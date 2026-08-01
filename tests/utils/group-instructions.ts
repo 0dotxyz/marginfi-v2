@@ -947,11 +947,13 @@ export const handleBankruptcy = (
 
 export type CloseBankArgs = {
   bank: PublicKey;
+  /** Admin escape hatch: skip the CLOSE_ENABLED_FLAG + open-position checks. */
+  forceClose?: boolean;
 };
 
 export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   const ix = program.methods
-    .lendingPoolCloseBank()
+    .lendingPoolCloseBank(args.forceClose ?? null)
     .accounts({
       // group: args.group, // implied from bank
       bank: args.bank,

@@ -1,18 +1,25 @@
 # Important Notice
 **DO NOT CREATE A GITHUB ISSUE** to report a security problem. Instead, please send an email to security@mrgn.group with a detailed description of the attack vector and security risk you have identified.
-​
+
+Due to the volume of scam reports, our spam filter is aggressive. Avoid sending links, and only
+attach txt, md, or pdf files. If you have not received a reply within 3 business days, try sending
+another email with no links or attachments. We do not open tar, zip, etc or click links.
+
 # Bug Bounty Overview
-marginfi offers bug bounties for marginfi's on-chain program code. Bugs related to other parts of marginfi's infrastructure (networking, UI, SDK) are marked below.
+Project 0 offers bug bounties for the on-chain marginlend program code. Bugs related to other parts of P0's infrastructure (networking, UI, SDK) are marked below.
 ​
 |Severity|Bounty|
 |-----------|-------------|
 |Critical|2% of the value of the hack, up to $500,000. Minimum $50,000|
 |High|$10,000 to $50,000 per bug, assessed on a case by case basis|
 |Medium/Low|$1,000 to $5,000 per bug, assessed on a case by case basis|
+|Info/WontFix|Assessed on a case by case basis|
 ​
 
 The severity scale is based on [Immunefi's classification system](https://immunefi.com/immunefi-vulnerability-severity-classification-system-v2-3/). 
 Note that these are simply guidelines for the severity of the bugs. Each bug bounty submission will be evaluated on a case-by-case basis.
+
+Bounties are only valid if they affect mainnet. Bugs in the most recent code marked for "release" or "pre-release" (https://github.com/0dotxyz/marginfi-v2/releases) are also eligible for bounty. Bugs that are related to an upcoming update to an integration (e.g., a release-flagged or main-branch update to SVSP, Kamino, Juplend, etc that could lead to a bug on our end when deploying to mainnet) may also be valid, but are assessed on a case by case basis and strictly first-come. Bugs affecting a flag/feature that is not in use in production will always be considered Medium or below.
 
 ## Infrastructure Bug Bounties
 Bug bounties for infrastructure components (networking, UI, SDK) are first-come-first-serve. The bounty amount is at the discretion of the team based on severity.
@@ -28,7 +35,7 @@ Please email security@mrgn.group with a detailed description of the attack vecto
 ​
 For critical- and high-severity bugs, we may require a proof of concept reproducible on a privately deployed mainnet contract or localnet (**NOT** our official deployment).
 ​
-You should expect a reply within 1 business day with additional questions or next steps regarding the bug bounty.
+You should expect a reply within 1 business day with additional questions or next steps regarding the bug bounty. For Medium severity and under our reply may take up to 1 week.
 ​
 ## Bug Bounty Payment
 Bug bounties will be paid in USDC or equivalent. Critical bounties may be paid in up to 80\% token, with the rest in USDC.
@@ -303,3 +310,26 @@ When bankrupting a bank, insurance typically offsets losses, but uncollected ins
 admin must remember to run `collect_bank_fees` before bankrupting a bank, and failing to do so can
 result in the bank becoming KILLED_BY_BANKRUPTCY slightly before expectations. Because bankruptcy is
 rare, and `collect_bank_fees` is permissionless, we categorize this as WONTFIX.
+
+### PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG Enables Attacks Around Bankruptcy Ordering
+
+None of the 200+ production banks under group `4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8` have
+this flag set (nor will they).
+
+When `lending_pool_handle_bankruptcy` is permissionless, a party can benefit by ordering their
+withdraw before handling bankruptcy for another user. This is by design: participants in a group
+where banks use this flag are responsible for clearing other users' bankruptcies in a timely fashion
+(for example, the design of Arena was to crank bankruptcies on the back of other user interactions).
+The cranking party can, if they are greedy, "dodge" the socialization of the bankruptcy this way. 
+
+In practice, we do not recommend setting this flag on any production bank unless the goal is
+explicitly to perform no first-party risk management whatsoever.
+
+### Bankruptcy Orphans Worthless Balances
+
+Balances with no value (e.g. zero weight, Isolated positions) can be orphaned (becoming permanently
+inaccessible) if bankruptcy is performed on an account. This is by design: assets that have no
+collateral value should not block writing off bad debt, which is a high-priority task (when
+necessary, which is rare). In a future update, we expect to add a "forced withdraw" instruction to
+deal with e.g. forcing users to reclaim a zero-weight position. Users impacted by this edge case
+before the implementation of that ix would be reimbursed for orphaned positions OTC.

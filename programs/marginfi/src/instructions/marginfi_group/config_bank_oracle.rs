@@ -29,9 +29,11 @@ pub fn lending_pool_configure_bank_oracle(
             return err!(MarginfiError::UseSetFixedOraclePrice);
         }
         check!(
-            !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) || bank.config.oracle_keys[0] == oracle,
+            !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+                || (bank.config.oracle_keys[0] == oracle
+                    && bank.config.oracle_setup.feed_family() == setup_type.feed_family()),
             MarginfiError::BadEmodeConfig,
-            "disable same-asset e-mode eligibility before changing oracle_keys[0]"
+            "disable same-asset e-mode eligibility before changing the oracle feed family or oracle_keys[0]"
         );
 
         bank.config.oracle_setup = setup_type;
