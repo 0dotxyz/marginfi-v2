@@ -25,6 +25,15 @@ pub fn propagate_fee(ctx: Context<PropagateFee>) -> Result<()> {
     group.fee_state_cache.global_fee_wallet = fee_state.global_fee_wallet;
     group.fee_state_cache.program_fee_fixed = fee_state.program_fee_fixed;
     group.fee_state_cache.program_fee_rate = fee_state.program_fee_rate;
+    group.fee_state_cache.position_transfer_fee = fee_state.position_transfer_fee;
+    group.fee_state_cache.position_transfer_min_value_usd_cents =
+        fee_state.position_transfer_min_value_usd_cents;
+    group.fee_state_cache.position_transfer_fee_initialized =
+        fee_state.position_transfer_fee_initialized;
+    group
+        .fee_state_cache
+        .position_transfer_min_value_initialized =
+        fee_state.position_transfer_min_value_initialized;
 
     let clock = Clock::get()?;
     group.fee_state_cache.last_update = clock.unix_timestamp;

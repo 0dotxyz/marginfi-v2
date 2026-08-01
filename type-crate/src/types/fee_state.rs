@@ -73,10 +73,15 @@ pub struct FeeState {
     /// * `Pubkey::default()` = unset (sweeps are rejected until the fee admin configures it),
     ///   which is what v1-sized accounts hold after `resize_global_fee_state` zero-fills them.
     pub premium_wallet: Pubkey,
+    pub position_transfer_fee: u32,
+    pub position_transfer_min_value_usd_cents: u32,
+    pub position_transfer_fee_initialized: u8,
+    pub position_transfer_min_value_initialized: u8,
+    _padding_initialized: [u8; 6],
     /// Reserved for future use. Accounts created before the struct grew to this size are
     /// v1-sized (`8 + V1_LEN` bytes) and must be grown via `resize_global_fee_state` before
     /// this program version can load them; the new bytes are zero-filled.
-    pub _reserved0: [u64; 28],
+    pub _reserved0: [u64; 26],
 }
 
 impl FeeState {

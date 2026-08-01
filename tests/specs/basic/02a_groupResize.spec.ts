@@ -18,7 +18,7 @@ import { assertBankrunTxFailed } from "../../utils/genericTests";
 import { getBankrunBlockhash, processBankrunTransaction } from "../../utils/tools";
 
 /** Current group layout size (8-byte discriminator + MarginfiGroup::LEN) */
-const GROUP_ACCOUNT_LEN = 8 + 9248;
+const GROUP_ACCOUNT_LEN = 8 + 9264;
 /** v1 group layout size, as on mainnet before this release */
 const GROUP_V1_ACCOUNT_LEN = 8 + 1056;
 /** Current fee-state layout size (8-byte discriminator + FeeState::LEN) */

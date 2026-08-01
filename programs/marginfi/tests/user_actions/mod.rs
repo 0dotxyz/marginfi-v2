@@ -26,6 +26,7 @@ mod rebalance;
 mod repay;
 mod same_asset_emode;
 mod transfer_account_pda;
+mod transfer_position;
 mod withdraw;
 
 use anchor_lang::prelude::Clock;
