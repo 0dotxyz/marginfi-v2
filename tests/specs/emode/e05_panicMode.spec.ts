@@ -525,7 +525,7 @@ describe("Panic Mode state test (Bankrun)", () => {
 
   it("(fee admin) admin unpause - happy path", async () => {
     const tx = new Transaction();
-    tx.add(await panicUnpause(globalProgramAdmin.mrgnBankrunProgram, {}));
+    tx.add(await panicUnpause(globalProgramAdmin.mrgnBankrunProgram, { admin: globalProgramAdmin.wallet.publicKey }));
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(globalProgramAdmin.wallet);
 
@@ -542,7 +542,7 @@ describe("Panic Mode state test (Bankrun)", () => {
   it("(fee admin) admin unpause when not paused - should fail", async () => {
     const tx = new Transaction();
     tx.add(
-      await panicUnpause(globalProgramAdmin.mrgnBankrunProgram, {}),
+      await panicUnpause(globalProgramAdmin.mrgnBankrunProgram, { admin: globalProgramAdmin.wallet.publicKey }),
       // Dummy tx to trick bankrun
       SystemProgram.transfer({
         fromPubkey: globalProgramAdmin.wallet.publicKey,
@@ -560,7 +560,7 @@ describe("Panic Mode state test (Bankrun)", () => {
 
   it("(pause delegate) tries to call admin unpause - should fail", async () => {
     const tx = new Transaction();
-    tx.add(await panicUnpause(users[0].mrgnBankrunProgram, {}));
+    tx.add(await panicUnpause(users[0].mrgnBankrunProgram, { admin: users[0].wallet.publicKey }));
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
 
@@ -571,7 +571,7 @@ describe("Panic Mode state test (Bankrun)", () => {
 
   it("(attacker) non-admin tries to call admin unpause - should fail", async () => {
     const tx = new Transaction();
-    tx.add(await panicUnpause(users[1].mrgnBankrunProgram, {}));
+    tx.add(await panicUnpause(users[1].mrgnBankrunProgram, { admin: users[1].wallet.publicKey }));
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[1].wallet);
 
