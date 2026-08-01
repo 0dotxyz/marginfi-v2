@@ -40,7 +40,6 @@ import { assert } from "chai";
 const MSOL_STATE = new PublicKey(
   "8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC",
 );
-const BSOL_POOL = new PublicKey("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi");
 const SANCTUM_SPL_POOL = new PublicKey(
   "9mhGNSPArRMHpLDMSmxAvuoizBqtBGqYdT8WGuqgxNdn",
 );
@@ -112,7 +111,6 @@ describe("LST / mSOL internal oracle setups", () => {
     // holds wsol while the fixtures mint their own LSTs, so point each fixture's embedded mint at
     // the bank's. `pool_mint` sits at byte 162 of an SPL StakePool; `msol_mint` is Marinade State's
     // first field (byte 8, past the disc).
-    await patchMint(BSOL_POOL, 162);
     await patchMint(SANCTUM_SPL_POOL, 162);
     await patchMint(JUPSOL_POOL, 162);
     await patchMint(MSOL_STATE, 8);
@@ -143,7 +141,9 @@ describe("LST / mSOL internal oracle setups", () => {
 
   const marinadeRate = async (state: PublicKey) => {
     const acc = await banksClient.getAccount(state);
-    return Number(decodeMarinadeState(acc!.data).msolPrice) / MSOL_PRICE_PRECISION;
+    return (
+      Number(decodeMarinadeState(acc!.data).msolPrice) / MSOL_PRICE_PRECISION
+    );
   };
 
   const setOracle = async (type: number, remaining: PublicKey[]) => {
@@ -172,11 +172,11 @@ describe("LST / mSOL internal oracle setups", () => {
   };
 
   it("(admin) configures PythLST - happy path", async () => {
-    await setOracle(ORACLE_SETUP_PYTH_LST, [BSOL_POOL]);
+    await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
     const { config } = await program.account.bank.fetch(lstBank.publicKey);
     assert.deepEqual(config.oracleSetup, { pythLst: {} });
     assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
-    assertKeysEqual(config.oracleKeys[1], BSOL_POOL);
+    assertKeysEqual(config.oracleKeys[1], SANCTUM_SPL_POOL);
   });
 
   it("(admin) configures PythMSOL - happy path", async () => {
@@ -209,27 +209,20 @@ describe("LST / mSOL internal oracle setups", () => {
   it("(admin) tries to configure PythMSOL - fails with a non-marinade account", async () => {
     await expectFailedTxWithError(
       async () => {
-        await setOracle(ORACLE_SETUP_PYTH_MSOL, [BSOL_POOL]);
+        await setOracle(ORACLE_SETUP_PYTH_MSOL, [SANCTUM_SPL_POOL]);
       },
       "MarinadeStateValidationFailed",
       6136,
     );
   });
 
-  it("prices bSOL via PythLST (vanilla SPL owner)", async () => {
-    await setOracle(ORACLE_SETUP_PYTH_LST, [BSOL_POOL]);
-    const rate = await stakePoolRate(BSOL_POOL);
-    const cache = await pulseCache([BSOL_POOL]);
-    // Rate is baked into the price; the wrapper multiplier stays 1.
-    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
-    assertI80F48Approx(cache.priceMultiplier, 1);
-  });
-
   it("prices a Sanctum-SPL LST via PythLST", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
     const rate = await stakePoolRate(SANCTUM_SPL_POOL);
     const cache = await pulseCache([SANCTUM_SPL_POOL]);
+    // Rate is baked into the price; the wrapper multiplier stays 1.
     assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
+    assertI80F48Approx(cache.priceMultiplier, 1);
   });
 
   it("prices jupSOL (Sanctum-Multi owner) via PythLST", async () => {

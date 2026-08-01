@@ -36,7 +36,9 @@ const EXPONENT_PROGRAM = new PublicKey(
   "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
 );
 // Real mainnet Exponent vault (validates as a genuine vault regardless of the test clock)
-const REAL_VAULT = new PublicKey("9YbaicMsXrtupkpD72pdWBfU6R7EJfSByw75sEpDM1uH");
+const REAL_VAULT = new PublicKey(
+  "9YbaicMsXrtupkpD72pdWBfU6R7EJfSByw75sEpDM1uH",
+);
 const VAULT_DISCRIMINATOR = Buffer.from([211, 8, 232, 43, 2, 152, 117, 119]);
 
 // Minimal Exponent vault bytes: discriminator + start_ts @264 + duration @268
