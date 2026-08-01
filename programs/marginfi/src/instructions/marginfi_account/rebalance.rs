@@ -104,13 +104,7 @@ fn venue_multiplier<'info>(
 /// so conservation is proven on token principal, not USD value. This is immune to per-bank oracle
 /// divergence: a keeper cannot skim tokens by moving them between same-mint banks whose oracles
 /// disagree, because price never enters the count. The oracle price is used only by the health check.
-fn underlying_of<'info>(
-    amount_native: I80F48,
-    bank: &Bank,
-    oracle_ais: &'info [AccountInfo<'info>],
-    clock: &Clock,
-) -> MarginfiResult<I80F48> {
-    let multiplier = venue_multiplier(bank, oracle_ais, clock)?;
+fn underlying_of(amount_native: I80F48, bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     calc_value(amount_native, multiplier, bank.get_balance_decimals(), None)
 }
 
@@ -121,13 +115,9 @@ fn underlying_of<'info>(
 /// window is the realized supply yield a depositor earned, which `settle_rebalance_tip` compares
 /// across banks. Because it is an accrued integral, not a spot rate, a single-tx rate spike cannot
 /// move it.
-fn yield_index_of<'info>(
-    bank: &Bank,
-    oracle_ais: &'info [AccountInfo<'info>],
-    clock: &Clock,
-) -> MarginfiResult<I80F48> {
+fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     Ok(I80F48::from(bank.asset_share_value)
-        .checked_mul(venue_multiplier(bank, oracle_ais, clock)?)
+        .checked_mul(multiplier)
         .ok_or_else(math_error!())?)
 }
 
@@ -135,6 +125,7 @@ fn yield_index_of<'info>(
 /// `RebalanceMove.amount`): the tighter of marginfi's `deposit_limit` headroom and the venue's.
 fn deposit_capacity_of<'info>(
     bank: &Bank,
+    multiplier: I80F48,
     oracle_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
@@ -142,7 +133,7 @@ fn deposit_capacity_of<'info>(
     // converts through the venue multiplier; the venue's is already in native units of the mint.
     let own = match bank.get_remaining_deposit_capacity()? {
         u64::MAX => I80F48::MAX,
-        native => underlying_of(I80F48::from_num(native), bank, oracle_ais, clock)?,
+        native => underlying_of(I80F48::from_num(native), bank, multiplier)?,
     };
     let venue = match rate::venue_remaining_capacity(bank, oracle_ais, clock)? {
         Some(u64::MAX) | None => I80F48::MAX,
@@ -169,19 +160,18 @@ fn to_native(mint_decimals: u8, amount: WrappedI80F48) -> MarginfiResult<u64> {
 
 /// Underlying-token amount (whole-token UI units) of the user's asset position in `bank`. Returns 0 if
 /// the user holds no balance there (e.g. the source balance after a full move).
-fn bank_underlying<'info>(
+fn bank_underlying(
     account: &MarginfiAccount,
     bank_key: &Pubkey,
     bank: &Bank,
-    oracle_ais: &'info [AccountInfo<'info>],
-    clock: &Clock,
+    multiplier: I80F48,
 ) -> MarginfiResult<I80F48> {
     let balance = match account.lending_account.get_balance(bank_key) {
         Some(b) => b,
         None => return Ok(I80F48::ZERO),
     };
     let amount = bank.get_asset_amount(balance.asset_shares.into())?;
-    underlying_of(amount, bank, oracle_ais, clock)
+    underlying_of(amount, bank, multiplier)
 }
 
 pub fn place_rebalance_order(
@@ -820,9 +810,15 @@ pub fn start_rebalance<'info>(
             parsed.rewards,
             &clock,
         )?;
-        let pre = bank_underlying(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
+        let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
+        let pre = bank_underlying(&account, &parsed.key, &bank, multiplier)?;
         rates.push(rate);
-        capacity.push(deposit_capacity_of(&bank, parsed.oracles, &clock)?);
+        capacity.push(deposit_capacity_of(
+            &bank,
+            multiplier,
+            parsed.oracles,
+            &clock,
+        )?);
         ref_banks.push((parsed.key, pre));
     }
 
@@ -997,14 +993,22 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     let (value_moved, tip_pending, move_yield_indices) = {
         let account = ctx.accounts.marginfi_account.load()?;
 
+        // Every referenced bank holds the order's mint, so one decimals value scales all of them.
+        let mint_decimals = banks[0].loader.load()?.mint_decimals;
+
         // Measure every referenced bank once: current supply rate (for the per-move overshoot check),
         // post-move underlying-token amount (for the token-principal reconciliation), and the yield
         // index (recorded so settlement can measure realized yield since the move).
         let mut post_rates: Vec<I80F48> = Vec::with_capacity(banks.len());
         let mut post_underlying: Vec<I80F48> = Vec::with_capacity(banks.len());
         let mut yield_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
+        // Venues settle in whole accounting tokens, so the widest multiplier is the largest
+        // rounding unit any leg can produce. Seeded at 1 so a native-only set keeps the raw bound.
+        let mut max_multiplier = I80F48::ONE;
         for parsed in banks.iter() {
             let bank = parsed.loader.load()?;
+            let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
+            max_multiplier = max_multiplier.max(multiplier);
             post_rates.push(rate_of(
                 &bank,
                 parsed.oracles,
@@ -1012,14 +1016,8 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 parsed.rewards,
                 &clock,
             )?);
-            post_underlying.push(bank_underlying(
-                &account,
-                &parsed.key,
-                &bank,
-                parsed.oracles,
-                &clock,
-            )?);
-            yield_indices.push(yield_index_of(&bank, parsed.oracles, &clock)?);
+            post_underlying.push(bank_underlying(&account, &parsed.key, &bank, multiplier)?);
+            yield_indices.push(yield_index_of(&bank, multiplier)?);
         }
 
         // Every move must not have inverted its rate advantage (the destination still beats the source
@@ -1039,7 +1037,8 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // Reconcile the declared moves against the real per-bank underlying-token deltas. This proves
         // token-principal conservation (each bank's delta matches its declared net flow within dust) and,
         // with the per-move improvement check, that every token moved to a strictly better venue.
-        let (total_moved, total_ref_pre, dust) = record.reconcile(&post_underlying)?;
+        let (total_moved, total_ref_pre, dust) =
+            record.reconcile(&post_underlying, mint_decimals, max_multiplier)?;
         check!(
             total_moved > I80F48::ZERO,
             MarginfiError::RebalanceIncompleteMove
@@ -1073,11 +1072,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let amount_budget = if order_amount == 0 {
             None
         } else {
-            let decimals = banks[0].loader.load()?.mint_decimals;
             Some(calc_value(
                 I80F48::from_num(order_amount),
                 I80F48::ONE,
-                decimals,
+                mint_decimals,
                 None,
             )?)
         };
@@ -1275,12 +1273,13 @@ pub fn settle_rebalance_tip<'info>(
 
     // Bring native banks' `asset_share_value` current so the realized-yield read reflects interest
     // accrued over the whole window (integration multipliers are refreshed by the caller's venue crank
-    // and staleness-checked in `yield_index_of`).
+    // and staleness-checked in `venue_multiplier`).
     let mut current_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
     for parsed in banks.iter() {
         accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
         let bank = parsed.loader.load()?;
-        current_indices.push(yield_index_of(&bank, parsed.oracles, &clock)?);
+        let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
+        current_indices.push(yield_index_of(&bank, multiplier)?);
     }
 
     // A move realized its intended improvement iff the destination's index grew strictly more than

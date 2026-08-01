@@ -993,9 +993,8 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .make_drift_deposit_ix_with_authority(
             f.keeper_token,
             &f.drift_bank,
-            // Deposit what the keeper received: the kamino withdraw rounds down by a native unit or
-            // two, so a small margin is left. Well within the conservation dust tolerance.
-            VENUE_DEPOSIT_NATIVE - 100,
+            // The venue withdraw rounds down, delivering one native unit less than requested.
+            VENUE_DEPOSIT_NATIVE - 1,
             f.keeper.pubkey(),
             None,
         )
@@ -1032,11 +1031,10 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
     .await?;
 
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
-    // The Drift mock bank scales shares 1000x (share value 0.001): dst holds the deposited position,
-    // 100 native short of the source.
+    // The Drift mock bank scales shares 1000x (share value 0.001).
     assert_eq!(
         f.asset_shares(dst).await,
-        I80F48::from_num((VENUE_DEPOSIT_NATIVE - 100) * 1000)
+        I80F48::from_num((VENUE_DEPOSIT_NATIVE - 1) * 1000)
     );
     Ok(())
 }
@@ -1100,9 +1098,8 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
         .make_juplend_deposit_ix_with_authority(
             f.keeper_token,
             &f.juplend_bank,
-            // Deposit what the keeper received: the drift withdraw rounds down by a native unit or
-            // two, so a small margin is left. Well within the conservation dust tolerance.
-            VENUE_DEPOSIT_NATIVE - 100,
+            // The venue withdraw rounds down, delivering one native unit less than requested.
+            VENUE_DEPOSIT_NATIVE - 1,
             f.keeper.pubkey(),
         )
         .await;
@@ -1128,10 +1125,107 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
     .await?;
 
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
-    // JupLend shares track native tokens 1:1: dst holds the deposit, 100 native short of the source.
+    // JupLend shares track native tokens 1:1.
     assert_eq!(
         f.asset_shares(dst).await,
-        I80F48::from_num(VENUE_DEPOSIT_NATIVE - 100)
+        I80F48::from_num(VENUE_DEPOSIT_NATIVE - 1)
+    );
+    Ok(())
+}
+
+/// The conservation tolerance tracks the size of a venue's accounting token: with the Drift source
+/// at a doubled exchange rate the bound is 6 native units, so a 4-unit shortfall that
+/// `rebalance_leak_just_over_dust_rejected` rejects at multiplier 1 is accepted here.
+#[tokio::test]
+async fn rebalance_dust_tolerance_scales_with_venue_multiplier() -> anyhow::Result<()> {
+    let f = setup_multi_venue_fixture().await?;
+    let src = f.drift_bank.key;
+    let dst = f.juplend_bank.key;
+
+    f.double_drift_exchange_rate().await;
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    f.set_juplend_rate_high().await;
+
+    let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.0001)).await?;
+
+    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+    let drift_crank = f
+        .user
+        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+        .await;
+    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
+    let ref_banks = vec![
+        RebalanceBankMeta::new(src, f.drift_slice().await),
+        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
+            .with_rewards(f.juplend_rewards().await),
+    ];
+
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_drift_withdraw_ix_with_authority(
+            f.keeper_token,
+            &f.drift_bank,
+            VENUE_DEPOSIT_NATIVE,
+            Some(true),
+            f.keeper.pubkey(),
+            None,
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_short_by = |units: u64| {
+        f.user.make_juplend_deposit_ix_with_authority(
+            f.keeper_token,
+            &f.juplend_bank,
+            VENUE_DEPOSIT_NATIVE - units,
+            f.keeper.pubkey(),
+        )
+    };
+    let sandwich = |deposit_ix: Instruction| -> Vec<Instruction> {
+        vec![
+            cu_ix.clone(),
+            drift_crank.clone(),
+            start_ix.clone(),
+            withdraw_ix.clone(),
+            deposit_ix,
+            end_ix.clone(),
+        ]
+    };
+
+    // 7 units short is past the doubled bound; the reverted attempt leaves the sequence untouched.
+    let res = f.process(&sandwich(deposit_short_by(7).await)).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
+
+    f.process(&sandwich(deposit_short_by(4).await)).await?;
+
+    assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
+    // JupLend shares track native tokens 1:1.
+    assert_eq!(
+        f.asset_shares(dst).await,
+        I80F48::from_num(VENUE_DEPOSIT_NATIVE - 4)
     );
     Ok(())
 }
@@ -2181,13 +2275,13 @@ async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
             f.keeper.pubkey(),
         )
         .await;
-    // Deposit 0.02 short of the declared 1000 — beyond the $0.01 dust tolerance.
+    // 4 native units short of the declared 1000, one past the single move's 3-unit tolerance.
     let deposit_ix = f
         .user
         .make_deposit_ix_with_authority(
             f.keeper_usdc,
             &f.dst_bank_f,
-            DEPOSIT_USDC - 0.02,
+            DEPOSIT_USDC - 0.000004,
             None,
             f.keeper.pubkey(),
         )
@@ -2237,13 +2331,13 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
             f.keeper.pubkey(),
         )
         .await;
-    // 0.005 short — within the $0.01 dust tolerance.
+    // 2 native units short, within the single move's 3-unit tolerance.
     let deposit_ix = f
         .user
         .make_deposit_ix_with_authority(
             f.keeper_usdc,
             &f.dst_bank_f,
-            DEPOSIT_USDC - 0.005,
+            DEPOSIT_USDC - 0.000002,
             None,
             f.keeper.pubkey(),
         )
@@ -2260,10 +2354,10 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
         .await;
     f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
         .await?;
-    // dst holds the deposit: the full source minus the 0.005 USDC (5_000 native) tolerated dust.
+    // dst holds the deposit: the full source minus the 2 native units of tolerated dust.
     assert_eq!(
         f.asset_shares(f.dst_bank_f.key).await,
-        old_src - I80F48::from_num(5_000)
+        old_src - I80F48::from_num(2)
     );
     Ok(())
 }

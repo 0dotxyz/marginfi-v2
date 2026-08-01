@@ -4,9 +4,7 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{
-    REBALANCE_CONSERVATION_DUST_FLOOR, REBALANCE_CONSERVATION_DUST_RATE,
-};
+use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
 use marginfi_type_crate::types::{
     Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
     RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
@@ -95,9 +93,14 @@ pub trait RebalanceRecordImpl {
     /// The declared moves, sliced to `move_count`.
     fn active_moves(&self) -> &[RebalanceMove];
 
-    /// The tolerance for this rebalance's conservation checks: the declared move total scaled by
-    /// `REBALANCE_CONSERVATION_DUST_RATE`, floored at `REBALANCE_CONSERVATION_DUST_FLOOR`.
-    fn conservation_dust(&self) -> MarginfiResult<I80F48>;
+    /// The tolerance for this rebalance's conservation checks, in whole-token UI units:
+    /// `REBALANCE_CONSERVATION_DUST_ATOMS` per declared move, scaled by the widest venue multiplier
+    /// (venues settle in whole accounting tokens, each worth `multiplier` native units).
+    fn conservation_dust(
+        &self,
+        mint_decimals: u8,
+        venue_multiplier: I80F48,
+    ) -> MarginfiResult<I80F48>;
 
     /// Reconcile the declared moves against the observed per-bank underlying-token deltas.
     /// `post_underlying[i]` is the end token amount of `ref_banks[i]`. For every referenced bank the net
@@ -106,7 +109,12 @@ pub trait RebalanceRecordImpl {
     /// deltas), the start token amount summed across ALL referenced banks (the tip denominator, stable
     /// against how the keeper splits the move across banks), and the tolerance applied (reused by the
     /// caller's budget-cap cushion).
-    fn reconcile(&self, post_underlying: &[I80F48]) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
+    fn reconcile(
+        &self,
+        post_underlying: &[I80F48],
+        mint_decimals: u8,
+        venue_multiplier: I80F48,
+    ) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
 
     /// Verify the non-referenced balance set is exactly what it was at start: every snapshotted
     /// balance still holds its side and shares, and no balance outside the referenced set was added.
@@ -197,26 +205,33 @@ impl RebalanceRecordImpl for RebalanceRecord {
         &self.moves[..self.move_count as usize]
     }
 
-    fn conservation_dust(&self) -> MarginfiResult<I80F48> {
-        let mut declared_total = I80F48::ZERO;
-        for m in self.active_moves() {
-            declared_total = declared_total
-                .checked_add(I80F48::from(m.amount))
-                .ok_or_else(math_error!())?;
-        }
-        let relative = declared_total
-            .checked_mul(REBALANCE_CONSERVATION_DUST_RATE)
-            .ok_or_else(math_error!())?;
-        Ok(relative.max(REBALANCE_CONSERVATION_DUST_FLOOR))
+    fn conservation_dust(
+        &self,
+        mint_decimals: u8,
+        venue_multiplier: I80F48,
+    ) -> MarginfiResult<I80F48> {
+        REBALANCE_CONSERVATION_DUST_ATOMS
+            .checked_mul(I80F48::from_num(self.move_count))
+            .ok_or_else(math_error!())?
+            .checked_mul(venue_multiplier)
+            .ok_or_else(math_error!())?
+            .checked_div(EXP_10_I80F48[mint_decimals as usize])
+            .ok_or_else(math_error!())
+            .map_err(Into::into)
     }
 
-    fn reconcile(&self, post_underlying: &[I80F48]) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
+    fn reconcile(
+        &self,
+        post_underlying: &[I80F48],
+        mint_decimals: u8,
+        venue_multiplier: I80F48,
+    ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
         let n = self.ref_bank_count as usize;
         check!(
             post_underlying.len() == n,
             MarginfiError::IllegalBalanceState
         );
-        let dust = self.conservation_dust()?;
+        let dust = self.conservation_dust(mint_decimals, venue_multiplier)?;
         let mut total_moved = I80F48::ZERO;
         let mut total_ref_pre = I80F48::ZERO;
         let mut total_actual = I80F48::ZERO;
@@ -290,4 +305,39 @@ impl RebalanceRecordImpl for RebalanceRecord {
 fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
     check!(a == b, MarginfiError::IllegalBalanceState);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RebalanceRecordImpl;
+    use bytemuck::Zeroable;
+    use fixed::types::I80F48;
+    use marginfi_type_crate::constants::EXP_10_I80F48;
+    use marginfi_type_crate::types::RebalanceRecord;
+
+    fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
+        let mut record = RebalanceRecord::zeroed();
+        record.move_count = move_count;
+        record
+            .conservation_dust(mint_decimals, I80F48::from_num(multiplier))
+            .unwrap()
+    }
+
+    /// `native_units` of a mint, in the whole-token units `conservation_dust` returns.
+    fn units(native_units: f64, mint_decimals: u8) -> I80F48 {
+        I80F48::from_num(native_units) / EXP_10_I80F48[mint_decimals as usize]
+    }
+
+    /// The tolerance is `REBALANCE_CONSERVATION_DUST_ATOMS` native units per move, scaled by the
+    /// venue's accounting-token size: a venue whose multiplier has grown rounds by proportionally
+    /// more native units per leg.
+    #[test]
+    fn conservation_dust_scales_with_moves_and_multiplier() {
+        // A native bank's multiplier of 1 leaves the raw per-move allowance.
+        assert_eq!(dust(1, 6, 1.0), units(3.0, 6));
+        assert_eq!(dust(4, 6, 1.0), units(12.0, 6));
+        // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
+        assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
+        assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
+    }
 }

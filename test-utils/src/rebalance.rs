@@ -753,6 +753,39 @@ impl MultiVenueFixture {
         Ok(())
     }
 
+    /// Doubles the Drift spot market's cumulative interest, so one unit of scaled balance is worth
+    /// two native units. Call before any deposit into the market, so positions are opened at the
+    /// scaled rate. Used to give a referenced bank a venue multiplier above 1.
+    pub async fn double_drift_exchange_rate(&self) {
+        let spot_market_key = self.drift_bank.load().await.integration_acc_1;
+        let mut acct = self
+            .test_f
+            .try_load(&spot_market_key)
+            .await
+            .unwrap()
+            .unwrap();
+        let m = bytemuck::from_bytes_mut::<MinimalSpotMarket>(&mut acct.data[8..]);
+        // Existing depositors' claims double with the rate, so the vault is topped up by their
+        // current value or Drift rejects the next deposit on its vault invariant.
+        let decimals = self.mint.mint.decimals;
+        let claims = u128::from_le_bytes(m.deposit_balance)
+            .saturating_mul(u128::from_le_bytes(m.cumulative_deposit_interest))
+            / 10u128.pow(19 - decimals as u32);
+        let vault = m.vault;
+        m.cumulative_deposit_interest =
+            (u128::from_le_bytes(m.cumulative_deposit_interest) * 2).to_le_bytes();
+        m.cumulative_borrow_interest =
+            (u128::from_le_bytes(m.cumulative_borrow_interest) * 2).to_le_bytes();
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&spot_market_key, &AccountSharedData::from(acct));
+        self.mint
+            .clone()
+            .mint_to(&vault, claims as f64 / 10f64.powi(decimals as i32))
+            .await;
+    }
+
     pub async fn set_drift_borrow_utilization(&self, num: u128, den: u128) {
         let spot_market_key = self.drift_bank.load().await.integration_acc_1;
         let ts = self.test_f.get_clock().await.unix_timestamp;
