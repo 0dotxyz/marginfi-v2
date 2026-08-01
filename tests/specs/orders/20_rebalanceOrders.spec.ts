@@ -8,6 +8,7 @@ import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
   TransactionInstruction,
+  MessageV0,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
@@ -233,6 +234,31 @@ const bankBlock = (bank: PublicKey, oracle: PublicKey): AccountMeta[] => [
   { pubkey: bank, isSigner: false, isWritable: true },
   { pubkey: oracle, isSigner: false, isWritable: false },
 ];
+
+/** Solana's per-transaction account lock limit (`MAX_TX_ACCOUNT_LOCKS`). */
+const TX_ACCOUNT_LOCK_LIMIT = 64;
+
+/** Accounts a compiled v0 message locks: its static keys plus everything the lookup table resolves. */
+const lockedAccounts = (message: MessageV0): number =>
+  message.staticAccountKeys.length +
+  message.addressTableLookups.reduce(
+    (n, l) => n + l.writableIndexes.length + l.readonlyIndexes.length,
+    0,
+  );
+
+/** A sandwich fits a transaction when it clears both the compute and the account lock budget. */
+const assertFitsTransaction = (
+  cu: number,
+  accounts: number,
+  cuCeiling: number,
+) => {
+  assert.isBelow(cu, cuCeiling, `sandwich burned ${cu} CU`);
+  assert.isAtMost(
+    accounts,
+    TX_ACCOUNT_LOCK_LIMIT,
+    `sandwich locked ${accounts} accounts`,
+  );
+};
 
 describe("Auto-rebalance orders (native -> native)", () => {
   let program: Program<Marginfi>;
@@ -2362,5 +2388,721 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc), "order persists");
 
     await closeOrder(order);
+  });
+  const MAX_BALANCES = 16;
+  /** `MAX_INTEGRATION_POSITIONS`, the most integration balances an account may hold. */
+  const INTEGRATION_BALANCES = 8;
+  const WORST_CASE_SEED_BASE = 7_710;
+  /** Measures ~923k. A bound rather than the figure, which every program edit shifts. */
+  const CU_CEILING = 1_100_000;
+
+  /** A Drift bank on the shared mint, on its own spot market, with its mrgn-side drift user. */
+  const addDriftBank = async (seed: BN) => {
+    const marketIndex = (await getDriftStateAccount(driftBankrunProgram))
+      .numberOfSpotMarkets;
+    const [market] = deriveSpotMarketPDA(
+      driftBankrunProgram.programId,
+      marketIndex,
+    );
+    const cfg = quoteAssetSpotMarketConfig();
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await makeInitializeSpotMarketIx(
+          driftBankrunProgram,
+          {
+            admin: groupAdmin.wallet.publicKey,
+            spotMarketMint: mint,
+            oracle: PublicKey.default,
+          },
+          {
+            optimalUtilization: cfg.optimalUtilization,
+            optimalRate: cfg.optimalRate,
+            maxRate: cfg.maxRate,
+            oracleSource: DriftOracleSourceValues.quoteAsset,
+            initialAssetWeight: cfg.initialAssetWeight,
+            maintenanceAssetWeight: cfg.maintenanceAssetWeight,
+            initialLiabilityWeight: cfg.initialLiabilityWeight,
+            maintenanceLiabilityWeight: cfg.maintenanceLiabilityWeight,
+            marketIndex,
+          },
+        ),
+      ),
+      [groupAdmin.wallet],
+    );
+    const [bank] = deriveBankWithSeed(program.programId, groupPk, mint, seed);
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await makeAddDriftBankIx(
+          groupAdmin.mrgnBankrunProgram,
+          {
+            group: groupPk,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: mint,
+            integrationAcc1: market,
+            oracle: usdcOracle,
+          },
+          { seed, config: defaultDriftBankConfig(usdcOracle) },
+        ),
+      ),
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await makeInitDriftUserIx(
+          groupAdmin.mrgnBankrunProgram,
+          {
+            feePayer: groupAdmin.wallet.publicKey,
+            bank,
+            signerTokenAccount: groupAdmin.usdcAccount,
+          },
+          { amount: usdc(1) },
+          marketIndex,
+        ),
+      ),
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+    return { bank, market, marketIndex };
+  };
+
+  /** A plain USDC bank on this group, for padding the account out to its balance limit. */
+  const addNativeBank = async (seed: BN) => {
+    const [bank] = deriveBankWithSeed(program.programId, groupPk, mint, seed);
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await addBankWithSeed(groupAdmin.mrgnProgram, {
+          marginfiGroup: groupPk,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: mint,
+          config: defaultBankConfig(),
+          seed,
+        }),
+      ),
+    );
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await configureBankOracle(groupAdmin.mrgnProgram, {
+          bank,
+          type: ORACLE_SETUP_PYTH_PUSH,
+          oracle: usdcOracle,
+        }),
+      ),
+    );
+    return bank;
+  };
+
+  /**
+   * The costliest set the runtime can be handed: every balance slot filled, the integration limit
+   * saturated, and the move itself running Kamino legs (the heaviest) into Drift.
+   */
+  it("executes at max balances with the integration limit saturated", async () => {
+    ownerAcc = await initAcc(owner);
+    const drifts = [];
+    for (let i = 0; i < INTEGRATION_BALANCES - 2; i++) {
+      drifts.push(await addDriftBank(new BN(WORST_CASE_SEED_BASE + i)));
+    }
+    const natives = [];
+    for (let i = 0; i < MAX_BALANCES - INTEGRATION_BALANCES; i++) {
+      natives.push(await addNativeBank(new BN(WORST_CASE_SEED_BASE + 100 + i)));
+    }
+
+    // The move runs Kamino -> the utilized drift bank; the rest only weigh down the health set.
+    for (const d of drifts) {
+      await sendOwner(
+        new Transaction().add(
+          await makeDriftDepositIx(
+            owner.mrgnProgram,
+            {
+              marginfiAccount: ownerAcc,
+              bank: d.bank,
+              signerTokenAccount: owner.usdcAccount,
+            },
+            REBALANCE_AMOUNT,
+            d.marketIndex,
+          ),
+        ),
+      );
+    }
+    await sendOwner(
+      new Transaction().add(
+        await makeDriftDepositIx(
+          owner.mrgnProgram,
+          {
+            marginfiAccount: ownerAcc,
+            bank: driftBank,
+            signerTokenAccount: owner.usdcAccount,
+          },
+          REBALANCE_AMOUNT,
+          driftMMarketIndex,
+        ),
+      ),
+    );
+    await sendOwner(
+      new Transaction().add(
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          kaminoReserve,
+          kaminoMarket,
+          usdcOracle,
+        ),
+        await simpleRefreshObligation(
+          klendBankrunProgram,
+          kaminoMarket,
+          deriveBaseObligation(
+            deriveLiquidityVaultAuthority(program.programId, kaminoBank)[0],
+            kaminoMarket,
+          )[0],
+          [kaminoReserve],
+        ),
+        await makeKaminoDepositIx(
+          owner.mrgnProgram,
+          {
+            marginfiAccount: ownerAcc,
+            bank: kaminoBank,
+            signerTokenAccount: owner.usdcAccount,
+            lendingMarket: kaminoMarket,
+            reserve: kaminoReserve,
+          },
+          REBALANCE_AMOUNT,
+        ),
+      ),
+    );
+    for (const bank of natives) {
+      await sendOwner(
+        new Transaction().add(
+          await depositIx(owner.mrgnProgram, {
+            marginfiAccount: ownerAcc,
+            bank,
+            tokenAccount: owner.usdcAccount,
+            amount: usdc(10),
+          }),
+        ),
+      );
+    }
+
+    const acc = await program.account.marginfiAccount.fetch(ownerAcc);
+    const active = acc.lendingAccount.balances.filter((b: any) => b.active);
+    assert.equal(
+      active.length,
+      MAX_BALANCES,
+      "account is at its balance limit",
+    );
+
+    const order = await placeOrder([kaminoBank, driftBank]);
+
+    const venues = [
+      ...drifts,
+      { bank: driftBank, market: driftMMarket },
+      { bank: kaminoBank, market: kaminoReserve },
+    ];
+    const blockOf = (bank: PublicKey): PublicKey[] => {
+      const venue = venues.find((v) => v.bank.equals(bank));
+      return venue ? [bank, usdcOracle, venue.market] : [bank, usdcOracle];
+    };
+    const healthSet = toMeta(
+      composeRemainingAccounts(active.map((b: any) => blockOf(b.bankPk))),
+    );
+    const refBanks: AccountMeta[] = [
+      { pubkey: kaminoBank, isSigner: false, isWritable: true },
+      ...toMeta([kaminoMarket, usdcOracle, kaminoReserve]),
+      { pubkey: driftBank, isSigner: false, isWritable: true },
+      ...toMeta([usdcOracle, driftMMarket]),
+    ];
+
+    const half = REBALANCE_AMOUNT.div(new BN(2));
+    const seq = await nextSeq();
+    const [record] = deriveRebalanceRecord(program.programId, ownerAcc, seq);
+    const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
+    const [lva] = deriveLiquidityVaultAuthority(program.programId, kaminoBank);
+    const [obligation] = deriveBaseObligation(lva, kaminoMarket);
+    const cranks = [
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        kaminoReserve,
+        kaminoMarket,
+        usdcOracle,
+      ),
+      await simpleRefreshObligation(
+        klendBankrunProgram,
+        kaminoMarket,
+        obligation,
+        [kaminoReserve],
+      ),
+      await makeUpdateSpotMarketCumulativeInterestIx(
+        driftBankrunProgram,
+        {},
+        driftMMarketIndex,
+      ),
+    ];
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ...cranks,
+      await program.methods
+        .marginfiAccountStartRebalance(
+          [buildMove(0, 1, half.toNumber() / 1e6)],
+          new BN(seq.toString()),
+        )
+        .accountsPartial({
+          group: groupPk,
+          marginfiAccount: ownerAcc,
+          rebalanceOrder: order,
+          executor: keeper.wallet.publicKey,
+          rebalanceRecord: record,
+          feePayer: keeper.wallet.publicKey,
+          instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .remainingAccounts(refBanks)
+        .instruction(),
+      await makeKaminoWithdrawIx(
+        keeper.mrgnProgram,
+        {
+          marginfiAccount: ownerAcc,
+          authority: keeper.wallet.publicKey,
+          bank: kaminoBank,
+          mint,
+          destinationTokenAccount: keeper.usdcAccount,
+          lendingMarket: kaminoMarket,
+          reserve: kaminoReserve,
+        },
+        {
+          amount: half,
+          isWithdrawAll: false,
+          remaining: healthSet.map((m) => m.pubkey),
+        },
+      ),
+      await makeDriftDepositIx(
+        keeper.mrgnProgram,
+        {
+          marginfiAccount: ownerAcc,
+          bank: driftBank,
+          signerTokenAccount: keeper.usdcAccount,
+        },
+        half,
+        driftMMarketIndex,
+      ),
+      ...cranks,
+      await program.methods
+        .marginfiAccountEndRebalance()
+        .accountsPartial({
+          group: groupPk,
+          marginfiAccount: ownerAcc,
+          rebalanceOrder: order,
+          rebalanceRecord: record,
+          executor: keeper.wallet.publicKey,
+          feePool,
+        })
+        .remainingAccounts([...refBanks, ...healthSet])
+        .instruction(),
+    ];
+
+    const lut = await createLookupTableForInstructions(keeper.wallet, ixs);
+    const messageV0 = new TransactionMessage({
+      payerKey: keeper.wallet.publicKey,
+      recentBlockhash: await getBankrunBlockhash(bankrunContext),
+      instructions: ixs,
+    }).compileToV0Message([lut]);
+    const accounts = lockedAccounts(messageV0);
+    const result: any = await processBankrunV0Transaction(
+      bankrunContext,
+      new VersionedTransaction(messageV0),
+      [keeper.wallet],
+      false,
+      true,
+    );
+    assertFitsTransaction(
+      Number(
+        result?.meta?.computeUnitsConsumed ?? result?.computeUnitsConsumed ?? 0,
+      ),
+      accounts,
+      CU_CEILING,
+    );
+  });
+});
+
+/**
+ * An account at `MAX_LENDING_ACCOUNT_BALANCES` in native banks, as deposits and as a deposit against
+ * borrows. Own group and banks, so the padding stays out of the other suites' shared account.
+ */
+describe("Auto-rebalance orders (worst-case balance sets)", () => {
+  const MAX_BALANCES = 16;
+  const PAD_BANKS = 15;
+  const WORST_CASE_SEED_BASE = 8_900;
+
+  let program: Program<Marginfi>;
+  let usdcOracle: PublicKey;
+  const group = Keypair.generate();
+  const groupPk = group.publicKey;
+
+  let srcBank: PublicKey;
+  let dstBank: PublicKey;
+  const padBanks: PublicKey[] = [];
+
+  let owner: (typeof users)[number];
+  let keeper: (typeof users)[number];
+  let lender: (typeof users)[number];
+  let utilBorrower: (typeof users)[number];
+  let depositAcc: PublicKey; // 16 deposits
+  let borrowAcc: PublicKey; // 1 deposit + 15 borrows
+  let lenderAcc: PublicKey;
+  let utilAcc: PublicKey;
+
+  const usdc = (n: number) => new BN(n * 10 ** ecosystem.usdcDecimals);
+  const MOVE_AMOUNT = usdc(1000);
+  const COLLATERAL = usdc(50_000);
+  /** Both shapes measure ~470k. A bound rather than the figure, which every program edit shifts. */
+  const CU_CEILING = 700_000;
+
+  const initAcc = async (u: (typeof users)[number]): Promise<PublicKey> => {
+    const kp = Keypair.generate();
+    await u.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await accountInit(program, {
+          marginfiGroup: groupPk,
+          marginfiAccount: kp.publicKey,
+          authority: u.wallet.publicKey,
+          feePayer: u.wallet.publicKey,
+        }),
+      ),
+      [kp],
+    );
+    return kp.publicKey;
+  };
+
+  const addUsdcBank = async (seed: BN): Promise<PublicKey> => {
+    const [bank] = deriveBankWithSeed(
+      program.programId,
+      groupPk,
+      ecosystem.usdcMint.publicKey,
+      seed,
+    );
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await addBankWithSeed(groupAdmin.mrgnProgram, {
+          marginfiGroup: groupPk,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          config: defaultBankConfig(),
+          seed,
+        }),
+      ),
+    );
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await configureBankOracle(groupAdmin.mrgnProgram, {
+          bank,
+          type: ORACLE_SETUP_PYTH_PUSH,
+          oracle: usdcOracle,
+        }),
+      ),
+    );
+    return bank;
+  };
+
+  /** The account's active balances, in the stored order the health check consumes them in. */
+  const activeBanks = async (acc: PublicKey): Promise<PublicKey[]> => {
+    const fetched = await program.account.marginfiAccount.fetch(acc);
+    return fetched.lendingAccount.balances
+      .filter((b: any) => b.active)
+      .map((b: any) => b.bankPk);
+  };
+
+  /** `banks` as a health observation set, ordered the way the account stores them. */
+  const healthSet = (banks: PublicKey[]): AccountMeta[] =>
+    toMeta(
+      composeRemainingAccounts(
+        [...banks]
+          .sort((a, b) => b.toBuffer().compare(a.toBuffer()))
+          .map((b) => [b, usdcOracle]),
+      ),
+    );
+
+  const fundUsdc = async (acc: PublicKey, amount: BN) => {
+    await bankRunProvider.sendAndConfirm(
+      new Transaction().add(
+        createMintToInstruction(
+          ecosystem.usdcMint.publicKey,
+          acc,
+          bankrunContext.payer.publicKey,
+          bnToBigIntSafe(amount),
+        ),
+      ),
+    );
+  };
+
+  const deposit = async (
+    u: (typeof users)[number],
+    acc: PublicKey,
+    bank: PublicKey,
+    amount: BN,
+  ) =>
+    u.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await depositIx(u.mrgnProgram, {
+          marginfiAccount: acc,
+          bank,
+          tokenAccount: u.usdcAccount,
+          amount,
+        }),
+      ),
+    );
+
+  before(async () => {
+    program = bankrunProgram;
+    usdcOracle = oracles.usdcOracle.publicKey;
+    [owner, keeper, lender, utilBorrower] = [
+      users[0],
+      users[1],
+      users[2],
+      users[3],
+    ];
+    for (const u of [owner, keeper, lender, utilBorrower]) {
+      await fundUsdc(u.usdcAccount, usdc(200_000));
+    }
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await groupInitialize(program, {
+          marginfiGroup: groupPk,
+          admin: groupAdmin.wallet.publicKey,
+        }),
+      ),
+      [group],
+    );
+
+    srcBank = await addUsdcBank(new BN(WORST_CASE_SEED_BASE));
+    dstBank = await addUsdcBank(new BN(WORST_CASE_SEED_BASE + 1));
+    for (let i = 0; i < PAD_BANKS; i++) {
+      padBanks.push(await addUsdcBank(new BN(WORST_CASE_SEED_BASE + 2 + i)));
+    }
+
+    depositAcc = await initAcc(owner);
+    borrowAcc = await initAcc(owner);
+    lenderAcc = await initAcc(lender);
+
+    // Supply for the borrow shape to draw on.
+    for (const bank of [dstBank, ...padBanks]) {
+      await deposit(lender, lenderAcc, bank, usdc(5_000));
+    }
+
+    // Utilization on the destination, so it out-rates the untouched source.
+    utilAcc = await initAcc(utilBorrower);
+    await deposit(utilBorrower, utilAcc, padBanks[PAD_BANKS - 1], usdc(10_000));
+    await utilBorrower.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await borrowIx(utilBorrower.mrgnProgram, {
+          marginfiAccount: utilAcc,
+          bank: dstBank,
+          tokenAccount: utilBorrower.usdcAccount,
+          amount: usdc(2_500),
+          remaining: composeRemainingAccounts([
+            [padBanks[PAD_BANKS - 1], usdcOracle],
+            [dstBank, usdcOracle],
+          ]),
+        }),
+      ),
+    );
+  });
+
+  /** start -> withdraw half of src -> deposit into dst -> end, over a v0 tx + lookup table. */
+  const runSandwich = async (
+    acc: PublicKey,
+    order: PublicKey,
+    post: PublicKey[],
+    move: BN,
+    withdrawAll = false,
+  ) => {
+    const refBanks: AccountMeta[] = [
+      ...bankBlock(srcBank, usdcOracle),
+      ...bankBlock(dstBank, usdcOracle),
+    ];
+    // The withdraw leg observes the balances as they stand; only `end_rebalance` sees the post set.
+    const preSet = healthSet(await activeBanks(acc));
+    const seq = await nextSeqOf(program, acc);
+    const [record] = deriveRebalanceRecord(program.programId, acc, seq);
+    const [feePool] = deriveRebalanceFeePool(program.programId, acc);
+
+    const startIx = await program.methods
+      .marginfiAccountStartRebalance(
+        [buildMove(0, 1, move.toNumber() / 1e6)],
+        new BN(seq.toString()),
+      )
+      .accountsPartial({
+        group: groupPk,
+        marginfiAccount: acc,
+        rebalanceOrder: order,
+        executor: keeper.wallet.publicKey,
+        rebalanceRecord: record,
+        feePayer: keeper.wallet.publicKey,
+        instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts(refBanks)
+      .instruction();
+
+    const withdrawIx = await program.methods
+      .lendingAccountWithdraw(withdrawAll ? new BN(0) : move, withdrawAll)
+      .accountsPartial({
+        marginfiAccount: acc,
+        authority: keeper.wallet.publicKey,
+        bank: srcBank,
+        destinationTokenAccount: keeper.usdcAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .remainingAccounts(preSet)
+      .instruction();
+
+    const depositToDstIx = await program.methods
+      .lendingAccountDeposit(move, false)
+      .accountsPartial({
+        marginfiAccount: acc,
+        authority: keeper.wallet.publicKey,
+        bank: dstBank,
+        signerTokenAccount: keeper.usdcAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .instruction();
+
+    const endIx = await program.methods
+      .marginfiAccountEndRebalance()
+      .accountsPartial({
+        group: groupPk,
+        marginfiAccount: acc,
+        rebalanceOrder: order,
+        rebalanceRecord: record,
+        executor: keeper.wallet.publicKey,
+        feePool,
+      })
+      .remainingAccounts([...refBanks, ...healthSet(post)])
+      .instruction();
+
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      startIx,
+      withdrawIx,
+      depositToDstIx,
+      endIx,
+    ];
+    const lut = await createLookupTableForInstructions(keeper.wallet, ixs);
+    const messageV0 = new TransactionMessage({
+      payerKey: keeper.wallet.publicKey,
+      recentBlockhash: await getBankrunBlockhash(bankrunContext),
+      instructions: ixs,
+    }).compileToV0Message([lut]);
+    const result: any = await processBankrunV0Transaction(
+      bankrunContext,
+      new VersionedTransaction(messageV0),
+      [keeper.wallet],
+      false,
+      true,
+    );
+    return {
+      accounts: lockedAccounts(messageV0),
+      cu: Number(
+        result?.meta?.computeUnitsConsumed ?? result?.computeUnitsConsumed ?? 0,
+      ),
+    };
+  };
+
+  const placeOrder = async (acc: PublicKey, u: (typeof users)[number]) => {
+    const [order] = deriveRebalanceOrder(
+      program.programId,
+      acc,
+      ecosystem.usdcMint.publicKey,
+    );
+    await u.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await program.methods
+          .marginfiAccountPlaceRebalanceOrder(
+            [srcBank, dstBank],
+            bigNumberToWrappedI80F48(0.0001),
+            new BN(0),
+            null,
+            null,
+          )
+          .accountsPartial({
+            group: groupPk,
+            marginfiAccount: acc,
+            authority: u.wallet.publicKey,
+            mint: ecosystem.usdcMint.publicKey,
+            rebalanceOrder: order,
+            feePayer: u.wallet.publicKey,
+          })
+          .instruction(),
+      ),
+    );
+    return order;
+  };
+
+  it("executes with the account at max balances, all deposits", async () => {
+    await deposit(owner, depositAcc, srcBank, MOVE_AMOUNT);
+    for (const bank of padBanks.slice(0, MAX_BALANCES - 2)) {
+      await deposit(owner, depositAcc, bank, usdc(10));
+    }
+    const start = await activeBanks(depositAcc);
+    assert.equal(start.length, MAX_BALANCES - 1, "one slot left for dst");
+
+    const order = await placeOrder(depositAcc, owner);
+    // A partial move keeps src open, so dst takes the account's last free slot.
+    const { cu, accounts } = await runSandwich(
+      depositAcc,
+      order,
+      [...start, dstBank],
+      MOVE_AMOUNT.div(new BN(2)),
+    );
+
+    assertFitsTransaction(cu, accounts, CU_CEILING);
+    assert.equal(
+      (await activeBanks(depositAcc)).length,
+      MAX_BALANCES,
+      "the move filled the last balance slot",
+    );
+  });
+
+  it("executes with the account at max balances, a deposit against 15 borrows", async () => {
+    await deposit(owner, borrowAcc, srcBank, COLLATERAL);
+    for (const bank of padBanks) {
+      const observed = [...(await activeBanks(borrowAcc)), bank]
+        .filter((b, i, all) => all.findIndex((x) => x.equals(b)) === i)
+        .sort((a, b) => b.toBuffer().compare(a.toBuffer()));
+      await owner.mrgnProgram.provider.sendAndConfirm(
+        // A borrow prices every active balance, so the last few exceed the default 200k budget.
+        new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+          await borrowIx(owner.mrgnProgram, {
+            marginfiAccount: borrowAcc,
+            bank,
+            tokenAccount: owner.usdcAccount,
+            amount: usdc(100),
+            remaining: composeRemainingAccounts(
+              observed.map((b) => [b, usdcOracle]),
+            ),
+          }),
+        ),
+      );
+    }
+    const start = await activeBanks(borrowAcc);
+    assert.equal(start.length, MAX_BALANCES, "1 deposit + 15 borrows");
+
+    const order = await placeOrder(borrowAcc, owner);
+    // Every slot is taken, so the whole source has to move: src closes and dst takes its place.
+    const { cu, accounts } = await runSandwich(
+      borrowAcc,
+      order,
+      [...start.filter((b) => !b.equals(srcBank)), dstBank],
+      COLLATERAL,
+      true,
+    );
+
+    assertFitsTransaction(cu, accounts, CU_CEILING);
+    assert.equal(
+      (await activeBanks(borrowAcc)).length,
+      MAX_BALANCES,
+      "dst replaced src; the borrows are untouched",
+    );
   });
 });
