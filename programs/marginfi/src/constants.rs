@@ -87,6 +87,10 @@ pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLeve
 /// initiating an account transfer.
 pub const DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS: u32 = 5_000_000;
 
+pub const DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS: u32 = 500_000;
+
+pub const DEFAULT_POSITION_TRANSFER_MIN_VALUE_USD_CENTS: u32 = 100;
+
 /// When creating a mrgn account using a PDA, programs that wish to specify a third_party_id must be
 /// registered here. This confers no other benefits. Creating accounts with third_party_id = 0 or
 /// (the default) or id < PDA_FREE_THRESHOLD is freely available to any caller.

@@ -2255,4 +2255,147 @@ impl MarginfiAccountFixture {
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
     }
+
+    pub async fn try_position_transfer<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authority(
+            destination_account,
+            bank,
+            ui_amount,
+            &self.ctx.borrow().payer.insecure_clone(),
+        )
+        .await
+    }
+
+    pub async fn try_position_transfer_with_authority<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authorities(
+            destination_account,
+            bank,
+            ui_amount,
+            authority,
+            authority,
+        )
+        .await
+    }
+
+    pub async fn try_position_transfer_with_authorities<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        source_authority: &Keypair,
+        destination_authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let source_account = self.load().await;
+        let destination_account_loaded = destination_account.load().await;
+
+        let (fee_state_key, _bump) = Pubkey::find_program_address(&[b"feestate"], &marginfi::ID);
+        let fee_wallet = {
+            let ctx_ref = self.ctx.borrow();
+            let fee_state_account = ctx_ref
+                .banks_client
+                .get_account(fee_state_key)
+                .await
+                .map_err(|e| BanksClientError::from(e))?
+                .ok_or_else(|| BanksClientError::ClientError("Fee state account not found"))?;
+
+            let fee_state: FeeState = FeeState::try_deserialize(&mut &fee_state_account.data[..])
+                .map_err(|_| {
+                BanksClientError::ClientError("Failed to deserialize fee state")
+            })?;
+            fee_state.global_fee_wallet
+        };
+
+        let mut accounts = vec![
+            AccountMeta::new_readonly(source_account.group, false),
+            AccountMeta::new(self.key, false),
+            AccountMeta::new(destination_account.key, false),
+            AccountMeta::new_readonly(source_authority.pubkey(), true),
+            AccountMeta::new_readonly(destination_authority.pubkey(), true),
+            AccountMeta::new(bank.key, false),
+            AccountMeta::new(fee_wallet, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ];
+
+        let mut all_banks_set = std::collections::BTreeSet::new();
+
+        let transferred_bank_account = bank.load().await;
+        all_banks_set.insert(bank.key);
+
+        for balance in source_account.lending_account.balances.iter() {
+            if balance.is_active() {
+                all_banks_set.insert(balance.bank_pk);
+            }
+        }
+
+        for balance in destination_account_loaded.lending_account.balances.iter() {
+            if balance.is_active() {
+                all_banks_set.insert(balance.bank_pk);
+            }
+        }
+
+        let mut all_banks_map = std::collections::BTreeMap::new();
+        all_banks_map.insert(bank.key, transferred_bank_account.clone());
+
+        for bank_pk in all_banks_set.iter() {
+            if *bank_pk == bank.key {
+                continue;
+            }
+            let bank_account = load_and_deserialize::<Bank>(self.ctx.clone(), bank_pk).await;
+            all_banks_map.insert(*bank_pk, bank_account);
+        }
+
+        let mut observation_metas = Vec::new();
+
+        for (bank_pk, bank_account) in all_banks_map.iter().rev() {
+            observation_metas.push(AccountMeta::new_readonly(*bank_pk, false));
+            if should_include_oracle_observation_meta(bank_account) {
+                if !bank_account.config.oracle_keys[0].eq(&Pubkey::default()) {
+                    observation_metas.push(AccountMeta::new_readonly(
+                        bank_account.config.oracle_keys[0],
+                        false,
+                    ));
+                }
+            }
+        }
+
+        accounts.extend(observation_metas);
+
+        let transfer_amount_bytes = ui_to_native!(ui_amount.into(), bank.mint.mint.decimals);
+        let mut ix_data = vec![63, 111, 55, 56, 14, 212, 75, 137];
+        ix_data.extend_from_slice(&transfer_amount_bytes.to_le_bytes());
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: ix_data,
+        };
+
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if source_authority.pubkey() != payer.pubkey() {
+            signers.push(source_authority);
+        }
+        if destination_authority.pubkey() != payer.pubkey()
+            && destination_authority.pubkey() != source_authority.pubkey()
+        {
+            signers.push(destination_authority);
+        }
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
 }

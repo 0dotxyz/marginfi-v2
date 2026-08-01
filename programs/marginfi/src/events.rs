@@ -197,6 +197,20 @@ pub struct LendingAccountWithdrawEvent {
     pub share_amount: WrappedI80F48,
 }
 
+#[event]
+pub struct LendingAccountTransferPositionEvent {
+    pub header: AccountEventHeader,
+    pub source_account: Pubkey,
+    pub source_account_authority: Pubkey,
+    pub destination_account: Pubkey,
+    pub destination_account_authority: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub transfer_amount: u64,
+    pub transfer_share_amount: WrappedI80F48,
+    pub protocol_fee_lamports: u32,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct LiquidationBalances {
     pub liquidatee_asset_balance: f64,
@@ -233,6 +247,13 @@ pub struct MarginfiAccountTransferToNewAccount {
 pub struct MarginfiAccountFreezeEvent {
     pub header: AccountEventHeader,
     pub frozen: bool,
+}
+
+#[event]
+pub struct MarginfiAccountFlagUpdateEvent {
+    pub header: AccountEventHeader,
+    pub disable_position_transfer_send: Option<bool>,
+    pub disable_position_transfer_receive: Option<bool>,
 }
 
 #[event]
@@ -323,6 +344,13 @@ pub struct DeleverageWithdrawFlowEvent {
     pub outflow_usd: u32,
     /// Unix timestamp when the flow was recorded
     pub current_timestamp: i64,
+}
+
+#[event]
+pub struct TransferFlagsSetEvent {
+    pub header: AccountEventHeader,
+    pub disable_receive: bool,
+    pub disable_send: bool,
 }
 
 /// Emitted when the per-bank oracle circuit breaker trips or escalates a halt.

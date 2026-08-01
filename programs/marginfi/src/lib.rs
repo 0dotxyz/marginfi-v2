@@ -411,6 +411,13 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
+    pub fn lending_account_transfer_position<'info>(
+        ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+        transfer_amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_transfer_position(ctx, transfer_amount)
+    }
+
     /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
     /// origination fee, transfers tokens, and runs a health check. If group rate limits are
     /// enabled, `remaining_accounts` must include the borrowed bank's oracle group for USD
@@ -570,6 +577,24 @@ pub mod marginfi {
         marginfi_account::set_account_freeze(ctx, frozen)
     }
 
+    pub fn marginfi_account_set_transfer_flags(
+        ctx: Context<SetTransferFlags>,
+        disable_receive: bool,
+        disable_send: bool,
+    ) -> MarginfiResult {
+        marginfi_account::set_transfer_flags(ctx, disable_receive, disable_send)
+    }
+
+    /// (account authority) Set position transfer opt-out flags. Allows account owner to prevent
+    /// sending or receiving position transfers.
+    pub fn marginfi_account_set_position_transfer_flags(
+        ctx: Context<SetPositionTransferFlags>,
+        disable_send: Option<bool>,
+        disable_receive: Option<bool>,
+    ) -> MarginfiResult {
+        marginfi_account::set_position_transfer_flags(ctx, disable_send, disable_receive)
+    }
+
     /// (account authority) Close a marginfi account. Requires all balances to be empty and no
     /// active flags (disabled, flashloan, receivership).
     pub fn marginfi_account_close(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
@@ -650,6 +675,8 @@ pub mod marginfi {
         order_execution_max_fee: Option<WrappedI80F48>,
         pause_delegate_admin: Option<Pubkey>,
         account_transfer_fee: Option<u32>,
+        position_transfer_fee: Option<u32>,
+        position_transfer_min_value_usd_cents: Option<u32>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -664,6 +691,8 @@ pub mod marginfi {
             order_execution_max_fee,
             pause_delegate_admin,
             account_transfer_fee,
+            position_transfer_fee,
+            position_transfer_min_value_usd_cents,
         )
     }
 

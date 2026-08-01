@@ -30,6 +30,17 @@ pub fn initialize_group(ctx: Context<MarginfiGroupInitialize>) -> MarginfiResult
     marginfi_group.fee_state_cache.global_fee_wallet = fee_state.global_fee_wallet;
     marginfi_group.fee_state_cache.program_fee_fixed = fee_state.program_fee_fixed;
     marginfi_group.fee_state_cache.program_fee_rate = fee_state.program_fee_rate;
+    marginfi_group.fee_state_cache.position_transfer_fee = fee_state.position_transfer_fee;
+    marginfi_group
+        .fee_state_cache
+        .position_transfer_min_value_usd_cents = fee_state.position_transfer_min_value_usd_cents;
+    marginfi_group
+        .fee_state_cache
+        .position_transfer_fee_initialized = fee_state.position_transfer_fee_initialized;
+    marginfi_group
+        .fee_state_cache
+        .position_transfer_min_value_initialized =
+        fee_state.position_transfer_min_value_initialized;
     marginfi_group.banks = 0;
 
     let cache = marginfi_group.fee_state_cache;

@@ -446,7 +446,22 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
+
+    // **************POSITION TRANSFER ERRORS
+    #[msg("Position transfer is disabled for this account")]
+    PositionTransferDisabled, // 6605
+    #[msg("Account is not allowed to send position transfers")]
+    PositionTransferSendDisabled, // 6606
+    #[msg("Invalid position transfer amount")]
+    InvalidPositionTransferAmount, // 6607
+    #[msg("Insufficient funds for position transfer")]
+    PositionTransferInsufficientFunds, // 6608
+    #[msg("Position transfer would violate health constraints")]
+    PositionTransferHealthCheckFailed, // 6609
+    #[msg("Cannot transfer a position to the same account")]
+    PositionTransferIdenticalAccounts, // 6610
+                                       // **************END POSITION TRANSFER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -691,6 +706,12 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::PositionTransferDisabled,
+            6606 => MarginfiError::PositionTransferSendDisabled,
+            6607 => MarginfiError::InvalidPositionTransferAmount,
+            6608 => MarginfiError::PositionTransferInsufficientFunds,
+            6609 => MarginfiError::PositionTransferHealthCheckFailed,
+            6610 => MarginfiError::PositionTransferIdenticalAccounts,
 
             _ => MarginfiError::InternalLogicError,
         }

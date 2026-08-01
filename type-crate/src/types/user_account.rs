@@ -238,6 +238,10 @@ pub const ACCOUNT_IN_RECEIVERSHIP: u64 = 1 << 4;
 pub const ACCOUNT_IN_DELEVERAGE: u64 = 1 << 5;
 pub const ACCOUNT_FROZEN: u64 = 1 << 6;
 pub const ACCOUNT_IN_ORDER_EXECUTION: u64 = 1 << 7;
+pub const ACCOUNT_TRANSFER_DISABLED: u64 = 1 << 8;
+pub const ACCOUNT_TRANSFER_SEND_DISABLED: u64 = 1 << 9;
+pub const ACCOUNT_POSITION_TRANSFER_SEND_DISABLED: u64 = 1 << 10;
+pub const ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED: u64 = 1 << 11;
 pub const MAX_LENDING_ACCOUNT_BALANCES: usize = 16;
 
 assert_struct_size!(LendingAccount, 1728);

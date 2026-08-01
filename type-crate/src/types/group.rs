@@ -10,7 +10,12 @@ use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
-assert_struct_size!(MarginfiGroup, 9248);
+/// NOTE: MarginfiGroup size increased from 9248 to 9256 bytes due to adding position_transfer_fee
+/// and position_transfer_min_value_usd_cents to FeeStateCache. Further increased to 9264 bytes due to
+/// adding position_transfer_fee_initialized and position_transfer_min_value_initialized flags
+/// (with padding for alignment). Existing on-chain MarginfiGroup accounts MUST be resized before
+/// this program version can load them. Use the resize account instruction or similar tooling to
+/// grow the account to this new size (zero-fill new bytes).
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
@@ -105,6 +110,8 @@ impl MarginfiGroup {
     pub const V1_LEN: usize = 1056;
 }
 
+assert_struct_size!(MarginfiGroup, 9264);
+
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
@@ -118,6 +125,16 @@ pub struct FeeStateCache {
     pub program_fee_rate: WrappedI80F48,
     /// Unix timestamp of the last fee state propagation
     pub last_update: i64,
+    /// Position transfer fee in lamports (0 = uninitialized, use default)
+    pub position_transfer_fee: u32,
+    /// Position transfer minimum value in USD cents (0 = uninitialized, use default)
+    pub position_transfer_min_value_usd_cents: u32,
+    /// Explicit flag: is position_transfer_fee explicitly set (not using default)?
+    pub position_transfer_fee_initialized: u8,
+    /// Explicit flag: is position_transfer_min_value_usd_cents explicitly set (not using default)?
+    pub position_transfer_min_value_initialized: u8,
+    /// Padding for alignment (future extensibility)
+    pub _padding: [u8; 6],
 }
 
 #[repr(C)]
