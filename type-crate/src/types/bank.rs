@@ -355,7 +355,7 @@ pub enum OracleSetup {
     PythLST,                // 21
     KaminoLST,              // 22
     JuplendLST,             // 23
-    PTPyth,                  // 24
+    PTPyth,                 // 24
     PTFixed,                // 25
 }
 unsafe impl Zeroable for OracleSetup {}

@@ -50,7 +50,8 @@ pub fn lending_pool_set_oracle_price(
     }
 
     let price_i80: I80F48 = price.into();
-    let requested = OracleSetup::from_u8(setup).unwrap_or_else(|| panic!("unsupported oracle type"));
+    let requested =
+        OracleSetup::from_u8(setup).unwrap_or_else(|| panic!("unsupported oracle type"));
     let remaining = ctx.remaining_accounts;
 
     match requested {
