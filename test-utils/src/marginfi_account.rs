@@ -2305,9 +2305,8 @@ impl MarginfiAccountFixture {
             let fee_state_account = ctx_ref
                 .banks_client
                 .get_account(fee_state_key)
-                .await
-                .map_err(|e| BanksClientError::from(e))?
-                .ok_or_else(|| BanksClientError::ClientError("Fee state account not found"))?;
+                .await?
+                .ok_or(BanksClientError::ClientError("Fee state account not found"))?;
 
             let fee_state: FeeState = FeeState::try_deserialize(&mut &fee_state_account.data[..])
                 .map_err(|_| {
@@ -2345,7 +2344,7 @@ impl MarginfiAccountFixture {
         }
 
         let mut all_banks_map = std::collections::BTreeMap::new();
-        all_banks_map.insert(bank.key, transferred_bank_account.clone());
+        all_banks_map.insert(bank.key, transferred_bank_account);
 
         for bank_pk in all_banks_set.iter() {
             if *bank_pk == bank.key {
@@ -2359,13 +2358,13 @@ impl MarginfiAccountFixture {
 
         for (bank_pk, bank_account) in all_banks_map.iter().rev() {
             observation_metas.push(AccountMeta::new_readonly(*bank_pk, false));
-            if should_include_oracle_observation_meta(bank_account) {
-                if !bank_account.config.oracle_keys[0].eq(&Pubkey::default()) {
-                    observation_metas.push(AccountMeta::new_readonly(
-                        bank_account.config.oracle_keys[0],
-                        false,
-                    ));
-                }
+            if should_include_oracle_observation_meta(bank_account)
+                && !bank_account.config.oracle_keys[0].eq(&Pubkey::default())
+            {
+                observation_metas.push(AccountMeta::new_readonly(
+                    bank_account.config.oracle_keys[0],
+                    false,
+                ));
             }
         }
 

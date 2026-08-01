@@ -990,7 +990,6 @@ async fn test_position_transfer_with_accrued_interest() -> anyhow::Result<()> {
 
     let bank_after_accrual = usdc_bank_f.load().await;
     let total_asset_shares_before: I80F48 = bank_after_accrual.total_asset_shares.into();
-    let asset_share_value_after_accrual: I80F48 = bank_after_accrual.asset_share_value.into();
 
     let source_balance_before = source_account_f.load().await;
     let source_balance_info_before = source_balance_before
