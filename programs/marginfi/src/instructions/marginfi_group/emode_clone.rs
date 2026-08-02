@@ -1,9 +1,11 @@
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{check, ix_utils, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
 
 /// Copy emode settings from one bank to another within the same group.
 pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let group = ctx.accounts.group.load()?;
 
     check!(
@@ -41,4 +43,7 @@ pub struct LendingPoolCloneEmode<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub copy_to_bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

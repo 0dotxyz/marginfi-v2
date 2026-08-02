@@ -250,6 +250,38 @@ pub fn is_allowed_cpi_for_third_party_id(
     Ok(current_ixn.program_id == allowed_program)
 }
 
+pub fn check_no_durable_nonce(sysvar: &AccountInfo) -> MarginfiResult<()> {
+    let ixes = load_and_validate_instructions(sysvar, None)?;
+
+    if ixes.is_empty() {
+        return Ok(());
+    }
+
+    let first_ix = &ixes[0];
+
+    if first_ix.program_id != anchor_lang::solana_program::system_program::ID {
+        return Ok(());
+    }
+
+    if first_ix.data.len() < 4 {
+        return Ok(());
+    }
+
+    const ADVANCE_NONCE_ACCOUNT_DISCRIMINATOR: u32 = 4;
+    let discriminator = u32::from_le_bytes([
+        first_ix.data[0],
+        first_ix.data[1],
+        first_ix.data[2],
+        first_ix.data[3],
+    ]);
+
+    if discriminator == ADVANCE_NONCE_ACCOUNT_DISCRIMINATOR {
+        err!(MarginfiError::DurableNonceNotAllowed)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use marginfi_type_crate::constants::{discriminators, ix_discriminators};

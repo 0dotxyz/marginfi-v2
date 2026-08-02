@@ -2,7 +2,7 @@ use crate::{
     check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
-    log_pool_info,
+    ix_utils, log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
@@ -21,6 +21,8 @@ pub fn lending_pool_clone_bank(
     ctx: Context<LendingPoolCloneBank>,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
         panic!("Staging or localnet only!");
     }
@@ -250,4 +252,7 @@ pub struct LendingPoolCloneBank<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

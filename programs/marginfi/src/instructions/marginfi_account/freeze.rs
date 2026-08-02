@@ -5,6 +5,7 @@
 /// - The group admin retains access to operate the account while frozen (for remediation/seizure).
 /// - Setting `frozen = false` clears the flag and returns control to the authority under normal auth rules.
 pub fn set_account_freeze(ctx: Context<SetAccountFreeze>, frozen: bool) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let group = ctx.accounts.group.load()?;
     check_eq!(
         group.admin,
@@ -35,6 +36,7 @@ pub fn set_account_freeze(ctx: Context<SetAccountFreeze>, frozen: bool) -> Margi
 use crate::{
     check_eq,
     events::{AccountEventHeader, MarginfiAccountFreezeEvent},
+    ix_utils,
     prelude::*,
     state::marginfi_account::MarginfiAccountImpl,
 };
@@ -55,4 +57,7 @@ pub struct SetAccountFreeze<'info> {
         constraint = group.load()?.admin == admin.key() @ MarginfiError::Unauthorized
     )]
     pub admin: Signer<'info>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::set_if_some;
 use crate::state::bank::BankImpl;
 use crate::state::interest_rate::InterestRateConfigImpl;
@@ -13,6 +14,8 @@ pub fn lending_pool_configure_bank_interest_only(
     ctx: Context<LendingPoolConfigureBankInterestOnly>,
     interest_rate_config: InterestRateConfigOpt,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
     msg!(
         "Configuring bank: {:?} mint: {:?}",
@@ -48,6 +51,9 @@ pub struct LendingPoolConfigureBankInterestOnly<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 pub fn lending_pool_configure_bank_limits_only(
@@ -56,6 +62,8 @@ pub fn lending_pool_configure_bank_limits_only(
     borrow_limit: Option<u64>,
     total_asset_value_init_limit: Option<u64>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
     msg!(
         "Configuring bank: {:?} mint: {:?}",
@@ -97,11 +105,15 @@ pub struct LendingPoolConfigureBankLimitsOnly<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 pub fn lending_pool_force_tokenless_repay_complete(
     ctx: Context<LendingPoolForceTokenlessRepayComplete>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     if bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED) {
@@ -125,4 +137,7 @@ pub struct LendingPoolForceTokenlessRepayComplete<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

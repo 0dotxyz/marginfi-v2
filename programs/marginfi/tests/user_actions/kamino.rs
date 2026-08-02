@@ -161,6 +161,7 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Re
             group: setup.test_f.marginfi_group.key,
             admin: admin.pubkey(),
             bank: setup.bank_f.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::ConfigureBankRateLimits {

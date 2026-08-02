@@ -6,6 +6,7 @@ use marginfi_type_crate::{
 };
 
 use crate::{
+    ix_utils,
     prelude::*,
     state::{
         bank::BankImpl,
@@ -16,6 +17,7 @@ use crate::{
 pub fn lending_account_purge_delev_balance(
     ctx: Context<LendingAccountPurgeDelevBalance>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let bank_pk = &ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -73,4 +75,7 @@ pub struct LendingAccountPurgeDelevBalance<'info> {
             @ MarginfiError::ForbiddenIx
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

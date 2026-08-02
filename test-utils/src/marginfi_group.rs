@@ -82,6 +82,7 @@ impl MarginfiGroupFixture {
                     admin,
                     fee_state: fee_state_key,
                     system_program: system_program::id(),
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: marginfi::instruction::MarginfiGroupInitialize {}.data(),
@@ -92,6 +93,7 @@ impl MarginfiGroupFixture {
                 accounts: marginfi::accounts::MarginfiGroupConfigure {
                     marginfi_group: group_key.pubkey(),
                     admin,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: MarginfiGroupConfigure {
@@ -197,6 +199,7 @@ impl MarginfiGroupFixture {
                     fee_payer: ctx.payer.pubkey(),
                     staked_settings: staked_settings_key,
                     system_program: system_program::id(),
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: InitStakedSettings { settings }.data(),
@@ -258,6 +261,7 @@ impl MarginfiGroupFixture {
             fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
             token_program: bank_asset_mint_fixture.token_program,
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -365,6 +369,7 @@ impl MarginfiGroupFixture {
             fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
             token_program: bank_fixture.get_token_program(),
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -421,6 +426,7 @@ impl MarginfiGroupFixture {
             bank: bank.key,
             group: self.key,
             admin: self.ctx.borrow().payer.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -442,6 +448,7 @@ impl MarginfiGroupFixture {
             bank: bank.key,
             group: self.key,
             admin: self.ctx.borrow().payer.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -466,6 +473,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -486,6 +494,7 @@ impl MarginfiGroupFixture {
             signer: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
             same_asset_emode_registry: self.same_asset_emode_registry,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -502,6 +511,7 @@ impl MarginfiGroupFixture {
             signer: self.ctx.borrow().payer.pubkey(),
             same_asset_emode_registry: self.same_asset_emode_registry,
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -596,6 +606,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             delegate_curve_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -642,6 +653,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             delegate_limit_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -719,6 +731,7 @@ impl MarginfiGroupFixture {
             bank: bank.key,
             group: self.key,
             emode_admin: self.ctx.borrow().payer.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -764,6 +777,7 @@ impl MarginfiGroupFixture {
             signer,
             copy_from_bank,
             copy_to_bank,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -964,6 +978,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::MarginfiGroupConfigure {
                 marginfi_group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupConfigure {
@@ -1043,6 +1058,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::MarginfiGroupConfigure {
                 marginfi_group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupConfigure {
@@ -1087,6 +1103,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::ConfigureDeleverageWithdrawalLimit {
                 marginfi_group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: ConfigureDeleverageWithdrawalLimit { limit }.data(),
@@ -1120,6 +1137,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: self.key,
                 delegate_flow_admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: UpdateDeleverageWithdrawals {
@@ -1214,6 +1232,7 @@ impl MarginfiGroupFixture {
             insurance_vault: bank.get_vault(BankVaultType::Insurance).0,
             insurance_vault_authority: bank.get_vault_authority(BankVaultType::Insurance).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1290,6 +1309,7 @@ impl MarginfiGroupFixture {
             liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
             liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1368,6 +1388,7 @@ impl MarginfiGroupFixture {
             admin_token_account,
             liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1541,6 +1562,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::PanicPause {
                 pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: PanicPause {}.data(),
@@ -1580,6 +1602,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::PanicUnpause {
                 global_fee_admin: pause_authority.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: PanicUnpause {}.data(),
@@ -1614,6 +1637,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::EditFeeState {
                 global_fee_admin: self.ctx.borrow().payer.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: EditGlobalFeeState {
@@ -1678,6 +1702,7 @@ impl MarginfiGroupFixture {
                 group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
                 staked_settings: self.staked_settings,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: DisableStakedOracles {}.data(),
@@ -1704,6 +1729,7 @@ impl MarginfiGroupFixture {
                 group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
                 staked_settings: self.staked_settings,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: EnableStakedOracleOnramp {}.data(),

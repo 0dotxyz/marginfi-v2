@@ -724,6 +724,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
             accounts: marginfi::accounts::ConfigureGroupRateLimits {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::ConfigureGroupRateLimits {

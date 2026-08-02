@@ -1,3 +1,4 @@
+use crate::ix_utils;
 // Adds a Kamino type bank to a group with sane defaults. Used to integrate with Kamino
 // allowing users to interact with Kamino pools through marginfi
 use crate::{
@@ -28,6 +29,7 @@ pub fn lending_pool_add_bank_kamino(
     bank_config: KaminoConfigCompact,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     // Note: Kamino banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
     let LendingPoolAddBankKamino {
@@ -238,4 +240,7 @@ pub struct LendingPoolAddBankKamino<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

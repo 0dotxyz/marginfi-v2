@@ -1,6 +1,6 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
-    log_pool_info,
+    ix_utils, log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
@@ -22,6 +22,8 @@ pub fn lending_pool_add_bank(
     ctx: Context<LendingPoolAddBank>,
     bank_config: BankConfigCompact,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // Transfer the flat sol init fee to the global fee wallet
     let fee_state = ctx.accounts.fee_state.load()?;
     let bank_init_flat_sol_fee = fee_state.bank_init_flat_sol_fee;
@@ -212,6 +214,9 @@ pub struct LendingPoolAddBank<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl<'info> LendingPoolAddBank<'info> {

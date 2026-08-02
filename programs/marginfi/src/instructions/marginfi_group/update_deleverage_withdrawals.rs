@@ -1,4 +1,6 @@
-use crate::{check, state::marginfi_group::MarginfiGroupImpl, MarginfiError, MarginfiResult};
+use crate::{
+    check, ix_utils, state::marginfi_group::MarginfiGroupImpl, MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::MarginfiGroup;
@@ -19,6 +21,8 @@ pub fn update_deleverage_withdrawals(
     event_start_slot: u64,
     event_end_slot: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut group = ctx.accounts.marginfi_group.load_mut()?;
     let clock = Clock::get()?;
 
@@ -86,6 +90,9 @@ pub struct UpdateDeleverageWithdrawals<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub delegate_flow_admin: Signer<'info>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 #[cfg(test)]

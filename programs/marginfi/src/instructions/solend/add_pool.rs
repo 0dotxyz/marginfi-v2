@@ -1,3 +1,4 @@
+use crate::ix_utils;
 // Adds a Solend type bank to a group with sane defaults. Used to integrate with Solend
 // allowing users to interact with Solend pools through marginfi
 use crate::{
@@ -25,6 +26,7 @@ pub fn lending_pool_add_bank_solend(
     bank_config: SolendConfigCompact,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     // Note: Solend banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
     let LendingPoolAddBankSolend {
@@ -228,4 +230,7 @@ pub struct LendingPoolAddBankSolend<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

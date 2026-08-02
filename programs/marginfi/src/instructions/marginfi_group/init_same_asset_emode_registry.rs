@@ -1,4 +1,4 @@
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{check, ix_utils, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::SAME_ASSET_EMODE_REGISTRY_SEED,
@@ -12,6 +12,8 @@ use marginfi_type_crate::{
 pub fn lending_pool_init_same_asset_emode_registry(
     ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let group = ctx.accounts.group.load()?;
 
     check!(
@@ -49,4 +51,7 @@ pub struct LendingPoolInitSameAssetEmodeRegistry<'info> {
     pub same_asset_emode_registry: AccountLoader<'info, SameAssetEmodeRegistry>,
 
     pub system_program: Program<'info, System>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

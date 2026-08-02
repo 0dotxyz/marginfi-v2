@@ -1,7 +1,7 @@
 use crate::events::{GroupEventHeader, MarginfiGroupConfigureEvent};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::utils::i80f48_to_f64;
-use crate::{MarginfiError, MarginfiResult};
+use crate::{ix_utils, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{basis_to_u32, u32_to_basis, MarginfiGroup, WrappedI80F48};
@@ -51,6 +51,8 @@ pub fn configure(
     same_asset_emode_init_leverage: Option<WrappedI80F48>,
     same_asset_emode_maint_leverage: Option<WrappedI80F48>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_mut()?;
     if let Some(new_admin) = new_admin {
         marginfi_group.update_admin(new_admin);
@@ -164,4 +166,7 @@ pub struct MarginfiGroupConfigure<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub admin: Signer<'info>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

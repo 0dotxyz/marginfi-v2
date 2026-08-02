@@ -1,10 +1,13 @@
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{constants::FEE_STATE_SEED, types::FeeState};
 
+use crate::ix_utils;
 use crate::state::panic_state::PanicStateImpl;
 use crate::MarginfiError;
 
 pub fn panic_unpause(ctx: Context<PanicUnpause>) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
     let current_timestamp = Clock::get()?.unix_timestamp;
 
@@ -49,4 +52,7 @@ pub struct PanicUnpause<'info> {
         has_one = global_fee_admin @ MarginfiError::Unauthorized
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

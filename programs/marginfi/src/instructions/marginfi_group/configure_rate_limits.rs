@@ -1,5 +1,5 @@
 use crate::{
-    check,
+    check, ix_utils,
     state::marginfi_group::MarginfiGroupImpl,
     state::rate_limiter::{is_valid_rate_limit_amount, BankRateLimiterImpl, GroupRateLimiterImpl},
     MarginfiError, MarginfiResult,
@@ -21,6 +21,7 @@ pub fn configure_bank_rate_limits(
     hourly_max_outflow: Option<u64>,
     daily_max_outflow: Option<u64>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut bank = ctx.accounts.bank.load_mut()?;
     let clock = Clock::get()?;
 
@@ -64,6 +65,9 @@ pub struct ConfigureBankRateLimits<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 /// Configure group-level rate limits for aggregate withdraw/borrow operations.
@@ -82,6 +86,7 @@ pub fn configure_group_rate_limits(
     hourly_max_outflow_usd: Option<u64>,
     daily_max_outflow_usd: Option<u64>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut group = ctx.accounts.marginfi_group.load_mut()?;
     let clock = Clock::get()?;
 
@@ -119,4 +124,7 @@ pub struct ConfigureGroupRateLimits<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub admin: Signer<'info>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

@@ -2,7 +2,7 @@ use crate::{
     bank_signer, check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolSuperAdminWithdrawEvent},
-    live, math_error,
+    ix_utils, live, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::{BankImpl, BankVaultType},
     utils,
@@ -31,6 +31,8 @@ pub fn super_admin_withdraw<'info>(
     mut ctx: Context<'info, SuperAdminWithdraw<'info>>,
     amount: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
         panic!("Staging or localnet only!");
     }
@@ -53,6 +55,7 @@ pub fn super_admin_withdraw<'info>(
         liquidity_vault_authority,
         token_program,
         admin,
+        instruction_sysvar: _,
     } = &ctx.accounts;
 
     let maybe_bank_mint = {
@@ -176,4 +179,7 @@ pub struct SuperAdminWithdraw<'info> {
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

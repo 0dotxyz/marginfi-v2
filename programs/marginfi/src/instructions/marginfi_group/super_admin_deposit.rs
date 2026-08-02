@@ -2,7 +2,7 @@ use crate::{
     check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolSuperAdminDepositEvent},
-    math_error,
+    ix_utils, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
     utils,
@@ -27,6 +27,8 @@ pub fn super_admin_deposit<'info>(
     mut ctx: Context<'info, SuperAdminDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
         panic!("Staging or localnet only!");
     }
@@ -48,6 +50,7 @@ pub fn super_admin_deposit<'info>(
         admin_token_account,
         liquidity_vault,
         token_program,
+        instruction_sysvar: _,
     } = &ctx.accounts;
 
     let maybe_bank_mint = {
@@ -133,4 +136,7 @@ pub struct SuperAdminDeposit<'info> {
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

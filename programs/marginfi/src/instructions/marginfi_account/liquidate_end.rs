@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::{
     check,
     constants::{LIQUIDATION_BONUS_FEE_MINIMUM, LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD},
@@ -87,6 +88,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 /// * Fails if account is less healthy than it was at start
 ///   Note: no fees taken.
 pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
 
@@ -297,6 +299,9 @@ pub struct EndDeleverage<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub risk_admin: Signer<'info>,
+
+    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for EndDeleverage<'_> {
