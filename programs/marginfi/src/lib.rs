@@ -609,6 +609,13 @@ pub mod marginfi {
         marginfi_account::lending_account_pulse_health(ctx)
     }
 
+    pub fn lending_account_query_max_borrow_withdraw<'info>(
+        ctx: Context<'info, QueryMaxBorrowWithdraw<'info>>,
+        query_type: u8,
+    ) -> MarginfiResult {
+        marginfi_account::query_max_borrow_withdraw(ctx, query_type)
+    }
+
     /// (Permissionless) Batch-sync balance-derived indexer flags for existing accounts.
     /// Pass MarginfiAccounts as writable remaining_accounts.
     pub fn sync_indexer_flags<'info>(
