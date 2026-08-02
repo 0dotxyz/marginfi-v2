@@ -1,14 +1,12 @@
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
-use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
+use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{
     assert_anchor_error, assert_custom_error, bank::BankFixture,
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{
-    centi_to_u32, u32_to_centi, BankConfigOpt, OrderTrigger, WrappedI80F48,
-};
+use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -1664,13 +1662,13 @@ async fn keeper_close_order_success_after_set_flags(
     Ok(())
 }
 
-/// A circuit-breaker-enabled bank that the keeper repays and closes mid-execution is invisible to
-/// the end-side price gate, which only scans still-active balances. `start_execute_order` must
-/// therefore run the gate over the full pre-execution set: with a tagged SOL liability bank breached
-/// past its first tier, the whole execution reverts up front, before the liability is repaid and any
-/// collateral moves.
+/// Regression (order execution must not bypass the CB gate via a closed balance): a keeper cannot
+/// execute an order whose tagged liability bank is breaching the circuit breaker by repaying that
+/// liability before `end_execute_order`. `start_execute_order` now gates the full pre-execution
+/// active set, so the breaching bank is caught even though the exploit's `repay_all` removes it
+/// from the end-of-order gate scan.
 #[tokio::test]
-async fn execute_order_start_gate_rejects_breached_liability_bank() -> anyhow::Result<()> {
+async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Result<()> {
     let (
         test_f,
         borrower_mfi_account_f,
@@ -1683,58 +1681,47 @@ async fn execute_order_start_gate_rejects_breached_liability_bank() -> anyhow::R
         keeper_asset_account,
         _keeper_uninvolved_account,
     ) = setup_execution_fixture_with_params(
-        BankMint::Usdc,
-        300.0,
         BankMint::Sol,
-        10.0,
+        200.0,
+        BankMint::Usdc,
+        50.0,
         BankMint::Fixed,
-        stop_loss_trigger(fp!(250), 0),
+        stop_loss_trigger(fp!(1945), slippage_bps(155)),
     )
     .await?;
 
-    let asset_bank_f = test_f.get_bank(&asset_mint);
-    let liability_bank_f = test_f.get_bank(&liability_mint);
+    let asset_bank_f = test_f.get_bank(&asset_mint); // SOL collateral
+    let liability_bank_f = test_f.get_bank(&liability_mint); // USDC debt (the CB bank)
 
-    // Warm the SOL liability bank's cache and enable the breaker so its reference seeds at $10, then
-    // push the live price to $11: a 1000 bps jump past the 500 bps first tier.
-    let base_native: i64 = 10_000_000_000;
+    // Enable the circuit breaker on the liability bank and seed its reference at $1.
     let warm_time: i64 = 100;
     let warm_slot: u64 = 1_000;
     test_f
-        .set_pyth_oracle_price_native(PYTH_SOL_FEED, base_native, 0, warm_time)
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, warm_time)
         .await;
     test_f.set_clock(warm_slot, warm_time).await;
     test_f
         .marginfi_group
-        .try_pulse_bank_price_cache(&liability_bank_f)
+        .try_pulse_bank_price_cache(liability_bank_f)
         .await?;
     liability_bank_f
-        .update_config(
-            BankConfigOpt {
-                circuit_breaker_enabled: Some(true),
-                cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-                cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_escalation_window_mult: Some(2),
-                cb_ema_alpha_bps: Some(1000),
-                ..Default::default()
-            },
-            None,
-        )
+        .update_config(standard_cb_config(), None)
         .await?;
 
+    // Move the liability's live oracle 10% past the reference (tier-0 is 5%). No pulse, so the bank
+    // is not halted; the breach is only visible to the live price gate. Keep the asset oracle fresh
+    // so the start-order health computation doesn't fail on staleness.
     let breach_time = warm_time + 1;
     test_f.set_clock(warm_slot + 10, breach_time).await;
     test_f
-        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 11_000_000_000, 0, breach_time)
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_100_000, 0, breach_time)
         .await;
-    for refreshed in [PYTH_SOL_FEED, PYTH_USDC_FEED, PYTH_PYUSD_FEED] {
-        test_f
-            .set_pyth_oracle_timestamp(refreshed, breach_time)
-            .await;
-    }
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, breach_time)
+        .await;
 
-    // The exploit sequence: start, repay the entire SOL liability (which would hide it from the
-    // end-side gate), withdraw collateral, end. The start gate rejects the whole transaction.
+    // The exploit tx: start, repay the whole liability (removing it from the end gate), withdraw,
+    // end. It must now revert at start_execute_order's gate.
     let (start_ix, execute_record) = borrower_mfi_account_f
         .make_start_execute_ix(order_pda, keeper.pubkey())
         .await;
@@ -1751,7 +1738,7 @@ async fn execute_order_start_gate_rejects_breached_liability_bank() -> anyhow::R
         .make_withdraw_ix_with_authority(
             keeper_asset_account,
             &asset_bank_f,
-            50.0,
+            1.0,
             None,
             keeper.pubkey(),
         )
@@ -1767,17 +1754,19 @@ async fn execute_order_start_gate_rejects_breached_liability_bank() -> anyhow::R
         .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
-    let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
         blockhash,
     );
-    let result = ctx.banks_client.process_transaction(tx).await;
-    assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
-    drop(ctx);
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        ctx.banks_client.process_transaction(tx).await
+    };
 
+    assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    // The rejected execution leaves the order intact rather than consuming it.
     assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }

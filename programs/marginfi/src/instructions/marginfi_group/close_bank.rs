@@ -9,7 +9,14 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiGroup},
 };
 
-pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
+/// * force_close - (admin escape hatch) when `Some(true)`, skips the `CLOSE_ENABLED_FLAG` and
+///   open-position checks. Intended for legacy pre-0.1.4 banks whose position count is
+///   non-authoritative. The zero-shares/zero-emissions checks are always enforced, so a bank still
+///   holding value can never be force-closed.
+pub fn lending_pool_close_bank(
+    ctx: Context<LendingPoolCloseBank>,
+    force_close: Option<bool>,
+) -> MarginfiResult {
     let mut group = ctx.accounts.group.load_mut()?;
     // Note: Groups created prior to 0.1.2 have a non-authoritative count here, so subtraction
     // without saturation could reduce the count below zero.
@@ -17,18 +24,20 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
 
     let bank = ctx.accounts.bank.load()?;
 
-    // banks created prior to 0.1.4 can never be closed because we cannot guarantee an accurate
-    // position count for those banks.
-    check!(
-        bank.get_flag(CLOSE_ENABLED_FLAG),
-        MarginfiError::BankCannotClose,
-        "Only banks created in 0.1.4 and later can close"
-    );
-    check!(
-        bank.lending_position_count == 0 && bank.borrowing_position_count == 0,
-        MarginfiError::BankCannotClose,
-        "Only banks with no open positions can close"
-    );
+    if !force_close.unwrap_or(false) {
+        // banks created prior to 0.1.4 can never be closed because we cannot guarantee an accurate
+        // position count for those banks.
+        check!(
+            bank.get_flag(CLOSE_ENABLED_FLAG),
+            MarginfiError::BankCannotClose,
+            "Only banks created in 0.1.4 and later can close"
+        );
+        check!(
+            bank.lending_position_count == 0 && bank.borrowing_position_count == 0,
+            MarginfiError::BankCannotClose,
+            "Only banks with no open positions can close"
+        );
+    }
     check!(
         I80F48::from(bank.total_asset_shares).is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD)
             && I80F48::from(bank.total_liability_shares)

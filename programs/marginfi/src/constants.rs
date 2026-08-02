@@ -40,6 +40,12 @@ cfg_if::cfg_if! {
 /// The SPL single-validator stake pool program. Deployed under the same address on every cluster.
 pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
 
+/// The SPL single-pool program mints no tokens against its initial non-refundable 1 SOL bootstrap
+/// stake, so it prices deposits/withdrawals against a notional supply of `raw supply + this`
+/// (single-pool `PHANTOM_TOKEN_AMOUNT = LAMPORTS_PER_SOL`). Staked on-ramp pricing divides the full
+/// pool NAV by the same notional supply so the exchange rate matches what a withdrawal redeems.
+pub const SVSP_PHANTOM_TOKEN_AMOUNT: u64 = 1_000_000_000;
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "devnet")] {
         pub const SWITCHBOARD_PULL_ID: Pubkey = pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");

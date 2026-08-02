@@ -366,13 +366,10 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
 
     assert!(res1.is_ok());
 
-    // Advance a slot so the duplicate carries a fresh blockhash. A byte-identical tx replayed on the
-    // same blockhash is treated as already-confirmed and returns the cached Ok, masking the real
-    // "account already initialized" rejection this test is asserting.
+    // Second transaction with same parameters should fail. Warp a slot first: it is byte-identical
+    // to the first, so on the same blockhash BanksClient dedupes it into that cached success.
     let next_slot = test_f.get_clock().await.slot + 1;
     test_f.context.borrow_mut().warp_to_slot(next_slot).unwrap();
-
-    // Second transaction with same parameters should fail
     let tx2 = Transaction::new_signed_with_payer(
         &[init_marginfi_account_pda_ix],
         Some(&test_f.payer()),

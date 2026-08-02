@@ -16,7 +16,7 @@ pub struct OraclePriceWithConfidence {
     /// Spot oracle price in USD, no bias.
     pub price: I80F48,
     /// Confidence band in absolute price units (same scale as `price`), already multiplied by
-    /// `STD_DEV_MULTIPLE` and clamped to the bank's max-confidence ceiling.
+    /// `oracle_max_confidence` and clamped to the bank's max-confidence ceiling.
     pub confidence: I80F48,
     /// Publisher-side timestamp (unix seconds): Pyth `publish_time` or Switchboard
     /// `last_update_timestamp`. Zero when the adapter doesn't expose one (e.g. `Fixed`).
