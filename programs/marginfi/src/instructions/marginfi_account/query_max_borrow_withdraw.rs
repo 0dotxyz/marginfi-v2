@@ -176,7 +176,7 @@ fn binary_search_max_withdraw<'info>(
         return Ok((0, false));
     }
 
-    match try_withdraw(
+    if let Ok(()) = try_withdraw(
         marginfi_account,
         group,
         bank,
@@ -184,10 +184,7 @@ fn binary_search_max_withdraw<'info>(
         user_balance_u64,
         remaining_ais,
     ) {
-        Ok(()) => {
-            return Ok((user_balance_u64, true));
-        }
-        Err(_) => {}
+        return Ok((user_balance_u64, true));
     }
 
     let mut low: u64 = 0;
