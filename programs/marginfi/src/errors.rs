@@ -483,7 +483,9 @@ pub enum MarginfiError {
     RebalanceNotBestVenue, // 6715
     #[msg("Rebalance execution sequence does not match the account's next value")]
     RebalanceStaleExecutionSeq, // 6716
-                                // **************END AUTO-REBALANCE ERRORS
+    #[msg("Rebalance allowlist contains a bank the account owes into")]
+    RebalanceAllowlistLiability, // 6717
+                                 // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -745,6 +747,7 @@ impl From<u32> for MarginfiError {
             6714 => MarginfiError::RebalanceUntrackedBalance,
             6715 => MarginfiError::RebalanceNotBestVenue,
             6716 => MarginfiError::RebalanceStaleExecutionSeq,
+            6717 => MarginfiError::RebalanceAllowlistLiability,
 
             _ => MarginfiError::InternalLogicError,
         }

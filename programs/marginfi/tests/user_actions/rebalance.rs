@@ -3411,3 +3411,76 @@ async fn rebalance_rejects_decoy_juplend_reserve() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// A liability in an allowlisted bank is rejected at placement: that bank can never receive, yet
+/// still blocks lower-rate destinations in the best-venue scan.
+#[tokio::test]
+async fn rebalance_place_rejects_an_allowlisted_liability() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+
+    // A second account holding the shape the guard rejects: a deposit in src, a borrow in dst.
+    let user = f.test_f.create_marginfi_account().await;
+    let funding = f
+        .test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(DEPOSIT_USDC)
+        .await;
+    user.try_bank_deposit(funding.key, &f.src_bank_f, DEPOSIT_USDC, None)
+        .await?;
+    let borrowed = f.test_f.usdc_mint.create_empty_token_account().await;
+    user.try_bank_borrow(borrowed.key, &f.dst_bank_f, 100.0)
+        .await?;
+
+    let order_pda = Pubkey::find_program_address(
+        &[
+            REBALANCE_ORDER_SEED.as_bytes(),
+            user.key.as_ref(),
+            f.test_f.usdc_mint.key.as_ref(),
+        ],
+        &marginfi::ID,
+    )
+    .0;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let place_ix = user
+        .make_place_rebalance_order_ix(
+            f.test_f.usdc_mint.key,
+            order_pda,
+            payer,
+            payer,
+            vec![f.src_bank_f.key, f.dst_bank_f.key],
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[place_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceAllowlistLiability);
+    Ok(())
+}
+
+/// The same guard on update: an allowlist may not be widened to cover a bank the account owes into.
+#[tokio::test]
+async fn rebalance_update_rejects_an_allowlisted_liability() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let c = f.add_dst_bank_at(250.0).await?;
+    let borrowed = f.test_f.usdc_mint.create_empty_token_account().await;
+    f.user.try_bank_borrow(borrowed.key, &c, 100.0).await?;
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let update_ix = f
+        .user
+        .make_update_rebalance_order_ix(
+            f.order_pda,
+            payer,
+            Some(vec![f.src_bank_f.key, f.dst_bank_f.key, c.key]),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[update_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceAllowlistLiability);
+    Ok(())
+}

@@ -175,6 +175,25 @@ fn bank_underlying(
     underlying_of(amount, bank, multiplier)
 }
 
+/// Validates an order's allowlist: the account must deposit into one of `banks` (so a later empty
+/// state is an exit, not a pre-deposit gap) and owe into none, since a borrowed bank cannot receive.
+fn validate_allowlist_positions(account: &MarginfiAccount, banks: &[Pubkey]) -> MarginfiResult {
+    let (mut has_deposit, mut has_liability) = (false, false);
+    for balance in account.lending_account.balances.iter() {
+        if !balance.is_active() || !banks.contains(&balance.bank_pk) {
+            continue;
+        }
+        match balance.get_side() {
+            Some(BalanceSide::Assets) => has_deposit = true,
+            Some(BalanceSide::Liabilities) => has_liability = true,
+            None => {}
+        }
+    }
+    check!(has_deposit, MarginfiError::RebalanceNoAllowlistPosition);
+    check!(!has_liability, MarginfiError::RebalanceAllowlistLiability);
+    Ok(())
+}
+
 pub fn place_rebalance_order(
     ctx: Context<PlaceRebalanceOrder>,
     allowed_banks: Vec<Pubkey>,
@@ -192,17 +211,7 @@ pub fn place_rebalance_order(
     let keeper_tip = keeper_tip.unwrap_or(0);
 
     let mut account = ctx.accounts.marginfi_account.load_mut()?;
-    // A rebalance order must be placed against a deposit in an allowed bank, which is what a move
-    // relocates. A later "no allowed position" state is then a genuine exit rather than a pre-deposit
-    // gap, so permissionless close on that state cannot grief a user who has not deposited yet.
-    check!(
-        account.lending_account.balances.iter().any(|b| {
-            b.is_active()
-                && allowed_banks.contains(&b.bank_pk)
-                && matches!(b.get_side(), Some(BalanceSide::Assets))
-        }),
-        MarginfiError::RebalanceNoAllowlistPosition
-    );
+    validate_allowlist_positions(&account, &allowed_banks)?;
     {
         let mut order = ctx.accounts.rebalance_order.load_init()?;
         order.initialize(
@@ -393,16 +402,7 @@ pub fn update_rebalance_order(
     let (allowed, min_imp, cooldown, amount, tip) = {
         let mut order = ctx.accounts.rebalance_order.load_mut()?;
         if let Some(banks) = allowed_banks {
-            // Same invariant as placement: the new allowlist must contain a bank the account holds a
-            // deposit in, so an update can't leave the order pointing at venues with nothing to move.
-            check!(
-                account.lending_account.balances.iter().any(|b| {
-                    b.is_active()
-                        && banks.contains(&b.bank_pk)
-                        && matches!(b.get_side(), Some(BalanceSide::Assets))
-                }),
-                MarginfiError::RebalanceNoAllowlistPosition
-            );
+            validate_allowlist_positions(&account, &banks)?;
             order.set_allowed_banks(&banks)?;
         }
         if let Some(mi) = min_improvement {

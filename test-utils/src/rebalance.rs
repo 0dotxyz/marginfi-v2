@@ -314,6 +314,38 @@ impl RebalanceFixture {
         Ok(extra)
     }
 
+    /// Add a same-mint destination bank drawn to `borrow_ui` against the 1_000 USDC seeded into it,
+    /// so its rate sits wherever that utilization puts it, and extend the allowlist to cover it.
+    pub async fn add_dst_bank_at(&self, borrow_ui: f64) -> anyhow::Result<BankFixture> {
+        let bank = self
+            .test_f
+            .marginfi_group
+            .try_lending_pool_add_bank_with_seed(
+                &self.test_f.usdc_mint,
+                None,
+                *DEFAULT_USDC_TEST_BANK_CONFIG,
+                104,
+            )
+            .await?;
+        drive_utilization(&self.test_f, &bank, borrow_ui, 100.0).await?;
+
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let update_ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                Some(vec![self.src_bank_f.key, self.dst_bank_f.key, bank.key]),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        self.process_as_payer(&[update_ix]).await?;
+        Ok(bank)
+    }
+
     /// Add a second same-mint USDC SOURCE bank at 0% utilization (rate 0), give the user a `deposit`
     /// position in it, and extend the order allowlist to `[src, dst, src2]`. For consolidation (N->1)
     /// tests: the user then holds value in two low-rate sources to sweep into the higher-rate `dst`.
