@@ -12,7 +12,7 @@ use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     constants::REBALANCE_ORDER_SEED,
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
-    types::{BankConfig, BankConfigOpt, WrappedI80F48},
+    types::{BankConfig, BankConfigOpt, WrappedI80F48, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::tokio;
@@ -873,6 +873,107 @@ async fn rebalance_partial_fill_pays_prorata_tip() -> anyhow::Result<()> {
         paid,
         tip / 5 - 1,
         "partial fill pays the floored 20% pro-rata tip"
+    );
+    Ok(())
+}
+
+/// `MAX_REBALANCE_MOVES` legs over the full `MAX_REBALANCE_BANKS` allowlist, one short of that many
+/// destinations: a bank only receives from one it out-rates, so the lowest-rate bank is always a
+/// source and the last leg doubles into a destination already fed.
+#[tokio::test]
+async fn rebalance_executes_the_maximum_moves() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let extra = f.add_dst_banks(MAX_REBALANCE_BANKS - 2).await?;
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let tip = 400_000u64;
+    f.set_keeper_tip(tip).await?;
+    f.top_up_pool(5_000_000).await?;
+
+    let mut ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    ref_banks.extend(extra.iter().map(|b| f.bank_meta(b.key)));
+    assert_eq!(ref_banks.len(), MAX_REBALANCE_BANKS);
+
+    // Uneven, so reconciliation has to accumulate every entry rather than scale the first. Deposits
+    // mirror the declared per-bank totals, leaving the keeper nothing.
+    let legs = [100.0, 125.0, 125.0, 150.0, 150.0, 150.0, 100.0];
+    let mut moves: Vec<_> = legs
+        .iter()
+        .enumerate()
+        .map(|(i, &amount)| rebalance_move(0, i as u8 + 1, amount))
+        .collect();
+    moves.push(rebalance_move(0, 1, 100.0));
+    assert_eq!(moves.len(), MAX_REBALANCE_MOVES);
+    let mut deposits = legs;
+    deposits[0] += 100.0;
+    assert_eq!(deposits.iter().sum::<f64>(), DEPOSIT_USDC);
+
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            moves,
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let mut ixs = vec![
+        start_ix,
+        f.user
+            .make_withdraw_ix_with_authority(
+                f.keeper_usdc,
+                &f.src_bank_f,
+                DEPOSIT_USDC,
+                Some(true),
+                f.keeper.pubkey(),
+            )
+            .await,
+    ];
+    let dst_banks: Vec<_> = std::iter::once(f.dst_bank_f.clone())
+        .chain(extra.iter().cloned())
+        .collect();
+    for (bank, amount) in dst_banks.iter().zip(deposits.iter()) {
+        ixs.push(
+            f.user
+                .make_deposit_ix_with_authority(
+                    f.keeper_usdc,
+                    bank,
+                    *amount,
+                    None,
+                    f.keeper.pubkey(),
+                )
+                .await,
+        );
+    }
+    // The source is emptied, so the post-move set is the seven destinations in stored order.
+    let mut observed: Vec<_> = dst_banks.iter().map(|b| b.key).collect();
+    observed.sort_by(|a, b| b.to_bytes().cmp(&a.to_bytes()));
+    ixs.push(
+        f.user
+            .make_rebalance_end_ix_observing(
+                ref_banks,
+                vec![f.src_bank_f.key],
+                observed,
+                f.order_pda,
+                f.record_pda,
+                f.keeper.pubkey(),
+            )
+            .await,
+    );
+    f.process(&ixs).await?;
+
+    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO);
+    let mut moved = I80F48::ZERO;
+    for bank in dst_banks.iter() {
+        moved += f.asset_shares(bank.key).await;
+    }
+    assert_eq!(moved, old_src, "value conserved across all eight legs");
+    assert_eq!(
+        f.record_pending_tip().await,
+        tip,
+        "eight legs escrow the same tip as one: the denominator is the aggregate moved"
     );
     Ok(())
 }

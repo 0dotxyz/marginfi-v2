@@ -276,6 +276,44 @@ impl RebalanceFixture {
         Ok(dst2)
     }
 
+    /// Add `n` more same-mint destination banks, each driven to the same utilization as `dst` so a
+    /// move into any of them clears the best-venue check, and extend the allowlist to cover them all.
+    pub async fn add_dst_banks(&self, n: usize) -> anyhow::Result<Vec<BankFixture>> {
+        let mut extra = Vec::with_capacity(n);
+        for i in 0..n {
+            let bank = self
+                .test_f
+                .marginfi_group
+                .try_lending_pool_add_bank_with_seed(
+                    &self.test_f.usdc_mint,
+                    None,
+                    *DEFAULT_USDC_TEST_BANK_CONFIG,
+                    110 + i as u64,
+                )
+                .await?;
+            drive_dst_utilization(&self.test_f, &bank).await?;
+            extra.push(bank);
+        }
+
+        let mut allowed = vec![self.src_bank_f.key, self.dst_bank_f.key];
+        allowed.extend(extra.iter().map(|b| b.key));
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let update_ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                Some(allowed),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        self.process_as_payer(&[update_ix]).await?;
+        Ok(extra)
+    }
+
     /// Add a second same-mint USDC SOURCE bank at 0% utilization (rate 0), give the user a `deposit`
     /// position in it, and extend the order allowlist to `[src, dst, src2]`. For consolidation (N->1)
     /// tests: the user then holds value in two low-rate sources to sweep into the higher-rate `dst`.
