@@ -24,9 +24,10 @@
 //!
 //! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
 //! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
-//! gates, and unwind afterwards, so the move itself can be induced. The tip settlement makes this
-//! profitless (a transient spike realizes no yield, so the tip is refunded), leaving only unpaid
-//! griefing bounded by the per-order cooldown and the conservation dust.
+//! gates, and unwind afterwards, so the move itself can be induced. Settlement pays the tip only on
+//! realized yield, by any margin above zero: a spike realizing nothing refunds the tip and leaves
+//! unpaid griefing bounded by the per-order cooldown and the conservation dust, while any realized
+//! edge pays the full tip for a move that did leave the position in the better venue.
 
 use crate::{
     check, check_eq,

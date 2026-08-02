@@ -169,6 +169,78 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
     Ok(())
 }
 
+/// Documents the accepted keeper threat model: `realized` is a strict inequality, not a margin, so a
+/// keeper that clears `min_improvement` at start collects the whole tip on an arbitrarily smaller
+/// edge over the settlement window. Here the source is driven to just under the destination.
+#[tokio::test]
+async fn rebalance_settle_pays_full_tip_on_a_margin_far_under_min_improvement() -> anyhow::Result<()>
+{
+    let min_improvement = I80F48::from_num(0.05);
+    let f = setup(min_improvement, 0).await?;
+    let tip = 200_000u64;
+    f.set_keeper_tip(tip).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+
+    // Start demands dst beat src by 5%: the idle source against the utilized destination clears it.
+    let pool_before = f.lamports_of(f.fee_pool()).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    let pool_after_end = f.lamports_of(f.fee_pool()).await;
+
+    // Collapse the advantage to a sliver: the arriving deposit left dst near 25% utilization, so the
+    // source is driven just under it. The driver's borrower posts SOL collateral.
+    f.test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .await;
+    drive_utilization(&f.test_f, &f.src_bank_f, 240.0, 300.0).await?;
+
+    let (src_before, dst_before) = (
+        f.share_value(&f.src_bank_f).await,
+        f.share_value(&f.dst_bank_f).await,
+    );
+    f.advance_clock(601).await;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let pending_tip = f.record_pending_tip().await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+    f.process_as_payer(&[settle]).await?;
+
+    assert_eq!(
+        f.lamports_of(f.fee_pool()).await,
+        pool_after_end,
+        "the sliver of realized yield pays the keeper in full; the pool is not refunded"
+    );
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports,
+        "executor receives the entire escrowed tip plus the record rent"
+    );
+    assert_eq!(
+        pool_before - f.lamports_of(f.fee_pool()).await,
+        pending_tip,
+        "settlement pays the whole escrow, unscaled by how small the realized margin was"
+    );
+
+    // Bounds, not figures: the exact growth follows the fixture's rate curve and window length, while
+    // what settlement turns on is the sign of the gap and how far under `min_improvement` it sits.
+    let dst_growth = f.share_value(&f.dst_bank_f).await / dst_before;
+    let src_growth = f.share_value(&f.src_bank_f).await / src_before;
+    assert!(src_growth > I80F48::ONE, "the source accrued too");
+    assert!(
+        dst_growth > src_growth,
+        "the destination out-yielded the source, all settlement asks"
+    );
+    assert!(
+        dst_growth - src_growth < min_improvement / I80F48::from_num(1_000),
+        "the edge that earned the whole tip is under a thousandth of what start demanded"
+    );
+    Ok(())
+}
+
 /// Draining the fee pool between `end_rebalance` and settlement forfeits an unrealized escrow to the
 /// executor: a drained pool cannot be credited without being left rent-paying, which the runtime
 /// rejects outright and which would otherwise block the record from ever closing.

@@ -101,8 +101,8 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 /// Delay before a rebalance keeper tip can be settled, derived per order as
 /// `cooldown_seconds.clamp(MIN, MAX)`. The tip is not paid at `end_rebalance`; a later
 /// `settle_rebalance_tip` pays it only if the destinations actually out-yielded the sources over
-/// this window (realized yield, from each bank's share value times venue multiplier), which
-/// defeats cross-transaction (bundle) rate manipulation. Tracking the cooldown means the record is
+/// this window (realized yield, from each bank's share value times venue multiplier), so a purely
+/// transient cross-transaction (bundle) spike earns nothing. Tracking the cooldown means the record is
 /// settleable by the time the cooldown allows the next rebalance, so a pending settlement never
 /// blocks re-rebalancing for any `cooldown >= MIN`. `MIN` keeps the window well above a single-slot
 /// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.

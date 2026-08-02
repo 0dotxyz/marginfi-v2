@@ -495,6 +495,11 @@ impl RebalanceFixture {
             .unwrap_or(I80F48::ZERO)
     }
 
+    /// A bank's `asset_share_value`, the per-share yield index a settlement compares across banks.
+    pub async fn share_value(&self, bank: &BankFixture) -> I80F48 {
+        I80F48::from(bank.load().await.asset_share_value)
+    }
+
     pub fn fee_pool(&self) -> Pubkey {
         self.user.rebalance_fee_pool_pda()
     }
