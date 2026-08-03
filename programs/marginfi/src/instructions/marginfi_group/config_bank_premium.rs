@@ -8,6 +8,18 @@ use marginfi_type_crate::{
 };
 
 /// (emode admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
+///
+/// # Deactivation is destructive — it is a LAZY premium amnesty
+///
+/// `active: false` forgives unpaid premium per-balance at each balance's NEXT touch while the
+/// flag is off (there is no deactivation epoch): untouched balances keep their materialized
+/// receivable through a deactivate→reactivate cycle, and a full amnesty requires touching
+/// every borrower (e.g. a `pulse_health` sweep) while off. Only the inactive window's accrual
+/// is always forgiven (`premium_activated_at` clamp).
+///
+/// To stop accrual WITHOUT forgiving earned premium, retag to an unused `premium_tag` and
+/// crank `pulse_health` instead — receivables stay collectible and the flag stays on.
+/// Tag changes never forgive anything; only the flag transition does.
 pub fn lending_pool_configure_bank_premium(
     ctx: Context<LendingPoolConfigureBankPremium>,
     premium_tag: u16,
@@ -28,6 +40,9 @@ pub fn lending_pool_configure_bank_premium(
             bank.premium_activated_at = Clock::get()?.unix_timestamp;
         }
     } else {
+        if was_active {
+            msg!("WARNING: premium deactivation forgives all unpaid premium on this bank");
+        }
         bank.flags &= !PREMIUM_ACTIVE;
     }
 
