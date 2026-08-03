@@ -217,8 +217,12 @@ pub trait BalancePremiumImpl {
     /// later 0→nonzero snapshot write would retroactively charge the zero-rate period.
     /// * Mutates only the balance (realized-only accounting): bank counters are credited at
     ///   settlement, where real tokens arrive.
-    fn claim_premium(&mut self, liability_amount: I80F48, activated_at: i64, now: u64)
-        -> MarginfiResult;
+    fn claim_premium(
+        &mut self,
+        liability_amount: I80F48,
+        activated_at: i64,
+        now: u64,
+    ) -> MarginfiResult;
 
     /// Forgive the receivable: zero `premium_outstanding` AND `premium_rate_snapshot`,
     /// without crediting the bank. The single clear used by every write-off site
@@ -495,7 +499,9 @@ mod tests {
         let mut balance = Balance::empty_deactivated();
         balance.last_update = 1_000;
         balance.premium_rate_snapshot = 0;
-        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance
+            .claim_premium(I80F48!(100), 0, 1_000 + YEAR)
+            .unwrap();
         assert_eq!(balance.last_update, 1_000 + YEAR);
         assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
     }
@@ -505,7 +511,9 @@ mod tests {
         let mut balance = Balance::empty_deactivated();
         balance.last_update = 1_000;
         balance.premium_rate_snapshot = rate(1.0);
-        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance
+            .claim_premium(I80F48!(100), 0, 1_000 + YEAR)
+            .unwrap();
         assert_eq!(balance.last_update, 1_000 + YEAR);
         assert_approx(
             balance.premium_outstanding.into(),
@@ -514,7 +522,9 @@ mod tests {
         );
 
         // Double-claim at the same timestamp is a no-op
-        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance
+            .claim_premium(I80F48!(100), 0, 1_000 + YEAR)
+            .unwrap();
         assert_approx(
             balance.premium_outstanding.into(),
             I80F48!(1.0),
@@ -585,7 +595,9 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.01), TOL);
         // 0 -> nonzero transition bumped the accrual clock (no retroactive projection)
         assert_eq!(account.lending_account.balances[0].last_update, 1_000);
@@ -608,7 +620,9 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 300));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.002), TOL);
     }
 
@@ -645,7 +659,9 @@ mod tests {
         scratch.push(liab_entry(2, 25.0, 12));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
 
         let rate_of = |i: usize| -> I80F48 {
             u32_to_milli(account.lending_account.balances[i].premium_rate_snapshot)
@@ -666,7 +682,9 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_eq!(snapshot_rate(&account), I80F48::ZERO);
     }
 
@@ -681,7 +699,9 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 100));
         // complete deliberately left false (partial health pass)
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
         assert_eq!(account.lending_account.balances[0].last_update, 500);
     }
@@ -700,7 +720,9 @@ mod tests {
         scratch.push(liab_entry(0, 100.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, t0 + YEAR).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, t0 + YEAR)
+            .unwrap();
 
         let balance = &account.lending_account.balances[0];
         assert_approx(
@@ -731,7 +753,9 @@ mod tests {
         scratch.push(inactive_liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         let balance = &account.lending_account.balances[0];
         assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
         assert_eq!(balance.premium_rate_snapshot, 0);
@@ -764,7 +788,9 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
     }
 
@@ -796,7 +822,9 @@ mod tests {
         scratch.push(liab_entry(1, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
         assert_approx(
             u32_to_milli(account.lending_account.balances[1].premium_rate_snapshot),
@@ -819,9 +847,15 @@ mod tests {
         scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000)
+            .unwrap();
         let balance = &account.lending_account.balances[0];
-        assert_approx(u32_to_milli(balance.premium_rate_snapshot), I80F48!(0.01), TOL);
+        assert_approx(
+            u32_to_milli(balance.premium_rate_snapshot),
+            I80F48!(0.01),
+            TOL,
+        );
         assert_eq!(balance.last_update, 500, "closed slot must not be touched");
     }
 
@@ -838,7 +872,10 @@ mod tests {
         assert_eq!(max_premium_rate_for_liability_tag(&group, 11), rate(9.0));
         // No pairs targeting the tag (or untagged): seeds zero — harmless.
         assert_eq!(max_premium_rate_for_liability_tag(&group, 12), 0);
-        assert_eq!(max_premium_rate_for_liability_tag(&group, PREMIUM_TAG_EMPTY), 0);
+        assert_eq!(
+            max_premium_rate_for_liability_tag(&group, PREMIUM_TAG_EMPTY),
+            0
+        );
     }
 
     // ---------------- refresh_unavailable (the debt-origination gate) ----------------

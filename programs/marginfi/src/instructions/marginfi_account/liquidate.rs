@@ -659,8 +659,7 @@ fn check_liquidator_health_and_refresh_premium<'info>(
             .find(|b| b.is_active() && b.bank_pk == liab_info.bank_pk);
         if let Some(balance) = balance {
             let seed = max_premium_rate_for_liability_tag(group, liab_info.premium_tag);
-            if !balance.is_empty(BalanceSide::Liabilities) && balance.premium_rate_snapshot < seed
-            {
+            if !balance.is_empty(BalanceSide::Liabilities) && balance.premium_rate_snapshot < seed {
                 // Claim the window since the last update at the OLD snapshot rate first, so
                 // the raised rate applies strictly forward (never retroactive).
                 let liability_amount = I80F48::from(balance.liability_shares)

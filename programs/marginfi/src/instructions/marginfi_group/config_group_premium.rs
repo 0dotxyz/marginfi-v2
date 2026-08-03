@@ -26,10 +26,7 @@ pub fn lending_pool_configure_group_premium(
         MarginfiError::PremiumEntryInvalid
     );
     // Policy cap: at most 100% APR per pair (the encoding itself allows up to 1000%).
-    check!(
-        rate <= MAX_PREMIUM_RATE,
-        MarginfiError::PremiumEntryInvalid
-    );
+    check!(rate <= MAX_PREMIUM_RATE, MarginfiError::PremiumEntryInvalid);
 
     let mut group = ctx.accounts.group.load_mut()?;
     let mut count = (group.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);

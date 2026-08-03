@@ -1,8 +1,8 @@
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
-use marginfi::state::bank::BankImpl;
 use marginfi::errors::MarginfiError;
+use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::{
     constants::PREMIUM_ACTIVE,
     types::{milli_to_u32, FeeState, PremiumEntry, MAX_PREMIUM_ENTRIES, MAX_PREMIUM_RATE},
@@ -39,9 +39,7 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
 
     // Global fee admin (payer) sets the premium wallet
     let premium_wallet = Keypair::new().pubkey();
-    group_f
-        .try_edit_fee_state_premium(premium_wallet)
-        .await?;
+    group_f.try_edit_fee_state_premium(premium_wallet).await?;
 
     let fee_state = load_fee_state(&test_f).await;
     assert_eq!(fee_state.premium_wallet, premium_wallet);

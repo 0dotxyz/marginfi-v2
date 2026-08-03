@@ -417,9 +417,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
 
     // Sweep to the premium wallet's canonical ATA (permissionless)
     let premium_wallet = Keypair::new().pubkey();
-    group_f
-        .try_edit_fee_state_premium(premium_wallet)
-        .await?;
+    group_f.try_edit_fee_state_premium(premium_wallet).await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
         &test_f.usdc_mint.key,
@@ -464,9 +462,7 @@ async fn premium_sweep_without_realized_premium_transfers_nothing() -> anyhow::R
     borrower.try_lending_account_pulse_health().await?;
 
     let premium_wallet = Keypair::new().pubkey();
-    group_f
-        .try_edit_fee_state_premium(premium_wallet)
-        .await?;
+    group_f.try_edit_fee_state_premium(premium_wallet).await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
         &test_f.usdc_mint.key,
@@ -498,9 +494,7 @@ async fn premium_sweep_requires_canonical_ata_and_configured_wallet() -> anyhow:
 
     // Configured wallet, but a non-canonical destination -> InvalidPremiumAta
     let premium_wallet = Keypair::new().pubkey();
-    group_f
-        .try_edit_fee_state_premium(premium_wallet)
-        .await?;
+    group_f.try_edit_fee_state_premium(premium_wallet).await?;
     let res = group_f
         .try_collect_premium_fees(usdc_bank_f, random_ata.key)
         .await;
@@ -2347,7 +2341,10 @@ async fn premium_story4_two_borrows_independent_premiums() -> anyhow::Result<()>
 
     // 50/50 basket: equal USD in tag-A and tag-B collateral.
     let dana = test_f.create_marginfi_account().await;
-    let dana_sol = test_f.sol_mint.create_token_account_and_mint_to(1_000).await;
+    let dana_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
     dana.try_bank_deposit(dana_sol.key, sol_bank_f, 999, None)
         .await?;
     let dana_sol_eq = test_f
@@ -2358,7 +2355,8 @@ async fn premium_story4_two_borrows_independent_premiums() -> anyhow::Result<()>
         .await?;
 
     let dana_usdc = test_f.usdc_mint.create_empty_token_account().await;
-    dana.try_bank_borrow(dana_usdc.key, usdc_bank_f, 100).await?;
+    dana.try_bank_borrow(dana_usdc.key, usdc_bank_f, 100)
+        .await?;
     let dana_pyusd = test_f.pyusd_mint.create_empty_token_account().await;
     dana.try_bank_borrow(dana_pyusd.key, pyusd_bank_f, 100)
         .await?;
@@ -2436,11 +2434,15 @@ async fn premium_story5_dormant_account_becomes_liquidatable() -> anyhow::Result
     // Eve: $9990 SOL collateral (maint capacity $9490.5), borrows $8900 — healthy, but with
     // only ~$590 of maint margin. Zero base interest: ALL degradation is premium.
     let eve = test_f.create_marginfi_account().await;
-    let eve_sol = test_f.sol_mint.create_token_account_and_mint_to(1_000).await;
+    let eve_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
     eve.try_bank_deposit(eve_sol.key, sol_bank_f, 999, None)
         .await?;
     let eve_usdc = test_f.usdc_mint.create_empty_token_account().await;
-    eve.try_bank_borrow(eve_usdc.key, usdc_bank_f, 8_900).await?;
+    eve.try_bank_borrow(eve_usdc.key, usdc_bank_f, 8_900)
+        .await?;
 
     let liquidator = test_f.create_marginfi_account().await;
     let liquidator_sol = test_f
@@ -2525,7 +2527,10 @@ async fn premium_sunset_workflow_retag_settle_then_deactivate() -> anyhow::Resul
         .try_bank_repay(borrower_usdc, usdc_bank_f, 100, None)
         .await?;
     let usdc_bank = usdc_bank_f.load().await;
-    assert_eq!(I80F48::from(usdc_bank.collected_premium_outstanding), earned);
+    assert_eq!(
+        I80F48::from(usdc_bank.collected_premium_outstanding),
+        earned
+    );
     let account = borrower.load().await;
     assert_eq!(
         I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding),
@@ -2538,7 +2543,10 @@ async fn premium_sunset_workflow_retag_settle_then_deactivate() -> anyhow::Resul
         .try_configure_bank_premium(usdc_bank_f, TAG_UNUSED, false)
         .await?;
     let usdc_bank = usdc_bank_f.load().await;
-    assert_eq!(I80F48::from(usdc_bank.collected_premium_outstanding), earned);
+    assert_eq!(
+        I80F48::from(usdc_bank.collected_premium_outstanding),
+        earned
+    );
 
     Ok(())
 }
@@ -2996,8 +3004,7 @@ async fn premium_liquidation_seed_raises_preseeded_tiny_snapshot() -> anyhow::Re
 /// receivable through a deactivate→reactivate cycle — only the inactive window's accrual is
 /// forgiven. This is the documented contract in `config_bank_premium`.
 #[tokio::test]
-async fn premium_reactivation_before_touch_retains_materialized_receivable(
-) -> anyhow::Result<()> {
+async fn premium_reactivation_before_touch_retains_materialized_receivable() -> anyhow::Result<()> {
     let test_f = premium_test_fixture().await;
     let group_f = &test_f.marginfi_group;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
