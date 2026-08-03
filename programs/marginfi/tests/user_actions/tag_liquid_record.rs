@@ -6,7 +6,7 @@ use marginfi::constants::{LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMI
 use marginfi::prelude::*;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, LiquidationRecord},
+    types::{BankConfigOpt, LiquidationRecord, MarginfiAccount},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -47,12 +47,16 @@ async fn init_record(
 async fn send_tag(
     test_f: &TestFixture,
     liquidatee: &MarginfiAccountFixture,
-    record_pk: Pubkey,
     nonce: u32,
 ) -> Result<(), BanksClientError> {
     let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(400_000 + nonce);
-    let tag_ix = liquidatee.make_tag_liquidation_record_ix(record_pk).await;
+    let tag_ix = liquidatee.make_tag_liquidation_record_ix().await;
     send_ixs(test_f, &[cu_ix, tag_ix]).await
+}
+
+/// Reads the account's premium-growth tag.
+async fn load_tag(account: &MarginfiAccountFixture) -> i64 {
+    account.load().await.liquidation_tagged_at
 }
 
 async fn load_record(test_f: &TestFixture, record_pk: Pubkey) -> LiquidationRecord {
@@ -167,6 +171,7 @@ async fn setup_unhealthy_liquidatee() -> anyhow::Result<(
     MarginfiAccountFixture,
     Pubkey,
     TokenAccountFixture,
+    Keypair,
 )> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
@@ -235,30 +240,26 @@ async fn setup_unhealthy_liquidatee() -> anyhow::Result<(
         liquidator,
         record_pk,
         liquidator_usdc_acc,
+        liquidatee_authority,
     ))
 }
 
 #[tokio::test]
 async fn tag_sets_clears_and_rejects_double_tag() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc) =
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
     set_timestamp(&test_f, T0 + 60).await;
     refresh_oracles(&test_f).await;
-    let res = send_tag(&test_f, &liquidatee, record_pk, 1).await;
+    let res = send_tag(&test_f, &liquidatee, 1).await;
     assert!(res.is_err());
-    assert_custom_error!(
-        res.unwrap_err(),
-        MarginfiError::LiquidationRecordAlreadyTagged
-    );
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountAlreadyTagged);
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
     // Restore weights so the account is healthy again; the tag can now be cleared
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -274,14 +275,13 @@ async fn tag_sets_clears_and_rejects_double_tag() -> anyhow::Result<()> {
         .await?;
     set_timestamp(&test_f, T0 + 120).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 2).await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, 0);
+    send_tag(&test_f, &liquidatee, 2).await?;
+    assert_eq!(load_tag(&liquidatee).await, 0);
 
     // Healthy and untagged: nothing to do
     set_timestamp(&test_f, T0 + 180).await;
     refresh_oracles(&test_f).await;
-    let res = send_tag(&test_f, &liquidatee, record_pk, 3).await;
+    let res = send_tag(&test_f, &liquidatee, 3).await;
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::HealthyAccount);
     Ok(())
@@ -292,16 +292,15 @@ async fn tag_sets_clears_and_rejects_double_tag() -> anyhow::Result<()> {
 /// `LIQUIDATION_TAG_RESET_DEFICIT_FRACTION` of the health deficit restarts the growth clock.
 #[tokio::test]
 async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc) =
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
     let matured = T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS;
     set_timestamp(&test_f, matured).await;
@@ -331,8 +330,8 @@ async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result
         native!(99.8, "USDC", f64)
     );
 
+    assert_eq!(load_tag(&liquidatee).await, T0);
     let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
     assert_eq!(record.liquidation_receiver, Pubkey::default());
     assert_eq!(record.entries[3].timestamp, matured);
 
@@ -346,8 +345,7 @@ async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result
         2.0,
     )
     .await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, matured);
+    assert_eq!(load_tag(&liquidatee).await, matured);
     Ok(())
 }
 
@@ -356,16 +354,15 @@ async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result
 /// repayment allows at most $3.05 of collateral.
 #[tokio::test]
 async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc) =
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
     // Within the delay: seizing .3 * 10 = $3 exceeds the base 5% cap on a $2 repayment
     set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS / 2).await;
@@ -418,8 +415,7 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
         liquidator_sol_acc.balance().await,
         native!(0.28, "SOL", f64)
     );
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, midpoint);
+    assert_eq!(load_tag(&liquidatee).await, midpoint);
     Ok(())
 }
 
@@ -427,59 +423,64 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
 async fn tag_fails_on_account_with_no_liabilities() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let user = test_f.create_marginfi_account().await;
-    let (record_pk, _bump) = Pubkey::find_program_address(
-        &[LIQUIDATION_RECORD_SEED.as_bytes(), user.key.as_ref()],
-        &marginfi::ID,
-    );
-    init_record(&test_f, &user, record_pk).await?;
 
     // An account with no balances has exactly zero health but nothing to liquidate, so it must
     // not be taggable
-    let res = send_tag(&test_f, &user, record_pk, 0).await;
+    let res = send_tag(&test_f, &user, 0).await;
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::HealthyAccount);
     Ok(())
 }
 
+/// The record can be closed while the account is tagged, and the tag is unaffected.
 #[tokio::test]
-async fn close_record_fails_while_tagged() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc) =
+async fn closing_the_record_keeps_the_tag() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
+    send_tag(&test_f, &liquidatee, 0).await?;
 
     let close_ix = liquidatee
         .make_close_liquidation_record_ix(record_pk, test_f.payer())
         .await;
-    let res = send_ixs(&test_f, &[close_ix.clone()]).await;
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
-
-    // Restore weights and clear the tag; the never-liquidated record can then close immediately
-    let sol_bank = test_f.get_bank(&BankMint::Sol);
-    sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(1).into()),
-                asset_weight_maint: Some(I80F48!(1).into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .await?;
-    set_timestamp(&test_f, T0 + 60).await;
-    refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 1).await?;
-
     let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(400_000);
     send_ixs(&test_f, &[cu_ix, close_ix]).await?;
+
     let record_account = {
         let ctx = test_f.context.borrow_mut();
         ctx.banks_client.get_account(record_pk).await?
     };
     assert!(record_account.is_none());
+    assert_eq!(load_tag(&liquidatee).await, T0);
+    Ok(())
+}
+
+/// A transfer carries the tag to the account it migrates to.
+#[tokio::test]
+async fn transfer_carries_the_tag() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+
+    let new_account = Keypair::new();
+    liquidatee
+        .try_transfer_account(
+            new_account.pubkey(),
+            liquidatee_authority.pubkey(),
+            Some(clone_keypair(&liquidatee_authority)),
+            None,
+            &new_account,
+            test_f.marginfi_group.fee_wallet,
+        )
+        .await?;
+
+    let migrated: MarginfiAccount = test_f.load_and_deserialize(&new_account.pubkey()).await;
+    assert_eq!(migrated.liquidation_tagged_at, T0);
     Ok(())
 }
 
@@ -487,41 +488,40 @@ async fn close_record_fails_while_tagged() -> anyhow::Result<()> {
 /// clears the tag outright.
 #[tokio::test]
 async fn deleverage_restarts_clock_then_clears_when_healthy() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc) =
+    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let risk_admin_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(10).await;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
+    send_tag(&test_f, &liquidatee, 0).await?;
 
     // $1.50 repaid against $8 of maintenance collateral leaves a $0.50 deficit, down from $2
     set_timestamp(&test_f, T0 + 500).await;
     refresh_oracles(&test_f).await;
     run_deleverage(&test_f, &liquidatee, record_pk, &risk_admin_usdc_acc, 1.5).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0 + 500);
     let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0 + 500);
     assert_eq!(record.liquidation_receiver, Pubkey::default());
 
     // A further $1 leaves $7.50 of debt against $8 of maintenance collateral: healthy
     set_timestamp(&test_f, T0 + 1_000).await;
     refresh_oracles(&test_f).await;
     run_deleverage(&test_f, &liquidatee, record_pk, &risk_admin_usdc_acc, 1.0).await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, 0);
+    assert_eq!(load_tag(&liquidatee).await, 0);
     Ok(())
 }
 
 #[tokio::test]
 async fn legacy_liquidate_dust_keeps_tag_material_restarts_clock() -> anyhow::Result<()> {
-    let (test_f, liquidatee, liquidator, record_pk, _liquidator_usdc_acc) =
+    let (test_f, liquidatee, liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, record_pk, 0).await?;
+    send_tag(&test_f, &liquidatee, 0).await?;
 
     // Seizing 0.01 SOL ($0.10) repays ~$0.095 and erases only ~$0.055 of the $2 deficit
     set_timestamp(&test_f, T0 + 1_800).await;
@@ -529,8 +529,7 @@ async fn legacy_liquidate_dust_keeps_tag_material_restarts_clock() -> anyhow::Re
     liquidator
         .try_liquidate(&liquidatee, sol_bank, 0.01, usdc_bank)
         .await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0);
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
     // Seizing 0.2 SOL ($2) repays ~$1.90 and erases ~$1.10, above the 25% bar
     set_timestamp(&test_f, T0 + 3_600).await;
@@ -538,8 +537,7 @@ async fn legacy_liquidate_dust_keeps_tag_material_restarts_clock() -> anyhow::Re
     liquidator
         .try_liquidate(&liquidatee, sol_bank, 0.2, usdc_bank)
         .await?;
-    let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, T0 + 3_600);
+    assert_eq!(load_tag(&liquidatee).await, T0 + 3_600);
     Ok(())
 }
 
@@ -557,7 +555,7 @@ fn cb_config() -> BankConfigOpt {
 
 #[tokio::test]
 async fn tag_blocked_while_cb_halted() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc) =
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
 
@@ -592,7 +590,7 @@ async fn tag_blocked_while_cb_halted() -> anyhow::Result<()> {
         .set_pyth_oracle_timestamp(PYTH_USDC_FEED, trip_time)
         .await;
 
-    let res = send_tag(&test_f, &liquidatee, record_pk, 0).await;
+    let res = send_tag(&test_f, &liquidatee, 0).await;
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::CircuitBreakerAdminOnly);
     Ok(())

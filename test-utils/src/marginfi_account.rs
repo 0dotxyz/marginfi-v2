@@ -781,7 +781,6 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
-        let liquidatee_record = liquidatee.load().await.liquidation_record;
 
         let asset_bank = asset_bank_fixture.load().await;
         let liab_bank = liab_bank_fixture.load().await;
@@ -799,8 +798,6 @@ impl MarginfiAccountFixture {
             bank_liquidity_vault: liab_bank_fixture.get_vault(BankVaultType::Liquidity).0,
             bank_insurance_vault: liab_bank_fixture.get_vault(BankVaultType::Insurance).0,
             token_program: liab_bank_fixture.get_token_program(),
-            liquidatee_liquidation_record: (liquidatee_record != Pubkey::default())
-                .then_some(liquidatee_record),
         }
         .to_account_metas(Some(true));
 
@@ -1382,12 +1379,11 @@ impl MarginfiAccountFixture {
         }
     }
 
-    pub async fn make_tag_liquidation_record_ix(&self, liquidation_record: Pubkey) -> Instruction {
+    pub async fn make_tag_liquidation_record_ix(&self) -> Instruction {
         let mut ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::TagLiquidationRecord {
                 marginfi_account: self.key,
-                liquidation_record,
                 group: self.load().await.group,
             }
             .to_account_metas(Some(true)),

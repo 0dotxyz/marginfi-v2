@@ -82,7 +82,12 @@ pub struct MarginfiAccount {
     ///   also charge the user if they are opening a risky position on the front end.
     pub liquidation_record: Pubkey,
     pub indexer_flags: IndexerFlags,
-    pub _padding0: [u64; 4],
+    /// Unix timestamp when this account was tagged as unhealthy, growing the allowed liquidation
+    /// premium over time. Cleared when the account regains health, restarted when a liquidation
+    /// erases a material share of the health deficit.
+    /// * 0 if not tagged
+    pub liquidation_tagged_at: i64,
+    pub _padding0: [u64; 3],
 }
 
 impl MarginfiAccount {

@@ -11,9 +11,8 @@ use crate::{
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-    ACCOUNT_IN_RECEIVERSHIP,
+    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 
 /// (Permissionless) Tags an unhealthy account, letting the allowed liquidation premium grow over
@@ -24,8 +23,7 @@ use marginfi_type_crate::types::{
 pub fn tag_liquidation_record<'info>(
     ctx: Context<'info, TagLiquidationRecord<'info>>,
 ) -> MarginfiResult {
-    let marginfi_account = ctx.accounts.marginfi_account.load()?;
-    let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
+    let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
     let (health, _assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
@@ -41,12 +39,15 @@ pub fn tag_liquidation_record<'info>(
     // Accounts with no liabilities cannot be meaningfully liquidated: they are never taggable,
     // and any stale tag on them can be cleared.
     if health > I80F48::ZERO || liabs == I80F48::ZERO {
-        check!(liq_record.tagged_at != 0, MarginfiError::HealthyAccount);
-        liq_record.tagged_at = 0;
+        check!(
+            marginfi_account.liquidation_tagged_at != 0,
+            MarginfiError::HealthyAccount
+        );
+        marginfi_account.liquidation_tagged_at = 0;
     } else {
         check!(
-            liq_record.tagged_at == 0,
-            MarginfiError::LiquidationRecordAlreadyTagged
+            marginfi_account.liquidation_tagged_at == 0,
+            MarginfiError::AccountAlreadyTagged
         );
         // While any balance bank is CB-halted, liquidation is admin-only, so the premium-growth
         // clock must not start.
@@ -54,12 +55,12 @@ pub fn tag_liquidation_record<'info>(
             !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
             MarginfiError::CircuitBreakerAdminOnly
         );
-        liq_record.tagged_at = Clock::get()?.unix_timestamp;
+        marginfi_account.liquidation_tagged_at = Clock::get()?.unix_timestamp;
     }
 
     emit!(LiquidationTagEvent {
         marginfi_account: ctx.accounts.marginfi_account.key(),
-        tagged_at: liq_record.tagged_at,
+        tagged_at: marginfi_account.liquidation_tagged_at,
     });
 
     Ok(())
@@ -68,7 +69,7 @@ pub fn tag_liquidation_record<'info>(
 #[derive(Accounts)]
 pub struct TagLiquidationRecord<'info> {
     #[account(
-        has_one = liquidation_record @ MarginfiError::InvalidLiquidationRecord,
+        mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
@@ -80,10 +81,6 @@ pub struct TagLiquidationRecord<'info> {
         } @MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
-    /// The associated liquidation record PDA for the given `marginfi_account`
-    #[account(mut)]
-    pub liquidation_record: AccountLoader<'info, LiquidationRecord>,
 
     pub group: AccountLoader<'info, MarginfiGroup>,
 }

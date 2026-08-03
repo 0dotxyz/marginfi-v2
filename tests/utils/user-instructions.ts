@@ -469,15 +469,10 @@ export const tagLiquidationRecordIx = (
   args: TagLiquidationRecordArgs
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
-  const [liquidationRecord] = deriveLiquidationRecord(
-    program.programId,
-    args.marginfiAccount
-  );
   return program.methods
     .marginfiAccountTagLiqRecord()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      liquidationRecord,
     })
     .remainingAccounts(oracleMeta)
     .instruction();
@@ -544,8 +539,6 @@ export type LiquidateIxArgs = {
   amount: BN;
   liquidateeAccounts: number;
   liquidatorAccounts: number;
-  /** Required when the liquidatee has a liquidation record registered. */
-  liquidateeLiquidationRecord?: PublicKey;
 };
 
 /**
@@ -581,7 +574,6 @@ export const liquidateIx = (
       liquidatorMarginfiAccount: args.liquidatorMarginfiAccount,
       liquidateeMarginfiAccount: args.liquidateeMarginfiAccount,
       tokenProgram: TOKEN_PROGRAM_ID,
-      liquidateeLiquidationRecord: args.liquidateeLiquidationRecord ?? null,
     })
     .remainingAccounts(oracleMeta)
     .instruction();

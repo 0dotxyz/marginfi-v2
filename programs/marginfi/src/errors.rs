@@ -447,8 +447,8 @@ pub enum MarginfiError {
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
-    #[msg("Liquidation record is already tagged")]
-    LiquidationRecordAlreadyTagged, // 6605
+    #[msg("Account is already tagged for liquidation")]
+    AccountAlreadyTagged, // 6605
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -693,7 +693,7 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
-            6605 => MarginfiError::LiquidationRecordAlreadyTagged,
+            6605 => MarginfiError::AccountAlreadyTagged,
 
             _ => MarginfiError::InternalLogicError,
         }

@@ -29,8 +29,8 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_SEED,
     },
     types::{
-        u32_to_centi, Bank, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
-        OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -524,29 +524,12 @@ pub fn lending_account_liquidate<'info>(
     // persisted to its health cache here. Writing it would add CU to the hot liquidation path for a
     // value any consumer can refresh on demand via `lending_account_pulse_health`.
 
-    // The liquidatee's liquidation record is required whenever one is registered; the completed
-    // liquidation updates its premium-growth tag.
-    match ctx.accounts.liquidatee_liquidation_record.as_ref() {
-        Some(record_loader) => {
-            check!(
-                record_loader.key() == liquidatee_marginfi_account.liquidation_record,
-                MarginfiError::InvalidLiquidationRecord
-            );
-            let mut record = record_loader.load_mut()?;
-            record.tagged_at = tag_after_liquidation(
-                record.tagged_at,
-                pre_liquidation_health,
-                post_liquidation_health,
-                current_timestamp,
-            );
-        }
-        None => {
-            check!(
-                liquidatee_marginfi_account.liquidation_record == Pubkey::default(),
-                MarginfiError::InvalidLiquidationRecord
-            );
-        }
-    }
+    liquidatee_marginfi_account.liquidation_tagged_at = tag_after_liquidation(
+        liquidatee_marginfi_account.liquidation_tagged_at,
+        pre_liquidation_health,
+        post_liquidation_health,
+        current_timestamp,
+    );
 
     liquidatee_marginfi_account
         .indexer_flags
@@ -669,10 +652,4 @@ pub struct LendingAccountLiquidate<'info> {
     pub bank_insurance_vault: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
-
-    /// The liquidatee's liquidation record. Required whenever the liquidatee has one registered
-    /// (`liquidatee_marginfi_account.liquidation_record` is set); the completed liquidation may
-    /// clear or restart its premium-growth tag (see `tag_after_liquidation`).
-    #[account(mut)]
-    pub liquidatee_liquidation_record: Option<AccountLoader<'info, LiquidationRecord>>,
 }

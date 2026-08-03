@@ -46,7 +46,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let group = ctx.accounts.group.load()?;
     // Read before `end_receivership` updates the tag
-    let tagged_at = liq_record.tagged_at;
+    let tagged_at = marginfi_account.liquidation_tagged_at;
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
@@ -173,8 +173,12 @@ pub fn end_receivership<'info>(
     // clear receivership
     marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
-    liq_record.tagged_at =
-        tag_after_liquidation(liq_record.tagged_at, pre_health, post_health, now);
+    marginfi_account.liquidation_tagged_at = tag_after_liquidation(
+        marginfi_account.liquidation_tagged_at,
+        pre_health,
+        post_health,
+        now,
+    );
 
     let seized_f64 = seized.to_num::<f64>();
     let repaid_f64 = repaid.to_num::<f64>();

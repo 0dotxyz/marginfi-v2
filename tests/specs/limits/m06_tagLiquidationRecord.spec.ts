@@ -63,10 +63,7 @@ const USER_ACCOUNT_THROWAWAY = "throwaway_account_m6_tag";
 const groupSeed = Buffer.from("MARGINFI_GROUP_SEED_12340000TAG0");
 const startingSeed = 480;
 
-const ERR_ACCOUNT_OWNED_BY_WRONG_PROGRAM = 3007;
-const ERR_ILLEGAL_ACTION = 6043;
 const ERR_HEALTHY_ACCOUNT = 6068;
-const ERR_INVALID_LIQUIDATION_RECORD = 6095;
 const ERR_ALREADY_TAGGED = 6605;
 
 /** Original limits from bank creation (defaultBankConfig), reapplied on every configureBank. */
@@ -113,6 +110,12 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
 
   const fetchRecord = () =>
     program.account.liquidationRecord.fetch(liquidationRecord);
+
+  /** The account's premium-growth tag. */
+  const fetchTag = async () =>
+    (
+      await program.account.marginfiAccount.fetch(liquidateeAccount)
+    ).liquidationTaggedAt.toNumber();
 
   /** Moves the clock forward and refreshes the pull oracles. */
   const advanceClock = async (seconds: number) => {
@@ -223,22 +226,9 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     );
   });
 
-  it("(permissionless) tag before the record exists - should fail", async () => {
-    const liquidator = users[1];
-    const tx = new Transaction().add(
-      await tagLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
-        marginfiAccount: liquidateeAccount,
-        remaining: composeRemainingAccounts(balanceGroups),
-      })
-    );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [liquidator.wallet],
-      true
-    );
-    // The record PDA does not exist yet, so it is still owned by the system program
-    assertBankrunTxFailed(result, ERR_ACCOUNT_OWNED_BY_WRONG_PROGRAM);
+  it("(permissionless) tag a healthy account - should fail", async () => {
+    const result = await sendTag(true);
+    assertBankrunTxFailed(result, ERR_HEALTHY_ACCOUNT);
   });
 
   it("(admin) cuts collateral weights so user 0 is unhealthy", async () => {
@@ -272,16 +262,47 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
 
     const record = await fetchRecord();
     assertKeysEqual(record.marginfiAccount, liquidateeAccount);
-    assert.equal(record.taggedAt.toNumber(), timeAtTag);
+    assert.equal(await fetchTag(), timeAtTag);
   });
 
   it("(permissionless) tag again while already tagged - should fail", async () => {
-    const recordBefore = await fetchRecord();
+    const tagBefore = await fetchTag();
     const result = await sendTag(true);
     assertBankrunTxFailed(result, ERR_ALREADY_TAGGED);
+    assert.equal(await fetchTag(), tagBefore);
+  });
 
-    const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), recordBefore.taggedAt.toNumber());
+  it("(anyone) close the tagged record; the tag lives on the account", async () => {
+    const liquidator = users[1];
+    const tagBefore = await fetchTag();
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await closeLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          recordPayer: liquidator.wallet.publicKey,
+        })
+      ),
+      [liquidator.wallet]
+    );
+    const account = await program.account.marginfiAccount.fetch(
+      liquidateeAccount
+    );
+    assertKeyDefault(account.liquidationRecord);
+    assert.equal(await fetchTag(), tagBefore);
+
+    // The receivership liquidation below operates on an open record
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          feePayer: liquidator.wallet.publicKey,
+        })
+      ),
+      [liquidator.wallet]
+    );
+    assert.equal(await fetchTag(), tagBefore);
   });
 
   it("(user 1) liquidates at a ~37% premium after the tag matures; clock restarts", async () => {
@@ -378,19 +399,17 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
 
     // Erasing $3.60 of the ~$6.75 deficit clears the 25% bar; the account is still unhealthy
     const now = await getBankrunTime(bankrunContext);
+    assert.equal(await fetchTag(), now);
     const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), now);
     assertKeyDefault(record.liquidationReceiver);
     assert.equal(record.entries[3].timestamp.toNumber(), now);
   });
 
   it("(permissionless) tag after a partial liquidation - should fail, still tagged", async () => {
-    const recordBefore = await fetchRecord();
+    const tagBefore = await fetchTag();
     const result = await sendTag(true);
     assertBankrunTxFailed(result, ERR_ALREADY_TAGGED);
-
-    const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), recordBefore.taggedAt.toNumber());
+    assert.equal(await fetchTag(), tagBefore);
   });
 
   it("(admin) restores weights; tag clears, then tagging while healthy fails", async () => {
@@ -406,8 +425,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     );
 
     await sendTag();
-    const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), 0);
+    assert.equal(await fetchTag(), 0);
 
     // Healthy and untagged: nothing to do
     const result = await sendTag(true);
@@ -428,64 +446,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
 
     const timeAtTag = await getBankrunTime(bankrunContext);
     await sendTag();
-    const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), timeAtTag);
+    assert.equal(await fetchTag(), timeAtTag);
   });
 
-  it("(anyone) close the record while tagged - should fail", async () => {
-    const liquidator = users[1];
-    const tx = new Transaction().add(
-      await closeLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
-        marginfiAccount: liquidateeAccount,
-        recordPayer: liquidator.wallet.publicKey,
-      })
-    );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [liquidator.wallet],
-      true
-    );
-    assertBankrunTxFailed(result, ERR_ILLEGAL_ACTION);
-  });
-
-  it("(user 1) legacy liquidate omitting the liquidation record - should fail", async () => {
-    const liquidator = users[1];
-    const liquidatorAccounts = composeRemainingAccounts([
-      [debtBank, oracles.pythPullLst.publicKey],
-      [collateralBank, oracles.tokenAOracle.publicKey],
-    ]);
-    const liquidateeAccounts = composeRemainingAccounts(balanceGroups);
-    const tx = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 }),
-      await liquidateIx(liquidator.mrgnBankrunProgram, {
-        assetBankKey: collateralBank,
-        liabilityBankKey: debtBank,
-        liquidatorMarginfiAccount: liquidator.accounts.get(
-          USER_ACCOUNT_THROWAWAY
-        ),
-        liquidateeMarginfiAccount: liquidateeAccount,
-        remaining: [
-          oracles.tokenAOracle.publicKey,
-          oracles.pythPullLst.publicKey,
-          ...liquidatorAccounts,
-          ...liquidateeAccounts,
-        ],
-        amount: new BN(0.2 * 10 ** ecosystem.tokenADecimals),
-        liquidateeAccounts: liquidateeAccounts.length,
-        liquidatorAccounts: liquidatorAccounts.length,
-      })
-    );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [liquidator.wallet],
-      true
-    );
-    assertBankrunTxFailed(result, ERR_INVALID_LIQUIDATION_RECORD);
-  });
-
-  it("(user 1) legacy liquidate with the record restarts the clock", async () => {
+  it("(user 1) legacy liquidate restarts the clock", async () => {
     const liquidator = users[1];
     const liquidatorAccounts = composeRemainingAccounts([
       [debtBank, oracles.pythPullLst.publicKey],
@@ -513,13 +477,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
         amount: new BN(0.2 * 10 ** ecosystem.tokenADecimals),
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: liquidatorAccounts.length,
-        liquidateeLiquidationRecord: liquidationRecord,
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
 
-    const now = await getBankrunTime(bankrunContext);
-    const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), now);
+    assert.equal(await fetchTag(), await getBankrunTime(bankrunContext));
   });
 });
