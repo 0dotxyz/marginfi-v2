@@ -4,13 +4,20 @@
 //! (collateral `premium_tag`, liability `premium_tag`) matrix and weighted by each collateral's
 //! share of the account's total collateral value.
 //!
+//! ## Terminology
+//!
+//! "Claim" is the canonical verb everywhere in code; "materialize" is its informal synonym in
+//! prose (claiming materializes pending accrual into the stored receivable).
+//!
 //! ## Lifecycle
 //!
-//! 1. **Claim (materialize)** — [`claim_premium`] folds `liability_amount × rate × elapsed /
-//!    SECONDS_PER_YEAR` into `balance.premium_outstanding` and bumps
+//! 1. **Claim (materialize)** — [`BalancePremiumImpl::claim_premium`] folds
+//!    `liability_amount × rate × elapsed / SECONDS_PER_YEAR` into
+//!    `balance.premium_outstanding` and bumps
 //!    `balance.last_update`. Mutates ONLY the balance: the premium is a receivable, not vault
 //!    liquidity, so any balance close implicitly (and safely) writes it off.
-//! 2. **Snapshot recompute** — [`update_premium_snapshots`] rewrites each liability's
+//! 2. **Snapshot recompute** — [`MarginfiAccountPremiumImpl::update_premium_snapshots`]
+//!    rewrites each liability's
 //!    collateral-weighted rate from data collected during the health-check loop
 //!    ([`PremiumScratch`]). It always claims at the OLD rate first, so a 0→nonzero snapshot
 //!    transition can never retroactively charge the period before the rate existed.
@@ -22,12 +29,24 @@
 //!    premium wallet. Bankruptcy / tokenless repayment / liability→asset flips write the
 //!    receivable off without crediting the bank.
 //!
+//! ## Scratch valuation is requirement-independent by design
+//!
+//! The scratch answers "what is the collateral mix?", not "may you take risk?": collateral
+//! weights use the UNBIASED RealTime price (no confidence-band bias — a keeper cannot move a
+//! rate by timing a crank against wide confidence), no risk weights, and ReduceOnly
+//! collateral counts under every requirement type. The persisted APR is therefore a pure
+//! function of (collateral mix, matrix, prices) — identical from every instruction.
+//!
 //! ## Accepted approximations
 //!
 //! * **Deposit/repay staleness** — no oracles, so they claim at the old rate but can't
 //!   re-weight; the stale rate persists until the next refreshing ix or `pulse_health`.
-//! * **Crank-order variance** — [`claim_premium`] uses the liability amount at claim time,
-//!   so claiming before vs. after interest accrual differs by a second-order term.
+//!   Admin rate changes likewise apply per-account from each account's next refresh — after
+//!   `configure_group_premium` / retags, crank `pulse_health` across active borrowers of the
+//!   affected banks so the new rate takes effect promptly.
+//! * **Crank-order variance** — [`BalancePremiumImpl::claim_premium`] uses the liability
+//!   amount at claim time, so claiming before vs. after interest accrual differs by a
+//!   second-order term.
 
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -41,33 +60,49 @@ use marginfi_type_crate::{
 
 use crate::{math_error, prelude::MarginfiResult, state::marginfi_group::MarginfiGroupImpl};
 
+/// `PremiumScratchEntry.flags`: entry is a collateral leg.
+pub const SCRATCH_ASSET: u8 = 1 << 0;
+/// `PremiumScratchEntry.flags`: entry is a liability leg. Liability entries are recorded for
+/// premium-INACTIVE banks too (without [`SCRATCH_PREMIUM_ACTIVE`]) so the snapshot pass can
+/// WRITE OFF their receivable instead of accruing.
+pub const SCRATCH_LIABILITY: u8 = 1 << 1;
+/// `PremiumScratchEntry.flags`: the liability's bank has `PREMIUM_ACTIVE` set.
+pub const SCRATCH_PREMIUM_ACTIVE: u8 = 1 << 2;
+
 /// Per-balance data collected during the health-check loop, enough to recompute premium
 /// snapshots afterwards without reloading banks or oracles.
-/// * Plain stack enum: survives the health loop's `heap_restore` checkpoints, and each
-///   variant carries only the fields that are meaningful for it.
+/// * Flat `#[repr(C)]` record (no enum): 16 of these live on the stack ([`PremiumScratch`]),
+///   and the enum tag + per-variant padding was a meaningful share of the SBF frame budget.
+/// * A zeroed entry (`flags == 0`) is an unused slot.
+#[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub enum PremiumScratchEntry {
-    /// Slot not in use (or a balance that contributes nothing to premium).
-    #[default]
-    Skip,
-    /// A collateral leg: contributes `usd_value` of weight at `premium_tag`.
-    /// * `usd_value` is UNWEIGHTED collateral USD; zero when the risk engine prices this
-    ///   collateral at zero (isolated banks, skipped stale oracles).
-    Asset { premium_tag: u16, usd_value: I80F48 },
-    /// A liability leg: gets claimed at its old rate and receives a recomputed snapshot.
-    /// Recorded for premium-INACTIVE banks too (`premium_active: false`) so the snapshot pass
-    /// can WRITE OFF their receivable instead of accruing.
-    Liability {
-        /// Matches `Balance.bank_pk` — how the entry finds its balance again post-health-loop.
-        bank_pk: Pubkey,
-        premium_tag: u16,
-        /// Liability amount in native token units.
-        liability_amount: I80F48,
-        /// The bank's `premium_activated_at` accrual clamp.
-        activated_at: i64,
-        /// Whether the bank has `PREMIUM_ACTIVE` set.
-        premium_active: bool,
-    },
+pub struct PremiumScratchEntry {
+    /// Asset legs: UNWEIGHTED collateral USD (zero when the risk engine prices the collateral
+    /// at zero — isolated banks, skipped stale oracles). Liability legs: liability amount in
+    /// native token units.
+    pub value: I80F48,
+    /// Liability legs: the bank's `premium_activated_at` accrual clamp. Zero for asset legs.
+    pub activated_at: i64,
+    pub premium_tag: u16,
+    /// Liability legs: RAW index into `lending_account.balances` (not the active-only
+    /// ordinal, so inactive holes cannot misaddress). INVARIANT: no `sort_balances` between
+    /// scratch collection and the snapshot write; closed balances are caught by write-time
+    /// revalidation.
+    pub balance_index: u8,
+    /// `SCRATCH_*` bit flags; 0 = unused slot.
+    pub flags: u8,
+}
+
+impl PremiumScratchEntry {
+    pub fn is_asset(&self) -> bool {
+        self.flags & SCRATCH_ASSET != 0
+    }
+    pub fn is_liability(&self) -> bool {
+        self.flags & SCRATCH_LIABILITY != 0
+    }
+    pub fn is_premium_active(&self) -> bool {
+        self.flags & SCRATCH_PREMIUM_ACTIVE != 0
+    }
 }
 
 /// Collector threaded through `get_health_components` (as `&mut Option<&mut PremiumScratch>`,
@@ -79,14 +114,20 @@ pub struct PremiumScratch {
     pub entries: [PremiumScratchEntry; MAX_LENDING_ACCOUNT_BALANCES],
     pub count: usize,
     pub complete: bool,
+    /// A countable (non-isolated) collateral leg could not be priced. Tracked separately from
+    /// `err_code` because health may not flag the leg at all (ReduceOnly + Initial soft-zeroes
+    /// before inspecting the oracle) while the premium weighting still counts it — such a
+    /// pass must never be marked complete.
+    pub unpriceable_leg: bool,
 }
 
 impl Default for PremiumScratch {
     fn default() -> Self {
         Self {
-            entries: [PremiumScratchEntry::Skip; MAX_LENDING_ACCOUNT_BALANCES],
+            entries: [PremiumScratchEntry::default(); MAX_LENDING_ACCOUNT_BALANCES],
             count: 0,
             complete: false,
+            unpriceable_leg: false,
         }
     }
 }
@@ -103,15 +144,9 @@ impl PremiumScratch {
     /// the rate, so debt-changing handlers revert (passive ones just skip).
     pub fn refresh_unavailable(&self) -> bool {
         !self.complete
-            && self.entries[..self.count].iter().any(|e| {
-                matches!(
-                    e,
-                    PremiumScratchEntry::Liability {
-                        premium_active: true,
-                        ..
-                    }
-                )
-            })
+            && self.entries[..self.count]
+                .iter()
+                .any(|e| e.is_liability() && e.is_premium_active())
     }
 }
 
@@ -157,40 +192,97 @@ pub fn premium_elapsed_seconds(balance: &Balance, activated_at: i64, now: u64) -
     now.saturating_sub(start)
 }
 
-/// Materialize pending premium into `balance.premium_outstanding` at the CURRENT snapshot rate
-/// and advance `last_update`.
-///
-/// Always bumps `last_update`, including when the snapshot rate is zero — otherwise a later
-/// 0→nonzero snapshot write would retroactively charge the zero-rate period.
-/// * Mutates only the balance (realized-only accounting): bank counters are credited at
-///   settlement, where real tokens arrive.
-pub fn claim_premium(
-    balance: &mut Balance,
-    liability_amount: I80F48,
-    activated_at: i64,
-    now: u64,
-) -> MarginfiResult {
-    let elapsed = premium_elapsed_seconds(balance, activated_at, now);
-    let total = accrued_premium_total(
-        liability_amount,
-        balance.premium_rate_snapshot,
-        balance.premium_outstanding.into(),
-        elapsed,
-    )?;
-    balance.premium_outstanding = total.into();
-    balance.last_update = now;
-    Ok(())
+/// Highest configured pair rate against `liability_tag` across all collateral tags (0 when
+/// none). Seeds a conservative snapshot when liquidation assumes premium-active debt during
+/// an incomplete health pass — worst rate instead of 0%, so a permanently-stale leg is never
+/// a standing exemption; the next complete pass reprices to the true weighted rate.
+pub fn max_premium_rate_for_liability_tag(group: &MarginfiGroup, liability_tag: u16) -> u32 {
+    let count = (group.premium_settings.entry_count as usize).min(group.premium_entries.len());
+    let mut max_rate = 0u32;
+    for entry in &group.premium_entries[..count] {
+        if entry.liability_tag == liability_tag && entry.rate > max_rate {
+            max_rate = entry.rate;
+        }
+    }
+    max_rate
 }
 
-/// Claim every premium-active liability at its OLD snapshot rate, then overwrite each snapshot
-/// with the freshly computed collateral-weighted pair rate. Runs in instruction handlers after
-/// a successful health check, using the scratch that check collected.
-///
-/// The weighted rate for a liability is
-/// `Σ(collateral_usd_i × pair_rate(collateral_tag_i, liability_tag)) / Σ(collateral_usd_i)`,
-/// or zero when the account has no priced collateral or the matrix is disabled.
-/// * No-op when the scratch is incomplete (partial health pass must never write rates).
-pub fn update_premium_snapshots(
+/// Premium methods on [`Balance`] (extension trait: `Balance` lives in the type-crate, so an
+/// inherent impl is not possible here — same pattern as `BalanceImpl`).
+pub trait BalancePremiumImpl {
+    /// Materialize pending premium into `premium_outstanding` at the CURRENT snapshot rate
+    /// and advance `last_update`.
+    ///
+    /// Always bumps `last_update`, including when the snapshot rate is zero — otherwise a
+    /// later 0→nonzero snapshot write would retroactively charge the zero-rate period.
+    /// * Mutates only the balance (realized-only accounting): bank counters are credited at
+    ///   settlement, where real tokens arrive.
+    fn claim_premium(&mut self, liability_amount: I80F48, activated_at: i64, now: u64)
+        -> MarginfiResult;
+
+    /// Forgive the receivable: zero `premium_outstanding` AND `premium_rate_snapshot`,
+    /// without crediting the bank. The single clear used by every write-off site
+    /// (premium-inactive banks, non-liability balances, dust-closed liabilities) so no site
+    /// can clear one field and leave a stale value in the other.
+    fn write_off_premium(&mut self);
+}
+
+impl BalancePremiumImpl for Balance {
+    fn claim_premium(
+        &mut self,
+        liability_amount: I80F48,
+        activated_at: i64,
+        now: u64,
+    ) -> MarginfiResult {
+        let elapsed = premium_elapsed_seconds(self, activated_at, now);
+        let total = accrued_premium_total(
+            liability_amount,
+            self.premium_rate_snapshot,
+            self.premium_outstanding.into(),
+            elapsed,
+        )?;
+        self.premium_outstanding = total.into();
+        self.last_update = now;
+        Ok(())
+    }
+
+    fn write_off_premium(&mut self) {
+        self.premium_outstanding = I80F48::ZERO.into();
+        self.premium_rate_snapshot = 0;
+    }
+}
+
+/// Premium methods on [`MarginfiAccount`] (extension trait, same rationale as
+/// [`BalancePremiumImpl`]).
+pub trait MarginfiAccountPremiumImpl {
+    /// Claim every premium-active liability at its OLD snapshot rate, then overwrite each
+    /// snapshot with the freshly computed collateral-weighted pair rate. Runs in instruction
+    /// handlers after a successful health check, using the scratch that check collected.
+    ///
+    /// The weighted rate for a liability is
+    /// `Σ(collateral_usd_i × pair_rate(collateral_tag_i, liability_tag)) / Σ(collateral_usd_i)`,
+    /// or zero when the account has no priced collateral or the matrix is disabled.
+    /// * No-op when the scratch is incomplete (partial health pass must never write rates).
+    fn update_premium_snapshots(
+        &mut self,
+        group: &MarginfiGroup,
+        scratch: &PremiumScratch,
+        now: u64,
+    ) -> MarginfiResult;
+}
+
+impl MarginfiAccountPremiumImpl for MarginfiAccount {
+    fn update_premium_snapshots(
+        &mut self,
+        group: &MarginfiGroup,
+        scratch: &PremiumScratch,
+        now: u64,
+    ) -> MarginfiResult {
+        update_premium_snapshots_internal(self, group, scratch, now)
+    }
+}
+
+fn update_premium_snapshots_internal(
     marginfi_account: &mut MarginfiAccount,
     group: &MarginfiGroup,
     scratch: &PremiumScratch,
@@ -204,72 +296,60 @@ pub fn update_premium_snapshots(
 
     let mut total_collateral_usd = I80F48::ZERO;
     for entry in entries {
-        if let PremiumScratchEntry::Asset { usd_value, .. } = entry {
+        if entry.is_asset() {
             total_collateral_usd = total_collateral_usd
-                .checked_add(*usd_value)
+                .checked_add(entry.value)
                 .ok_or_else(math_error!())?;
         }
     }
 
     for entry in entries {
-        let PremiumScratchEntry::Liability {
-            bank_pk,
-            premium_tag: liability_tag,
-            liability_amount,
-            activated_at,
-            premium_active,
-        } = entry
-        else {
+        if !entry.is_liability() {
             continue;
-        };
+        }
+        let liability_tag = entry.premium_tag;
 
+        // Address the balance by the RAW slot recorded at collection time, then revalidate:
+        // the balance may have closed between the health pass and this write (e.g. repay_all
+        // in the same handler). Reordering between collect and write is forbidden (see
+        // `PremiumScratchEntry::balance_index`).
         let balance = marginfi_account
             .lending_account
             .balances
-            .iter_mut()
-            .find(|b| b.is_active() && b.bank_pk == *bank_pk);
+            .get_mut(entry.balance_index as usize);
         let Some(balance) = balance else {
-            // The balance closed between the health pass and this write (e.g. repay_all in the
-            // same handler); nothing to update.
             continue;
         };
-        if balance.is_empty(BalanceSide::Liabilities) {
+        if !balance.is_active() || balance.is_empty(BalanceSide::Liabilities) {
             continue;
         }
 
         // Premium-inactive liability: write off any receivable (premium from a
         // since-deactivated bank) and clear the snapshot; never accrue.
-        if !premium_active {
-            balance.premium_outstanding = I80F48::ZERO.into();
-            balance.premium_rate_snapshot = 0;
+        if !entry.is_premium_active() {
+            balance.write_off_premium();
             balance.last_update = now;
             continue;
         }
 
         // Materialize at the OLD rate before overwriting it. This also bumps `last_update`,
         // making a 0 -> nonzero rate transition safe (no retroactive projection).
-        claim_premium(balance, *liability_amount, *activated_at, now)?;
+        balance.claim_premium(entry.value, entry.activated_at, now)?;
 
         let new_rate: u32 = if total_collateral_usd > I80F48::ZERO {
             let mut weighted = I80F48::ZERO;
             for collateral in entries {
-                let PremiumScratchEntry::Asset {
-                    premium_tag: collateral_tag,
-                    usd_value,
-                } = collateral
-                else {
-                    continue;
-                };
-                if *usd_value <= I80F48::ZERO {
+                if !collateral.is_asset() || collateral.value <= I80F48::ZERO {
                     continue;
                 }
-                let pair_rate = group.find_premium_rate(*collateral_tag, *liability_tag);
+                let pair_rate = group.find_premium_rate(collateral.premium_tag, liability_tag);
                 if pair_rate == 0 {
                     continue;
                 }
                 weighted = weighted
                     .checked_add(
-                        usd_value
+                        collateral
+                            .value
                             .checked_mul(u32_to_milli(pair_rate))
                             .ok_or_else(math_error!())?,
                     )
@@ -295,7 +375,7 @@ mod tests {
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::types::{
-        milli_to_u32, MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES,
+        milli_to_u32, MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY,
     };
 
     const YEAR: u64 = 31_536_000;
@@ -324,6 +404,18 @@ mod tests {
             let decoded = u32_to_milli(encoded);
             assert_approx(decoded, I80F48::from_num(percent / 100.0), TOL);
         }
+    }
+
+    #[test]
+    fn max_premium_rate_is_the_encoders_100_percent() {
+        // MAX_PREMIUM_RATE is defined as `u32::MAX / 10` (integer division). This must agree
+        // EXACTLY with what the encoder produces for 100% APR, or an admin configuring
+        // exactly 100% via `milli_to_u32(1.0)` would be rejected by the cap check.
+        use marginfi_type_crate::types::MAX_PREMIUM_RATE;
+        assert_eq!(milli_to_u32(I80F48::ONE), MAX_PREMIUM_RATE);
+        // Decodes to at most 100% (in fact a hair under, from fixed-point truncation).
+        assert!(u32_to_milli(MAX_PREMIUM_RATE) <= I80F48::ONE);
+        assert_approx(u32_to_milli(MAX_PREMIUM_RATE), I80F48::ONE, TOL);
     }
 
     #[test]
@@ -403,7 +495,7 @@ mod tests {
         let mut balance = Balance::empty_deactivated();
         balance.last_update = 1_000;
         balance.premium_rate_snapshot = 0;
-        claim_premium(&mut balance, I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
         assert_eq!(balance.last_update, 1_000 + YEAR);
         assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
     }
@@ -413,7 +505,7 @@ mod tests {
         let mut balance = Balance::empty_deactivated();
         balance.last_update = 1_000;
         balance.premium_rate_snapshot = rate(1.0);
-        claim_premium(&mut balance, I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
         assert_eq!(balance.last_update, 1_000 + YEAR);
         assert_approx(
             balance.premium_outstanding.into(),
@@ -422,7 +514,7 @@ mod tests {
         );
 
         // Double-claim at the same timestamp is a no-op
-        claim_premium(&mut balance, I80F48!(100), 0, 1_000 + YEAR).unwrap();
+        balance.claim_premium(I80F48!(100), 0, 1_000 + YEAR).unwrap();
         assert_approx(
             balance.premium_outstanding.into(),
             I80F48!(1.0),
@@ -458,19 +550,22 @@ mod tests {
     }
 
     fn asset_entry(usd: f64, tag: u16) -> PremiumScratchEntry {
-        PremiumScratchEntry::Asset {
+        PremiumScratchEntry {
+            value: I80F48::from_num(usd),
+            activated_at: 0,
             premium_tag: tag,
-            usd_value: I80F48::from_num(usd),
+            balance_index: 0,
+            flags: SCRATCH_ASSET,
         }
     }
 
-    fn liab_entry(bank_pk: Pubkey, amount: f64, tag: u16) -> PremiumScratchEntry {
-        PremiumScratchEntry::Liability {
-            bank_pk,
-            premium_tag: tag,
-            liability_amount: I80F48::from_num(amount),
+    fn liab_entry(balance_index: u8, amount: f64, tag: u16) -> PremiumScratchEntry {
+        PremiumScratchEntry {
+            value: I80F48::from_num(amount),
             activated_at: 0,
-            premium_active: true,
+            premium_tag: tag,
+            balance_index,
+            flags: SCRATCH_LIABILITY | SCRATCH_PREMIUM_ACTIVE,
         }
     }
 
@@ -487,10 +582,10 @@ mod tests {
 
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(100.0, 200));
-        scratch.push(liab_entry(liab_pk, 50.0, 100));
+        scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.01), TOL);
         // 0 -> nonzero transition bumped the accrual clock (no retroactive projection)
         assert_eq!(account.lending_account.balances[0].last_update, 1_000);
@@ -510,10 +605,10 @@ mod tests {
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(90.0, 100));
         scratch.push(asset_entry(10.0, 200));
-        scratch.push(liab_entry(liab_pk, 50.0, 300));
+        scratch.push(liab_entry(0, 50.0, 300));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.002), TOL);
     }
 
@@ -545,12 +640,12 @@ mod tests {
         scratch.push(asset_entry(100.0, 2));
         scratch.push(asset_entry(50.0, 3));
         scratch.push(asset_entry(50.0, 4));
-        scratch.push(liab_entry(stable_pk, 100.0, 10));
-        scratch.push(liab_entry(lst_pk, 40.0, 11));
-        scratch.push(liab_entry(major_pk, 25.0, 12));
+        scratch.push(liab_entry(0, 100.0, 10));
+        scratch.push(liab_entry(1, 40.0, 11));
+        scratch.push(liab_entry(2, 25.0, 12));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
 
         let rate_of = |i: usize| -> I80F48 {
             u32_to_milli(account.lending_account.balances[i].premium_rate_snapshot)
@@ -568,10 +663,10 @@ mod tests {
         let mut account = account_with_liability(liab_pk, rate(1.0), 500);
 
         let mut scratch = PremiumScratch::default();
-        scratch.push(liab_entry(liab_pk, 50.0, 100));
+        scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         assert_eq!(snapshot_rate(&account), I80F48::ZERO);
     }
 
@@ -583,10 +678,10 @@ mod tests {
 
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(100.0, 200));
-        scratch.push(liab_entry(liab_pk, 50.0, 100));
+        scratch.push(liab_entry(0, 50.0, 100));
         // complete deliberately left false (partial health pass)
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
         assert_eq!(account.lending_account.balances[0].last_update, 500);
     }
@@ -602,10 +697,10 @@ mod tests {
 
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(100.0, 200));
-        scratch.push(liab_entry(liab_pk, 100.0, 100));
+        scratch.push(liab_entry(0, 100.0, 100));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, t0 + YEAR).unwrap();
+        account.update_premium_snapshots(&group, &scratch, t0 + YEAR).unwrap();
 
         let balance = &account.lending_account.balances[0];
         assert_approx(
@@ -633,16 +728,10 @@ mod tests {
 
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(100.0, 200));
-        scratch.push(PremiumScratchEntry::Liability {
-            bank_pk: liab_pk,
-            premium_tag: 100,
-            liability_amount: I80F48!(50),
-            activated_at: 0,
-            premium_active: false,
-        });
+        scratch.push(inactive_liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         let balance = &account.lending_account.balances[0];
         assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
         assert_eq!(balance.premium_rate_snapshot, 0);
@@ -666,39 +755,112 @@ mod tests {
     #[test]
     fn snapshot_skips_closed_and_asset_side_balances() {
         let group = group_with(&[(200, 100, 1.0)]);
-        let liab_pk = Pubkey::new_unique();
+        let _liab_pk = Pubkey::new_unique();
         // Balance closed between health pass and write: no panic, no write
         let mut account = MarginfiAccount::zeroed();
 
         let mut scratch = PremiumScratch::default();
         scratch.push(asset_entry(100.0, 200));
-        scratch.push(liab_entry(liab_pk, 50.0, 100));
+        scratch.push(liab_entry(0, 50.0, 100));
         scratch.complete = true;
 
-        update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
+    }
+
+    // ---------------- scratch layout / addressing ----------------
+
+    #[test]
+    fn scratch_entry_is_flat_and_small() {
+        // The whole point of the flat record + balance_index: 16 entries must fit comfortably
+        // in the SBF stack frame. 32 bytes/entry, ~530 bytes total (vs ~1.2KB with the old
+        // enum + bank_pk).
+        assert_eq!(core::mem::size_of::<PremiumScratchEntry>(), 32);
+        assert!(core::mem::size_of::<PremiumScratch>() <= 552);
+    }
+
+    #[test]
+    fn snapshot_addresses_raw_slot_across_inactive_holes() {
+        // Balances: [0] inactive hole, [1] active liability. The scratch records RAW index 1;
+        // an active-ordinal scheme would have addressed slot 0 and misfired.
+        let group = group_with(&[(200, 100, 1.0)]);
+        let mut account = MarginfiAccount::zeroed();
+        let balance = &mut account.lending_account.balances[1];
+        balance.active = 1;
+        balance.bank_pk = Pubkey::new_unique();
+        balance.liability_shares = I80F48!(50).into();
+        balance.last_update = 500;
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(100.0, 200));
+        scratch.push(liab_entry(1, 50.0, 100));
+        scratch.complete = true;
+
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
+        assert_approx(
+            u32_to_milli(account.lending_account.balances[1].premium_rate_snapshot),
+            I80F48!(0.01),
+            TOL,
+        );
+    }
+
+    #[test]
+    fn snapshot_revalidates_balance_closed_between_pass_and_write() {
+        // The indexed balance deactivated between collect and write (repay_all in the same
+        // handler): revalidation must skip it, not write to a dead slot.
+        let group = group_with(&[(200, 100, 1.0)]);
+        let liab_pk = Pubkey::new_unique();
+        let mut account = account_with_liability(liab_pk, rate(1.0), 500);
+        account.lending_account.balances[0].active = 0;
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(100.0, 200));
+        scratch.push(liab_entry(0, 50.0, 100));
+        scratch.complete = true;
+
+        account.update_premium_snapshots(&group, &scratch, 1_000).unwrap();
+        let balance = &account.lending_account.balances[0];
+        assert_approx(u32_to_milli(balance.premium_rate_snapshot), I80F48!(0.01), TOL);
+        assert_eq!(balance.last_update, 500, "closed slot must not be touched");
+    }
+
+    // ---------------- max_premium_rate_for_liability_tag (liquidator seeding) ----------------
+
+    #[test]
+    fn max_pair_rate_picks_worst_rate_for_tag() {
+        let group = group_with(&[(1, 10, 1.0), (2, 10, 5.0), (4, 10, 0.2), (4, 11, 9.0)]);
+        assert_eq!(
+            max_premium_rate_for_liability_tag(&group, 10),
+            rate(5.0),
+            "highest rate across all collateral tags for liability tag 10"
+        );
+        assert_eq!(max_premium_rate_for_liability_tag(&group, 11), rate(9.0));
+        // No pairs targeting the tag (or untagged): seeds zero — harmless.
+        assert_eq!(max_premium_rate_for_liability_tag(&group, 12), 0);
+        assert_eq!(max_premium_rate_for_liability_tag(&group, PREMIUM_TAG_EMPTY), 0);
     }
 
     // ---------------- refresh_unavailable (the debt-origination gate) ----------------
 
-    fn inactive_liab_entry(bank_pk: Pubkey, amount: f64, tag: u16) -> PremiumScratchEntry {
-        PremiumScratchEntry::Liability {
-            bank_pk,
-            premium_tag: tag,
-            liability_amount: I80F48::from_num(amount),
+    fn inactive_liab_entry(balance_index: u8, amount: f64, tag: u16) -> PremiumScratchEntry {
+        PremiumScratchEntry {
+            value: I80F48::from_num(amount),
             activated_at: 0,
-            premium_active: false,
+            premium_tag: tag,
+            balance_index,
+            flags: SCRATCH_LIABILITY,
         }
     }
 
     #[test]
     fn refresh_unavailable_only_blocks_incomplete_pass_with_active_liability() {
-        let pk = Pubkey::new_unique();
+        let _pk = Pubkey::new_unique();
 
         // Incomplete pass + a premium-active liability => refresh needed but untrustworthy.
         let mut s = PremiumScratch::default();
         s.push(asset_entry(100.0, 200));
-        s.push(liab_entry(pk, 50.0, 100));
+        s.push(liab_entry(0, 50.0, 100));
         assert!(!s.complete);
         assert!(
             s.refresh_unavailable(),
@@ -709,7 +871,7 @@ mod tests {
         // to mis-price (it gets written off regardless), so the gate must NOT block.
         let mut s = PremiumScratch::default();
         s.push(asset_entry(100.0, 200));
-        s.push(inactive_liab_entry(pk, 50.0, 100));
+        s.push(inactive_liab_entry(0, 50.0, 100));
         assert!(
             !s.refresh_unavailable(),
             "inactive-only debt must not block"
@@ -723,7 +885,7 @@ mod tests {
         // A COMPLETE pass is always trustworthy, even with active debt.
         let mut s = PremiumScratch::default();
         s.push(asset_entry(100.0, 200));
-        s.push(liab_entry(pk, 50.0, 100));
+        s.push(liab_entry(0, 50.0, 100));
         s.complete = true;
         assert!(!s.refresh_unavailable(), "complete pass must never block");
 

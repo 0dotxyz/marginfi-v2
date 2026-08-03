@@ -2,6 +2,35 @@
 //!
 //! Most tests use a ZERO-interest USDC bank so all liability growth is premium and the math
 //! can be asserted exactly (within u32 rate-encoding tolerance).
+//!
+//! # Spec story map (Variable Borrow Premium spec, Stories 1-6)
+//!
+//! * **Story 1** (weak-collateral borrower): `premium_snapshot_set_on_borrow`,
+//!   `premium_accrues_lazily_and_pulse_materializes` (the permissionless realize),
+//!   `premium_repay_all_settles_and_sweep_pays_premium_wallet` (the premium-fund flow);
+//!   unit `state::premium::tests::snapshot_story1_single_collateral`.
+//! * **Story 2** (mixed collateral, weighted): unit `snapshot_story2_mixed_collateral_weighted`;
+//!   integration weighting in `premium_snapshot_reprices_when_collateral_improves`.
+//! * **Story 3** (improving collateral): `premium_snapshot_reprices_when_collateral_improves`.
+//!   DEVIATION BY DESIGN: deposit alone does NOT recompute (no oracles in deposit) — clients
+//!   bundle `[deposit, pulse_health]`; the test pins both halves. The spec's §3.6
+//!   overwrite-before-claim staleness no longer exists: every snapshot write claims at the
+//!   OLD rate first (`snapshot_write_claims_at_old_rate_first`).
+//! * **Story 4** (multiple borrows, independent premiums): `premium_story4_two_borrows_
+//!   independent_premiums`; unit `snapshot_story4_5_missing_pairs_default_zero`; worst-case
+//!   8x8 in TS `vb05`.
+//! * **Story 4.5** (missing pairs = 0%): unit `snapshot_story4_5_missing_pairs_default_zero`.
+//! * **Story 5** (dormant account degrades): `premium_included_in_health_liabilities`,
+//!   `premium_story5_dormant_account_becomes_liquidatable`. DEVIATION BY DESIGN: liquidation
+//!   does NOT settle premium into the bank (realized-only accounting — tokens must enter the
+//!   vault); the receivable stays on the remaining debt, and a full close reverts
+//!   (`premium_liquidation_cannot_close_liability_receivable_survives`); receivership's
+//!   `repay_all` path is the settling close.
+//! * **Story 6** (repay settlement): `premium_repay_all_settles_and_sweep_pays_premium_wallet`;
+//!   unit `accrual_story6_numbers`. DEVIATION BY DESIGN: partial repay settles premium FIRST
+//!   (spec's §4.3 option B, not the story's principal-first) —
+//!   `premium_partial_repay_settles_premium_first`; principal-first would strand a receivable
+//!   on a dust-closable balance.
 
 use anchor_lang::prelude::Clock;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
@@ -12,7 +41,7 @@ use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::types::{
     make_points, milli_to_u32, u32_to_milli, Balance, BankConfig, BankConfigOpt,
-    InterestRateConfig, MarginfiAccount, PremiumEntry,
+    BankOperationalState, InterestRateConfig, MarginfiAccount, PremiumEntry,
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -283,6 +312,11 @@ async fn premium_activation_never_charges_retroactively() -> anyhow::Result<()> 
     Ok(())
 }
 
+/// DEVIATION BY DESIGN from Story 6, which specs principal-first: partial repay settles
+/// premium FIRST (spec §4.3 option B). Structural reason: principal-first could extinguish
+/// the principal while a receivable remains, stranding it on a sub-threshold balance where
+/// health never projects it and the dust-clear wipes it — premium-first guarantees the
+/// receivable settles before the balance can reach the dust zone.
 #[tokio::test]
 async fn premium_partial_repay_settles_premium_first() -> anyhow::Result<()> {
     let test_f = premium_test_fixture().await;
@@ -384,7 +418,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
     // Sweep to the premium wallet's canonical ATA (permissionless)
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(premium_wallet)
         .await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
@@ -431,7 +465,7 @@ async fn premium_sweep_without_realized_premium_transfers_nothing() -> anyhow::R
 
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(premium_wallet)
         .await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
@@ -465,7 +499,7 @@ async fn premium_sweep_requires_canonical_ata_and_configured_wallet() -> anyhow:
     // Configured wallet, but a non-canonical destination -> InvalidPremiumAta
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(premium_wallet)
         .await?;
     let res = group_f
         .try_collect_premium_fees(usdc_bank_f, random_ata.key)
@@ -525,8 +559,10 @@ async fn premium_snapshot_reprices_when_collateral_improves() -> anyhow::Result<
     let account = borrower.load().await;
     assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 1.0).abs() < 0.0001);
 
-    // Deposit an equal USD value of untagged (0% pair) collateral, then pulse to recompute:
-    // the weighted rate drops to ~0.5%
+    // Deposit an equal USD value of untagged (0% pair) collateral. DEVIATION BY DESIGN
+    // (Story 3): the deposit alone must NOT reprice — deposit carries no oracle accounts, so
+    // the snapshot stays at the old 1% until a risk-bearing ix or pulse runs. Clients bundle
+    // `[deposit, pulse_health]` to realize the improvement immediately.
     let sol_eq_account = test_f
         .sol_equivalent_mint
         .create_token_account_and_mint_to(1_000)
@@ -534,6 +570,13 @@ async fn premium_snapshot_reprices_when_collateral_improves() -> anyhow::Result<
     borrower
         .try_bank_deposit(sol_eq_account.key, sol_eq_bank_f, 999, None)
         .await?;
+    let account = borrower.load().await;
+    assert!(
+        (snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 1.0).abs() < 0.0001,
+        "deposit alone must not reprice the snapshot"
+    );
+
+    // The pulse (second half of the client bundle) recomputes: weighted rate drops to ~0.5%.
     borrower.try_lending_account_pulse_health().await?;
 
     let account = borrower.load().await;
@@ -2070,6 +2113,41 @@ async fn premium_liquidation_not_blocked_when_liquidator_collateral_oracle_stale
         .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
         .await?;
 
+    // Seeding: the incomplete pass can't compute a real weighted rate, so the just-assumed
+    // USDC debt starts at the MAX configured pair rate for TAG_STABLE (1%) instead of a
+    // standing 0% — keeping a stale dust leg must never become a premium exemption.
+    let account = liquidator.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        (snapshot_percent(balance) - 1.0).abs() < 1e-6,
+        "incomplete pass must seed the max pair rate, got {}%",
+        snapshot_percent(balance)
+    );
+    assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
+
+    // Once the stale feed recovers, one clean pass reprices to the TRUE weighted rate — the
+    // liquidator's collateral (PyUSD + SolEq + seized SOL... only SOL is tagged) is mostly
+    // untagged, so the rate drops well below the seeded worst case.
+    advance_clock_with_feeds(
+        &test_f,
+        60,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+            PYTH_PYUSD_FEED,
+        ],
+    )
+    .await;
+    liquidator.try_lending_account_pulse_health().await?;
+    let account = liquidator.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        snapshot_percent(balance) < 0.1,
+        "clean pass must reprice the seed to the true (mostly-untagged) weighted rate, got {}%",
+        snapshot_percent(balance)
+    );
+
     Ok(())
 }
 
@@ -2164,6 +2242,794 @@ async fn premium_withdraw_allowed_when_stale_oracle_but_debt_is_inactive() -> an
     borrower
         .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
         .await?;
+
+    Ok(())
+}
+
+/// Story 4: two borrows against the same collateral basket carry INDEPENDENT premiums —
+/// the same 50/50 basket prices 0.55% on the stable debt and 1.00% on the LST debt, exactly
+/// the spec's numbers (pairs: A->stable 1%, B->stable 0.1%, A->lst 2%, B->lst missing = 0%).
+#[tokio::test]
+async fn premium_story4_two_borrows_independent_premiums() -> anyhow::Result<()> {
+    const TAG_A: u16 = TAG_SOL; // the "BONK" role
+    const TAG_B: u16 = TAG_LST; // the "SOL" role
+    const TAG_LST_LIAB: u16 = 400; // the "dSOL" role
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_PYUSD_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock_with_feeds(
+        &test_f,
+        1_700_000_000,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+            PYTH_PYUSD_FEED,
+        ],
+    )
+    .await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_A, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_B, TAG_STABLE, 0.1))
+        .await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_A, TAG_LST_LIAB, 2.0))
+        .await?;
+    // (TAG_B, TAG_LST_LIAB) deliberately missing -> 0% (Story 4.5 policy)
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(pyusd_bank_f, TAG_LST_LIAB, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_A, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_eq_bank_f, TAG_B, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+    let lender_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_pyusd.key, pyusd_bank_f, 100_000, None)
+        .await?;
+
+    // 50/50 basket: equal USD in tag-A and tag-B collateral.
+    let dana = test_f.create_marginfi_account().await;
+    let dana_sol = test_f.sol_mint.create_token_account_and_mint_to(1_000).await;
+    dana.try_bank_deposit(dana_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let dana_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    dana.try_bank_deposit(dana_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+
+    let dana_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    dana.try_bank_borrow(dana_usdc.key, usdc_bank_f, 100).await?;
+    let dana_pyusd = test_f.pyusd_mint.create_empty_token_account().await;
+    dana.try_bank_borrow(dana_pyusd.key, pyusd_bank_f, 100)
+        .await?;
+
+    let account = dana.load().await;
+    let stable_rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    let lst_rate = snapshot_percent(usdc_balance(&account, &pyusd_bank_f.key));
+    assert!(
+        (stable_rate - 0.55).abs() < 0.01,
+        "stable debt: 1%*50% + 0.1%*50% = 0.55%, got {}%",
+        stable_rate
+    );
+    assert!(
+        (lst_rate - 1.0).abs() < 0.01,
+        "lst debt: 2%*50% + 0%*50% = 1.00%, got {}%",
+        lst_rate
+    );
+
+    Ok(())
+}
+
+/// Story 5: a dormant account with premium-active debt degrades over time PURELY from
+/// projected pending premium — no crank ever runs — until it becomes liquidatable, and the
+/// liquidation claims the pending premium at the stale snapshot rate.
+/// DEVIATION BY DESIGN from the story's "debt repaid (including premium)": liquidation never
+/// settles premium into the bank (realized-only accounting); the claimed receivable stays on
+/// the liquidatee's remaining debt, collectible on their next real repay.
+#[tokio::test]
+async fn premium_story5_dormant_account_becomes_liquidatable() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(0.9).into(),
+                    asset_weight_maint: I80F48!(0.95).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Eve: $9990 SOL collateral (maint capacity $9490.5), borrows $8900 — healthy, but with
+    // only ~$590 of maint margin. Zero base interest: ALL degradation is premium.
+    let eve = test_f.create_marginfi_account().await;
+    let eve_sol = test_f.sol_mint.create_token_account_and_mint_to(1_000).await;
+    eve.try_bank_deposit(eve_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let eve_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    eve.try_bank_borrow(eve_usdc.key, usdc_bank_f, 8_900).await?;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 9_999, None)
+        .await?;
+
+    // Healthy account: liquidation must be rejected.
+    let res = liquidator
+        .try_liquidate(&eve, sol_bank_f, 50, usdc_bank_f)
+        .await;
+    assert!(res.is_err(), "healthy account must not be liquidatable");
+
+    // Eve never touches her account. 1% on $8900 ≈ $89/year of pending premium, projected by
+    // every health check without any claim; after 8 years (~$712 > $590 margin) she is
+    // liquidatable purely from premium.
+    advance_clock(&test_f, 8 * YEAR).await;
+    liquidator
+        .try_liquidate(&eve, sol_bank_f, 50, usdc_bank_f)
+        .await?;
+
+    // The liquidation claimed the pending premium at the stale 1% snapshot into the
+    // receivable; nothing was settled into the bank (no tokens entered the vault for it).
+    let account = eve.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert_eq_noise!(
+        I80F48::from(balance.premium_outstanding),
+        I80F48::from(native!(712, "USDC")),
+        I80F48!(2_000_000)
+    );
+    let usdc_bank = usdc_bank_f.load().await;
+    assert_eq!(
+        I80F48::from(usdc_bank.collected_premium_outstanding),
+        I80F48::ZERO
+    );
+
+    Ok(())
+}
+
+/// Executable runbook for sunsetting a live premium bank WITHOUT forgiving earned fees:
+/// retag to an unused tag → crank → let borrowers repay (settles) → deactivate LAST.
+/// Deactivating first would write off every receivable (see
+/// `premium_deactivated_bank_writes_off_receivable_instead_of_settling` for that half).
+#[tokio::test]
+async fn premium_sunset_workflow_retag_settle_then_deactivate() -> anyhow::Result<()> {
+    const TAG_UNUSED: u16 = 999;
+    let mut test_f = premium_test_fixture().await;
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (_lender, borrower, borrower_usdc) = setup_borrower(&test_f, 1_000.0).await;
+
+    // 1 year at 1% -> ~10 USDC earned.
+    advance_clock(&test_f, YEAR).await;
+
+    // Step 1: retag (flag stays ON — tag changes never forgive anything).
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_UNUSED, true)
+        .await?;
+    // Step 2: crank — claims the elapsed year at the old 1% snapshot, then reprices future
+    // accrual to 0% (no pairs target the unused tag).
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    let earned = I80F48::from(balance.premium_outstanding);
+    assert_eq_noise!(earned, I80F48::from(native!(10, "USDC")), I80F48!(50));
+    assert_eq!(balance.premium_rate_snapshot, 0);
+
+    // Wind-down holds: another year adds nothing.
+    advance_clock(&test_f, YEAR).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    assert_eq!(
+        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding),
+        earned
+    );
+
+    // Step 3: repay settles the receivable into the bank's premium counter (premium-first).
+    borrower
+        .try_bank_repay(borrower_usdc, usdc_bank_f, 100, None)
+        .await?;
+    let usdc_bank = usdc_bank_f.load().await;
+    assert_eq!(I80F48::from(usdc_bank.collected_premium_outstanding), earned);
+    let account = borrower.load().await;
+    assert_eq!(
+        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding),
+        I80F48::ZERO
+    );
+
+    // Step 4: deactivate LAST — everything is settled, the forgive-all flag transition has
+    // nothing left to forgive. The earned premium survived the whole sunset.
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_UNUSED, false)
+        .await?;
+    let usdc_bank = usdc_bank_f.load().await;
+    assert_eq!(I80F48::from(usdc_bank.collected_premium_outstanding), earned);
+
+    Ok(())
+}
+
+/// Pins the ExhaustedLiability/dust-write-off threshold coupling: liquidation can never fully
+/// close a premium-bearing liability, so the receivable written off below
+/// `EMPTY_BALANCE_THRESHOLD` can only be cleared in states that revert anyway. An exact-full
+/// close is unreachable through the ix (`OperationRepayOnly` fires on any overshoot first);
+/// partial liquidations claim at the old rate and keep the receivable.
+#[tokio::test]
+async fn premium_liquidation_cannot_close_liability_receivable_survives() -> anyhow::Result<()> {
+    let mut test_f = premium_test_fixture().await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let (_lender, liquidatee, _) = setup_borrower(&test_f, 1_000.0).await;
+
+    // Materialize a real receivable (~10 USDC over a year at 1%).
+    advance_clock(&test_f, YEAR).await;
+    liquidatee.try_lending_account_pulse_health().await?;
+    let account = liquidatee.load().await;
+    let receivable = I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding);
+    let debt_shares = I80F48::from(usdc_balance(&account, &usdc_bank_f.key).liability_shares);
+    assert!(receivable > I80F48::ZERO);
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 9_999, None)
+        .await?;
+
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // Overshoot: 150 SOL (~$1500) repays more than the whole ~$1000 debt — nothing commits.
+    let res = liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 150, usdc_bank_f)
+        .await;
+    assert!(res.is_err(), "full-close liquidation must revert");
+    let account = liquidatee.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert_eq!(I80F48::from(balance.premium_outstanding), receivable);
+    assert_eq!(I80F48::from(balance.liability_shares), debt_shares);
+
+    // Partial liquidation: succeeds, receivable survives (claimed at the old rate, never
+    // written off — the balance stays far above EMPTY_BALANCE_THRESHOLD).
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
+        .await?;
+    let account = liquidatee.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(I80F48::from(balance.premium_outstanding) >= receivable);
+    assert!(I80F48::from(balance.liability_shares) < debt_shares);
+
+    Ok(())
+}
+
+/// A stale nonzero premium value on an ASSET-side balance of a premium-ACTIVE bank (the shape
+/// the mainnet ex-emissions fixtures pin) must be cleared by the pre-mutation write-off — NOT
+/// resurrected as live premium debt when liquidation's BypassBorrowLimit withdraw flips the
+/// asset into a liability.
+#[tokio::test]
+async fn premium_stale_asset_side_value_cleared_not_resurrected_on_flip() -> anyhow::Result<()> {
+    let mut test_f = premium_test_fixture().await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let (_lender, liquidatee, _) = setup_borrower(&test_f, 1_000.0).await;
+
+    // Liquidator: big SOL collateral + a small 10 USDC ASSET balance in the (premium-active)
+    // liab bank.
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 9_999, None)
+        .await?;
+    let liquidator_usdc = test_f.usdc_mint.create_token_account_and_mint_to(10).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc.key, usdc_bank_f, 10, None)
+        .await?;
+
+    // Seed garbage into the recycled bytes of the ASSET-side USDC balance (what a legacy
+    // emissions value would look like if it survived to premium activation).
+    let mut account = liquidator.load().await;
+    let garbage = I80F48!(26891413);
+    {
+        let balance = account
+            .lending_account
+            .balances
+            .iter_mut()
+            .find(|b| b.is_active() && b.bank_pk == usdc_bank_f.key)
+            .unwrap();
+        balance.premium_outstanding = garbage.into();
+        balance.premium_rate_snapshot = milli_to_u32(I80F48!(5)); // 500% garbage rate
+    }
+    liquidator.set_account(&account).await?;
+
+    // Make the liquidatee liquidatable.
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // Seize 10 SOL (~$100): the liquidator's 10 USDC asset flips into ~$87 of USDC debt via
+    // BypassBorrowLimit. The pre-mutation clear must wipe the garbage BEFORE the flip.
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 10, usdc_bank_f)
+        .await?;
+
+    let account = liquidator.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        I80F48::from(balance.liability_shares) > I80F48::ZERO,
+        "flip must have created a liability"
+    );
+    assert_eq!(
+        I80F48::from(balance.premium_outstanding),
+        I80F48::ZERO,
+        "stale asset-side value must not resurrect as premium debt"
+    );
+    // The post-liquidation refresh then prices the NEW debt from the actual collateral mix
+    // (tagged SOL dominates): ~1%, nowhere near the 500% garbage.
+    assert!(snapshot_percent(balance) < 1.5);
+
+    Ok(())
+}
+
+/// The premium scratch values ReduceOnly collateral under EVERY requirement type: the rate is
+/// a pure function of the collateral mix, identical from every instruction. (Initial health
+/// still zeroes ReduceOnly collateral for risk — only the premium weighting is exempt.)
+#[tokio::test]
+async fn premium_reduce_only_collateral_counts_in_rate() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%, (lst -> stable) = 3%; SolEq is tagged LST and made ReduceOnly.
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_LST, TAG_STABLE, 3.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_eq_bank_f, TAG_LST, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Borrower: equal USD in SOL (1% tag) and SolEq (3% tag).
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+
+    // SolEq goes ReduceOnly. Under the old requirement-typed valuation, borrow (Initial)
+    // would have zeroed it and priced the premium off SOL alone (1%).
+    test_f
+        .get_bank_mut(&BankMint::SolEquivalent)
+        .update_config(
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::ReduceOnly),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+
+    // Equal-value halves at 1% and 3% -> 2%, ReduceOnly leg included.
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        (snapshot_percent(balance) - 2.0).abs() < 0.01,
+        "ReduceOnly collateral must count in the premium mix: got {}%",
+        snapshot_percent(balance)
+    );
+
+    // MFI-30 regression: a STALE oracle on the ReduceOnly leg must mark the pass incomplete
+    // (health soft-zeroes ReduceOnly under Initial before ever looking at the oracle, so
+    // only the premium-price path can flag it). An "complete" pass here would silently drop
+    // the 3% leg and rewrite the rate to 1%.
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_FEED]).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        (snapshot_percent(balance) - 2.0).abs() < 0.01,
+        "stale ReduceOnly leg must not falsely complete the pass: got {}%",
+        snapshot_percent(balance)
+    );
+
+    // Once the feed recovers, a clean pulse still prices the full mix.
+    advance_clock_with_feeds(
+        &test_f,
+        60,
+        &[PYTH_USDC_FEED, PYTH_SOL_FEED, PYTH_SOL_EQUIVALENT_FEED],
+    )
+    .await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!((snapshot_percent(balance) - 2.0).abs() < 0.01);
+
+    Ok(())
+}
+
+/// MFI-31 regression: the incomplete-pass max-rate fallback must fire for ANY snapshot below
+/// the max pair rate — a pre-seeded tiny nonzero snapshot must not dodge it (the old guard
+/// was `== 0`). The elapsed window is claimed at the OLD tiny rate first (never retroactive).
+#[tokio::test]
+async fn premium_liquidation_seed_raises_preseeded_tiny_snapshot() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_PYUSD_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock_with_feeds(
+        &test_f,
+        1_700_000_000,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+            PYTH_PYUSD_FEED,
+        ],
+    )
+    .await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidatee_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    // Liquidator: untagged PyUSD + untagged SolEq collateral, and a PRE-EXISTING USDC debt.
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_pyusd.key, pyusd_bank_f, 9_999, None)
+        .await?;
+    let liquidator_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let liquidator_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidator
+        .try_bank_borrow(liquidator_usdc.key, usdc_bank_f, 100)
+        .await?;
+
+    // Pre-arrange the dodge: a tiny nonzero snapshot on the existing USDC debt.
+    let tiny = milli_to_u32(I80F48::from_num(0.00001)); // 0.001%
+    let mut account = liquidator.load().await;
+    account
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|b| b.is_active() && b.bank_pk == usdc_bank_f.key)
+        .unwrap()
+        .premium_rate_snapshot = tiny;
+    liquidator.set_account(&account).await?;
+
+    // Crush the liquidatee, stale ONLY the liquidator's SolEq leg (incomplete pass).
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    advance_clock_with_feeds(
+        &test_f,
+        3_600,
+        &[PYTH_USDC_FEED, PYTH_SOL_FEED, PYTH_PYUSD_FEED],
+    )
+    .await;
+
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
+        .await?;
+
+    // The tiny snapshot did not dodge the fallback: raised to the max pair rate (1%), with
+    // the elapsed hour claimed at the old 0.001% (≈ nothing, but nonzero-safe).
+    let account = liquidator.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(
+        (snapshot_percent(balance) - 1.0).abs() < 1e-6,
+        "pre-seeded tiny snapshot must be raised to the max pair rate, got {}%",
+        snapshot_percent(balance)
+    );
+    assert!(I80F48::from(balance.premium_outstanding) < I80F48!(100));
+
+    Ok(())
+}
+
+/// MFI-32 regression: forgiveness on deactivation is LAZY (per-balance, at next touch while
+/// the flag is off). A balance untouched during the inactive window carries its materialized
+/// receivable through a deactivate→reactivate cycle — only the inactive window's accrual is
+/// forgiven. This is the documented contract in `config_bank_premium`.
+#[tokio::test]
+async fn premium_reactivation_before_touch_retains_materialized_receivable(
+) -> anyhow::Result<()> {
+    let test_f = premium_test_fixture().await;
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (_lender, borrower, _) = setup_borrower(&test_f, 1_000.0).await;
+
+    // Year 1 (active): materialize ~10 USDC.
+    advance_clock(&test_f, YEAR).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let materialized = I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding);
+    assert!(materialized > I80F48::ZERO);
+
+    // Year 2: deactivated, and the balance is deliberately NEVER touched.
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, false)
+        .await?;
+    advance_clock(&test_f, YEAR).await;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+
+    // Year 3 (active again), then touch: the materialized receivable SURVIVED the cycle, the
+    // inactive year was never charged, and year 3 accrued normally -> ~20 total.
+    advance_clock(&test_f, YEAR).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert_eq_noise!(
+        I80F48::from(balance.premium_outstanding),
+        materialized + I80F48::from(native!(10, "USDC")),
+        I80F48!(100)
+    );
 
     Ok(())
 }

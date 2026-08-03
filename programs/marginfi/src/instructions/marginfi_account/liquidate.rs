@@ -7,7 +7,10 @@ use crate::state::{
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
     },
-    premium::{update_premium_snapshots, PremiumScratch},
+    premium::{
+        max_premium_rate_for_liability_tag, BalancePremiumImpl, MarginfiAccountPremiumImpl,
+        PremiumScratch,
+    },
     {
         marginfi_group::MarginfiGroupImpl,
         price::{OraclePriceFeedAdapter, PriceAdapter},
@@ -19,18 +22,18 @@ use crate::utils::{
     InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
-use crate::{check, debug, prelude::*, utils};
+use crate::{check, debug, math_error, prelude::*, utils};
 use anchor_lang::{prelude::*, solana_program::clock::Clock};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
-        LIQUIDITY_VAULT_SEED,
+        LIQUIDITY_VAULT_SEED, PREMIUM_ACTIVE,
     },
     types::{
-        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, BalanceSide, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup,
+        OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -540,10 +543,21 @@ pub fn lending_account_liquidate<'info>(
     // Verify liquidator account health using heap-efficient version (includes isolated-tier
     // check). The liquidator may have just opened a liability leg (snapshot 0 at creation):
     // weight it against their post-liquidation collateral mix, including the seized collateral.
+    let liab_seed_info = {
+        let liab_bank = ctx.accounts.liab_bank.load()?;
+        LiquidatorLiabSeedInfo {
+            bank_pk: ctx.accounts.liab_bank.key(),
+            premium_tag: liab_bank.premium_tag,
+            premium_active: liab_bank.get_flag(PREMIUM_ACTIVE),
+            premium_activated_at: liab_bank.premium_activated_at,
+            liability_share_value: liab_bank.liability_share_value.into(),
+        }
+    };
     check_liquidator_health_and_refresh_premium(
         &mut liquidator_marginfi_account,
         group,
         liquidator_remaining_accounts,
+        &liab_seed_info,
         clock.unix_timestamp as u64,
     )?;
 
@@ -596,17 +610,35 @@ fn check_liquidatee_health_and_refresh_premium<'info>(
         pre_liquidation_health,
         &mut Some(&mut premium_scratch),
     )?;
-    update_premium_snapshots(liquidatee_marginfi_account, group, &premium_scratch, now)?;
+    liquidatee_marginfi_account.update_premium_snapshots(group, &premium_scratch, now)?;
     Ok(post_liquidation_health)
+}
+
+/// Premium data about the liquidated liability bank, captured before the liquidator's
+/// account is mutably borrowed for the health check.
+struct LiquidatorLiabSeedInfo {
+    bank_pk: Pubkey,
+    premium_tag: u16,
+    premium_active: bool,
+    premium_activated_at: i64,
+    liability_share_value: I80F48,
 }
 
 /// Init health check + premium snapshot refresh for the liquidator. See
 /// [`check_liquidatee_health_and_refresh_premium`] for the `#[inline(never)]` rationale.
+///
+/// No `refresh_unavailable` gate here (a stale unrelated leg must not block liquidations).
+/// Instead, on an incomplete pass the just-grown premium-active debt's snapshot is RAISED to
+/// the max configured pair rate for its tag — claiming the elapsed window at the old rate
+/// first (never retroactive), raising anything below the max (a pre-seeded tiny rate must
+/// not dodge it), never lowering. So a permanently-stale dust leg costs the worst rate
+/// instead of granting a standing discount; the next complete pass reprices normally.
 #[inline(never)]
 fn check_liquidator_health_and_refresh_premium<'info>(
     liquidator_marginfi_account: &mut MarginfiAccount,
     group: &MarginfiGroup,
     liquidator_remaining_accounts: &'info [AccountInfo<'info>],
+    liab_info: &LiquidatorLiabSeedInfo,
     now: u64,
 ) -> MarginfiResult {
     let mut premium_scratch = PremiumScratch::default();
@@ -617,7 +649,28 @@ fn check_liquidator_health_and_refresh_premium<'info>(
         &mut None,
         &mut Some(&mut premium_scratch),
     )?;
-    update_premium_snapshots(liquidator_marginfi_account, group, &premium_scratch, now)?;
+    liquidator_marginfi_account.update_premium_snapshots(group, &premium_scratch, now)?;
+
+    if !premium_scratch.complete && liab_info.premium_active {
+        let balance = liquidator_marginfi_account
+            .lending_account
+            .balances
+            .iter_mut()
+            .find(|b| b.is_active() && b.bank_pk == liab_info.bank_pk);
+        if let Some(balance) = balance {
+            let seed = max_premium_rate_for_liability_tag(group, liab_info.premium_tag);
+            if !balance.is_empty(BalanceSide::Liabilities) && balance.premium_rate_snapshot < seed
+            {
+                // Claim the window since the last update at the OLD snapshot rate first, so
+                // the raised rate applies strictly forward (never retroactive).
+                let liability_amount = I80F48::from(balance.liability_shares)
+                    .checked_mul(liab_info.liability_share_value)
+                    .ok_or_else(math_error!())?;
+                balance.claim_premium(liability_amount, liab_info.premium_activated_at, now)?;
+                balance.premium_rate_snapshot = seed;
+            }
+        }
+    }
     Ok(())
 }
 
