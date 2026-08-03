@@ -8,7 +8,7 @@ use crate::{
         check_pre_liquidation_condition_and_get_account_health,
         clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
     },
-    state::premium::{update_premium_snapshots, PremiumScratch},
+    state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
@@ -154,8 +154,7 @@ pub fn end_receivership<'info>(
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-liquidation collateral mix (cached prices).
-    update_premium_snapshots(
-        marginfi_account,
+    marginfi_account.update_premium_snapshots(
         group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,

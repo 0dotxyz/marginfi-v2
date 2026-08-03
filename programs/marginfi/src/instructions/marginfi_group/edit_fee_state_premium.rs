@@ -5,17 +5,15 @@ use marginfi_type_crate::{constants::FEE_STATE_SEED, types::FeeState};
 
 pub fn edit_fee_state_premium(
     ctx: Context<EditFeeStatePremium>,
-    premium_wallet: Option<Pubkey>,
+    premium_wallet: Pubkey,
 ) -> Result<()> {
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
-    if let Some(premium_wallet) = premium_wallet {
-        msg!(
-            "Updating premium_wallet: {:?} -> {:?}",
-            fee_state.premium_wallet,
-            premium_wallet
-        );
-        fee_state.premium_wallet = premium_wallet;
-    }
+    msg!(
+        "Updating premium_wallet: {:?} -> {:?}",
+        fee_state.premium_wallet,
+        premium_wallet
+    );
+    fee_state.premium_wallet = premium_wallet;
 
     Ok(())
 }

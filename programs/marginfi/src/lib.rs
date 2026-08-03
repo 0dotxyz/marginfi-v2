@@ -672,7 +672,7 @@ pub mod marginfi {
     /// (global fee admin only) Adjust the variable-borrow premium wallet on the fee state.
     pub fn edit_fee_state_premium(
         ctx: Context<EditFeeStatePremium>,
-        premium_wallet: Option<Pubkey>,
+        premium_wallet: Pubkey,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state_premium(ctx, premium_wallet)
     }

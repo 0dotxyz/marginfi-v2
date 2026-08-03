@@ -55,8 +55,7 @@ export const newPremiumEntry = (
 export type EditFeeStatePremiumArgs = {
   /** Signer; must match `FeeState.global_fee_admin`. */
   admin: PublicKey;
-  /** undefined = leave unchanged. */
-  premiumWallet?: PublicKey;
+  premiumWallet: PublicKey;
 };
 
 /**
@@ -67,7 +66,7 @@ export const editFeeStatePremium = (
   args: EditFeeStatePremiumArgs,
 ) => {
   return program.methods
-    .editFeeStatePremium(args.premiumWallet ?? null)
+    .editFeeStatePremium(args.premiumWallet)
     .accounts({
       globalFeeAdmin: args.admin,
       // feeState: derived from constant seed

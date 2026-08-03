@@ -12,7 +12,7 @@ use crate::{
         check_pre_liquidation_condition_and_get_account_health,
         compute_has_isolated_liability_flag,
     },
-    state::premium::{update_premium_snapshots, PremiumScratch},
+    state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     MarginfiError, MarginfiResult,
 };
 
@@ -54,8 +54,7 @@ pub fn lending_account_pulse_health<'info>(
     // Claim at old rates + rewrite snapshots. Self-gated: a partial health pass (e.g. an oracle
     // failure mid-loop) leaves the scratch incomplete and this is a no-op, so a failed pulse can
     // never write garbage rates.
-    update_premium_snapshots(
-        &mut marginfi_account,
+    marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         clock.unix_timestamp as u64,

@@ -12,7 +12,7 @@ use crate::{
             MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        premium::{update_premium_snapshots, PremiumScratch},
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -268,8 +268,7 @@ pub fn kamino_withdraw<'info>(
 
         // Claim premium at the old rates and refresh every liability's premium rate snapshot
         // with the post-withdraw collateral mix.
-        update_premium_snapshots(
-            &mut marginfi_account,
+        marginfi_account.update_premium_snapshots(
             &group,
             &premium_scratch,
             clock.unix_timestamp as u64,

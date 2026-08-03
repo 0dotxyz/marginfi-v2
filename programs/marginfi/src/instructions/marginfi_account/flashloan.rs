@@ -7,7 +7,7 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
-    state::premium::{update_premium_snapshots, PremiumScratch},
+    state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -138,8 +138,7 @@ pub fn lending_account_end_flashloan<'info>(
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-flashloan balances.
-    update_premium_snapshots(
-        &mut marginfi_account,
+    marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
@@ -166,10 +165,8 @@ pub struct LendingAccountEndFlashloan<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Needed for the same-asset emode checks and the premium snapshot recompute
-    #[account(
-        constraint = marginfi_account.load()?.group == group.key() @ MarginfiError::InvalidGroup
-    )]
+    /// Needed for the same-asset emode checks and the premium snapshot recompute; validated by
+    /// the `has_one = group` on `marginfi_account`.
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub authority: Signer<'info>,

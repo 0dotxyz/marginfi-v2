@@ -10,7 +10,7 @@ use crate::state::marginfi_account::{
     account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
     is_signer_authorized, run_cb_price_gate,
 };
-use crate::state::premium::{update_premium_snapshots, PremiumScratch};
+use crate::state::premium::{MarginfiAccountPremiumImpl, PremiumScratch};
 use crate::{
     check,
     prelude::*,
@@ -523,8 +523,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     // Withdraw defers its snapshot refresh while ACCOUNT_IN_ORDER_EXECUTION is set, so this
     // handler owns it: claim at old rates and re-weight surviving liabilities against the
     // post-order collateral mix.
-    update_premium_snapshots(
-        &mut marginfi_account,
+    marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,

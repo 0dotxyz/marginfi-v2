@@ -712,7 +712,7 @@ impl MarginfiGroupFixture {
 
     pub async fn try_edit_fee_state_premium(
         &self,
-        premium_wallet: Option<Pubkey>,
+        premium_wallet: Pubkey,
     ) -> Result<(), BanksClientError> {
         let payer = self.ctx.borrow().payer.insecure_clone();
         self.try_edit_fee_state_premium_with_signer(premium_wallet, &payer)
@@ -721,7 +721,7 @@ impl MarginfiGroupFixture {
 
     pub async fn try_edit_fee_state_premium_with_signer(
         &self,
-        premium_wallet: Option<Pubkey>,
+        premium_wallet: Pubkey,
         signer: &Keypair,
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
