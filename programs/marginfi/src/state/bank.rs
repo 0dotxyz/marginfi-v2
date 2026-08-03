@@ -236,7 +236,7 @@ pub trait BankImpl {
         slot: u64,
         oracle: OraclePriceWithConfidence,
     ) -> MarginfiResult<()>;
-    fn reset_cb_runtime_state(&mut self);
+    fn reset_cb_runtime_state(&mut self, now: i64);
     fn trip_cb_halt(&mut self, now: i64, deviation_bps: u64, breached_tier: u8);
     fn deposit_spl_transfer<'info>(
         &self,
@@ -692,10 +692,8 @@ impl BankImpl for Bank {
             }
             // Disable: zero halt + dedup state so a later re-enable starts clean.
             // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
-            // Callers must `accrue_interest` first: this drops the halt span that
-            // `cb_frozen_seconds` reads, and the frozen interval would otherwise be charged.
             if !flag && was_enabled {
-                self.reset_cb_runtime_state();
+                self.reset_cb_runtime_state(Clock::get()?.unix_timestamp);
             }
             self.update_flag(flag, CIRCUIT_BREAKER_ENABLED);
         }
@@ -1471,14 +1469,21 @@ impl BankImpl for Bank {
         self.borrowing_position_count = self.borrowing_position_count.saturating_sub(1);
     }
 
-    fn reset_cb_runtime_state(&mut self) {
+    fn reset_cb_runtime_state(&mut self, now: i64) {
         // If the breaker escalated the bank into the non-expiring `CircuitBroken` end state,
         // restore the operational state it held beforehand (a no-op otherwise).
         self.config.operational_state = self.cb_effective_operational_state();
+
+        // Bank the elapsed frozen span before dropping the halt record, same as `trip_cb_halt`.
+        // Zero when the caller accrued first (`last_update == now`); the halt's remainder past
+        // `now` is not frozen because this reset ends the halt.
+        self.cb_frozen_seconds_pending = self
+            .cb_frozen_seconds_pending
+            .saturating_add(self.cb_frozen_seconds(self.last_update, now));
+
         self.cb_tier = 0;
         self.cb_halt_started_at = 0;
         self.cb_halt_ended_at = 0;
-        self.cb_frozen_seconds_pending = 0;
         self.cb_tier3_consecutive_trips = 0;
         self.cb_last_observed_slot = 0;
         self.cb_last_oracle_source_time = 0;
@@ -2278,7 +2283,7 @@ mod cb_tests {
         );
         assert_eq!(b.cb_pre_break_state, BankOperationalState::Paused as u8);
 
-        b.reset_cb_runtime_state();
+        b.reset_cb_runtime_state(b.cb_halt_ended_at);
         assert_eq!(b.config.operational_state, BankOperationalState::Paused);
     }
 
@@ -2301,7 +2306,7 @@ mod cb_tests {
             BankOperationalState::KilledByBankruptcy as u8
         );
 
-        b.reset_cb_runtime_state();
+        b.reset_cb_runtime_state(b.cb_halt_ended_at);
         assert_eq!(
             b.config.operational_state,
             BankOperationalState::KilledByBankruptcy
@@ -2603,10 +2608,10 @@ mod cb_tests {
             BankOperationalState::CircuitBroken
         );
 
-        b.reset_cb_runtime_state();
+        b.reset_cb_runtime_state(b.cb_halt_ended_at);
         // Operational state restored to the pre-break value.
         assert_eq!(b.config.operational_state, BankOperationalState::ReduceOnly);
-        // All runtime fields zeroed.
+        // All halt and dedup fields zeroed (`cb_frozen_seconds_pending` is carried, not cleared).
         assert_eq!(b.cb_tier, 0);
         assert_eq!(b.cb_halt_started_at, 0);
         assert_eq!(b.cb_halt_ended_at, 0);
@@ -2627,12 +2632,39 @@ mod cb_tests {
             .unwrap();
         assert_eq!(b.cb_tier, 2);
 
-        b.reset_cb_runtime_state();
+        b.reset_cb_runtime_state(b.cb_halt_ended_at);
         assert_eq!(
             b.config.operational_state,
             BankOperationalState::Operational
         );
         assert_eq!(b.cb_tier, 0);
         assert_eq!(b.cb_halt_ended_at, 0);
+    }
+
+    #[test]
+    fn reset_cb_runtime_state_banks_elapsed_frozen_span() {
+        // A reset that runs without a preceding accrual must bank the halt's elapsed frozen
+        // span rather than drop it with the halt record.
+        let mut b = make_cb_bank();
+        b.last_update = 500;
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(200)))
+            .unwrap();
+        assert_eq!(b.cb_halt_started_at, 1_001);
+        assert_eq!(b.cb_halt_ended_at, 1_001 + 14_400);
+
+        // Reset one hour into the four-hour halt: [1001, 4601) is frozen, the rest of the halt
+        // never happens because the reset ends it.
+        b.reset_cb_runtime_state(4_601);
+        assert_eq!(b.cb_frozen_seconds_pending, 3_600);
+        assert_eq!(b.cb_halt_started_at, 0);
+        assert_eq!(b.cb_halt_ended_at, 0);
+
+        // The deferred accrual charges [500, 1001) plus the post-reset gap, never the frozen span.
+        let now = 5_000;
+        let frozen = b.cb_frozen_seconds_pending + b.cb_frozen_seconds(b.last_update, now);
+        assert_eq!(frozen, 3_600);
+        assert_eq!((now - b.last_update) as u64 - frozen, 900);
     }
 }

@@ -40,8 +40,8 @@ pub fn lending_pool_configure_bank(
             borrow_limit: bank.config.borrow_limit,
         });
     } else {
-        // Disabling the breaker clears the halt span that `accrue_interest` uses to skip the
-        // frozen interval, so accrue first: otherwise the next accrual charges the halted time.
+        // Consume the interest freeze before the disable: accrual excludes the halted time up to
+        // now and restarts from here.
         if bank_config.circuit_breaker_enabled == Some(false)
             && bank.get_flag(CIRCUIT_BREAKER_ENABLED)
         {
