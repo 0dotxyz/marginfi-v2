@@ -586,7 +586,6 @@ fn create_handle_bankruptcy_cpi_metas(
         AccountMeta::new(accounts.insurance_vault, false),
         AccountMeta::new_readonly(accounts.insurance_vault_authority, false),
         AccountMeta::new_readonly(accounts.token_program, false),
-        AccountMeta::new_readonly(accounts.instruction_sysvar, false),
     ]
 }
 
@@ -642,7 +641,7 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
         insurance_vault,
         insurance_vault_authority,
         token_program: anchor_spl::token::ID,
-        instruction_sysvar: solana_instructions_sysvar::id(),
+        marginfi_program: marginfi::ID,
     };
 
     let mut metas = create_handle_bankruptcy_cpi_metas(&cpi_accounts);
