@@ -10,7 +10,7 @@ use crate::{
             MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        premium::{update_premium_snapshots, PremiumScratch},
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -268,8 +268,7 @@ pub fn solend_withdraw<'info>(
             // snapshot with the post-withdraw collateral mix.
             {
                 let group = ctx.accounts.group.load()?;
-                update_premium_snapshots(
-                    &mut marginfi_account,
+                marginfi_account.update_premium_snapshots(
                     &group,
                     &premium_scratch,
                     Clock::get()?.unix_timestamp as u64,
