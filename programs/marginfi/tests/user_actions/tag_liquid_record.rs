@@ -135,6 +135,28 @@ async fn run_receivership_liquidation(
     Ok(liquidator_sol_acc)
 }
 
+/// Sends a deleverage as one tx: start_deleverage, repay `repay_usdc`, end_deleverage.
+async fn run_deleverage(
+    test_f: &TestFixture,
+    liquidatee: &MarginfiAccountFixture,
+    record_pk: Pubkey,
+    risk_admin_usdc_acc: &TokenAccountFixture,
+    repay_usdc: f64,
+) -> Result<(), BanksClientError> {
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let risk_admin = test_f.payer();
+    let start_ix = liquidatee
+        .make_start_deleverage_ix(record_pk, risk_admin)
+        .await;
+    let repay_ix = liquidatee
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, repay_usdc, None)
+        .await;
+    let end_ix = liquidatee
+        .make_end_deleverage_ix(record_pk, risk_admin, vec![])
+        .await;
+    send_ixs(test_f, &[start_ix, repay_ix, end_ix]).await
+}
+
 /// Liquidatee deposits $20 of SOL and borrows $10 of USDC, then SOL weights are cut so the
 /// account is maintenance-unhealthy. The record PDA is initialized. Returns the liquidator's
 /// marginfi account (holding a 100 USDC deposit) and USDC token account (still holding 100
@@ -265,10 +287,11 @@ async fn tag_sets_clears_and_rejects_double_tag() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Once the tag matures, a liquidation is allowed at the grown premium and any non-zero repayment
-/// resets the tag, including a dust-sized repayment.
+/// Once the tag matures, a liquidation is allowed at the grown premium. A dust-sized one leaves the
+/// tag (and the matured premium) alone; only one that erases at least
+/// `LIQUIDATION_TAG_RESET_DEFICIT_FRACTION` of the health deficit restarts the growth clock.
 #[tokio::test]
-async fn tag_grows_premium_and_liquidation_resets_tag() -> anyhow::Result<()> {
+async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -280,15 +303,15 @@ async fn tag_grows_premium_and_liquidation_resets_tag() -> anyhow::Result<()> {
     let record = load_record(&test_f, record_pk).await;
     assert_eq!(record.tagged_at, T0);
 
-    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS).await;
+    let matured = T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS;
+    set_timestamp(&test_f, matured).await;
     refresh_oracles(&test_f).await;
     // Accrue the warped interval's interest now so the accrual jump doesn't land between the
     // liquidation's pre/post health snapshots
     test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
     test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
 
-    // Repay $0.20 (2% of the $10 debt) and seize $0.20 of SOL. Even this dust-sized completed
-    // liquidation resets the tag.
+    // Repay $0.20 and seize $0.20 of SOL: erases $0.12 of the ~$2 deficit, under the 25% bar
     let liquidator_sol_acc = run_receivership_liquidation(
         &test_f,
         &liquidatee,
@@ -308,14 +331,23 @@ async fn tag_grows_premium_and_liquidation_resets_tag() -> anyhow::Result<()> {
         native!(99.8, "USDC", f64)
     );
 
-    // The completed liquidation resets the tag, clears the receiver, and records the entry.
     let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, 0);
+    assert_eq!(record.tagged_at, T0);
     assert_eq!(record.liquidation_receiver, Pubkey::default());
-    assert_eq!(
-        record.entries[3].timestamp,
-        T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS
-    );
+    assert_eq!(record.entries[3].timestamp, matured);
+
+    // Repay $2 and seize $2 of SOL: erases $1.20 of the remaining ~$1.90 deficit, over the bar
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.2,
+        2.0,
+    )
+    .await?;
+    let record = load_record(&test_f, record_pk).await;
+    assert_eq!(record.tagged_at, matured);
     Ok(())
 }
 
@@ -351,7 +383,8 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     assert_custom_error!(res.err().unwrap(), MarginfiError::LiquidationPremiumTooHigh);
 
     let growth_window = LIQUIDATION_TAG_FULL_PREMIUM_SECS - LIQUIDATION_TAG_DELAY_SECS;
-    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + growth_window / 2).await;
+    let midpoint = T0 + LIQUIDATION_TAG_DELAY_SECS + growth_window / 2;
+    set_timestamp(&test_f, midpoint).await;
     refresh_oracles(&test_f).await;
     // Accrue the warped interval's interest now so the accrual jump doesn't land between the
     // liquidation's pre/post health snapshots
@@ -371,7 +404,7 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     assert!(res.is_err());
     assert_custom_error!(res.err().unwrap(), MarginfiError::LiquidationPremiumTooHigh);
 
-    // ...while $2.80 is allowed, and the 20% repayment resets the tag
+    // ...while $2.80 is allowed, and erases $0.88 of the ~$2 deficit, over the 25% bar
     let liquidator_sol_acc = run_receivership_liquidation(
         &test_f,
         &liquidatee,
@@ -386,7 +419,7 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
         native!(0.28, "SOL", f64)
     );
     let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, 0);
+    assert_eq!(record.tagged_at, midpoint);
     Ok(())
 }
 
@@ -450,38 +483,37 @@ async fn close_record_fails_while_tagged() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A deleverage that leaves the account underwater restarts the clock; one that leaves it healthy
+/// clears the tag outright.
 #[tokio::test]
-async fn deleverage_resets_tag() -> anyhow::Result<()> {
+async fn deleverage_restarts_clock_then_clears_when_healthy() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, record_pk, _liquidator_usdc_acc) =
         setup_unhealthy_liquidatee().await?;
-    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let risk_admin_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(10).await;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
     send_tag(&test_f, &liquidatee, record_pk, 0).await?;
 
-    // The risk admin repays $2 (20% of the debt), enough to reset the tag
-    let risk_admin = test_f.payer();
-    let risk_admin_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(10).await;
-    let start_ix = liquidatee
-        .make_start_deleverage_ix(record_pk, risk_admin)
-        .await;
-    let repay_ix = liquidatee
-        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
-        .await;
-    let end_ix = liquidatee
-        .make_end_deleverage_ix(record_pk, risk_admin, vec![])
-        .await;
-    send_ixs(&test_f, &[start_ix, repay_ix, end_ix]).await?;
+    // $1.50 repaid against $8 of maintenance collateral leaves a $0.50 deficit, down from $2
+    set_timestamp(&test_f, T0 + 500).await;
+    refresh_oracles(&test_f).await;
+    run_deleverage(&test_f, &liquidatee, record_pk, &risk_admin_usdc_acc, 1.5).await?;
+    let record = load_record(&test_f, record_pk).await;
+    assert_eq!(record.tagged_at, T0 + 500);
+    assert_eq!(record.liquidation_receiver, Pubkey::default());
 
+    // A further $1 leaves $7.50 of debt against $8 of maintenance collateral: healthy
+    set_timestamp(&test_f, T0 + 1_000).await;
+    refresh_oracles(&test_f).await;
+    run_deleverage(&test_f, &liquidatee, record_pk, &risk_admin_usdc_acc, 1.0).await?;
     let record = load_record(&test_f, record_pk).await;
     assert_eq!(record.tagged_at, 0);
-    assert_eq!(record.liquidation_receiver, Pubkey::default());
     Ok(())
 }
 
 #[tokio::test]
-async fn legacy_liquidate_resets_tag() -> anyhow::Result<()> {
+async fn legacy_liquidate_dust_keeps_tag_material_restarts_clock() -> anyhow::Result<()> {
     let (test_f, liquidatee, liquidator, record_pk, _liquidator_usdc_acc) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -491,14 +523,23 @@ async fn legacy_liquidate_resets_tag() -> anyhow::Result<()> {
     refresh_oracles(&test_f).await;
     send_tag(&test_f, &liquidatee, record_pk, 0).await?;
 
-    // Liquidate 0.2 SOL ($2) against the USDC debt via the legacy instruction; the ~$1.90
-    // repaid (19% of the debt) is above the reset threshold
+    // Seizing 0.01 SOL ($0.10) repays ~$0.095 and erases only ~$0.055 of the $2 deficit
+    set_timestamp(&test_f, T0 + 1_800).await;
+    refresh_oracles(&test_f).await;
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank, 0.01, usdc_bank)
+        .await?;
+    let record = load_record(&test_f, record_pk).await;
+    assert_eq!(record.tagged_at, T0);
+
+    // Seizing 0.2 SOL ($2) repays ~$1.90 and erases ~$1.10, above the 25% bar
+    set_timestamp(&test_f, T0 + 3_600).await;
+    refresh_oracles(&test_f).await;
     liquidator
         .try_liquidate(&liquidatee, sol_bank, 0.2, usdc_bank)
         .await?;
-
     let record = load_record(&test_f, record_pk).await;
-    assert_eq!(record.tagged_at, 0);
+    assert_eq!(record.tagged_at, T0 + 3_600);
     Ok(())
 }
 

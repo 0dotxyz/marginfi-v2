@@ -17,9 +17,9 @@ pub fn read_tagged_at(trident: &mut Trident, liquidation_record_pk: Pubkey) -> i
         .unwrap_or(0)
 }
 
-/// A completed liquidation may clear the premium-growth tag (or leave it untouched when the
-/// repayment was below the reset threshold), but must never set or move it.
-pub fn assert_tag_cleared_or_unchanged(
+/// A completed liquidation may clear the premium-growth tag, restart it at the current time, or
+/// leave it untouched, but must never tag an untagged record nor move a tag backwards.
+pub fn assert_tag_cleared_or_advanced(
     trident: &mut Trident,
     liquidation_record_pk: Pubkey,
     tagged_at_before: i64,
@@ -27,8 +27,8 @@ pub fn assert_tag_cleared_or_unchanged(
 ) {
     let after = read_tagged_at(trident, liquidation_record_pk);
     invariant!(
-        after == 0 || after == tagged_at_before,
-        "{}: a liquidation must clear or preserve tagged_at, never set it. before: {}, after: {}",
+        after == 0 || (tagged_at_before != 0 && after >= tagged_at_before),
+        "{}: a liquidation must clear or advance tagged_at, never tag an untagged record. before: {}, after: {}",
         ctx,
         tagged_at_before,
         after
@@ -80,8 +80,8 @@ pub fn assert_receivership_cleared_after_success(
         newest.timestamp
     );
     invariant!(
-        rec.tagged_at == 0 || rec.tagged_at == tagged_at_before,
-        "receivership: a liquidation must clear or preserve tagged_at, never set it. before: {}, after: {}",
+        rec.tagged_at == 0 || (tagged_at_before != 0 && rec.tagged_at >= tagged_at_before),
+        "receivership: a liquidation must clear or advance tagged_at, never tag an untagged record. before: {}, after: {}",
         tagged_at_before,
         rec.tagged_at
     );

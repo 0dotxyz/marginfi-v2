@@ -946,7 +946,7 @@ impl FuzzTest {
             invariants::assert_liquidation_success_share_invariants(&snap, &after, asset_amount);
             invariants::assert_balances_packed(&mut self.trident, liquidator_marginfi_account);
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
-            invariants::assert_tag_cleared_or_unchanged(
+            invariants::assert_tag_cleared_or_advanced(
                 &mut self.trident,
                 liquidatee_record,
                 tagged_at_before,

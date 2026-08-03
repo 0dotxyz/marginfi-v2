@@ -5,7 +5,7 @@ use crate::{
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
     state::{
-        liquidation_record::tag_adjusted_premium,
+        liquidation_record::{tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
             clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
@@ -45,7 +45,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let is_dust_closeout = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
 
     let group = ctx.accounts.group.load()?;
-    // Read before `end_receivership` resets the tag
+    // Read before `end_receivership` updates the tag
     let tagged_at = liq_record.tagged_at;
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
@@ -168,13 +168,13 @@ pub fn end_receivership<'info>(
     let seized: I80F48 = pre_assets_equity - post_assets_equity;
     let repaid: I80F48 = pre_liabs_equity - post_liabilities_equity;
 
-    // Clear receivership. Any completed liquidation that repays debt resets the tag, matching
-    // the tag's one-shot incentive model.
+    let now = Clock::get()?.unix_timestamp;
+
+    // clear receivership
     marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
-    if repaid > I80F48::ZERO {
-        liq_record.tagged_at = 0;
-    }
+    liq_record.tagged_at =
+        tag_after_liquidation(liq_record.tagged_at, pre_health, post_health, now);
 
     let seized_f64 = seized.to_num::<f64>();
     let repaid_f64 = repaid.to_num::<f64>();
@@ -186,7 +186,7 @@ pub fn end_receivership<'info>(
 
         entry.asset_amount_seized = seized_f64.to_le_bytes();
         entry.liab_amount_repaid = repaid_f64.to_le_bytes();
-        entry.timestamp = Clock::get()?.unix_timestamp;
+        entry.timestamp = now;
     }
 
     Ok((

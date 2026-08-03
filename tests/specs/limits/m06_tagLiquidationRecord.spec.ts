@@ -114,6 +114,21 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
   const fetchRecord = () =>
     program.account.liquidationRecord.fetch(liquidationRecord);
 
+  /** Moves the clock forward and refreshes the pull oracles. */
+  const advanceClock = async (seconds: number) => {
+    const clock = await banksClient.getClock();
+    bankrunContext.setClock(
+      new Clock(
+        clock.slot,
+        clock.epochStartTimestamp,
+        clock.epoch,
+        clock.leaderScheduleEpoch,
+        clock.unixTimestamp + BigInt(seconds)
+      )
+    );
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+  };
+
   before(async () => {
     program = bankrunProgram;
     const setup = await genericMultiBankTestSetup(
@@ -269,7 +284,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     assert.equal(record.taggedAt.toNumber(), recordBefore.taggedAt.toNumber());
   });
 
-  it("(user 1) liquidates at a ~37% premium after the tag matures; tag resets", async () => {
+  it("(user 1) liquidates at a ~37% premium after the tag matures; clock restarts", async () => {
     const liquidator = users[1];
 
     // Warp one week ahead so the tag matures (premium cap grows to 100%)
@@ -361,19 +376,21 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     );
     assert.equal(lstBalanceBefore - lstBalanceAfter, repayAmount.toNumber());
 
-    // The liquidation resets the tag and records the entry
+    // Erasing $3.60 of the ~$6.75 deficit clears the 25% bar; the account is still unhealthy
     const now = await getBankrunTime(bankrunContext);
     const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), 0);
+    assert.equal(record.taggedAt.toNumber(), now);
     assertKeyDefault(record.liquidationReceiver);
     assert.equal(record.entries[3].timestamp.toNumber(), now);
   });
 
-  it("(permissionless) re-tag after reset while still unhealthy", async () => {
-    const timeAtTag = await getBankrunTime(bankrunContext);
-    await sendTag();
+  it("(permissionless) tag after a partial liquidation - should fail, still tagged", async () => {
+    const recordBefore = await fetchRecord();
+    const result = await sendTag(true);
+    assertBankrunTxFailed(result, ERR_ALREADY_TAGGED);
+
     const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), timeAtTag);
+    assert.equal(record.taggedAt.toNumber(), recordBefore.taggedAt.toNumber());
   });
 
   it("(admin) restores weights; tag clears, then tagging while healthy fails", async () => {
@@ -468,15 +485,16 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     assertBankrunTxFailed(result, ERR_INVALID_LIQUIDATION_RECORD);
   });
 
-  it("(user 1) legacy liquidate with the record resets the tag", async () => {
+  it("(user 1) legacy liquidate with the record restarts the clock", async () => {
     const liquidator = users[1];
     const liquidatorAccounts = composeRemainingAccounts([
       [debtBank, oracles.pythPullLst.publicKey],
       [collateralBank, oracles.tokenAOracle.publicKey],
     ]);
     const liquidateeAccounts = composeRemainingAccounts(balanceGroups);
-    // Seize 0.2 token A ($2); the ~$1.90 repaid is well above the 5% reset threshold on the
-    // remaining ~$4.55 debt
+    await advanceClock(600);
+    // Seize 0.2 token A ($2); the ~$1.90 repaid erases ~$1.70 of the ~$3.15 deficit, above the
+    // 25% bar, and leaves the account unhealthy
     const tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 }),
       await liquidateIx(liquidator.mrgnBankrunProgram, {
@@ -500,7 +518,8 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
 
+    const now = await getBankrunTime(bankrunContext);
     const record = await fetchRecord();
-    assert.equal(record.taggedAt.toNumber(), 0);
+    assert.equal(record.taggedAt.toNumber(), now);
   });
 });

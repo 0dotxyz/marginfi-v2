@@ -2,6 +2,7 @@ use fixed::types::I80F48;
 
 use crate::constants::{
     LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMIUM_SECS, LIQUIDATION_TAG_MAX_PREMIUM,
+    LIQUIDATION_TAG_RESET_DEFICIT_FRACTION,
 };
 
 /// Maximum premium a liquidator may earn, accounting for the record's tag: `base_premium` until
@@ -21,10 +22,34 @@ pub fn tag_adjusted_premium(base_premium: I80F48, tagged_at: i64, now: i64) -> I
     base_premium + (LIQUIDATION_TAG_MAX_PREMIUM - base_premium) * progress
 }
 
+/// The record's `tagged_at` after a completed liquidation: cleared once the account is healthy,
+/// restarted at `now` when the liquidation erased at least `LIQUIDATION_TAG_RESET_DEFICIT_FRACTION`
+/// of the health deficit, otherwise unchanged. Healths are maintenance-weighted at matching prices.
+pub fn tag_after_liquidation(
+    tagged_at: i64,
+    pre_health: I80F48,
+    post_health: I80F48,
+    now: i64,
+) -> i64 {
+    if tagged_at == 0 {
+        return 0;
+    }
+    let pre_deficit = I80F48::max(I80F48::ZERO, -pre_health);
+    let post_deficit = I80F48::max(I80F48::ZERO, -post_health);
+    if post_deficit == I80F48::ZERO {
+        return 0;
+    }
+    if pre_deficit - post_deficit >= pre_deficit * LIQUIDATION_TAG_RESET_DEFICIT_FRACTION {
+        return now;
+    }
+    tagged_at
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::constants::LIQUIDATION_BONUS_FEE_MINIMUM;
+    use fixed_macro::types::I80F48;
 
     const BASE: I80F48 = LIQUIDATION_BONUS_FEE_MINIMUM;
     const TAGGED_AT: i64 = 1_000_000;
@@ -79,6 +104,50 @@ mod tests {
                 TAGGED_AT + LIQUIDATION_TAG_FULL_PREMIUM_SECS
             ),
             base
+        );
+    }
+
+    const NOW: i64 = TAGGED_AT + 50_000;
+
+    #[test]
+    fn untagged_record_is_never_tagged_by_a_liquidation() {
+        assert_eq!(
+            tag_after_liquidation(0, I80F48!(-100), I80F48!(-10), NOW),
+            0
+        );
+    }
+
+    #[test]
+    fn healthy_after_liquidation_clears_tag() {
+        assert_eq!(
+            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48::ZERO, NOW),
+            0
+        );
+        assert_eq!(
+            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(5), NOW),
+            0
+        );
+    }
+
+    #[test]
+    fn deficit_reduction_at_threshold_restarts_clock() {
+        // Exactly 25% of a 100 deficit erased
+        assert_eq!(
+            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(-75), NOW),
+            NOW
+        );
+    }
+
+    #[test]
+    fn deficit_reduction_below_threshold_leaves_tag() {
+        assert_eq!(
+            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(-75.01), NOW),
+            TAGGED_AT
+        );
+        // Dust repayment on a large deficit: the growth clock keeps running
+        assert_eq!(
+            tag_after_liquidation(TAGGED_AT, I80F48!(-1000), I80F48!(-999.99), NOW),
+            TAGGED_AT
         );
     }
 }

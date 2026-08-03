@@ -76,6 +76,9 @@ pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour
 pub const LIQUIDATION_TAG_FULL_PREMIUM_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Maximum liquidation premium reachable via tag growth (1 = 100%).
 pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(1);
+/// Share of the account's health deficit a liquidation must erase to restart the premium-growth
+/// clock (see `tag_after_liquidation`).
+pub const LIQUIDATION_TAG_RESET_DEFICIT_FRACTION: I80F48 = I80F48!(0.25);
 /// Maximum order execution fee as a percent of the order size
 /// * This value is used together with the slippage set by the user.
 pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%

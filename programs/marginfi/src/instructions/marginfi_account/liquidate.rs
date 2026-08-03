@@ -1,6 +1,7 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
 use crate::state::{
     bank::{BankImpl, BankVaultType},
+    liquidation_record::tag_after_liquidation,
     marginfi_account::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
         check_account_init_health, check_post_liquidation_condition_and_get_account_health,
@@ -250,7 +251,7 @@ pub fn lending_account_liquidate<'info>(
 
     // ##Accounting changes##
 
-    let (pre_balances, post_balances, repaid_value) = {
+    let (pre_balances, post_balances) = {
         let asset_amount: I80F48 = I80F48::from_num(asset_amount);
 
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
@@ -306,15 +307,6 @@ pub fn lending_account_liquidate<'info>(
             )?,
             liab_price,
             liab_bank.get_balance_decimals(),
-        )?;
-
-        // Dollar value of the debt actually repaid, used to decide whether the liquidation
-        // resets the record's premium-growth tag
-        let repaid_value: I80F48 = calc_value(
-            liab_amount_final,
-            liab_price,
-            liab_bank.get_balance_decimals(),
-            None,
         )?;
 
         // Insurance fund fee
@@ -508,29 +500,8 @@ pub fn lending_account_liquidate<'info>(
                 liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_post_balance
                     .to_num::<f64>(),
             },
-            repaid_value,
         )
     };
-
-    // The liquidatee's liquidation record must be supplied whenever one is registered; the
-    // completed liquidation resets its premium-growth tag once it repays debt.
-    match ctx.accounts.liquidatee_liquidation_record.as_ref() {
-        Some(record_loader) => {
-            check!(
-                record_loader.key() == liquidatee_marginfi_account.liquidation_record,
-                MarginfiError::InvalidLiquidationRecord
-            );
-            if repaid_value > I80F48::ZERO {
-                record_loader.load_mut()?.tagged_at = 0;
-            }
-        }
-        None => {
-            check!(
-                liquidatee_marginfi_account.liquidation_record == Pubkey::default(),
-                MarginfiError::InvalidLiquidationRecord
-            );
-        }
-    }
 
     // ## Risk checks ##
     let liquidator_remaining_acc_len = liquidator_accounts as usize;
@@ -552,6 +523,30 @@ pub fn lending_account_liquidate<'info>(
     // Note: the liquidatee's post-liquidation health is computed above but intentionally not
     // persisted to its health cache here. Writing it would add CU to the hot liquidation path for a
     // value any consumer can refresh on demand via `lending_account_pulse_health`.
+
+    // The liquidatee's liquidation record is required whenever one is registered; the completed
+    // liquidation updates its premium-growth tag.
+    match ctx.accounts.liquidatee_liquidation_record.as_ref() {
+        Some(record_loader) => {
+            check!(
+                record_loader.key() == liquidatee_marginfi_account.liquidation_record,
+                MarginfiError::InvalidLiquidationRecord
+            );
+            let mut record = record_loader.load_mut()?;
+            record.tagged_at = tag_after_liquidation(
+                record.tagged_at,
+                pre_liquidation_health,
+                post_liquidation_health,
+                current_timestamp,
+            );
+        }
+        None => {
+            check!(
+                liquidatee_marginfi_account.liquidation_record == Pubkey::default(),
+                MarginfiError::InvalidLiquidationRecord
+            );
+        }
+    }
 
     liquidatee_marginfi_account
         .indexer_flags
@@ -677,7 +672,7 @@ pub struct LendingAccountLiquidate<'info> {
 
     /// The liquidatee's liquidation record. Required whenever the liquidatee has one registered
     /// (`liquidatee_marginfi_account.liquidation_record` is set); the completed liquidation may
-    /// reset its premium-growth tag.
+    /// clear or restart its premium-growth tag (see `tag_after_liquidation`).
     #[account(mut)]
     pub liquidatee_liquidation_record: Option<AccountLoader<'info, LiquidationRecord>>,
 }
