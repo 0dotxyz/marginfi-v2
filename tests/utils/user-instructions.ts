@@ -1000,3 +1000,44 @@ export const endExecuteOrderIx = (
     .remainingAccounts(rem)
     .instruction();
 };
+
+
+export type LendingAccountTransferPositionArgs = {
+  sourceMarginfiAccount: PublicKey;
+  destinationMarginfiAccount: PublicKey;
+  bank: PublicKey;
+  marginfiGroup: PublicKey;
+  authority: PublicKey;
+  destinationAuthority: PublicKey;
+  transferAmount: BN;
+  globalFeeWallet: PublicKey;
+  remainingAccounts: AccountMeta[];
+};
+
+export const lendingAccountTransferPositionIx = (
+  program: Program<Marginfi>,
+  args: LendingAccountTransferPositionArgs
+): Promise<TransactionInstruction> => {
+  const transferAmountBytes = new BN(args.transferAmount).toBuffer('le', 8);
+  const discriminator = Buffer.from([63, 111, 55, 56, 14, 212, 75, 137]);
+  const data = Buffer.concat([discriminator, transferAmountBytes]);
+
+  const accounts: AccountMeta[] = [
+    { pubkey: args.marginfiGroup, isSigner: false, isWritable: false },
+    { pubkey: args.sourceMarginfiAccount, isSigner: false, isWritable: true },
+    { pubkey: args.destinationMarginfiAccount, isSigner: false, isWritable: true },
+    { pubkey: args.authority, isSigner: true, isWritable: false },
+    { pubkey: args.destinationAuthority, isSigner: true, isWritable: true },
+    { pubkey: args.bank, isSigner: false, isWritable: true },
+    { pubkey: args.globalFeeWallet, isSigner: false, isWritable: true },
+    { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+  ];
+
+  accounts.push(...args.remainingAccounts);
+
+  return Promise.resolve(new TransactionInstruction({
+    programId: program.programId,
+    keys: accounts,
+    data,
+  }));
+};

@@ -135,6 +135,10 @@ async fn test_pause_delegate_admin_cannot_edit_fee_state() -> anyhow::Result<()>
             order_execution_max_fee: Some(fee_state.order_execution_max_fee),
             pause_delegate_admin: None,
             account_transfer_fee: None,
+            position_transfer_fee: Some(fee_state.position_transfer_fee),
+            position_transfer_min_value_usd_cents: Some(
+                fee_state.position_transfer_min_value_usd_cents,
+            ),
         }
         .data(),
     };

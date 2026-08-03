@@ -205,7 +205,7 @@ describe("Same-bank deposit", () => {
   const setProtocolPaused = async (paused: boolean) => {
     const controlIx = paused
       ? await panicPause(globalProgramAdmin.mrgnProgram, {})
-      : await panicUnpause(globalProgramAdmin.mrgnProgram, {});
+      : await panicUnpause(globalProgramAdmin.mrgnProgram, { admin: globalProgramAdmin.wallet.publicKey });
     const tx = new Transaction().add(
       dummyIx(globalProgramAdmin.wallet.publicKey, users[0].wallet.publicKey),
       controlIx,

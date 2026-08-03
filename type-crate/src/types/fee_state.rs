@@ -68,11 +68,16 @@ pub struct FeeState {
     pub order_execution_max_fee: WrappedI80F48,
     /// Can pause (not unpause) the protocol, but cannot modify any fee configuration.
     pub pause_delegate_admin: Pubkey,
+    pub position_transfer_fee: u32,
+    pub position_transfer_min_value_usd_cents: u32,
+    pub position_transfer_fee_initialized: u8,
+    pub position_transfer_min_value_initialized: u8,
+    _padding_initialized: [u8; 6],
     /// Reserved for future use (e.g. the variable-borrow premium settings). Accounts created
     /// before the struct grew to this size are v1-sized (`8 + V1_LEN` bytes) and must be
     /// grown via `resize_global_fee_state` before this program version can load them; the new
     /// bytes are zero-filled.
-    pub _reserved0: [u64; 32],
+    pub _reserved0: [u64; 30],
 }
 
 impl FeeState {

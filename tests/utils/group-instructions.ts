@@ -447,6 +447,8 @@ export type EditGlobalFeeStateArgs = {
   orderExecutionMaxFee?: WrappedI80F48 | null;
   pauseDelegateAdmin?: PublicKey | null; // undefined = no-op, null = clear
   accountTransferFee?: number | null; // u32, in lamports; 0 => use default
+  positionTransferFee?: number | null; 
+  positionTransferMinValueUsdCents?: number | null; 
 };
 
 // Covered by e05_panicMode "(fee admin) edits all global fee fields and restores them".
@@ -471,7 +473,9 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
-      args.accountTransferFee ?? null
+      args.accountTransferFee ?? null,
+      args.positionTransferFee ?? null,
+      args.positionTransferMinValueUsdCents ?? null
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -999,17 +1003,17 @@ export const panicPause = async (
 };
 
 export type PanicUnpauseArgs = {
-  // No args (global fee admin and fee state are inferred)...
+  admin: PublicKey;
 };
 
 export const panicUnpause = async (
   program: Program<Marginfi>,
-  _args: PanicUnpauseArgs,
+  args: PanicUnpauseArgs,
 ) => {
   const ix = await program.methods
     .panicUnpause()
     .accounts({
-      // globalFeeAdmin: args.admin,
+      globalFeeAdmin: args.admin,
       // feeState: args.feeState,
     })
     .instruction();
