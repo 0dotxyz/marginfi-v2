@@ -5,7 +5,7 @@ use crate::MarginfiResult;
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use marginfi_type_crate::types::{
-    MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY,
+    MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES, MAX_PREMIUM_RATE, PREMIUM_TAG_EMPTY,
 };
 
 /// (emode admin only) Set one pair of the group's variable-borrow premium matrix.
@@ -23,6 +23,11 @@ pub fn lending_pool_configure_group_premium(
     // Zero (untagged) never matches a lookup, so storing it would create a dead entry.
     check!(
         collateral_tag != PREMIUM_TAG_EMPTY && liability_tag != PREMIUM_TAG_EMPTY,
+        MarginfiError::PremiumEntryInvalid
+    );
+    // Policy cap: at most 100% APR per pair (the encoding itself allows up to 1000%).
+    check!(
+        rate <= MAX_PREMIUM_RATE,
         MarginfiError::PremiumEntryInvalid
     );
 

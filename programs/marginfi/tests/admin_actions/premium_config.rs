@@ -1,10 +1,11 @@
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use fixtures::prelude::*;
+use fixtures::{assert_custom_error, prelude::*};
 use marginfi::state::bank::BankImpl;
+use marginfi::errors::MarginfiError;
 use marginfi_type_crate::{
     constants::PREMIUM_ACTIVE,
-    types::{milli_to_u32, FeeState, PremiumEntry, MAX_PREMIUM_ENTRIES},
+    types::{milli_to_u32, FeeState, PremiumEntry, MAX_PREMIUM_ENTRIES, MAX_PREMIUM_RATE},
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -39,7 +40,7 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     // Global fee admin (payer) sets the premium wallet
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(premium_wallet)
         .await?;
 
     let fee_state = load_fee_state(&test_f).await;
@@ -127,9 +128,38 @@ async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
     assert!(res.is_err());
 
     let res = group_f
-        .try_edit_fee_state_premium_with_signer(Some(Pubkey::new_unique()), &intruder)
+        .try_edit_fee_state_premium_with_signer(Pubkey::new_unique(), &intruder)
         .await;
     assert!(res.is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn premium_config_rate_capped_at_100_percent() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let group_f = &test_f.marginfi_group;
+
+    // Exactly at the cap: accepted.
+    group_f
+        .try_configure_group_premium(PremiumEntry {
+            collateral_tag: 1,
+            liability_tag: 2,
+            rate: MAX_PREMIUM_RATE,
+        })
+        .await?;
+    let group = group_f.load().await;
+    assert_eq!(group.premium_entries[0].rate, MAX_PREMIUM_RATE);
+
+    // One above (still well inside the 1000% encoding range): rejected.
+    let res = group_f
+        .try_configure_group_premium(PremiumEntry {
+            collateral_tag: 1,
+            liability_tag: 3,
+            rate: MAX_PREMIUM_RATE + 1,
+        })
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumEntryInvalid);
 
     Ok(())
 }

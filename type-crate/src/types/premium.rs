@@ -11,6 +11,10 @@ use crate::{assert_struct_align, assert_struct_size};
 pub const MAX_PREMIUM_ENTRIES: usize = 64;
 /// A `premium_tag` of 0 is untagged: it never matches any premium entry.
 pub const PREMIUM_TAG_EMPTY: u16 = 0;
+/// Maximum configurable premium APR for a pair: 100%, in the `milli_to_u32` encoding
+/// (`u32::MAX` = 1000%, so 100% = `u32::MAX / 10`). The encoding ceiling of 1000% is
+/// deliberately not exposed to the emode admin.
+pub const MAX_PREMIUM_RATE: u32 = u32::MAX / 10;
 
 assert_struct_size!(PremiumSettings, 32);
 assert_struct_align!(PremiumSettings, 8);
