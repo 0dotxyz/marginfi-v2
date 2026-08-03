@@ -457,6 +457,36 @@ async fn closing_the_record_keeps_the_tag() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The ordinary repay path clears the tag once the last liability is gone.
+#[tokio::test]
+async fn repaying_all_debt_clears_the_tag() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    let repay_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 20)
+        .await;
+    liquidatee
+        .try_bank_repay_with_authority(
+            repay_acc.key,
+            usdc_bank,
+            10.0,
+            Some(true),
+            &liquidatee_authority,
+        )
+        .await?;
+
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
 /// A transfer carries the tag to the account it migrates to.
 #[tokio::test]
 async fn transfer_carries_the_tag() -> anyhow::Result<()> {
