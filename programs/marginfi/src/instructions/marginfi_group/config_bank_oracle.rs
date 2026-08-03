@@ -80,6 +80,7 @@ pub struct LendingPoolConfigureBankOracle<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }

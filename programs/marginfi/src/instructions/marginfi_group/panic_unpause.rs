@@ -53,6 +53,7 @@ pub struct PanicUnpause<'info> {
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }

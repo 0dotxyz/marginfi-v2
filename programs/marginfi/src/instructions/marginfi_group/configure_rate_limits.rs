@@ -66,7 +66,8 @@ pub struct ConfigureBankRateLimits<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
@@ -125,6 +126,7 @@ pub struct ConfigureGroupRateLimits<'info> {
 
     pub admin: Signer<'info>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }

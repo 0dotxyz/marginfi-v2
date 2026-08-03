@@ -38,7 +38,8 @@ pub struct DisableStakedOracles<'info> {
     )]
     pub staked_settings: AccountLoader<'info, StakedSettings>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
@@ -75,6 +76,7 @@ pub struct EnableStakedOracleOnramp<'info> {
     )]
     pub staked_settings: AccountLoader<'info, StakedSettings>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }

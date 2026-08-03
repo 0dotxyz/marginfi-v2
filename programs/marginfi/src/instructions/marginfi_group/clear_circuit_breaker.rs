@@ -64,6 +64,7 @@ pub struct LendingPoolClearCircuitBreaker<'info> {
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }

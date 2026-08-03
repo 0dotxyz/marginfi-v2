@@ -8,6 +8,7 @@ use marginfi_type_crate::constants::{
 };
 use pretty_assertions::assert_eq;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instructions_sysvar;
 use solana_program_test::*;
 use solana_sdk::signature::Keypair;
 use solana_sdk::{signer::Signer, transaction::Transaction};
@@ -585,7 +586,7 @@ fn create_handle_bankruptcy_cpi_metas(
         AccountMeta::new(accounts.insurance_vault, false),
         AccountMeta::new_readonly(accounts.insurance_vault_authority, false),
         AccountMeta::new_readonly(accounts.token_program, false),
-        AccountMeta::new_readonly(accounts.marginfi_program, false),
+        AccountMeta::new_readonly(accounts.instruction_sysvar, false),
     ]
 }
 
@@ -641,13 +642,17 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
         insurance_vault,
         insurance_vault_authority,
         token_program: anchor_spl::token::ID,
-        marginfi_program: marginfi::ID,
+        instruction_sysvar: solana_instructions_sysvar::id(),
     };
 
     let mut metas = create_handle_bankruptcy_cpi_metas(&cpi_accounts);
-    let remaining = borrower_mfi_account_f
+    let mut remaining = borrower_mfi_account_f
         .load_observation_account_metas(vec![], vec![])
         .await;
+    remaining.insert(
+        0,
+        AccountMeta::new_readonly(solana_instructions_sysvar::id(), false),
+    );
 
     metas.extend_from_slice(&remaining);
 

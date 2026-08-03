@@ -329,7 +329,8 @@ pub struct LendingPoolWithdrawFees<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
@@ -413,7 +414,8 @@ pub struct LendingPoolWithdrawInsurance<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
@@ -457,7 +459,8 @@ pub struct LendingPoolUpdateFeesDestinationAccount<'info> {
     )]
     pub destination_account: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
 

@@ -169,6 +169,7 @@ pub struct LendingPoolSetBankSameAssetEmodeEligibility<'info> {
     )]
     pub same_asset_emode_registry: AccountLoader<'info, SameAssetEmodeRegistry>,
 
-    #[account(address = pubkey!("Sysvar1nstructions4gQvDKZeTQvzK88j5KqVn5P"))]
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 }
