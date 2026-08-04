@@ -1,5 +1,6 @@
 use crate::{
     events::{CircuitBreakerClearedEvent, CB_CLEAR_REASON_ADMIN},
+    ix_utils,
     state::bank::BankImpl,
     MarginfiError, MarginfiResult,
 };
@@ -16,6 +17,8 @@ pub fn lending_pool_clear_circuit_breaker(
     ctx: Context<LendingPoolClearCircuitBreaker>,
     reseed_reference: bool,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     {
         let group = ctx.accounts.group.load()?;
         let signer = ctx.accounts.authority.key();
@@ -60,4 +63,8 @@ pub struct LendingPoolClearCircuitBreaker<'info> {
 
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

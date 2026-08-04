@@ -2,6 +2,7 @@ use crate::events::EditStakedSettingsEvent;
 use crate::state::staked_settings::StakedSettingsImpl;
 // Used by the group admin to edit the default features of staked collateral banks. Remember to
 // propagate afterwards.
+use crate::ix_utils;
 use crate::set_if_some;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
@@ -11,6 +12,8 @@ pub fn edit_staked_settings(
     ctx: Context<EditStakedSettings>,
     settings: StakedSettingsEditConfig,
 ) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // let group = ctx.accounts.marginfi_group.load()?;
     let mut staked_settings = ctx.accounts.staked_settings.load_mut()?;
     // require_keys_eq!(group.admin, ctx.accounts.admin.key());
@@ -57,6 +60,10 @@ pub struct EditStakedSettings<'info> {
         has_one = marginfi_group @ MarginfiError::InvalidGroup
     )]
     pub staked_settings: AccountLoader<'info, StakedSettings>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 #[derive(AnchorDeserialize, AnchorSerialize, Default)]

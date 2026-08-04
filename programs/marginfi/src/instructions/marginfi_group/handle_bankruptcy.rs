@@ -3,7 +3,7 @@ use crate::{
     constants::PROGRAM_VERSION,
     debug,
     events::{AccountEventHeader, LendingPoolBankHandleBankruptcyEvent},
-    math_error,
+    ix_utils, math_error,
     prelude::MarginfiError,
     state::{
         bank::{BankImpl, BankVaultType},
@@ -43,6 +43,8 @@ use std::cmp::{max, min};
 pub fn lending_pool_handle_bankruptcy<'info>(
     mut ctx: Context<'info, LendingPoolHandleBankruptcy<'info>>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let LendingPoolHandleBankruptcy {
         marginfi_account: marginfi_account_loader,
         insurance_vault,
@@ -307,4 +309,8 @@ pub struct LendingPoolHandleBankruptcy<'info> {
     pub insurance_vault_authority: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

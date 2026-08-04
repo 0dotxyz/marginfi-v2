@@ -23,6 +23,7 @@ async fn marginfi_group_create_success() -> anyhow::Result<()> {
         admin: test_f.payer(),
         fee_state: fee_state_key,
         system_program: system_program::id(),
+        instruction_sysvar: solana_sdk::sysvar::instructions::ID,
     };
     let init_marginfi_group_ix = Instruction {
         program_id: marginfi::ID,

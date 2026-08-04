@@ -4,13 +4,14 @@ use marginfi_type_crate::{
     types::{Bank, BankMetadata, MarginfiGroup},
 };
 
-use crate::{check_eq, MarginfiError};
+use crate::{check_eq, ix_utils, MarginfiError};
 
 pub fn write_bank_metadata(
     ctx: Context<WriteBankMetadata>,
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     // When the bank's seed is on-chain, recompute the canonical PDA and verify the passed bank
     // account matches it. Legacy keypair banks (BANK_SEED_KNOWN unset) skip the check.
     {
@@ -42,6 +43,7 @@ pub fn write_bank_metadata_pre_init(
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut metadata = ctx.accounts.metadata.load_mut()?;
     apply_metadata_write(&mut metadata, ticker, description)
 }
@@ -105,6 +107,10 @@ pub struct WriteBankMetadata<'info> {
 
     #[account(mut, has_one = bank)]
     pub metadata: AccountLoader<'info, BankMetadata>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -132,4 +138,8 @@ pub struct WriteBankMetadataPreInit<'info> {
 
     #[account(mut, has_one = bank)]
     pub metadata: AccountLoader<'info, BankMetadata>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

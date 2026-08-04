@@ -62,6 +62,7 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_deleverage_withdraw
             accounts: marginfi::accounts::ConfigureDeleverageWithdrawalLimit {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: limit_admin.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::ConfigureDeleverageWithdrawalLimit { limit: 100 }.data(),
@@ -92,6 +93,7 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_deleverage_withdraw
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: flow_admin.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {
@@ -199,6 +201,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {
@@ -235,6 +238,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {
@@ -271,6 +275,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {
@@ -307,6 +312,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {
@@ -356,6 +362,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: attacker.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateDeleverageWithdrawals {

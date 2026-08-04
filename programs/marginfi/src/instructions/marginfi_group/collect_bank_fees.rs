@@ -1,4 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankCollectFeesEvent};
+use crate::ix_utils;
 use crate::state::bank::{BankImpl, BankVaultType};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{bank_signer, math_error, MarginfiResult};
@@ -253,6 +254,7 @@ pub fn lending_pool_withdraw_fees<'info>(
     mut ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
     amount: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let LendingPoolWithdrawFees {
         bank: bank_loader,
         fee_vault,
@@ -326,12 +328,17 @@ pub struct LendingPoolWithdrawFees<'info> {
     pub dst_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 pub fn lending_pool_withdraw_insurance<'info>(
     mut ctx: Context<'info, LendingPoolWithdrawInsurance<'info>>,
     amount: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let LendingPoolWithdrawInsurance {
         bank: bank_loader,
         insurance_vault,
@@ -406,12 +413,17 @@ pub struct LendingPoolWithdrawInsurance<'info> {
     pub dst_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 /// Fees will be withdrawn to fees_destination_account
 pub fn lending_pool_update_fees_destination_account<'info>(
     ctx: Context<'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     let old_dst = bank.fees_destination_account;
@@ -446,6 +458,10 @@ pub struct LendingPoolUpdateFeesDestinationAccount<'info> {
             @ MarginfiError::InvalidFeesDestinationAccount
     )]
     pub destination_account: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 pub fn lending_pool_withdraw_fees_permissionless<'info>(

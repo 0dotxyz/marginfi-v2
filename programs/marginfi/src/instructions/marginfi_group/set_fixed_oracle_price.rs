@@ -1,4 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetFixedOraclePriceEvent};
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, errors::MarginfiError, MarginfiResult};
@@ -16,6 +17,8 @@ pub fn lending_pool_set_fixed_oracle_price(
     ctx: Context<LendingPoolSetFixedOraclePrice>,
     price: WrappedI80F48,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -91,4 +94,8 @@ pub struct LendingPoolSetFixedOraclePrice<'info> {
         has_one = group
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

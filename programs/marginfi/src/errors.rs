@@ -446,7 +446,9 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    #[msg("Durable nonce cannot be used for this instruction")]
+    DurableNonceNotAllowed, // 6605
+                            // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -691,6 +693,7 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::DurableNonceNotAllowed,
 
             _ => MarginfiError::InternalLogicError,
         }

@@ -1,4 +1,5 @@
 // Used by the group admin to enable staked collateral banks and configure their default features
+use crate::ix_utils;
 use crate::state::staked_settings::StakedSettingsImpl;
 use crate::utils::wrapped_i80f48_to_f64;
 use crate::MarginfiError;
@@ -12,6 +13,8 @@ pub fn initialize_staked_settings(
     ctx: Context<InitStakedSettings>,
     settings: StakedSettingsConfig,
 ) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut staked_settings = ctx.accounts.staked_settings.load_init()?;
 
     *staked_settings = StakedSettings::new(
@@ -72,6 +75,10 @@ pub struct InitStakedSettings<'info> {
     pub staked_settings: AccountLoader<'info, StakedSettings>,
 
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 #[derive(AnchorDeserialize, AnchorSerialize, Default)]

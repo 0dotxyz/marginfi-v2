@@ -24,6 +24,7 @@ use solana_program::{
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use std::mem::size_of;
+use solana_instructions_sysvar;
 
 pub struct AccountsState {
     pub bump: Bump,
@@ -408,6 +409,21 @@ impl AccountsState {
         rent.to_account_info(&mut account_info).unwrap();
 
         account_info
+    }
+
+    pub fn new_instruction_sysvar_account(&self) -> AccountInfo<'_> {
+        let id_key = solana_instructions_sysvar::id();
+        let data = self.bump.alloc_slice_fill_copy(0, 0u8);
+
+        AccountInfo::new(
+            self.bump.alloc(id_key),
+            false,
+            false,
+            self.bump.alloc(0),
+            data,
+            &sysvar::ID,
+            false,
+        )
     }
 
     pub fn new_vault_account<'a>(

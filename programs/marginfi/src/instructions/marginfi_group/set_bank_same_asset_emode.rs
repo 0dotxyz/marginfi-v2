@@ -1,4 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetSameAssetEmodeEligibilityEvent};
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
@@ -19,6 +20,8 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
     enabled: bool,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let group = ctx.accounts.group.load()?;
 
     check!(
@@ -165,4 +168,8 @@ pub struct LendingPoolSetBankSameAssetEmodeEligibility<'info> {
         bump,
     )]
     pub same_asset_emode_registry: AccountLoader<'info, SameAssetEmodeRegistry>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

@@ -1,6 +1,7 @@
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
+use crate::ix_utils;
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
@@ -21,6 +22,8 @@ pub fn lending_pool_configure_bank(
     ctx: Context<LendingPoolConfigureBank>,
     bank_config: BankConfigOpt,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     // If settings are frozen, you can only update the deposit and borrow limits, everything else is ignored.
@@ -93,6 +96,10 @@ pub struct LendingPoolConfigureBank<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 /// Permissionlessly deposit same-mint emissions directly into the bank liquidity vault,
