@@ -981,7 +981,8 @@ impl FuzzTest {
         msg: Option<&str>,
     ) {
         let record = self.liquidation_record_pda(liquidatee_marginfi_account);
-        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, record);
+        let tagged_at_before =
+            invariants::read_tagged_at(&mut self.trident, liquidatee_marginfi_account);
         let liq_banks = self.get_marginfi_account_banks(liquidatee_marginfi_account, None);
         let health_remaining_start = self.remaining_accounts_for_bank_risk_only(liq_banks.clone());
         let health_remaining_end = self.remaining_accounts_for_bank_risk_banks_only(liq_banks);
