@@ -586,6 +586,7 @@ fn create_handle_bankruptcy_cpi_metas(
         AccountMeta::new(accounts.insurance_vault, false),
         AccountMeta::new_readonly(accounts.insurance_vault_authority, false),
         AccountMeta::new_readonly(accounts.token_program, false),
+        AccountMeta::new_readonly(accounts.marginfi_program, false),
     ]
 }
 
