@@ -4,8 +4,7 @@ use crate::{
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
     state::marginfi_account::{
-        any_balance_bank_is_cb_halted, check_pre_liquidation_condition_and_get_account_health,
-        MarginfiAccountImpl,
+        check_pre_liquidation_condition_and_get_account_health, MarginfiAccountImpl,
     },
 };
 use anchor_lang::prelude::*;
@@ -19,7 +18,7 @@ use marginfi_type_crate::types::{
 /// time (see `tag_adjusted_premium`). Calling this instruction while the account is healthy again
 /// or has no liabilities clears any existing tag instead.
 /// * Fails if unhealthy and already tagged, or healthy and not tagged.
-/// * Fails if tagging while any balance bank is CB-halted (liquidation is admin-only then).
+/// * A CB halt does not block tagging.
 pub fn tag_liquidation_record<'info>(
     ctx: Context<'info, TagLiquidationRecord<'info>>,
 ) -> MarginfiResult {
@@ -48,12 +47,6 @@ pub fn tag_liquidation_record<'info>(
         check!(
             marginfi_account.liquidation_tagged_at == 0,
             MarginfiError::AccountAlreadyTagged
-        );
-        // While any balance bank is CB-halted, liquidation is admin-only, so the premium-growth
-        // clock must not start.
-        check!(
-            !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
-            MarginfiError::CircuitBreakerAdminOnly
         );
         marginfi_account.liquidation_tagged_at = Clock::get()?.unix_timestamp;
     }

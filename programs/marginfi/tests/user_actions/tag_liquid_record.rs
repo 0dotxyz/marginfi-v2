@@ -655,7 +655,7 @@ fn cb_config() -> BankConfigOpt {
 }
 
 #[tokio::test]
-async fn tag_blocked_while_cb_halted() -> anyhow::Result<()> {
+async fn tag_allowed_while_cb_halted() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -691,8 +691,7 @@ async fn tag_blocked_while_cb_halted() -> anyhow::Result<()> {
         .set_pyth_oracle_timestamp(PYTH_USDC_FEED, trip_time)
         .await;
 
-    let res = send_tag(&test_f, &liquidatee, 0).await;
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::CircuitBreakerAdminOnly);
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, trip_time);
     Ok(())
 }
