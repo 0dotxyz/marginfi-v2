@@ -54,7 +54,7 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import { getEpochAndSlot } from "../../utils/bankrunConnection";
+import { dummyIx, getEpochAndSlot } from "../../utils/bankrunConnection";
 import { Clock } from "../../utils/litesvm";
 import { genericMultiBankTestSetup } from "../../genericSetups";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
@@ -79,7 +79,6 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
   let liquidationRecord: PublicKey;
   /** [[bank, oracle]] groups for the liquidatee's two balances */
   let balanceGroups: PublicKey[][] = [];
-  let tagNonce = 0;
 
   const collateralWeightConfig = (init: number, maint: number) => {
     const config = defaultBankConfigOptRaw();
@@ -93,8 +92,8 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
   const sendTag = async (expectFail: boolean = false) => {
     const liquidator = users[1];
     const tx = new Transaction().add(
-      // The varied CU limit makes each tag tx unique so results are never replayed
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 + tagNonce++ }),
+      // Keeps each tag tx unique so bankrun never replays a cached result
+      dummyIx(liquidator.wallet.publicKey, liquidator.wallet.publicKey),
       await tagLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining: composeRemainingAccounts(balanceGroups),
