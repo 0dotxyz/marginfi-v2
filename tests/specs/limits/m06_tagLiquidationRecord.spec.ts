@@ -64,7 +64,7 @@ const groupSeed = Buffer.from("MARGINFI_GROUP_SEED_12340000TAG0");
 const startingSeed = 480;
 
 const ERR_HEALTHY_ACCOUNT = 6068;
-const ERR_ALREADY_TAGGED = 6605;
+const ERR_ALREADY_TAGGED = 6054;
 
 /** Original limits from bank creation (defaultBankConfig), reapplied on every configureBank. */
 const BANK_LIMIT = new BN(100_000_000_000);
