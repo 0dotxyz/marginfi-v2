@@ -487,6 +487,77 @@ async fn repaying_all_debt_clears_the_tag() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A pulse clears the tag once the account is maintenance-healthy again.
+#[tokio::test]
+async fn pulse_clears_the_tag_when_healthy() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    // A pulse while still unhealthy leaves the tag alone
+    liquidatee.try_lending_account_pulse_health().await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(1).into()),
+                asset_weight_maint: Some(I80F48!(1).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    set_timestamp(&test_f, T0 + 60).await;
+    refresh_oracles(&test_f).await;
+    liquidatee.try_lending_account_pulse_health().await?;
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
+/// A withdraw proves init health, which clears the tag while the account still carries debt.
+#[tokio::test]
+async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    // Restore weights so the account is init-healthy while keeping its $10 USDC debt
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(1).into()),
+                asset_weight_maint: Some(I80F48!(1).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    set_timestamp(&test_f, T0 + 60).await;
+    refresh_oracles(&test_f).await;
+
+    let sol_acc = test_f
+        .sol_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
+    liquidatee
+        .try_bank_withdraw_with_authority(sol_acc.key, sol_bank, 0.1, None, &liquidatee_authority)
+        .await?;
+
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
 /// A transfer carries the tag to the account it migrates to.
 #[tokio::test]
 async fn transfer_carries_the_tag() -> anyhow::Result<()> {

@@ -4,7 +4,8 @@ use crate::state::{
     liquidation_record::tag_after_liquidation,
     marginfi_account::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
-        check_account_init_health, check_post_liquidation_condition_and_get_account_health,
+        check_account_init_health_and_clear_tag,
+        check_post_liquidation_condition_and_get_account_health,
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
     },
@@ -539,8 +540,8 @@ pub fn lending_account_liquidate<'info>(
     liquidator_marginfi_account.sync_indexer_flags();
 
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
-    check_account_init_health(
-        &liquidator_marginfi_account,
+    check_account_init_health_and_clear_tag(
+        &mut liquidator_marginfi_account,
         group,
         liquidator_remaining_accounts,
         &mut None,

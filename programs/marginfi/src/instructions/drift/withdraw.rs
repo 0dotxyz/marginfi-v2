@@ -6,7 +6,7 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
             MarginfiAccountImpl,
         },
@@ -282,8 +282,8 @@ pub fn drift_withdraw<'info>(
         // the end of the transaction.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
             let group = ctx.accounts.group.load()?;
-            check_account_init_health(
-                &marginfi_account,
+            check_account_init_health_and_clear_tag(
+                &mut marginfi_account,
                 &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),

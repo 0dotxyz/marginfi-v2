@@ -1392,6 +1392,22 @@ pub fn check_account_init_health<'info>(
     check_account_risk_tiers(marginfi_account, remaining_ais)
 }
 
+/// `check_account_init_health`, additionally clearing the account's premium-growth tag. Init
+/// weights are stricter than maintenance ones, so passing implies the account is untaggable. Risk
+/// checks are skipped inside flashloans, where a pass proves nothing.
+pub fn check_account_init_health_and_clear_tag<'info>(
+    marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+) -> MarginfiResult {
+    check_account_init_health(marginfi_account, group, remaining_ais, health_cache)?;
+    if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+    Ok(())
+}
+
 /// Post-liquidation invariant using the heap-reuse health calculator.
 ///
 /// - Liability bank must still have outstanding liabilities and no assets

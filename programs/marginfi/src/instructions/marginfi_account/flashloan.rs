@@ -6,7 +6,7 @@ use crate::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar, Hashable,
     },
     prelude::*,
-    state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
+    state::marginfi_account::{check_account_init_health_and_clear_tag, MarginfiAccountImpl},
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -120,7 +120,12 @@ pub fn lending_account_end_flashloan<'info>(
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
     let group = ctx.accounts.group.load()?;
-    check_account_init_health(&marginfi_account, &group, ctx.remaining_accounts, &mut None)?;
+    check_account_init_health_and_clear_tag(
+        &mut marginfi_account,
+        &group,
+        ctx.remaining_accounts,
+        &mut None,
+    )?;
 
     Ok(())
 }
