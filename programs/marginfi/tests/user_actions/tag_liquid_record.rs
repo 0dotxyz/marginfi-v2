@@ -351,7 +351,7 @@ async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result
 
 /// Walks the premium growth schedule on one fixture: within the delay the cap is still the 5%
 /// base; halfway through the growth window the cap is 52.5% (halfway from 5% to 100%), so a $2
-/// repayment allows at most $3.05 of collateral.
+/// repayment allows just under $3.05 of collateral.
 #[tokio::test]
 async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
@@ -401,19 +401,19 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     assert!(res.is_err());
     assert_custom_error!(res.err().unwrap(), MarginfiError::LiquidationPremiumTooHigh);
 
-    // ...while $2.80 is allowed, and erases $0.88 of the ~$2 deficit, over the 25% bar
+    // ...while $3.04 is just inside it, and erases $0.78 of the ~$2 deficit, over the 25% bar
     let liquidator_sol_acc = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.28,
+        0.304,
         2.0,
     )
     .await?;
     assert_eq!(
         liquidator_sol_acc.balance().await,
-        native!(0.28, "SOL", f64)
+        native!(0.304, "SOL", f64)
     );
     assert_eq!(load_tag(&liquidatee).await, midpoint);
     Ok(())
