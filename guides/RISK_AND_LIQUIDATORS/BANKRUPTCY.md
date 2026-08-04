@@ -31,6 +31,8 @@ assets and B dollars in liabilities (in equity value, i.e. excluding any weights
 A. After liquidation is complete, A_new = 0, and B_new = B - A + X, where X is the liquidation
 premium and insurance.
 
+Run `collect_bank_fees` before beginning the next step so the insurance fund is fully capitalized.
+
 Next, the group administrator runs `handle_bankruptcy` on the user. For banks where
 `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is enabled, anyone can do this. This will perform the
 following logic:

@@ -100,7 +100,6 @@ pub fn kamino_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
-    let group = ctx.accounts.group.load()?;
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
@@ -113,10 +112,40 @@ pub fn kamino_withdraw<'info>(
             withdraw_is_halt_safe,
         )?;
 
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+        let mut bank_account = BankAccountWrapper::find(
+            &ctx.accounts.bank.key(),
+            &mut bank,
+            &mut marginfi_account.lending_account,
+        )?;
+
+        (collateral_amount, share_amount) = if withdraw_all {
+            bank_account.withdraw_all(in_receivership)?
+        } else {
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
+        };
+    }
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+    }
+
+    let expected_liquidity_amount = ctx
+        .accounts
+        .integration_acc_1
+        .load()?
+        .collateral_to_liquidity(collateral_amount)?;
+
+    {
+        let mut bank = ctx.accounts.bank.load_mut()?;
+        let group = ctx.accounts.group.load()?;
+
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        // Fetch oracle price for rate limiting and deleverage tracking
-        // When group rate limiter is enabled, oracle is required
+        // Fetch oracle price for rate limiting and deleverage tracking. When group rate limiting is
+        // enabled, this must happen after any reserve refresh so wrapped-bank prices use the same
+        // exchange rate as the actual redemption.
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
         let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
@@ -136,31 +165,10 @@ pub fn kamino_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
-
-        (collateral_amount, share_amount) = if withdraw_all {
-            bank_account.withdraw_all(in_receivership)?
-        } else {
-            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
-            (amount, share_amount)
-        };
-
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        let rate_limit_amount = if withdraw_all {
-            collateral_amount
-        } else {
-            amount
-        };
-
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
-            rate_limit_amount,
+            expected_liquidity_amount,
+            collateral_amount,
             price,
             &mut bank,
             &group,
@@ -192,16 +200,6 @@ pub fn kamino_withdraw<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
     }
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-    }
-
-    let expected_liquidity_amount = ctx
-        .accounts
-        .integration_acc_1
-        .load()?
-        .collateral_to_liquidity(collateral_amount)?;
 
     ctx.accounts.cpi_kamino_withdraw(collateral_amount)?;
 

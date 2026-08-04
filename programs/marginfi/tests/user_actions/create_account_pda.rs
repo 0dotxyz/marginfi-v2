@@ -366,12 +366,12 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
 
     assert!(res1.is_ok());
 
-    // Second transaction with same parameters should fail. The added compute budget ix makes the
-    // tx distinct from the first so BanksClient cannot replay the first tx's cached result.
-    let cu_ix =
-        solana_compute_budget_interface::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+    // Second transaction with same parameters should fail. (Warp a slot first: this transaction is
+    // byte-identical to the first, and with the same blockhash it would be signature-deduped by
+    // BanksClient into that cached success.)
+    test_f.context.borrow_mut().warp_to_slot(100).unwrap();
     let tx2 = Transaction::new_signed_with_payer(
-        &[cu_ix, init_marginfi_account_pda_ix],
+        &[init_marginfi_account_pda_ix],
         Some(&test_f.payer()),
         &[&test_f.payer_keypair()],
         test_f.get_latest_blockhash().await,
