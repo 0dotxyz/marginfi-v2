@@ -57,6 +57,7 @@ pub struct MarginfiFuzzContext<'info> {
     pub marginfi_accounts: Vec<UserAccount<'info>>,
     pub owner: AccountInfo<'info>,
     pub system_program: AccountInfo<'info>,
+    pub instruction_sysvar: AccountInfo<'info>,
     pub last_sysvar_current_timestamp: RwLock<u64>,
     pub metrics: Arc<RwLock<Metrics>>,
     pub state: &'info AccountsState,
@@ -91,6 +92,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             banks: vec![],
             owner: admin,
             system_program,
+            instruction_sysvar: state.new_instruction_sysvar_account(),
             marginfi_accounts: vec![],
             last_sysvar_current_timestamp: RwLock::new(
                 SystemTime::now()
@@ -263,6 +265,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                         fee_vault: Box::new(InterfaceAccount::try_from(airls(&fee_vault)).unwrap()),
                         token_program: Interface::try_from(airls(&token_program)).unwrap(),
                         system_program: Program::try_from(airls(&self.system_program)).unwrap(),
+                        instruction_sysvar: uails(&self.instruction_sysvar),
                     },
                     &[],
                     add_bank_bumps,
@@ -319,6 +322,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                         admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         bank: AccountLoader::try_from_unchecked(&marginfi::ID, airls(&bank))
                             .unwrap(),
+                        instruction_sysvar: uails(&self.instruction_sysvar),
                     },
                     &[ails(oracle.clone())],
                     configure_bumps,
@@ -961,6 +965,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                 ))?),
                 insurance_vault_authority: uails(&bank.insurance_vault_authority),
                 token_program: Interface::try_from(airls(&bank.token_program))?,
+                instruction_sysvar: uails(&self.instruction_sysvar),
             },
             aisls(&remaining_accounts),
             Default::default(),
@@ -1041,16 +1046,17 @@ fn initialize_marginfi_group<'a>(
     let program_id = marginfi::ID;
     let marginfi_group =
         state.new_owned_account(size_of::<MarginfiGroup>(), program_id, Rent::free());
+    let instruction_sysvar = state.new_instruction_sysvar_account();
 
     marginfi::instructions::marginfi_group::initialize_group(Context::new(
         &marginfi::ID,
         &mut marginfi::instructions::MarginfiGroupInitialize {
-            // Unchecked because we are initializing the account.
             marginfi_group: AccountLoader::try_from_unchecked(&program_id, airls(&marginfi_group))
                 .unwrap(),
             admin: Signer::try_from(airls(&admin)).unwrap(),
             fee_state: AccountLoader::try_from_unchecked(&program_id, airls(&fee_state)).unwrap(),
             system_program: Program::try_from(airls(&system_program)).unwrap(),
+            instruction_sysvar: uails(&instruction_sysvar),
         },
         &[],
         Default::default(),
@@ -1059,6 +1065,7 @@ fn initialize_marginfi_group<'a>(
 
     set_discriminator::<MarginfiGroup>(marginfi_group.clone());
 
+    let instruction_sysvar = state.new_instruction_sysvar_account();
     marginfi::instructions::marginfi_group::configure(
         Context::new(
             &marginfi::ID,
@@ -1069,6 +1076,7 @@ fn initialize_marginfi_group<'a>(
                 )
                 .unwrap(),
                 admin: Signer::try_from(airls(&admin)).unwrap(),
+                instruction_sysvar: uails(&instruction_sysvar),
             },
             &[],
             Default::default(),
