@@ -3,10 +3,10 @@ use std::cmp::max;
 use crate::{
     assert_struct_align, assert_struct_size,
     constants::{
-        discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED,
-        STAKED_ORACLE_PRICE_USES_ONRAMP,
+        discriminators, ASSET_TAG_DRIFT, BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
     },
-    types::{BalanceSide, BankCache, BankConfig, EmodeConfig, RequirementType},
+    types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
 };
 
 #[cfg(feature = "anchor")]
@@ -241,25 +241,39 @@ impl Bank {
         }
     }
 
+    /// Taking the most favorable asset weight of:
+    /// - the bank's configured weight,
+    /// - cross-asset e-mode weight for its tag,
+    /// - same-asset e-mode weight (if applicable).
     pub fn get_asset_weight(
         &self,
         requirement_type: RequirementType,
-        emode_config: &EmodeConfig,
+        reconciled_emode_config: &ReconciledEmodeConfig,
     ) -> I80F48 {
-        if let Some(emode_entry) = emode_config.find_with_tag(self.emode.emode_tag) {
-            let bank_weight = self
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            let emode_weight = match requirement_type {
-                RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                RequirementType::Equity => I80F48::ONE,
-            };
-            max(bank_weight, emode_weight)
-        } else {
-            self.config
-                .get_weight(requirement_type, BalanceSide::Assets)
+        let mut asset_weight = self
+            .config
+            .get_weight(requirement_type, BalanceSide::Assets);
+
+        if let Some(emode_entry) = reconciled_emode_config.find_with_tag(self.emode.emode_tag) {
+            asset_weight = max(asset_weight, emode_entry.asset_weight);
         }
+
+        let same_asset = &reconciled_emode_config.same_asset;
+        if same_asset.is_enabled()
+            && self.mint == same_asset.mint
+            && self.config.oracle_keys[0] == same_asset.oracle_key
+            && self.config.oracle_setup.feed_family() == same_asset.feed_family
+            && self.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE != 0
+            && matches!(self.config.risk_tier, RiskTier::Collateral)
+            && !matches!(
+                (self.config.operational_state, requirement_type),
+                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+            )
+        {
+            asset_weight = max(asset_weight, same_asset.asset_weight);
+        }
+
+        asset_weight
     }
 
     // To be removed once SVSP update is rolled out (likely in 1.10)
