@@ -29,13 +29,15 @@
 //!    premium wallet. Bankruptcy / tokenless repayment / liability→asset flips write the
 //!    receivable off without crediting the bank.
 //!
-//! ## Scratch valuation is requirement-independent by design
+//! ## Scratch valuation reuses health prices (accepted approximation)
 //!
-//! The scratch answers "what is the collateral mix?", not "may you take risk?": collateral
-//! weights use the UNBIASED RealTime price (no confidence-band bias — a keeper cannot move a
-//! rate by timing a crank against wide confidence), no risk weights, and ReduceOnly
-//! collateral counts under every requirement type. The persisted APR is therefore a pure
-//! function of (collateral mix, matrix, prices) — identical from every instruction.
+//! Collateral weights reuse the health pass's biased, requirement-typed prices — zero extra
+//! oracle work. The rate therefore wobbles with confidence bands (clamped at 5% of price;
+//! uniform haircuts cancel in the average, so at most ~5% RELATIVE, symmetric, correctable
+//! by any crank) and varies slightly by triggering instruction (Initial uses EMA for Pyth).
+//! No risk weights; ReduceOnly collateral still counts (Initial zeroes it for health only).
+//! Prices never scale the materialized amount (`debt_tokens × rate × time` is price-free),
+//! so price quality is second-order here — health/liquidation pricing is untouched.
 //!
 //! ## Accepted approximations
 //!

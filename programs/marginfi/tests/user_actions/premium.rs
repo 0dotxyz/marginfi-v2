@@ -2240,6 +2240,47 @@ async fn premium_withdraw_allowed_when_stale_oracle_but_debt_is_inactive() -> an
     Ok(())
 }
 
+/// CU fast-path (account-level premium skip): an account with NO premium-active liability
+/// skips all premium pricing, but this must be unobservable — write-offs on inactive banks
+/// still run, and an account that GAINS premium-active debt prices normally from that point.
+#[tokio::test]
+async fn premium_skip_without_premium_debt_is_unobservable() -> anyhow::Result<()> {
+    let test_f = premium_test_fixture().await;
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (_lender, borrower, borrower_usdc) = setup_borrower(&test_f, 1_000.0).await;
+
+    // Accrue a receivable, then deactivate the bank: the account now has NO premium-active
+    // liability, so the fast path applies — yet the write-off must still happen on touch.
+    advance_clock(&test_f, YEAR).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    assert!(
+        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding) > I80F48::ZERO
+    );
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, false)
+        .await?;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
+    assert_eq!(balance.premium_rate_snapshot, 0);
+
+    // Reactivate and borrow again: premium-active debt exists, the skip no longer applies,
+    // and the snapshot prices normally (1% — all-SOL collateral).
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    borrower
+        .try_bank_borrow(borrower_usdc, usdc_bank_f, 10)
+        .await?;
+    let account = borrower.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 1.0).abs() < 0.0001);
+
+    Ok(())
+}
+
 /// Story 4: two borrows against the same collateral basket carry INDEPENDENT premiums —
 /// the same 50/50 basket prices 0.55% on the stable debt and 1.00% on the LST debt, exactly
 /// the spec's numbers (pairs: A->stable 1%, B->stable 0.1%, A->lst 2%, B->lst missing = 0%).

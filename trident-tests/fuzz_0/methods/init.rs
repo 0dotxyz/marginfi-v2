@@ -261,7 +261,7 @@ impl FuzzTest {
         invariant!(res.is_success());
 
         let edit_ix = types::marginfi::EditFeeStatePremiumInstruction::data(
-            types::marginfi::EditFeeStatePremiumInstructionData::new(Some(payer)),
+            types::marginfi::EditFeeStatePremiumInstructionData::new(payer),
         )
         .accounts(types::marginfi::EditFeeStatePremiumInstructionAccounts::new(
             payer,

@@ -4,6 +4,8 @@ import {
   Keypair,
   PublicKey,
   Transaction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
 import { assert } from "chai";
@@ -21,6 +23,7 @@ import {
 } from "../../rootHooks";
 import {
   addBankWithSeed,
+  configureBank,
   groupConfigure,
   groupInitialize,
 } from "../../utils/group-instructions";
@@ -30,6 +33,7 @@ import {
   composeRemainingAccounts,
   depositIx,
   healthPulse,
+  liquidateIx,
 } from "../../utils/user-instructions";
 import {
   configBankPremium,
@@ -40,13 +44,21 @@ import {
 import {
   BankConfig,
   defaultBankConfig,
+  defaultBankConfigOptRaw,
   I80F48_ONE,
   I80F48_ZERO,
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
 import { deriveBankWithSeed } from "../../utils/pdas";
-import { getBankrunBlockhash, processBankrunTransaction } from "../../utils/tools";
+import {
+  createLookupTableForInstructions,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "../../utils/tools";
+import { getEpochAndSlot } from "../../utils/bankrunConnection";
+import { setPythPullOraclePrice } from "../../utils/bankrun-oracles";
+import { ORACLE_CONF_INTERVAL } from "../../utils/types";
 import { assertBankrunTxFailed } from "../../utils/genericTests";
 
 // 8 collateral banks x 8 liability banks, one account with 16 active balances.
@@ -403,5 +415,137 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
       assert.approximately(rate, expectedSnapshot(j), 0.00005);
     }
     assert.equal(seen.size, N, "expected 8 distinct snapshot values");
+  });
+
+  // vb06-style: worst-case PREMIUM-ENABLED liquidation CU guard. The liquidatee carries all
+  // 16 premium-relevant balances, so all three health passes run the premium machinery
+  // (pass-1 record, pass-2 replay, liquidator seed/refresh). Complements m03, which pins the
+  // premium-OFF integration-bank worst case against the same 1.4M hard cap.
+  it("liquidation with 16 premium balances: CU < 1.4M cap, logged", async () => {
+    // Liquidator: fresh account, deposits into collateral bank 0.
+    const kp = Keypair.generate();
+    const liquidatorAccount = kp.publicKey;
+    let tx = new Transaction().add(
+      await accountInit(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: group8x8.publicKey,
+        marginfiAccount: liquidatorAccount,
+        authority: groupAdmin.wallet.publicKey,
+        feePayer: groupAdmin.wallet.publicKey,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet, kp);
+    await banksClient.processTransaction(tx);
+    tx = new Transaction().add(
+      await depositIx(groupAdmin.mrgnBankrunProgram, {
+        marginfiAccount: liquidatorAccount,
+        bank: banks[0],
+        tokenAccount: groupAdmin.lstAlphaAccount,
+        amount: lstNative(1_000),
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    // Crush the 8 collateral banks' asset weights so user 0 (8000 LST collateral vs 8 LST
+    // debt) becomes unhealthy once the first liability bank's weights are raised.
+    for (let i = 0; i < N; i += 2) {
+      const crushTx = new Transaction();
+      for (let k = i; k < Math.min(i + 2, N); k++) {
+        const config = defaultBankConfigOptRaw();
+        config.assetWeightInit = bigNumberToWrappedI80F48(0.01);
+        config.assetWeightMaint = bigNumberToWrappedI80F48(0.02);
+        crushTx.add(
+          await configureBank(groupAdmin.mrgnBankrunProgram, {
+            bank: banks[k],
+            bankConfigOpt: config,
+          }),
+        );
+      }
+      await processBankrunTransaction(bankrunContext, crushTx, [
+        groupAdmin.wallet,
+      ]);
+    }
+    const raiseConfig = defaultBankConfigOptRaw();
+    raiseConfig.liabilityWeightInit = bigNumberToWrappedI80F48(210);
+    raiseConfig.liabilityWeightMaint = bigNumberToWrappedI80F48(200);
+    tx = new Transaction().add(
+      await configureBank(groupAdmin.mrgnBankrunProgram, {
+        bank: banks[N],
+        bankConfigOpt: raiseConfig,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    // Seize a sliver of collateral bank 0 against liability bank N's debt.
+    const liquidateeRemaining: PublicKey[][] = [];
+    for (let k = 0; k < 2 * N; k++) liquidateeRemaining.push([banks[k], lstOracle()]);
+    const liquidatorRemaining: PublicKey[][] = [
+      [banks[0], lstOracle()],
+      [banks[N], lstOracle()],
+    ];
+    const liquidateeAccounts = composeRemainingAccounts(liquidateeRemaining);
+    const liquidatorAccounts = composeRemainingAccounts(liquidatorRemaining);
+
+    const liquidate = await liquidateIx(groupAdmin.mrgnBankrunProgram, {
+      assetBankKey: banks[0],
+      liabilityBankKey: banks[N],
+      liquidatorMarginfiAccount: liquidatorAccount,
+      liquidateeMarginfiAccount: borrowerAccount,
+      remaining: [
+        lstOracle(), // asset oracle
+        lstOracle(), // liab oracle
+        ...liquidatorAccounts,
+        ...liquidateeAccounts,
+      ],
+      amount: new BN(0.01 * 10 ** ecosystem.lstAlphaDecimals),
+      liquidateeAccounts: liquidateeAccounts.length,
+      liquidatorAccounts: liquidatorAccounts.length,
+    });
+
+    // 18 distinct banks push the legacy tx over 1232 bytes — run through a LUT as a v0 tx
+    // (activating the LUT needs a slot warp; refresh the shared oracle after).
+    const lutAccount = await createLookupTableForInstructions(
+      groupAdmin.wallet,
+      [liquidate],
+    );
+    const { slot } = await getEpochAndSlot(banksClient);
+    bankrunContext.warpToSlot(BigInt(slot + 24));
+    await setPythPullOraclePrice(
+      bankrunContext,
+      banksClient,
+      oracles.pythPullLst.publicKey,
+      oracles.pythPullLstOracleFeed.publicKey,
+      oracles.lstAlphaPrice,
+      oracles.lstAlphaDecimals,
+      ORACLE_CONF_INTERVAL,
+    );
+
+    const messageV0 = new TransactionMessage({
+      payerKey: groupAdmin.wallet.publicKey,
+      recentBlockhash: await getBankrunBlockhash(bankrunContext),
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        liquidate,
+      ],
+    }).compileToV0Message([lutAccount]);
+    const liqTx = new VersionedTransaction(messageV0);
+    liqTx.sign([groupAdmin.wallet]);
+
+    const result = await banksClient.processTransaction(liqTx);
+    const cu = Number(result.computeUnitsConsumed);
+    console.log(`*16-balance premium liquidation: compute units consumed = ${cu}`);
+    assert.isBelow(cu, 1_400_000, "premium liquidation exceeded the 1.4M hard cap");
+
+    // The seized-debt snapshot must be priced (not a 0% dodge): liquidator's collateral is
+    // 100% tag-0 collateral bank... bank 0 carries collateral tag i=0, so the pair rate for
+    // liability N (j=0) computed from a complete pass is pairRate(0, 0).
+    const account =
+      await bankrunProgram.account.marginfiAccount.fetch(liquidatorAccount);
+    const liabBalance = account.lendingAccount.balances.find(
+      (b: any) => b.active && b.bankPk.equals(banks[N]),
+    );
+    assert.ok(liabBalance, "liquidator must carry the assumed liability");
+    const rate = u32ToPremiumRate(liabBalance.premiumRateSnapshot);
+    assert.approximately(rate, pairRate(0, 0), 0.00005);
   });
 });

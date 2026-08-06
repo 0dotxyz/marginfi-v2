@@ -627,9 +627,9 @@ fn calc_premium_liab_value(
 
 /// Record a balance into the premium scratch during the health loop.
 ///
-/// The scratch measures the collateral MIX, not risk capacity, so it is requirement-type
-/// independent: unbiased RealTime `premium_price`, no risk weights, ReduceOnly always
-/// counts, isolated never does. Unpriceable legs weigh zero and keep the scratch incomplete
+/// `premium_price` is the pass's biased health price, reused for free (accepted rate wobble
+/// — see the premium module docs). No risk weights; ReduceOnly always counts; isolated never
+/// does. Unpriceable legs weigh zero and keep the scratch incomplete
 /// (`err_code` / `unpriceable_leg`).
 #[inline(always)]
 fn collect_premium_scratch_entry(
@@ -1062,6 +1062,10 @@ pub fn get_health_components<'info>(
     .reconcile();
     heap_restore(emode_checkpoint);
 
+    // With an empty premium matrix every computable rate is 0 regardless of weights, so the
+    // per-leg premium handling (incl. the ReduceOnly-leg derivation) is skipped entirely.
+    let price_for_premium = group.premium_settings.entry_count > 0;
+
     // =========================================================================
     // Phase 2: Calculate health with heap reuse per position
     // =========================================================================
@@ -1112,10 +1116,8 @@ pub fn get_health_components<'info>(
                 requirement_type,
                 &reconciled_emode_config,
             )?;
-            // Premium weights use the UNBIASED RealTime cache price (see
-            // `collect_premium_scratch_entry`).
-            let premium_price = I80F48::from(bank.cache.liquidation_price_rt);
-            (asset_val, liab_val, price, 0, premium_price)
+            // Premium weights reuse the biased health price, same as the live branch.
+            (asset_val, liab_val, price, 0, price)
         } else {
             // Load oracle (this is the heap-intensive operation)
             let oracle_ai_idx = account_index + 1;
@@ -1131,35 +1133,25 @@ pub fn get_health_components<'info>(
             let price_adapter_result =
                 OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
-            // Premium weights use the UNBIASED RealTime price from the same loaded feed — not
-            // the requirement-typed, confidence-biased price health uses below (see
-            // `collect_premium_scratch_entry`). Unpriceable legs weigh zero; the health pass
-            // marks them via `err_code`, which keeps the scratch incomplete.
-            let premium_price = if premium_scratch.is_some()
+            // Premium weights reuse the biased health price computed inside the calc — no
+            // extra adapter work (see the premium module docs for the accepted rate wobble).
+            // `price_for_premium` gate: skip when no computable rate can exist — empty
+            // matrix, or no premium-active liability on the account. Isolated legs are also
+            // skipped: they always weigh zero in the scratch.
+            let need_premium_price = premium_scratch.is_some()
+                && price_for_premium
                 && matches!(balance.get_side(), Some(BalanceSide::Assets))
-            {
-                match &price_adapter_result {
-                    Ok(feed) => feed.get_price_of_type(
-                        OraclePriceType::RealTime,
-                        None,
-                        bank.config.oracle_max_confidence,
-                    )?,
-                    Err(_) => {
-                        // A countable collateral leg the premium weighting cannot price. The
-                        // health pass may not flag this itself (ReduceOnly + Initial
-                        // soft-zeroes before inspecting the oracle), so mark the scratch
-                        // directly — an incomplete pass must never write rates.
-                        if !matches!(bank.config.risk_tier, RiskTier::Isolated) {
-                            if let Some(scratch) = premium_scratch.as_mut() {
-                                scratch.unpriceable_leg = true;
-                            }
-                        }
-                        I80F48::ZERO
-                    }
+                && !matches!(bank.config.risk_tier, RiskTier::Isolated);
+
+            // A countable collateral leg the premium weighting cannot price. The health pass
+            // may not flag this itself (ReduceOnly + Initial soft-zeroes; stale-skip only
+            // sets err_code), so mark the scratch directly — an incomplete pass must never
+            // write rates.
+            if need_premium_price && price_adapter_result.is_err() {
+                if let Some(scratch) = premium_scratch.as_mut() {
+                    scratch.unpriceable_leg = true;
                 }
-            } else {
-                I80F48::ZERO
-            };
+            }
 
             // Log heap usage per position for measurement/debugging
             // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
@@ -1174,7 +1166,7 @@ pub fn get_health_components<'info>(
             }
 
             // Calculate weighted value for this position
-            let (asset_val, liab_val, price, err_code) = calc_weighted_value_for_balance(
+            calc_weighted_value_for_balance(
                 balance,
                 &bank,
                 &price_adapter_result,
@@ -1182,8 +1174,8 @@ pub fn get_health_components<'info>(
                 &reconciled_emode_config,
                 &mut liq_cache,
                 position_index,
-            )?;
-            (asset_val, liab_val, price, err_code, premium_price)
+                need_premium_price,
+            )?
         };
 
         // Record error index if applicable
@@ -1335,15 +1327,17 @@ pub fn get_tagged_account_health_components<'info>(
             let price_adapter_result =
                 OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
-            let (asset_val, liab_val, price, _err_code) = calc_weighted_value_for_balance(
-                balance,
-                &bank,
-                &price_adapter_result,
-                requirement_type,
-                &reconciled_emode_config,
-                &mut None,
-                position_index,
-            )?;
+            let (asset_val, liab_val, price, _err_code, _premium_price) =
+                calc_weighted_value_for_balance(
+                    balance,
+                    &bank,
+                    &price_adapter_result,
+                    requirement_type,
+                    &reconciled_emode_config,
+                    &mut None,
+                    position_index,
+                    false,
+                )?;
             let liab_premium_val = calc_premium_liab_value(
                 balance,
                 &bank,
@@ -1694,7 +1688,11 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
 
 /// Helper function to calculate weighted value for a single balance.
 ///
-/// Calculates asset or liability value with appropriate weights and price biases.
+/// Calculates asset or liability value with appropriate weights and price biases. When
+/// `need_premium_price` is set (asset legs of premium-relevant accounts only), the returned
+/// 5th element is the UNBIASED RealTime price for the premium scratch — derived from the same
+/// normalization pass as the health price (see `PriceAdapter::get_health_and_premium_prices`),
+/// so it costs ~nothing extra.
 #[inline(always)]
 fn calc_weighted_value_for_balance(
     balance: &Balance,
@@ -1704,11 +1702,12 @@ fn calc_weighted_value_for_balance(
     reconciled_emode_config: &ReconciledEmodeConfig,
     liq_cache: &mut Option<&mut LiquidationPriceCache>,
     position_index: usize,
-) -> MarginfiResult<(I80F48, I80F48, I80F48, u32)> {
+    need_premium_price: bool,
+) -> MarginfiResult<(I80F48, I80F48, I80F48, u32, I80F48)> {
     match balance.get_side() {
         Some(side) => match side {
             BalanceSide::Assets => {
-                let (value, price, err_code) = calc_weighted_asset_value_standalone(
+                let (value, price, premium_price, err_code) = calc_weighted_asset_value_standalone(
                     balance,
                     bank,
                     price_adapter_result,
@@ -1716,8 +1715,9 @@ fn calc_weighted_value_for_balance(
                     reconciled_emode_config,
                     liq_cache,
                     position_index,
+                    need_premium_price,
                 )?;
-                Ok((value, I80F48::ZERO, price, err_code))
+                Ok((value, I80F48::ZERO, price, err_code, premium_price))
             }
             BalanceSide::Liabilities => {
                 let (value, price) = calc_weighted_liab_value_standalone(
@@ -1728,14 +1728,16 @@ fn calc_weighted_value_for_balance(
                     liq_cache,
                     position_index,
                 )?;
-                Ok((I80F48::ZERO, value, price, 0))
+                Ok((I80F48::ZERO, value, price, 0, I80F48::ZERO))
             }
         },
-        None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, 0)),
+        None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, 0, I80F48::ZERO)),
     }
 }
 
-/// Calculate weighted asset value (standalone version for heap reuse).
+/// Calculate weighted asset value (standalone version for heap reuse). Returns
+/// `(value, health_price, premium_price, err_code)`; `premium_price` is ZERO unless
+/// `need_premium_price`.
 #[inline(always)]
 fn calc_weighted_asset_value_standalone(
     balance: &Balance,
@@ -1745,16 +1747,28 @@ fn calc_weighted_asset_value_standalone(
     reconciled_emode_config: &ReconciledEmodeConfig,
     liq_cache: &mut Option<&mut LiquidationPriceCache>,
     position_index: usize,
-) -> MarginfiResult<(I80F48, I80F48, u32)> {
+    need_premium_price: bool,
+) -> MarginfiResult<(I80F48, I80F48, I80F48, u32)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
-            // ReduceOnly banks should not be counted as collateral for Initial checks
+            // ReduceOnly banks should not be counted as collateral for Initial checks — for
+            // HEALTH. The premium scratch still counts ReduceOnly collateral, so its (biased,
+            // same-as-health) price is derived even on this early exit.
             if matches!(
                 (bank.config.operational_state, requirement_type),
                 (BankOperationalState::ReduceOnly, RequirementType::Initial)
             ) {
                 debug!("ReduceOnly bank assets worth 0 for Initial margin");
-                return Ok((I80F48::ZERO, I80F48::ZERO, 0));
+                let premium_price = match (need_premium_price, price_adapter_result) {
+                    (true, Ok(feed)) => feed.get_price_of_type(
+                        requirement_type.get_oracle_price_type(),
+                        Some(PriceBias::Low),
+                        bank.config.oracle_max_confidence,
+                    )?,
+                    // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
+                    _ => I80F48::ZERO,
+                };
+                return Ok((I80F48::ZERO, I80F48::ZERO, premium_price, 0));
             }
 
             // Extract error code if oracle failed
@@ -1779,7 +1793,7 @@ fn calc_weighted_asset_value_standalone(
                 (&Err(_), RequirementType::Initial)
             ) {
                 debug!("Skipping stale oracle");
-                return Ok((I80F48::ZERO, I80F48::ZERO, err_code));
+                return Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, err_code));
             }
 
             let price_feed = price_adapter_result
@@ -1802,19 +1816,27 @@ fn calc_weighted_asset_value_standalone(
                 asset_weight = max(asset_weight, same_asset_weight);
             }
 
+            let oracle_price_type = requirement_type.get_oracle_price_type();
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
-                    requirement_type.get_oracle_price_type(),
+                    oracle_price_type,
                     bank.config.oracle_max_confidence,
                 )?;
                 cache.record(requirement_type, position_index, price_with_confidence);
                 apply_price_bias(price_with_confidence, PriceBias::Low)?
             } else {
                 price_feed.get_price_of_type(
-                    requirement_type.get_oracle_price_type(),
+                    oracle_price_type,
                     Some(PriceBias::Low),
                     bank.config.oracle_max_confidence,
                 )?
+            };
+            // Premium weights reuse the biased health price — accepted rate skew, see the
+            // premium module docs.
+            let premium_price = if need_premium_price {
+                lower_price
+            } else {
+                I80F48::ZERO
             };
 
             // Apply initial discount if applicable
@@ -1833,9 +1855,9 @@ fn calc_weighted_asset_value_standalone(
                 Some(asset_weight),
             )?;
 
-            Ok((value, lower_price, 0))
+            Ok((value, lower_price, premium_price, 0))
         }
-        RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO, 0)),
+        RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, 0)),
     }
 }
 
