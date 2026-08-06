@@ -21,8 +21,42 @@ Note that these are simply guidelines for the severity of the bugs. Each bug bou
 
 Bounties are only valid if they affect mainnet. Bugs in the most recent code marked for "release" or "pre-release" (https://github.com/0dotxyz/marginfi-v2/releases) are also eligible for bounty. Bugs that are related to an upcoming update to an integration (e.g., a release-flagged or main-branch update to SVSP, Kamino, Juplend, etc that could lead to a bug on our end when deploying to mainnet) may also be valid, but are assessed on a case by case basis and strictly first-come. Bugs affecting a flag/feature that is not in use in production will always be considered Medium or below.
 
+## Supported Assets and Deprecated Systems
+
+This scope clarification applies to reports submitted on or after August 6, 2026.
+
+Bug bounty eligibility is limited to vulnerabilities with a direct, reproducible impact on an
+active mainnet deployment or an actively supported Project 0 production system.
+
+The following are explicitly out of scope:
+
+- The deprecated marginfi web application, including its legacy UI and API routes.
+- Deprecated or archived marginfi client applications and source repositories, including
+  `mrgn-ts` and `marginfi-v2-ui`.
+- Retired marginfi infrastructure, including legacy Vercel deployments, serverless functions,
+  storage services, Supabase projects, GCP resources, APIs, and documentation sites.
+- Historical source code, branches, releases, deployments, domains, or endpoints that are no
+  longer used by an active production system.
+- Findings whose impact is limited to modifying, disclosing, or disrupting unused legacy data.
+
+An asset being publicly reachable, present in source control or Git history, or displaying a
+deprecation notice does not make it eligible for a bounty.
+
+A finding involving a deprecated asset may still be eligible if the reporter demonstrates a direct
+impact on an active Project 0 production system, active user funds, non-public user data, or
+currently valid production credentials. Reporters must not perform production writes, access user
+data, or attempt to pivot from a deprecated system without prior written authorization.
+
+If you are unsure whether an asset is actively supported, email security@mrgn.group before testing.
+Testing of out-of-scope assets is not authorized by this bug bounty program and is not eligible for
+a bounty.
+
 ## Infrastructure Bug Bounties
-Bug bounties for infrastructure components (networking, UI, SDK) are first-come-first-serve. The bounty amount is at the discretion of the team based on severity.
+
+Bug bounties for infrastructure components apply only to actively supported Project 0 production
+assets. Deprecated marginfi applications and infrastructure are excluded as described above.
+Eligible infrastructure reports are first-come, first-served, and bounty amounts are determined by
+the team based on severity and demonstrated production impact.
 
 |Severity|Bounty|
 |-----------|-------------|
@@ -52,6 +86,8 @@ A number of attacks are out of scope for the bug bounty, including but not limit
 8. Sybil attacks.
 9. Attempted phishing or other social engineering attacks involving marginfi contributors or users
 10. Denial of service, or automated testing of services that generate significant traffic.
+11. Vulnerabilities affecting only deprecated, archived, retired, staging, development, or
+    otherwise unsupported applications and infrastructure.
 
 
 ## Credits
