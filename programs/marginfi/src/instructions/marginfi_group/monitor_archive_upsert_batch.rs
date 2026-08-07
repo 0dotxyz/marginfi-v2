@@ -78,5 +78,5 @@ pub struct MonitorArchiveUpsertBatch<'info> {
     /// CHECK: Program-owned archive account with raw bytes layout:
     /// [8-byte discriminator][ArchiveMeta][index_map][payload].
     #[account(mut, owner = crate::ID)]
-    pub archive: AccountInfo<'info>,
+    pub archive: UncheckedAccount<'info>,
 }

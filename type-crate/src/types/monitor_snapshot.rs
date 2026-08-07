@@ -395,22 +395,13 @@ mod tests {
 
     #[cfg(feature = "anchor")]
     fn new_archive_account(payload_len: usize) -> AccountInfo<'static> {
-        use anchor_lang::solana_program::{account_info::AccountInfo, clock::Epoch};
+        use anchor_lang::solana_program::account_info::AccountInfo;
         let key = Box::leak(Box::new(pk(200)));
         let owner = Box::leak(Box::new(crate::ID));
         let lamports = Box::leak(Box::new(1_000_000u64));
         let total_len = 8 + ArchiveMeta::LEN + (300 * 64) + payload_len;
         let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
-        let account = AccountInfo::new(
-            key,
-            false,
-            true,
-            lamports,
-            data,
-            owner,
-            false,
-            Epoch::default(),
-        );
+        let account = AccountInfo::new(key, false, true, lamports, data, owner, false);
         MintSnapshotsArchive::initialize(&account, pk(7)).unwrap();
         account
     }

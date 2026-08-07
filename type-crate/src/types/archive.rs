@@ -377,7 +377,7 @@ where
 #[cfg(all(test, feature = "anchor"))]
 mod tests {
     use super::*;
-    use anchor_lang::solana_program::{account_info::AccountInfo, clock::Epoch};
+    use anchor_lang::solana_program::account_info::AccountInfo;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct TestRecord {
@@ -433,16 +433,7 @@ mod tests {
         let lamports = Box::leak(Box::new(1_000_000u64));
         let total_len = 8 + ArchiveMeta::LEN + (INDEX_MAP_LEN * 64) + payload_len;
         let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
-        let account = AccountInfo::new(
-            key,
-            false,
-            true,
-            lamports,
-            data,
-            owner,
-            false,
-            Epoch::default(),
-        );
+        let account = AccountInfo::new(key, false, true, lamports, data, owner, false);
         Archive::<INDEX_MAP_LEN, TestRecord>::initialize(&account, pk(7)).unwrap();
         account
     }
