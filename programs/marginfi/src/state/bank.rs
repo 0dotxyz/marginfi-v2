@@ -432,13 +432,12 @@ impl BankImpl for Bank {
         bypass_deposit_limit: bool,
     ) -> MarginfiResult {
         let total_asset_shares: I80F48 = self.total_asset_shares.into();
-        self.total_asset_shares = total_asset_shares
+        let new_total_shares = total_asset_shares
             .checked_add(shares)
-            .ok_or_else(math_error!())?
-            .into();
+            .ok_or_else(math_error!())?;
 
         if shares.is_positive() && self.config.is_deposit_limit_active() && !bypass_deposit_limit {
-            let total_deposits_amount = self.get_asset_amount(self.total_asset_shares.into())?;
+            let total_deposits_amount = self.get_asset_amount(new_total_shares)?;
 
             // For Drift banks, deposit_limit is in native decimals but total_deposits_amount
             // is in 9-decimal (DRIFT_SCALED_BALANCE_DECIMALS). We Scale deposit_limit to match.
@@ -455,6 +454,8 @@ impl BankImpl for Bank {
                 return err!(MarginfiError::BankAssetCapacityExceeded);
             }
         }
+
+        self.total_asset_shares = new_total_shares.into();
 
         Ok(())
     }
