@@ -3,6 +3,8 @@ use anchor_spl::token_2022::spl_token_2022::extension::{
 };
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use fixtures::bank::BankFixture;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::{
     prelude::*,
@@ -1431,19 +1433,20 @@ async fn marginfi_account_liquidation_emode(
         assert!(res.is_ok());
     }
 
-    // The account is healthy when emode is ON -> liquidation will fail
+    // Emode leaves the collateral weighted past what the fees can pay for, so the liquidation
+    // clears at the health-neutral credit. See
+    // `marginfi_account_liquidation_degrades_fee_past_emode_max_leverage`.
     {
         let collateral_bank_f = test_f.get_bank(&collateral_mint);
         let debt_bank_f = test_f.get_bank(&debt_mint);
-        let res = liquidator_mfi_account_f
+        liquidator_mfi_account_f
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
                 liquidate_amount * 0.1, // just to differ from the previous liquidation transaction
                 debt_bank_f,
             )
-            .await;
-        assert!(res.is_err());
+            .await?;
     }
 
     // Decrease the emode weights drawing the liquidatee account liquidatable again
@@ -1515,7 +1518,7 @@ async fn marginfi_account_liquidation_emode(
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
-                liquidate_amount * 97.0, // try to liquidate as much as possible
+                liquidate_amount * 96.9, // try to liquidate as much as possible
                 debt_bank_f,
             )
             .await;
@@ -1543,7 +1546,7 @@ async fn marginfi_account_liquidation_emode(
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
-                liquidate_amount * 97.0, // liquidate as much as possible
+                liquidate_amount * 96.9, // liquidate as much as possible
                 debt_bank_f,
             )
             .await;
@@ -1551,4 +1554,104 @@ async fn marginfi_account_liquidation_emode(
     }
 
     Ok(())
+}
+
+// The liquidatee's credit is floored at the health-neutral share of the seized value, so collateral
+// weighted past the fees (high emode leverage) shrinks them: the insurance cut absorbs it first,
+// then the liquidator's.
+#[tokio::test]
+async fn marginfi_account_liquidation_degrades_fee_past_emode_max_leverage() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    let lender_mfi_account_f = test_f.create_marginfi_account().await;
+    let lender_token_account_usdc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    lender_mfi_account_f
+        .try_bank_deposit(lender_token_account_usdc.key, usdc_bank_f, 200, None)
+        .await?;
+
+    // $20 of SOL against $19.90 of USDC debt, unhealthy at every weight tested below
+    let borrower_mfi_account_f = test_f.create_marginfi_account().await;
+    let borrower_token_account_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let borrower_token_account_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower_mfi_account_f
+        .try_bank_deposit(borrower_token_account_sol.key, sol_bank_f, 2, None)
+        .await?;
+    borrower_mfi_account_f
+        .try_bank_borrow(borrower_token_account_usdc.key, usdc_bank_f, 19.9)
+        .await?;
+
+    let insurance_vault = usdc_bank_f
+        .get_vault_token_account(BankVaultType::Insurance)
+        .await;
+
+    // 20.04x maintenance leverage against the 1.0 USDC liability weight: the 2.5% liquidator fee
+    // still fits, so only the insurance fee gives way.
+    sol_bank_f
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.9501).into()),
+                asset_weight_maint: Some(I80F48!(0.9501).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let insurance_pre = insurance_vault.balance().await;
+    lender_mfi_account_f
+        .try_liquidate(&borrower_mfi_account_f, sol_bank_f, 0.1, usdc_bank_f)
+        .await?;
+    // Seizing $1 of SOL credits the borrower 0.9501 * 1.0001, leaving the liquidator's $0.975
+    // payment minus $0.95019501 for insurance.
+    assert_eq!(insurance_vault.balance().await - insurance_pre, 24_804);
+
+    // 100x maintenance leverage: the credit exceeds 1 - liquidator_fee, so the insurance cut is
+    // gone and the liquidator is left with the 1/(L-1) the weights allow.
+    sol_bank_f
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.99).into()),
+                asset_weight_maint: Some(I80F48!(0.99).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let insurance_pre = insurance_vault.balance().await;
+    let liquidator_usdc_pre = liquidator_liability(&lender_mfi_account_f, usdc_bank_f).await?;
+    lender_mfi_account_f
+        .try_liquidate(&borrower_mfi_account_f, sol_bank_f, 0.1, usdc_bank_f)
+        .await?;
+    assert_eq!(insurance_vault.balance().await - insurance_pre, 0);
+    // Liquidator pays 0.99 * 1.0001 for $1 of SOL; the tolerance covers the I80F48 residue on
+    // that product (actual 990098.999999997).
+    assert_eq_noise!(
+        liquidator_liability(&lender_mfi_account_f, usdc_bank_f).await? - liquidator_usdc_pre,
+        I80F48!(990099),
+        I80F48!(1)
+    );
+
+    Ok(())
+}
+
+/// The liquidator's USDC deposit is drawn down before any borrow, so track the deposit side.
+async fn liquidator_liability(
+    account: &MarginfiAccountFixture,
+    bank_f: &BankFixture,
+) -> anyhow::Result<I80F48> {
+    let account_state = account.load().await;
+    let bank = bank_f.load().await;
+    let index = account_state
+        .lending_account
+        .balances
+        .iter()
+        .position(|b| b.is_active() && b.bank_pk == bank_f.key)
+        .unwrap();
+    let balance = account_state.lending_account.balances[index];
+    Ok(bank.get_liability_amount(balance.liability_shares.into())?
+        - bank.get_asset_amount(balance.asset_shares.into())?)
 }

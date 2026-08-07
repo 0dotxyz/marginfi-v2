@@ -1,4 +1,5 @@
 use anchor_lang::prelude::Clock;
+use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, native, prelude::*};
@@ -6,7 +7,7 @@ use marginfi::constants::{LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMI
 use marginfi::prelude::*;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, LiquidationRecord, MarginfiAccount},
+    types::{BankConfigOpt, EmodeEntry, LiquidationRecord, MarginfiAccount},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -173,6 +174,23 @@ async fn setup_unhealthy_liquidatee() -> anyhow::Result<(
     TokenAccountFixture,
     Keypair,
 )> {
+    setup_liquidatee_with(10.0, I80F48!(0.25), I80F48!(0.4)).await
+}
+
+/// As `setup_unhealthy_liquidatee`, but with the borrow size and the SOL weights the account is
+/// left unhealthy at chosen by the caller.
+async fn setup_liquidatee_with(
+    borrow_usdc: f64,
+    asset_weight_init: I80F48,
+    asset_weight_maint: I80F48,
+) -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    MarginfiAccountFixture,
+    Pubkey,
+    TokenAccountFixture,
+    Keypair,
+)> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -212,7 +230,7 @@ async fn setup_unhealthy_liquidatee() -> anyhow::Result<(
         .try_bank_borrow_with_authority(
             user_token_usdc.key,
             usdc_bank,
-            10.0,
+            borrow_usdc,
             0,
             &liquidatee_authority,
         )
@@ -220,8 +238,8 @@ async fn setup_unhealthy_liquidatee() -> anyhow::Result<(
     sol_bank
         .update_config(
             BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
+                asset_weight_init: Some(asset_weight_init.into()),
+                asset_weight_maint: Some(asset_weight_maint.into()),
                 ..Default::default()
             },
             None,
@@ -693,5 +711,186 @@ async fn tag_allowed_while_cb_halted() -> anyhow::Result<()> {
 
     send_tag(&test_f, &liquidatee, 0).await?;
     assert_eq!(load_tag(&liquidatee).await, trip_time);
+    Ok(())
+}
+
+// The health check bounds the loss by the premium taken, so a premium grown past what a 0.96
+// maintenance weight would fund is still reachable.
+#[tokio::test]
+async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()> {
+    // $20 of SOL against $19.50 of USDC debt, weighted at a 25x maintenance leverage
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
+        setup_liquidatee_with(19.5, I80F48!(0.95), I80F48!(0.96)).await?;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+
+    // Untagged the cap is the 5% minimum, so seizing $0.90 for $0.60 is refused
+    let res = run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.09,
+        0.6,
+    )
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationPremiumTooHigh
+    );
+
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    // Halfway through the growth window the cap is ~52.5%
+    let growth_window = LIQUIDATION_TAG_FULL_PREMIUM_SECS - LIQUIDATION_TAG_DELAY_SECS;
+    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + growth_window / 2).await;
+    refresh_oracles(&test_f).await;
+    // Accrue the warped interval's interest now so the accrual jump doesn't land between the
+    // liquidation's pre/post health snapshots
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    // The same 50% premium now goes through, paid out of the account's remaining equity
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.09,
+        0.6,
+    )
+    .await?;
+
+    Ok(())
+}
+
+// Emode collateral holds the premium at the configured base no matter how long the tag has run.
+#[tokio::test]
+async fn tag_growth_does_not_apply_to_emode_collateral() -> anyhow::Result<()> {
+    // SOL's own weight is 0.5; the emode entry lifts it to 0.94, still short of the $19.50 debt
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
+        setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let collateral_tag = 1u16;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(sol_bank, collateral_tag, &[])
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            usdc_bank,
+            2,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: collateral_tag,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.9).into(),
+                asset_weight_maint: I80F48!(0.94).into(),
+            }],
+        )
+        .await?;
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+
+    // Fully matured: an unboosted account would allow 100% here
+    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS).await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    // Seizing $1.20 for $0.80 is a 50% premium, refused against the unchanged 5% base
+    let res = run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.12,
+        0.8,
+    )
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationPremiumTooHigh
+    );
+
+    // The base 5% is still available: $1.04 seized against $1.00 repaid
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.104,
+        1.0,
+    )
+    .await?;
+
+    let account = liquidatee.load().await;
+    assert!(account.health_cache.is_emode_boosted());
+    Ok(())
+}
+
+// Growth is withheld once the account is in bad debt: past that point the premium is paid by the
+// protocol, not the borrower, and the solvency floor does not apply.
+#[tokio::test]
+async fn tag_growth_does_not_apply_once_in_bad_debt() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
+        setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+
+    // Long enough for the tag to mature and for interest to carry the $19.50 debt past the $20 of
+    // collateral, leaving the account in bad debt
+    set_timestamp(&test_f, T0 + 60 * 24 * 60 * 60).await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    liquidatee.try_lending_account_pulse_health().await?;
+    let cache = liquidatee.load().await.health_cache;
+    assert!(
+        I80F48::from(cache.asset_value_equity) < I80F48::from(cache.liability_value_equity),
+        "account should be in bad debt before the liquidation"
+    );
+
+    // Seizing $1.20 for $0.80 is a 50% premium, refused against the unchanged 5% base
+    let res = run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.12,
+        0.8,
+    )
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationPremiumTooHigh
+    );
+
+    // The base 5% still clears: $1.04 seized against $1.00 repaid
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.104,
+        1.0,
+    )
+    .await?;
+
     Ok(())
 }

@@ -75,6 +75,10 @@ pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
 /// of liquidation bonus, etc) if it has net assets worth less than this amount in dollars. This
 /// roughly covers the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
+/// Margin above the health-neutral discount (`asset weight / liability weight`) that
+/// `lending_account_liquidate` credits the liquidatee, so a fee-capped liquidation still improves
+/// health by more than rounding.
+pub const LIQUIDATION_HEALTH_GAIN_MARGIN: I80F48 = I80F48!(0.0001);
 /// Time after an account is tagged before the allowed liquidation premium starts to grow.
 pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour
 /// Time after tagging at which the premium reaches `LIQUIDATION_TAG_MAX_PREMIUM`, growing

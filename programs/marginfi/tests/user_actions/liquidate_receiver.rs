@@ -2342,3 +2342,224 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
 
     Ok(())
 }
+
+/// Deposits $20 of SOL against a $19.50 USDC borrow, then weights SOL at a maintenance ratio of
+/// 0.96, which puts the maintenance limit at 25x (against the 1.0 USDC liability weight) and caps
+/// any liquidator's premium at 1/24, leaving the account $0.30 short of maintenance. Returns the
+/// fixture, the parties, and the liquidation record.
+async fn setup_high_leverage_liquidatee() -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    TokenAccountFixture,
+    Pubkey,
+)> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
+
+    // Note: Sol is $10, USDC is $1
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
+    liquidatee
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            2.0,
+            None,
+            &liquidatee_authority,
+        )
+        .await?;
+    liquidatee
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            19.5,
+            0,
+            &liquidatee_authority,
+        )
+        .await?;
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.95).into()),
+                asset_weight_maint: Some(I80F48!(0.96).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    Ok((test_f, liquidatee, liquidator_usdc_acc, record_pk))
+}
+
+// Seizing the 5% premium that `LIQUIDATION_BONUS_FEE_MINIMUM` guarantees costs the account
+// -2.10 * 0.96 + 2.00 = $0.016 of maintenance health, less than the $0.10 premium taken.
+#[tokio::test]
+async fn liquidate_receiver_high_leverage_allows_minimum_premium() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) =
+        setup_high_leverage_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    // Seize $2.10 for $2.00 repaid, exactly the guaranteed 5% premium
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.21, None)
+        .await;
+    let repay_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
+        .await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, withdraw_ix, repay_ix, end_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    assert_eq!(
+        liquidator_sol_acc.balance().await,
+        native!(0.21, "SOL", f64)
+    );
+    Ok(())
+}
+
+// The premium is paid out of the liquidatee's equity, so it stops at the point the account would
+// be left in bad debt. Here $20 of collateral against $19.50 of debt funds $0.50 of premium.
+#[tokio::test]
+async fn liquidate_receiver_premium_stops_at_insolvency() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) =
+        setup_high_leverage_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let payer = test_f.payer().clone();
+
+    // Seizing $11.55 for $11.00 repaid takes $0.55 of premium, $0.05 more than the account has
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 1.155, None)
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 11.0, None)
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostLiquidation);
+    }
+
+    // $0.45 of premium leaves the account solvent and goes through
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.945, None)
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 9.0, None)
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    Ok(())
+}

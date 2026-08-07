@@ -509,6 +509,29 @@ fn get_same_asset_weight_for_balance(
     Some(reconciled_emode_config.same_asset.asset_weight)
 }
 
+/// The asset weight the risk engine applies to a balance: the bank's own weight, raised by any
+/// emode or same-asset entry the account's liabilities unlock.
+#[inline(always)]
+fn effective_asset_weight(
+    balance: &Balance,
+    bank: &Bank,
+    requirement_type: RequirementType,
+    reconciled_emode_config: &ReconciledEmodeConfig,
+) -> I80F48 {
+    let mut asset_weight = bank
+        .config
+        .get_weight(requirement_type, BalanceSide::Assets);
+    if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
+        asset_weight = max(asset_weight, emode_entry.asset_weight);
+    }
+    if let Some(same_asset_weight) =
+        get_same_asset_weight_for_balance(balance, bank, requirement_type, reconciled_emode_config)
+    {
+        asset_weight = max(asset_weight, same_asset_weight);
+    }
+    asset_weight
+}
+
 #[inline(always)]
 fn calc_weighted_asset_value_cached_standalone(
     balance: &Balance,
@@ -526,20 +549,8 @@ fn calc_weighted_asset_value_cached_standalone(
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            let mut asset_weight =
+                effective_asset_weight(balance, bank, requirement_type, reconciled_emode_config);
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
@@ -974,6 +985,11 @@ pub fn get_health_components<'info>(
     let mut first_err_index = NO_INDEX_FOUND;
     let mut account_index = 0usize;
 
+    // Skips the per-balance weight comparison below entirely for accounts no entry can reach.
+    let emode_possible = matches!(requirement_type, RequirementType::Maintenance)
+        && (reconciled_emode_config.count > 0 || reconciled_emode_config.same_asset.is_enabled());
+    let mut emode_boosted = false;
+
     for (position_index, balance) in lending_account
         .balances
         .iter()
@@ -1052,6 +1068,16 @@ pub fn get_health_components<'info>(
             )?
         };
 
+        if emode_possible
+            && !balance.is_empty(BalanceSide::Assets)
+            && effective_asset_weight(balance, &bank, requirement_type, &reconciled_emode_config)
+                > bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+        {
+            emode_boosted = true;
+        }
+
         // Record error index if applicable
         if err_code != 0 && first_err_index == NO_INDEX_FOUND {
             first_err_index = position_index;
@@ -1095,6 +1121,7 @@ pub fn get_health_components<'info>(
             RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
+                cache.set_emode_boosted(emode_boosted);
             }
             RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();
@@ -1535,6 +1562,56 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     Ok(account_health)
 }
 
+/// The maintenance asset weight the risk engine applies to `bank_pk` for this account, i.e. the
+/// bank's own weight after any emode or same-asset entry the account's liabilities unlock.
+/// * `remaining_ais` must carry oracles alongside each bank, as for a live health check.
+pub fn get_effective_maint_asset_weight<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    bank_pk: &Pubkey,
+) -> MarginfiResult<I80F48> {
+    let lending_account = &marginfi_account.lending_account;
+    let requirement_type = RequirementType::Maintenance;
+
+    let emode_checkpoint = heap_pos();
+    let reconciled_emode_config = EmodeConfigIterator::new(
+        lending_account,
+        remaining_ais,
+        false,
+        requirement_type,
+        same_asset_leverage_for_requirement(requirement_type, group),
+    )
+    .reconcile();
+    heap_restore(emode_checkpoint);
+
+    let mut account_index = 0usize;
+    for balance in lending_account.balances.iter().filter(|b| b.is_active()) {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+
+        if balance.bank_pk == *bank_pk {
+            return Ok(effective_asset_weight(
+                balance,
+                &bank,
+                requirement_type,
+                &reconciled_emode_config,
+            ));
+        }
+        account_index += get_remaining_accounts_per_bank(&bank)?;
+    }
+
+    err!(MarginfiError::LendingAccountBalanceNotFound)
+}
+
 /// Helper function to calculate weighted value for a single balance.
 ///
 /// Calculates asset or liability value with appropriate weights and price biases.
@@ -1629,21 +1706,8 @@ fn calc_weighted_asset_value_standalone(
                 .as_ref()
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
-            // Determine asset weight (emode or bank default)
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            let mut asset_weight =
+                effective_asset_weight(balance, bank, requirement_type, reconciled_emode_config);
 
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
