@@ -366,15 +366,19 @@ impl<'info> BankAccountWithCache<'_, 'info> {
         remaining_ais: &'info [AccountInfo<'info>],
     ) -> MarginfiResult<Vec<BankAccountWithCache<'a, 'info>>> {
         let mut account_index = 0;
-        let active_balances: Vec<&Balance> = lending_account
+        let mut active_balance_count = 0;
+
+        for balance in lending_account.balances.iter() {
+            if balance.is_active() {
+                active_balance_count += 1;
+            }
+        }
+        let banks_only = remaining_ais.len() == active_balance_count;
+
+        lending_account
             .balances
             .iter()
             .filter(|balance| balance.is_active())
-            .collect();
-        let banks_only = remaining_ais.len() == active_balances.len();
-
-        active_balances
-            .into_iter()
             .map(|balance| {
                 let bank_ai: Option<&AccountInfo<'info>> = remaining_ais.get(account_index);
                 if bank_ai.is_none() {
