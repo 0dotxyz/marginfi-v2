@@ -66,7 +66,11 @@ pub fn lending_pool_configure_bank(
             group.emode_max_init_leverage,
             group.emode_max_maint_leverage,
         )?;
-        check_same_asset_fee(&bank, &group)?;
+        // Only when the fee itself moves: a group leverage raise must not strand unrelated
+        // bank config changes.
+        if bank_config.liquidation_liquidator_fee.is_some() {
+            check_same_asset_fee(&bank, &group)?;
+        }
 
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {

@@ -88,21 +88,11 @@ pub fn calculate_max_leverage(
 
 /// A liquidation clears only while the liquidatee's credit outweighs the seized collateral, leaving
 /// `1 / leverage` for fees. The insurance cut gives way first, so this share is what must fit.
-pub fn check_liquidator_fee_fits_leverage(
-    liquidator_fee: I80F48,
-    leverage: I80F48,
-) -> MarginfiResult {
-    check!(
-        liquidator_fee
-            .checked_mul(leverage)
-            .ok_or_else(math_error!())?
-            < I80F48::ONE,
-        MarginfiError::MaxMaintLeverageExceeded,
-        "liquidator fee ({}) leaves no room at {} leverage",
-        liquidator_fee,
-        leverage
-    );
-    Ok(())
+fn fee_fits_leverage(liquidator_fee: I80F48, leverage: I80F48) -> MarginfiResult<bool> {
+    Ok(liquidator_fee
+        .checked_mul(leverage)
+        .ok_or_else(math_error!())?
+        < I80F48::ONE)
 }
 
 /// Same-asset weights are synthesized from the group leverage rather than stored as entries, so an
@@ -115,7 +105,15 @@ pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResul
     if leverage <= I80F48::ONE {
         return Ok(());
     }
-    check_liquidator_fee_fits_leverage(bank.liquidator_fee(), leverage)
+    let fee = bank.liquidator_fee();
+    check!(
+        fee_fits_leverage(fee, leverage)?,
+        MarginfiError::MaxMaintLeverageExceeded,
+        "same-asset: liquidator fee ({}) leaves no room at {} leverage",
+        fee,
+        leverage
+    );
+    Ok(())
 }
 
 /// Exclusive upper bound on a leverage that still encodes at or below `cap`, so a leverage sitting
@@ -183,7 +181,14 @@ impl EmodeSettingsImpl for EmodeSettings {
             );
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
-            check_liquidator_fee_fits_leverage(liquidator_fee, max_leverage_maint)?;
+            check!(
+                fee_fits_leverage(liquidator_fee, max_leverage_maint)?,
+                MarginfiError::MaxMaintLeverageExceeded,
+                "emode entry tag {}: liquidator fee ({}) leaves no room at {} leverage",
+                entry.collateral_bank_emode_tag,
+                liquidator_fee,
+                max_leverage_maint
+            );
             check!(
                 max_leverage_maint < maint_ceiling,
                 MarginfiError::MaxMaintLeverageExceeded,
