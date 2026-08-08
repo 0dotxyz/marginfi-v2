@@ -30,6 +30,7 @@ pub trait EmodeSettingsImpl {
     fn validate_entries_with_liability_weights(
         &self,
         bank_config: &BankConfig,
+        liquidator_fee: I80F48,
         emode_max_init_leverage: u32,
         emode_max_maint_leverage: u32,
     ) -> MarginfiResult;
@@ -83,10 +84,21 @@ pub fn calculate_max_leverage(
     Ok(leverage)
 }
 
+/// Exclusive upper bound on a leverage that still encodes at or below `cap`, so a leverage sitting
+/// exactly on the cap is admitted even though `basis_to_u32` decodes a hair below what it stores.
+/// A cap of 0 is unset and bounds nothing.
+fn leverage_ceiling(cap: u32) -> I80F48 {
+    match cap.checked_add(1) {
+        Some(next) if cap != 0 => u32_to_basis(next),
+        _ => I80F48::MAX,
+    }
+}
+
 impl EmodeSettingsImpl for EmodeSettings {
     fn validate_entries_with_liability_weights(
         &self,
         bank_config: &BankConfig,
+        liquidator_fee: I80F48,
         emode_max_init_leverage: u32,
         emode_max_maint_leverage: u32,
     ) -> MarginfiResult {
@@ -99,8 +111,8 @@ impl EmodeSettingsImpl for EmodeSettings {
             marginfi_type_crate::types::BalanceSide::Liabilities,
         );
 
-        let max_allowed_init_leverage: I80F48 = u32_to_basis(emode_max_init_leverage);
-        let max_allowed_maint_leverage: I80F48 = u32_to_basis(emode_max_maint_leverage);
+        let init_ceiling: I80F48 = leverage_ceiling(emode_max_init_leverage);
+        let maint_ceiling: I80F48 = leverage_ceiling(emode_max_maint_leverage);
 
         for entry in self.emode_config.entries {
             if entry.is_empty() {
@@ -128,22 +140,35 @@ impl EmodeSettingsImpl for EmodeSettings {
 
             let max_leverage_init = calculate_max_leverage(asset_init_w, liab_init_w)?;
             check!(
-                max_leverage_init <= max_allowed_init_leverage,
+                max_leverage_init < init_ceiling,
                 MarginfiError::MaxInitLeverageExceeded,
                 "emode entry tag {}: init leverage ({}) exceeds max allowed ({})",
                 entry.collateral_bank_emode_tag,
                 max_leverage_init,
-                max_allowed_init_leverage
+                u32_to_basis(emode_max_init_leverage)
             );
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
+            // A liquidation clears only while the liquidatee's credit outweighs the seized
+            // collateral, leaving `1 / leverage` for fees. The insurance cut gives way first.
             check!(
-                max_leverage_maint <= max_allowed_maint_leverage,
+                liquidator_fee
+                    .checked_mul(max_leverage_maint)
+                    .ok_or_else(math_error!())?
+                    < I80F48::ONE,
+                MarginfiError::MaxMaintLeverageExceeded,
+                "emode entry tag {}: liquidator fee ({}) leaves no room at {} leverage",
+                entry.collateral_bank_emode_tag,
+                liquidator_fee,
+                max_leverage_maint
+            );
+            check!(
+                max_leverage_maint < maint_ceiling,
                 MarginfiError::MaxMaintLeverageExceeded,
                 "emode entry tag {}: maint leverage ({}) exceeds max allowed ({})",
                 entry.collateral_bank_emode_tag,
                 max_leverage_maint,
-                max_allowed_maint_leverage
+                u32_to_basis(emode_max_maint_leverage)
             );
         }
 
@@ -195,6 +220,7 @@ mod tests {
     use crate::assert_eq_with_tolerance;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
+    use marginfi_type_crate::constants::DEFAULT_LIQUIDATION_FEE;
     use marginfi_type_crate::types::{basis_to_u32, BankConfig};
     use marginfi_type_crate::types::{
         reconcile_emode_configs, EmodeConfig, EmodeEntry, RequirementType, MAX_EMODE_ENTRIES,
@@ -231,6 +257,7 @@ mod tests {
         assert!(settings
             .validate_entries_with_liability_weights(
                 &bank_config,
+                DEFAULT_LIQUIDATION_FEE,
                 emode_max_init_leverage,
                 emode_max_maint_leverage
             )
@@ -252,6 +279,7 @@ mod tests {
         settings.emode_config.entries[2] = generic_entry(2);
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -301,6 +329,7 @@ mod tests {
         settings.emode_config.entries[0] = entry;
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -328,6 +357,7 @@ mod tests {
         settings.emode_config.entries[0] = entry;
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -510,6 +540,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -537,6 +568,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -544,6 +576,63 @@ mod tests {
             result.is_err(),
             "Should fail when asset_init_w >= liab_init_w"
         );
+    }
+
+    /// An unset group cap bounds nothing, but the fee still has to fit the entry's own leverage.
+    #[test]
+    fn test_validate_emode_entries_with_unset_group_caps() {
+        use bytemuck::Zeroable;
+
+        let mut settings = EmodeSettings::zeroed();
+        let mut bank_config = BankConfig::zeroed();
+        bank_config.liability_weight_init = I80F48::from_num(1.0).into();
+        bank_config.liability_weight_maint = I80F48::from_num(1.0).into();
+
+        // 10x maint against a 2.5% fee, no cap to clear
+        settings.emode_config.entries[0] = create_entry(1, 0, 0.8, 0.9);
+        assert!(settings
+            .validate_entries_with_liability_weights(&bank_config, DEFAULT_LIQUIDATION_FEE, 0, 0)
+            .is_ok());
+
+        // 100x maint leaves 1% of room, under the 2.5% fee
+        settings.emode_config.entries[0] = create_entry(1, 0, 0.98, 0.99);
+        let result = settings.validate_entries_with_liability_weights(
+            &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
+            0,
+            0,
+        );
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::MaxMaintLeverageExceeded.into()
+        );
+    }
+
+    /// The encoded group cap must decode to at least the value stored, or an entry sitting exactly
+    /// on the ceiling is rejected.
+    #[test]
+    fn test_validate_emode_entry_at_exactly_the_maint_cap() {
+        use bytemuck::Zeroable;
+
+        let mut settings = EmodeSettings::zeroed();
+        let mut bank_config = BankConfig::zeroed();
+
+        let emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
+        let emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
+
+        bank_config.liability_weight_init = I80F48::from_num(1.0).into();
+        bank_config.liability_weight_maint = I80F48::from_num(1.0).into();
+
+        // CW_init 0.9 => 10x, under the 15x cap. CW_maint 0.95 => exactly the 20x cap.
+        settings.emode_config.entries[0] = create_entry(1, 0, 0.9, 0.95);
+
+        let result = settings.validate_entries_with_liability_weights(
+            &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
+            emode_max_init_leverage,
+            emode_max_maint_leverage,
+        );
+        assert!(result.is_ok(), "entry at exactly the cap should validate");
     }
 
     #[test]
@@ -567,6 +656,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
+            DEFAULT_LIQUIDATION_FEE,
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );

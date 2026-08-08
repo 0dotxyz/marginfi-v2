@@ -95,10 +95,10 @@ const USER_ACCOUNT_SA_JLR = "same_asset_juplend_account";
 const REGULAR_TOKEN_A_SEED = new BN(80_001);
 const RECEIVERSHIP_JUP_WITHDRAW = new BN(500_000);
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.tokenADecimals);
-const SAME_ASSET_INIT_LEVERAGE = 99;
-const SAME_ASSET_MAINT_LEVERAGE = 100;
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
+const SAME_ASSET_INIT_LEVERAGE = 38;
+const SAME_ASSET_MAINT_LEVERAGE = 39;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 36;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 37;
 const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 
@@ -216,6 +216,8 @@ describe("jlr08: JupLend same-asset emode", () => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: groupPk,
           newRiskAdmin: options?.newRiskAdmin,
+          emodeMaxInitLeverage: toWrappedI80F48Safe(Math.max(initLeverage, 15)),
+          emodeMaxMaintLeverage: toWrappedI80F48Safe(Math.max(maintLeverage, 20)),
           sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
           sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),

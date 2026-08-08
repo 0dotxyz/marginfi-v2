@@ -100,10 +100,10 @@ const REGULAR_SOL_SEED = new BN(20_002);
 const RECEIVERSHIP_KAMINO_WITHDRAW = new BN(5_000);
 const RECEIVERSHIP_KAMINO_REPAY = new BN(5_000);
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.usdcDecimals);
-const SAME_ASSET_INIT_LEVERAGE = 99;
-const SAME_ASSET_MAINT_LEVERAGE = 100;
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
+const SAME_ASSET_INIT_LEVERAGE = 38;
+const SAME_ASSET_MAINT_LEVERAGE = 39;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 36;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 37;
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 const SAME_ASSET_BOUNDARY_GAP_POSITION = 0.5;
 
@@ -259,6 +259,8 @@ describe("k20: Kamino same-asset emode", () => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: kaminoGroup.publicKey,
           newRiskAdmin: options?.newRiskAdmin,
+          emodeMaxInitLeverage: bigNumberToWrappedI80F48(Math.max(initLeverage, 15)),
+          emodeMaxMaintLeverage: bigNumberToWrappedI80F48(Math.max(maintLeverage, 20)),
           sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
           sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
         })

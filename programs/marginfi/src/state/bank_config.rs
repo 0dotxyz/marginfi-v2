@@ -55,10 +55,7 @@ impl BankConfigImpl for BankConfig {
             asset_init_w >= I80F48::ZERO && asset_init_w <= I80F48::ONE,
             MarginfiError::InvalidConfig
         );
-        check!(
-            asset_maint_w <= (I80F48::ONE + I80F48::ONE),
-            MarginfiError::InvalidConfig
-        );
+        check!(asset_maint_w <= I80F48::ONE, MarginfiError::InvalidConfig);
         check!(asset_maint_w >= asset_init_w, MarginfiError::InvalidConfig);
 
         let liab_init_w = I80F48::from(self.liability_weight_init);

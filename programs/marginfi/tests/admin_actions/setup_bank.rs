@@ -2079,9 +2079,10 @@ async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_before = test_f.marginfi_group.load().await;
 
+    // Same-asset leverage may not exceed the emode caps, so both move together.
     test_f
         .marginfi_group
-        .try_update_with_same_asset_emode_leverage(
+        .try_update_leverages(
             group_before.admin,
             group_before.emode_admin,
             group_before.delegate_curve_admin,
@@ -2089,6 +2090,8 @@ async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
+            Some(I80F48::from_num(99).into()),
+            Some(I80F48::from_num(100).into()),
             Some(I80F48::from_num(99).into()),
             Some(I80F48::from_num(100).into()),
         )

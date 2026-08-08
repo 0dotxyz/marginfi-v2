@@ -197,6 +197,8 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
+        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
+        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -413,6 +415,8 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
+        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
+        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -499,6 +503,8 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
+        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
+        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -678,6 +684,8 @@ describe("Same-asset automatic emode", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
+        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
+        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),

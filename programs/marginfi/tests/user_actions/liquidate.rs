@@ -1226,7 +1226,8 @@ async fn marginfi_account_liquidation_emode(
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
-    // Configure group to allow higher max emode leverage (100x instead of default 20x)
+    // Raise the max emode leverage. 39x is the ceiling the default 2.5% liquidator fee
+    // leaves room for, since a liquidation only clears while that fee fits inside 1/leverage.
     let admin = test_f.payer();
     test_f
         .marginfi_group
@@ -1238,8 +1239,8 @@ async fn marginfi_account_liquidation_emode(
             admin,
             admin,
             admin,
-            Some(I80F48!(99).into()), // init must be < maint
-            Some(I80F48!(100).into()),
+            Some(I80F48!(38).into()), // init must be < maint
+            Some(I80F48!(39).into()),
         )
         .await
         .unwrap();
@@ -1422,8 +1423,8 @@ async fn marginfi_account_liquidation_emode(
             collateral_bank_emode_tag,
             flags: 0,
             pad0: [0, 0, 0, 0, 0],
-            asset_weight_init: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
-            asset_weight_maint: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
+            asset_weight_init: I80F48!(0.97).into(), // up from 0.1, gives ~33.3x leverage
+            asset_weight_maint: I80F48!(0.97).into(), // up from 0.1, gives ~33.3x leverage
         }];
 
         let res = test_f

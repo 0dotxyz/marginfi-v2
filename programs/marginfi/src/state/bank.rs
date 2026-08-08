@@ -27,6 +27,8 @@ use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
+use marginfi_type_crate::constants::DEFAULT_LIQUIDATION_FEE;
+use marginfi_type_crate::types::u32_to_centi;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
@@ -161,6 +163,13 @@ fn sol_log_compute_units() {
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
 
+    /// The liquidator's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn liquidator_fee(&self) -> I80F48;
+    /// The insurance fund's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn insurance_fee(&self) -> I80F48;
+
     #[allow(clippy::too_many_arguments)]
     fn new(
         marginfi_group_pk: Pubkey,
@@ -269,7 +278,24 @@ pub trait BankImpl {
     fn decrement_borrowing_position_count(&mut self);
 }
 
+/// A stored 0 falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
+        DEFAULT_LIQUIDATION_FEE
+    } else {
+        u32_to_centi(fee)
+    }
+}
+
 impl BankImpl for Bank {
+    fn liquidator_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_liquidator_fee)
+    }
+
+    fn insurance_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_insurance_fee)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new(
         marginfi_group_pk: Pubkey,
