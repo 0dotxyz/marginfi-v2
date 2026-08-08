@@ -292,7 +292,6 @@ pub fn lending_account_liquidate<'info>(
         };
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
-        // Liquidation fees are configured per-bank on the liability bank (0 => default 2.5%).
         let liquidator_fee = liab_bank.liquidator_fee();
         let insurance_fee = liab_bank.insurance_fee();
 

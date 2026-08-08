@@ -149,22 +149,25 @@ pub fn configure(
 
     // Same-asset weights are derived at runtime from these values, so the emode caps bind them
     // here and nowhere else.
-    if same_asset_init_enabled && same_asset_init_leverage > emode_init_leverage {
+    if emode_caps_set && same_asset_init_enabled && same_asset_init_leverage > emode_init_leverage {
         msg!(
             "same-asset emode init leverage ({:.6}) exceeds emode init leverage ({:.6})",
             i80f48_to_f64(same_asset_init_leverage),
             i80f48_to_f64(emode_init_leverage)
         );
-        return Err(error!(MarginfiError::MaxInitLeverageExceeded));
+        return Err(error!(MarginfiError::BadEmodeConfig));
     }
 
-    if same_asset_maint_enabled && same_asset_maint_leverage > emode_maint_leverage {
+    if emode_caps_set
+        && same_asset_maint_enabled
+        && same_asset_maint_leverage > emode_maint_leverage
+    {
         msg!(
             "same-asset emode maint leverage ({:.6}) exceeds emode maint leverage ({:.6})",
             i80f48_to_f64(same_asset_maint_leverage),
             i80f48_to_f64(emode_maint_leverage)
         );
-        return Err(error!(MarginfiError::MaxMaintLeverageExceeded));
+        return Err(error!(MarginfiError::BadEmodeConfig));
     }
     // The fuzzer should ignore this because the "Clock" mock sysvar doesn't load until after the
     // group is init. Eventually we might fix the fuzzer to load the clock first...

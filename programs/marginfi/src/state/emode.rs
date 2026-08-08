@@ -1,10 +1,12 @@
 use anchor_lang::err;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use marginfi_type_crate::constants::BANK_SAME_ASSET_EMODE_ELIGIBLE;
 use marginfi_type_crate::types::{
-    BankConfig, EmodeSettings, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
+    Bank, BankConfig, EmodeSettings, MarginfiGroup, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
 };
 
+use crate::state::bank::BankImpl;
 use crate::{check, errors::MarginfiError, math_error, prelude::MarginfiResult};
 use marginfi_type_crate::types::u32_to_basis;
 
@@ -84,14 +86,46 @@ pub fn calculate_max_leverage(
     Ok(leverage)
 }
 
+/// A liquidation clears only while the liquidatee's credit outweighs the seized collateral, leaving
+/// `1 / leverage` for fees. The insurance cut gives way first, so this share is what must fit.
+pub fn check_liquidator_fee_fits_leverage(
+    liquidator_fee: I80F48,
+    leverage: I80F48,
+) -> MarginfiResult {
+    check!(
+        liquidator_fee
+            .checked_mul(leverage)
+            .ok_or_else(math_error!())?
+            < I80F48::ONE,
+        MarginfiError::MaxMaintLeverageExceeded,
+        "liquidator fee ({}) leaves no room at {} leverage",
+        liquidator_fee,
+        leverage
+    );
+    Ok(())
+}
+
+/// Same-asset weights are synthesized from the group leverage rather than stored as entries, so an
+/// eligible bank's fee is checked against that leverage here.
+pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResult {
+    if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) {
+        return Ok(());
+    }
+    let leverage: I80F48 = u32_to_basis(group.same_asset_emode_maint_leverage);
+    if leverage <= I80F48::ONE {
+        return Ok(());
+    }
+    check_liquidator_fee_fits_leverage(bank.liquidator_fee(), leverage)
+}
+
 /// Exclusive upper bound on a leverage that still encodes at or below `cap`, so a leverage sitting
 /// exactly on the cap is admitted even though `basis_to_u32` decodes a hair below what it stores.
 /// A cap of 0 is unset and bounds nothing.
 fn leverage_ceiling(cap: u32) -> I80F48 {
-    match cap.checked_add(1) {
-        Some(next) if cap != 0 => u32_to_basis(next),
-        _ => I80F48::MAX,
+    if cap == 0 {
+        return I80F48::MAX;
     }
+    u32_to_basis(cap) + u32_to_basis(1)
 }
 
 impl EmodeSettingsImpl for EmodeSettings {
@@ -149,19 +183,7 @@ impl EmodeSettingsImpl for EmodeSettings {
             );
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
-            // A liquidation clears only while the liquidatee's credit outweighs the seized
-            // collateral, leaving `1 / leverage` for fees. The insurance cut gives way first.
-            check!(
-                liquidator_fee
-                    .checked_mul(max_leverage_maint)
-                    .ok_or_else(math_error!())?
-                    < I80F48::ONE,
-                MarginfiError::MaxMaintLeverageExceeded,
-                "emode entry tag {}: liquidator fee ({}) leaves no room at {} leverage",
-                entry.collateral_bank_emode_tag,
-                liquidator_fee,
-                max_leverage_maint
-            );
+            check_liquidator_fee_fits_leverage(liquidator_fee, max_leverage_maint)?;
             check!(
                 max_leverage_maint < maint_ceiling,
                 MarginfiError::MaxMaintLeverageExceeded,
@@ -575,6 +597,31 @@ mod tests {
         assert!(
             result.is_err(),
             "Should fail when asset_init_w >= liab_init_w"
+        );
+    }
+
+    /// `basis_to_u32(100)` is exactly `u32::MAX`, so the top of the range must still bound.
+    #[test]
+    fn test_validate_emode_entry_against_the_maximum_cap() {
+        use bytemuck::Zeroable;
+
+        let mut settings = EmodeSettings::zeroed();
+        let mut bank_config = BankConfig::zeroed();
+        bank_config.liability_weight_init = I80F48::from_num(1.0).into();
+        bank_config.liability_weight_maint = I80F48::from_num(1.0).into();
+        let cap = basis_to_u32(I80F48::from_num(100));
+
+        // 0.999 against liab 1.0 is 1000x, past even a 100x cap
+        settings.emode_config.entries[0] = create_entry(1, 0, 0.9, 0.999);
+        let result = settings.validate_entries_with_liability_weights(
+            &bank_config,
+            I80F48!(0.0001),
+            cap,
+            cap,
+        );
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::MaxMaintLeverageExceeded.into()
         );
     }
 

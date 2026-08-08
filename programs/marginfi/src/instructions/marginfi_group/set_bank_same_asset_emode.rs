@@ -1,5 +1,6 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetSameAssetEmodeEligibilityEvent};
 use crate::state::bank::BankImpl;
+use crate::state::emode::check_same_asset_fee;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -57,6 +58,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     }
 
     bank.update_flag(enabled, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+    check_same_asset_fee(&bank, &group)?;
 
     emit!(LendingPoolBankSetSameAssetEmodeEligibilityEvent {
         header: GroupEventHeader {

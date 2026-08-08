@@ -3,7 +3,7 @@ use crate::events::{
 };
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
-use crate::state::emode::EmodeSettingsImpl;
+use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
@@ -66,6 +66,7 @@ pub fn lending_pool_configure_bank(
             group.emode_max_init_leverage,
             group.emode_max_maint_leverage,
         )?;
+        check_same_asset_fee(&bank, &group)?;
 
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {
