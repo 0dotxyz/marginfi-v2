@@ -855,6 +855,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                 MarginfiError::ZeroAssetPrice.into(),
                 MarginfiError::ZeroLiabilityPrice.into(),
                 MarginfiError::OperationRepayOnly.into(),
+                MarginfiError::IllegalBalanceState.into(),
                 // Note: because updates in 1.5 allow liquidation of underwater banks, it is now
                 // possible for a bank's liquidity value to become empty in the fuzz suite, which
                 // leads to the `liquidatee_liab_bank_account.withdraw_spl_transfer` failing. This
