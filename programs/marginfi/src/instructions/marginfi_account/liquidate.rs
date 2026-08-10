@@ -6,9 +6,8 @@ use crate::state::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
         check_account_init_health_and_clear_tag,
         check_post_liquidation_condition_and_get_account_health,
-        check_pre_liquidation_condition_and_get_account_health, get_effective_maint_asset_weight,
-        get_remaining_accounts_per_bank, is_signer_authorized, run_cb_price_gate,
-        LendingAccountImpl, MarginfiAccountImpl,
+        check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
+        is_signer_authorized, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
     },
     {
         marginfi_group::MarginfiGroupImpl,
@@ -21,17 +20,15 @@ use crate::utils::{
     InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
-use crate::{
-    check, constants::LIQUIDATION_HEALTH_GAIN_MARGIN, debug, math_error, prelude::*, utils,
-};
+use crate::{check, debug, prelude::*, utils};
 use anchor_lang::{prelude::*, solana_program::clock::Clock};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
     types::{
-        BalanceSide, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        PriceBias, RequirementType, ACCOUNT_IN_RECEIVERSHIP,
+        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -49,8 +46,6 @@ use marginfi_type_crate::{
 /// - `p_a`: Price of `A`
 /// - `f_l`: Liquidation fee
 /// - `f_i`: Insurance fee
-/// - `w_a`: Maintenance asset weight of `A` for this account, including any emode boost
-/// - `w_l`: Maintenance liability weight of `L`
 ///
 /// The liquidator invokes this instruction with `q_a` as input (the total amount of collateral to be liquidated).
 /// This is done because `q_a` is the most bounded variable in this process, as if the `q_a` is larger than what the liquidatee has, the instruction will fail.
@@ -72,24 +67,18 @@ use marginfi_type_crate::{
 ///
 /// Calculations:
 ///  
-/// `d_h = min(1, w_a / w_l * (1 + LIQUIDATION_HEALTH_GAIN_MARGIN))`
-/// `q_ll = q_a * p_a * max(1 - f_l, d_h) / p_l`
-/// `q_lf = q_a * p_a * max(1 - (f_l + f_i), d_h) / p_l`
-///
-/// `d_h` is the smallest share of the seized value that, credited back as liability, still improves
-/// the liquidatee's maintenance health. Collateral weighted above `1 - (f_l + f_i)` leaves no room
-/// for the full fees, so the insurance cut shrinks first and the liquidator's fee after it. The
-/// insurance fee is the gap between `q_ll` and `q_lf`, which reaches zero and never inverts.
+/// `q_ll = q_a * p_a * (1 - f_l) / p_l`
+/// `q_lf = q_a * p_a * (1 - (f_l + f_i)) / p_l`
 ///
 /// Risk model
 ///
-/// Paying down `L` with `A` gains `q_lf * p_l * w_l` of maintenance health and costs `q_a * p_a *
-/// w_a`. The credit floor `d_h` holds the gain above the cost for any fee configuration, so the
-/// liquidation always leaves the liquidatee in better health than before whenever `w_a < w_l`.
+/// Assumptions:
 ///
-/// This holds while the liquidatee's liability balance does not become positive (counted as
-/// collateral) and its collateral balance does not become negative (counted as liability), both of
-/// which `check_post_liquidation_condition_and_get_account_health` rejects.
+/// The fundamental idea behind the risk model is that the liquidation always leaves the liquidatee account in a better health than before.
+/// This can be achieved by ensuring that for each token the liability has a LTV > 1, each collateral has a risk haircut of < 1,
+/// with this by paying down the liability with the collateral, the liquidatee account will always be in a better health,
+/// assuming that the liquidatee liability token balance doesn't become positive (doesn't become counted as collateral),
+/// and that the liquidatee collateral token balance doesn't become negative (doesn't become counted as liability).
 ///
 ///
 /// Expected remaining account schema
@@ -250,17 +239,7 @@ pub fn lending_account_liquidate<'info>(
         liquidatee_remaining_accounts,
     )
     .ok();
-    let liab_weight_maint: I80F48 = liab_bank
-        .config
-        .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
     drop(liab_bank);
-
-    let asset_weight_maint = get_effective_maint_asset_weight(
-        &liquidatee_marginfi_account,
-        group,
-        liquidatee_remaining_accounts,
-        &asset_bank_key,
-    )?;
 
     // ##Accounting changes##
 
@@ -294,22 +273,8 @@ pub fn lending_account_liquidate<'info>(
 
         let liquidator_fee = liab_bank.liquidator_fee();
         let insurance_fee = liab_bank.insurance_fee();
-
-        // Smallest credit that still improves the liquidatee's health. Collateral weighted past
-        // the fees shrinks them, insurance cut first.
-        let health_neutral_discount: I80F48 = I80F48::min(
-            I80F48::ONE,
-            asset_weight_maint
-                .checked_div(liab_weight_maint)
-                .ok_or_else(math_error!())?
-                .checked_mul(I80F48::ONE + LIQUIDATION_HEALTH_GAIN_MARGIN)
-                .ok_or_else(math_error!())?,
-        );
-        let final_discount: I80F48 = I80F48::max(
-            I80F48::ONE - (insurance_fee + liquidator_fee),
-            health_neutral_discount,
-        );
-        let liquidator_discount: I80F48 = I80F48::max(I80F48::ONE - liquidator_fee, final_discount);
+        let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
+        let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 
         // Quantity of liability to be paid off by liquidator
         let liab_amount_liquidator: I80F48 = calc_amount(
