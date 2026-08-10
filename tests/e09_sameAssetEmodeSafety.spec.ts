@@ -62,8 +62,8 @@ let usdcBankA: PublicKey;
 let usdcBankB: PublicKey;
 let solBank: PublicKey;
 
-const DEFAULT_INIT_LEVERAGE = 38;
-const DEFAULT_MAINT_LEVERAGE = 39;
+const DEFAULT_INIT_LEVERAGE = 99;
+const DEFAULT_MAINT_LEVERAGE = 100;
 // The boundary helper requires `tightenedRequirementLeverage < healthyInitLeverage` in the
 // no-haircut path so the borrow lands inside a positive gap.
 const BOUNDARY_TIGHTENED_LEVERAGE = DEFAULT_INIT_LEVERAGE - 1;
@@ -114,8 +114,6 @@ describe("Same-asset emode safety", () => {
     const tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        emodeMaxInitLeverage: bigNumberToWrappedI80F48(Math.max(initLeverage, 15)),
-        emodeMaxMaintLeverage: bigNumberToWrappedI80F48(Math.max(maintLeverage, 20)),
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
       })

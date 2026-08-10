@@ -27,10 +27,10 @@ pub fn lending_pool_configure_bank_emode(
     bank.emode.emode_config.entries = sorted_entries;
     bank.emode.timestamp = Clock::get()?.unix_timestamp;
 
-    let liquidator_fee = bank.liquidator_fee();
+    let total_liquidation_fee = bank.total_liquidation_fee();
     bank.emode.validate_entries_with_liability_weights(
         &bank.config,
-        liquidator_fee,
+        total_liquidation_fee,
         group.emode_max_init_leverage,
         group.emode_max_maint_leverage,
     )?;

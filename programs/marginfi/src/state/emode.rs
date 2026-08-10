@@ -6,6 +6,7 @@ use marginfi_type_crate::types::{
     Bank, BankConfig, EmodeSettings, MarginfiGroup, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
 };
 
+use crate::constants::LIQUIDATION_HEALTH_GAIN_MARGIN;
 use crate::state::bank::BankImpl;
 use crate::{check, errors::MarginfiError, math_error, prelude::MarginfiResult};
 use marginfi_type_crate::types::u32_to_basis;
@@ -32,7 +33,7 @@ pub trait EmodeSettingsImpl {
     fn validate_entries_with_liability_weights(
         &self,
         bank_config: &BankConfig,
-        liquidator_fee: I80F48,
+        total_liquidation_fee: I80F48,
         emode_max_init_leverage: u32,
         emode_max_maint_leverage: u32,
     ) -> MarginfiResult;
@@ -86,17 +87,17 @@ pub fn calculate_max_leverage(
     Ok(leverage)
 }
 
-/// A liquidation clears only while the liquidatee's credit outweighs the seized collateral, leaving
-/// `1 / leverage` for fees. The insurance cut gives way first, so this share is what must fit.
-fn fee_fits_leverage(liquidator_fee: I80F48, leverage: I80F48) -> MarginfiResult<bool> {
-    Ok(liquidator_fee
+/// Whether both liquidation cuts fit inside the `1 / leverage` that a health-improving liquidation
+/// leaves for them, less a margin that keeps a config off the boundary.
+fn fees_fit_leverage(total_liquidation_fee: I80F48, leverage: I80F48) -> MarginfiResult<bool> {
+    Ok((total_liquidation_fee + LIQUIDATION_HEALTH_GAIN_MARGIN)
         .checked_mul(leverage)
         .ok_or_else(math_error!())?
-        < I80F48::ONE)
+        <= I80F48::ONE + LIQUIDATION_HEALTH_GAIN_MARGIN)
 }
 
-/// Same-asset weights are synthesized from the group leverage rather than stored as entries, so an
-/// eligible bank's fee is checked against that leverage here.
+/// Checks an eligible bank's fees against the group's same-asset maintenance leverage, the value
+/// its synthesized collateral weight is derived from.
 pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResult {
     if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) {
         return Ok(());
@@ -105,11 +106,11 @@ pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResul
     if leverage <= I80F48::ONE {
         return Ok(());
     }
-    let fee = bank.liquidator_fee();
+    let fee = bank.total_liquidation_fee();
     check!(
-        fee_fits_leverage(fee, leverage)?,
+        fees_fit_leverage(fee, leverage)?,
         MarginfiError::MaxMaintLeverageExceeded,
-        "same-asset: liquidator fee ({}) leaves no room at {} leverage",
+        "same-asset: liquidation fees ({}) leave no room at {} leverage",
         fee,
         leverage
     );
@@ -130,7 +131,7 @@ impl EmodeSettingsImpl for EmodeSettings {
     fn validate_entries_with_liability_weights(
         &self,
         bank_config: &BankConfig,
-        liquidator_fee: I80F48,
+        total_liquidation_fee: I80F48,
         emode_max_init_leverage: u32,
         emode_max_maint_leverage: u32,
     ) -> MarginfiResult {
@@ -182,11 +183,11 @@ impl EmodeSettingsImpl for EmodeSettings {
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
             check!(
-                fee_fits_leverage(liquidator_fee, max_leverage_maint)?,
+                fees_fit_leverage(total_liquidation_fee, max_leverage_maint)?,
                 MarginfiError::MaxMaintLeverageExceeded,
-                "emode entry tag {}: liquidator fee ({}) leaves no room at {} leverage",
+                "emode entry tag {}: liquidation fees ({}) leave no room at {} leverage",
                 entry.collateral_bank_emode_tag,
-                liquidator_fee,
+                total_liquidation_fee,
                 max_leverage_maint
             );
             check!(
@@ -252,6 +253,12 @@ mod tests {
     use marginfi_type_crate::types::{
         reconcile_emode_configs, EmodeConfig, EmodeEntry, RequirementType, MAX_EMODE_ENTRIES,
     };
+
+    /// What `Bank::total_liquidation_fee` reports for a bank that left both cuts at 0.
+    fn default_total_fee() -> I80F48 {
+        DEFAULT_LIQUIDATION_FEE + DEFAULT_LIQUIDATION_FEE
+    }
+
     fn create_entry(tag: u16, flags: u8, init: f32, maint: f32) -> EmodeEntry {
         EmodeEntry {
             collateral_bank_emode_tag: tag,
@@ -284,7 +291,7 @@ mod tests {
         assert!(settings
             .validate_entries_with_liability_weights(
                 &bank_config,
-                DEFAULT_LIQUIDATION_FEE,
+                default_total_fee(),
                 emode_max_init_leverage,
                 emode_max_maint_leverage
             )
@@ -306,7 +313,7 @@ mod tests {
         settings.emode_config.entries[2] = generic_entry(2);
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -356,7 +363,7 @@ mod tests {
         settings.emode_config.entries[0] = entry;
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -384,7 +391,7 @@ mod tests {
         settings.emode_config.entries[0] = entry;
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -567,7 +574,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -595,7 +602,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -640,17 +647,17 @@ mod tests {
         bank_config.liability_weight_init = I80F48::from_num(1.0).into();
         bank_config.liability_weight_maint = I80F48::from_num(1.0).into();
 
-        // 10x maint against a 2.5% fee, no cap to clear
+        // 10x maint against the default 5% fees, no cap to clear
         settings.emode_config.entries[0] = create_entry(1, 0, 0.8, 0.9);
         assert!(settings
-            .validate_entries_with_liability_weights(&bank_config, DEFAULT_LIQUIDATION_FEE, 0, 0)
+            .validate_entries_with_liability_weights(&bank_config, default_total_fee(), 0, 0)
             .is_ok());
 
-        // 100x maint leaves 1% of room, under the 2.5% fee
+        // 100x maint leaves 1% of room, under the default 5% fees
         settings.emode_config.entries[0] = create_entry(1, 0, 0.98, 0.99);
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             0,
             0,
         );
@@ -675,12 +682,13 @@ mod tests {
         bank_config.liability_weight_init = I80F48::from_num(1.0).into();
         bank_config.liability_weight_maint = I80F48::from_num(1.0).into();
 
-        // CW_init 0.9 => 10x, under the 15x cap. CW_maint 0.95 => exactly the 20x cap.
+        // CW_init 0.9 => 10x, under the 15x cap. CW_maint 0.95 => exactly the 20x cap. The 0.1%
+        // fees leave the cap as the only binding check.
         settings.emode_config.entries[0] = create_entry(1, 0, 0.9, 0.95);
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            I80F48!(0.001),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
@@ -708,7 +716,7 @@ mod tests {
 
         let result = settings.validate_entries_with_liability_weights(
             &bank_config,
-            DEFAULT_LIQUIDATION_FEE,
+            default_total_fee(),
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );

@@ -19,12 +19,12 @@ pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> Marginfi
     destination_bank.emode = source_bank.emode;
     // The destination carries its own liability weights and fee, so the copied entries are
     // revalidated against them.
-    let liquidator_fee = destination_bank.liquidator_fee();
+    let total_liquidation_fee = destination_bank.total_liquidation_fee();
     destination_bank
         .emode
         .validate_entries_with_liability_weights(
             &destination_bank.config,
-            liquidator_fee,
+            total_liquidation_fee,
             group.emode_max_init_leverage,
             group.emode_max_maint_leverage,
         )?;

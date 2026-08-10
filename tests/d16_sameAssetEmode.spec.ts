@@ -96,10 +96,10 @@ const REGULAR_TOKEN_A_SEED = new BN(16_001);
 const REGULAR_USDC_SEED = new BN(16_002);
 const RECEIVERSHIP_DRIFT_WITHDRAW = new BN(500_000);
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.tokenADecimals);
-const SAME_ASSET_INIT_LEVERAGE = 38;
-const SAME_ASSET_MAINT_LEVERAGE = 39;
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 36;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 37;
+const SAME_ASSET_INIT_LEVERAGE = 99;
+const SAME_ASSET_MAINT_LEVERAGE = 100;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 
 type TestUser = (typeof users)[number];
@@ -196,8 +196,6 @@ describe("d16: Drift same-asset emode", () => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: driftGroup.publicKey,
           newRiskAdmin: options?.newRiskAdmin,
-          emodeMaxInitLeverage: toWrappedI80F48Safe(Math.max(initLeverage, 15)),
-          emodeMaxMaintLeverage: toWrappedI80F48Safe(Math.max(maintLeverage, 20)),
           sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
           sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),

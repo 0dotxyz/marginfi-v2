@@ -89,8 +89,8 @@ const getNetHealth = (cache: {
 const USER_ACCOUNT_SA: string = "sa_acc";
 
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.usdcDecimals);
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 36;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 37;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const SAME_ASSET_PARTIAL_LIQUIDATION = new BN(50_000);
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0;
 
@@ -197,8 +197,6 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
-        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -279,8 +277,8 @@ describe("Same-asset automatic emode", () => {
   };
 
   // Leverage values for configuration
-  const SAME_ASSET_INIT_LEVERAGE = 38;
-  const SAME_ASSET_MAINT_LEVERAGE = 39;
+  const SAME_ASSET_INIT_LEVERAGE = 99;
+  const SAME_ASSET_MAINT_LEVERAGE = 100;
   const SAME_ASSET_BORROW = computeSameAssetBoundaryBorrowNative({
     collateralNative: SAME_ASSET_DEPOSIT,
     collateralDecimals: ecosystem.usdcDecimals,
@@ -415,8 +413,6 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
-        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -503,8 +499,6 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
-        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
-        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
@@ -684,8 +678,6 @@ describe("Same-asset automatic emode", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        emodeMaxInitLeverage: toWrappedI80F48Safe(SAME_ASSET_INIT_LEVERAGE),
-        emodeMaxMaintLeverage: toWrappedI80F48Safe(SAME_ASSET_MAINT_LEVERAGE),
         sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),

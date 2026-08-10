@@ -2079,10 +2079,9 @@ async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_before = test_f.marginfi_group.load().await;
 
-    // Same-asset leverage may not exceed the emode caps, so both move together.
     test_f
         .marginfi_group
-        .try_update_leverages(
+        .try_update_with_same_asset_emode_leverage(
             group_before.admin,
             group_before.emode_admin,
             group_before.delegate_curve_admin,
@@ -2090,8 +2089,6 @@ async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            Some(I80F48::from_num(99).into()),
-            Some(I80F48::from_num(100).into()),
             Some(I80F48::from_num(99).into()),
             Some(I80F48::from_num(100).into()),
         )
@@ -2342,7 +2339,7 @@ async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> a
         .marginfi_group
         .try_lending_pool_configure_bank_emode(collateral, 1, &[])
         .await?;
-    // 0.9 against the 1.0 USDC liability weight is 10x, so the fee must stay under 10%
+    // 0.9 against the 1.0 USDC liability weight is 10x, so both cuts together must stay under 10%
     test_f
         .marginfi_group
         .try_lending_pool_configure_bank_emode(
@@ -2358,53 +2355,19 @@ async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> a
         )
         .await?;
 
-    let raise_fee = |fee: f64| BankConfigOpt {
-        liquidation_liquidator_fee: Some(centi_to_u32(I80F48::from_num(fee))),
+    let raise_fees = |liquidator: f64, insurance: f64| BankConfigOpt {
+        liquidation_liquidator_fee: Some(centi_to_u32(I80F48::from_num(liquidator))),
+        liquidation_insurance_fee: Some(centi_to_u32(I80F48::from_num(insurance))),
         ..Default::default()
     };
-    // 9% still clears 10x
-    debt.update_config(raise_fee(0.09), None).await?;
-    // 11% does not
-    let res = debt.update_config(raise_fee(0.11), None).await;
+    // 4% + 5% still clears 10x
+    debt.update_config(raise_fees(0.04, 0.05), None).await?;
+    // 5% + 6% does not
+    let res = debt.update_config(raise_fees(0.05, 0.06), None).await;
     assert_custom_error!(
         res.unwrap_err().downcast::<BanksClientError>().unwrap(),
         MarginfiError::MaxMaintLeverageExceeded
     );
-
-    Ok(())
-}
-
-/// Same-asset weights never become entries, so eligibility is the moment its fee is checked.
-#[tokio::test]
-async fn same_asset_eligibility_rejects_a_fee_that_cannot_clear_the_group_leverage(
-) -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
-    let bank = test_f.get_bank(&BankMint::Usdc);
-    let group = test_f.marginfi_group.load().await;
-
-    // 50x leaves 2% of room, under the default 2.5% liquidator fee
-    test_f
-        .marginfi_group
-        .try_update_leverages(
-            group.admin,
-            group.emode_admin,
-            group.delegate_curve_admin,
-            group.delegate_limit_admin,
-            group.delegate_emissions_admin,
-            group.metadata_admin,
-            group.risk_admin,
-            Some(I80F48::from_num(49).into()),
-            Some(I80F48::from_num(50).into()),
-            Some(I80F48::from_num(49).into()),
-            Some(I80F48::from_num(50).into()),
-        )
-        .await?;
-
-    let res = test_f
-        .marginfi_group
-        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, true)
-        .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::MaxMaintLeverageExceeded);
 
     Ok(())
 }

@@ -2,7 +2,7 @@ use fixed::types::I80F48 as FixedI80F48;
 use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::prelude::*;
-use marginfi_type_crate::types::{u32_to_basis, BankConfig, BankConfigOpt};
+use marginfi_type_crate::types::{BankConfig, BankConfigOpt};
 use solana_sdk::{signer::Signer, transaction::Transaction};
 
 pub(super) const KAMINO_ROUNDING_TOLERANCE_NATIVE: i128 = 1;
@@ -144,15 +144,9 @@ pub(super) async fn reconfigure_same_asset_leverage(
     maint_leverage: i64,
 ) -> anyhow::Result<()> {
     let group = test_f.marginfi_group.load().await;
-    // Same-asset leverage may not exceed the group's emode caps, so lift those to cover it in the
-    // same transaction. Only ever raises, so tightening same-asset leaves the caps where they are.
-    let emode_init =
-        FixedI80F48::from_num(init_leverage).max(u32_to_basis(group.emode_max_init_leverage));
-    let emode_maint =
-        FixedI80F48::from_num(maint_leverage).max(u32_to_basis(group.emode_max_maint_leverage));
     test_f
         .marginfi_group
-        .try_update_leverages(
+        .try_update_with_same_asset_emode_leverage(
             group.admin,
             group.emode_admin,
             group.delegate_curve_admin,
@@ -160,8 +154,6 @@ pub(super) async fn reconfigure_same_asset_leverage(
             group.delegate_emissions_admin,
             group.metadata_admin,
             group.risk_admin,
-            Some(emode_init.into()),
-            Some(emode_maint.into()),
             Some(FixedI80F48::from_num(init_leverage).into()),
             Some(FixedI80F48::from_num(maint_leverage).into()),
         )

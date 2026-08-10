@@ -167,6 +167,9 @@ pub trait BankImpl {
     /// The insurance fund's share of a classic liquidation, as a fraction. A stored 0 means the
     /// `DEFAULT_LIQUIDATION_FEE` default.
     fn insurance_fee(&self) -> I80F48;
+    /// Both liquidation cuts combined, the share of the seized collateral a liquidation must be
+    /// able to give up.
+    fn total_liquidation_fee(&self) -> I80F48;
 
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -292,6 +295,10 @@ impl BankImpl for Bank {
 
     fn insurance_fee(&self) -> I80F48 {
         liquidation_fee_fraction(self.liquidation_insurance_fee)
+    }
+
+    fn total_liquidation_fee(&self) -> I80F48 {
+        self.liquidator_fee() + self.insurance_fee()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -566,6 +573,15 @@ impl BankImpl for Bank {
     }
 
     fn configure(&mut self, config: &BankConfigOpt) -> MarginfiResult {
+        check!(
+            config.asset_weight_init.is_some() == config.asset_weight_maint.is_some(),
+            MarginfiError::InvalidConfig
+        );
+        check!(
+            config.liability_weight_init.is_some() == config.liability_weight_maint.is_some(),
+            MarginfiError::InvalidConfig
+        );
+
         set_if_some!(self.config.asset_weight_init, config.asset_weight_init);
         set_if_some!(self.config.asset_weight_maint, config.asset_weight_maint);
         set_if_some!(

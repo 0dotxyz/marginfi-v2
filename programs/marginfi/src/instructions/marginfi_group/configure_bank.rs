@@ -59,16 +59,16 @@ pub fn lending_pool_configure_bank(
         msg!("Bank configured!");
 
         let group = ctx.accounts.group.load()?;
-        let liquidator_fee = bank.liquidator_fee();
+        let total_liquidation_fee = bank.total_liquidation_fee();
         bank.emode.validate_entries_with_liability_weights(
             &bank.config,
-            liquidator_fee,
+            total_liquidation_fee,
             group.emode_max_init_leverage,
             group.emode_max_maint_leverage,
         )?;
-        // Only when the fee itself moves: a group leverage raise must not strand unrelated
-        // bank config changes.
-        if bank_config.liquidation_liquidator_fee.is_some() {
+        if bank_config.liquidation_liquidator_fee.is_some()
+            || bank_config.liquidation_insurance_fee.is_some()
+        {
             check_same_asset_fee(&bank, &group)?;
         }
 

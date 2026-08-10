@@ -68,7 +68,7 @@ import { enableSameAssetEmodeForBanks } from "./utils/same-asset-emode";
 
 const SAME_ASSET_DISABLED = 1;
 const SAME_ASSET_ENABLED_INIT_LEVERAGE = 10;
-const SAME_ASSET_ENABLED_MAINT_LEVERAGE = 39;
+const SAME_ASSET_ENABLED_MAINT_LEVERAGE = 100;
 
 const COLLATERAL_UI = 10;
 const BORROW_UI_BEFORE_ENABLE = 3.5;
@@ -171,8 +171,6 @@ async function setAssetWeights(bank: PublicKey, initWeight: number, maintWeight:
 async function setSameAssetLeverage(group: PublicKey, initLeverage: number, maintLeverage: number) {
   const ix = await groupConfigure(groupAdmin.mrgnBankrunProgram, {
     marginfiGroup: group,
-    emodeMaxInitLeverage: toWrappedI80F48Safe(Math.max(initLeverage, 15)),
-    emodeMaxMaintLeverage: toWrappedI80F48Safe(Math.max(maintLeverage, 20)),
     sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
     sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
   });
