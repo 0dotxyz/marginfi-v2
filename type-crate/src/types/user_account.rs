@@ -89,6 +89,10 @@ impl MarginfiAccount {
     pub const LEN: usize = std::mem::size_of::<MarginfiAccount>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::ACCOUNT;
 
+    pub fn get_flag(&self, flag: u64) -> bool {
+        self.account_flags & flag != 0
+    }
+
     /// Note: Only for accounts created by PDA
     #[cfg(feature = "anchor")]
     pub fn derive_pda(

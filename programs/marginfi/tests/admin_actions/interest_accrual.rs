@@ -4,10 +4,9 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_eq_noise, native, prelude::*};
 use marginfi::state::{
-    bank::{BankImpl, BankVaultType},
-    bank_cache::ComputedInterestRates,
-    interest_rate::InterestRateConfigImpl,
+    bank::BankImpl, bank_cache::ComputedInterestRates, interest_rate::InterestRateConfigImpl,
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{
     centi_to_u32, make_points, milli_to_u32, Bank, BankConfig, InterestRateConfig, MarginfiGroup,
     RatePoint,

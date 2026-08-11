@@ -1,22 +1,21 @@
+use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
 use {
     super::{group_get_all, load_all_banks},
     crate::{
         config::Config,
         output,
-        utils::{
-            find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
-            find_bank_vault_pda, send_tx,
-        },
+        utils::{find_bank_emssions_token_account_pda, send_tx},
     },
     anchor_client::anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas},
     anyhow::{bail, Context, Result},
     marginfi::state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         price::{
             parse_swb_ignore_alignment, LitePullFeedAccountData, OraclePriceFeedAdapter,
             PriceAdapter,
         },
     },
+    marginfi_type_crate::types::BankVaultType,
     marginfi_type_crate::{
         constants::METADATA_SEED,
         types::{Bank, BankMetadata, MarginfiGroup, OraclePriceType, OracleSetup, PriceBias},
@@ -558,9 +557,9 @@ pub fn bank_withdraw_fees_permissionless(
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let token_program = config.mfi_program.rpc().get_account(&bank.mint)?.owner;
 
-    let (fee_vault, _) = find_bank_vault_pda(&bank_pk, BankVaultType::Fee, &config.program_id);
+    let (fee_vault, _) = derive_bank_vault(&bank_pk, BankVaultType::Fee, &config.program_id);
     let (fee_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Fee, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Fee, &config.program_id);
 
     let fees_destination_account = bank.fees_destination_account;
 

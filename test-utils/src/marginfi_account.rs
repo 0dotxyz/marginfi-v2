@@ -8,12 +8,12 @@ use fixed::types::I80F48;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
-use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::pdas::{
     derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
     derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
     derive_juplend_rate_model, derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
 use solana_commitment_config::CommitmentLevel;

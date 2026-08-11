@@ -4,11 +4,9 @@ use anchor_spl::token_2022::spl_token_2022::extension::{
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
-use marginfi::{
-    prelude::MarginfiError,
-    state::bank::{BankImpl, BankVaultType},
-};
+use marginfi::{prelude::MarginfiError, state::bank::BankImpl};
 use marginfi_type_crate::types::BankConfig;
+use marginfi_type_crate::types::BankVaultType;
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use test_case::test_case;

@@ -4,13 +4,14 @@ use crate::{
     events::{GroupEventHeader, LendingPoolSuperAdminWithdrawEvent},
     live, math_error,
     prelude::{MarginfiError, MarginfiResult},
-    state::bank::{BankImpl, BankVaultType},
+    state::bank::BankImpl,
     utils,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_SOL, LIQUIDITY_VAULT_AUTHORITY_SEED, ZERO_AMOUNT_THRESHOLD,

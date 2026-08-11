@@ -2,7 +2,6 @@ use crate::{
     bank_signer,
     events::{DriftClaimBadDebtEvent, GroupEventHeader},
     ix_utils::get_discrim_hash,
-    state::bank::BankVaultType,
     utils::is_drift_asset_tag,
     MarginfiError, MarginfiResult,
 };
@@ -20,6 +19,7 @@ use anchor_spl::{
     },
     token::{self, accessor, Mint, Token, TokenAccount, Transfer},
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     types::{Bank, FeeState},

@@ -3,10 +3,8 @@ use fixtures::{
     assert_custom_error,
     test::{BankMint, TestBankSetting, TestFixture, TestSettings, DEFAULT_SOL_TEST_BANK_CONFIG},
 };
-use marginfi::{
-    errors::MarginfiError,
-    state::{bank::BankVaultType, marginfi_account::MarginfiAccountImpl},
-};
+use marginfi::errors::MarginfiError;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{BankConfig, BankConfigOpt, ACCOUNT_DISABLED};
 use solana_program_test::tokio;
 use solana_sdk::pubkey::Pubkey;

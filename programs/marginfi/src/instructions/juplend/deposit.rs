@@ -2,7 +2,7 @@ use crate::{
     bank_signer,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
             BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
@@ -26,6 +26,7 @@ use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate};
 use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
 use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup};
 use marginfi_type_crate::{constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_DISABLED};
 

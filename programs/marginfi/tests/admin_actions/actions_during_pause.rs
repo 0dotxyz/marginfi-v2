@@ -3,7 +3,7 @@ use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{assert_custom_error, native, prelude::*};
 use marginfi::prelude::*;
-use marginfi::state::{bank::BankVaultType, marginfi_account::MarginfiAccountImpl};
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{BankConfig, BankConfigOpt, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},

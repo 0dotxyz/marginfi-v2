@@ -5,7 +5,7 @@ use crate::{
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
@@ -17,7 +17,7 @@ use crate::{
     },
     utils::{
         self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
-        is_marginfi_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
+        record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -28,6 +28,8 @@ use anchor_spl::{
 };
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
+use marginfi_type_crate::types::is_marginfi_asset_tag;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{

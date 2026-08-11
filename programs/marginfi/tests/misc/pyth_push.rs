@@ -8,10 +8,8 @@ use fixtures::{
         DEFAULT_USDC_TEST_BANK_CONFIG,
     },
 };
-use marginfi::{
-    errors::MarginfiError,
-    state::bank::{BankImpl, BankVaultType},
-};
+use marginfi::{errors::MarginfiError, state::bank::BankImpl};
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{Bank, BankConfig, BankConfigOpt};
 use solana_program_test::tokio;
 

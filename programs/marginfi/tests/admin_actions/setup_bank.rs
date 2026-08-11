@@ -7,12 +7,13 @@ use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         emode::{
             DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
         },
     },
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         BANK_SAME_ASSET_EMODE_ELIGIBLE, BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS,

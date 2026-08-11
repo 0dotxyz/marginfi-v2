@@ -6,7 +6,8 @@ use fixtures::{
         PYTH_SOL_EQUIVALENT_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED,
     },
 };
-use marginfi::{prelude::MarginfiError, state::bank::BankVaultType};
+use marginfi::prelude::MarginfiError;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{BankConfig, BankConfigOpt};
 use solana_program_test::tokio;
 

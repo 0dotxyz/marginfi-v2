@@ -67,7 +67,6 @@ pub trait MarginfiAccountImpl {
     fn initialize(&mut self, group: Pubkey, authority: Pubkey, current_timestamp: u64);
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
-    fn get_flag(&self, flag: u64) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -272,10 +271,6 @@ impl MarginfiAccountImpl for MarginfiAccount {
             msg!("Unsetting account flag {:b}", flag);
         }
         self.account_flags &= !flag;
-    }
-
-    fn get_flag(&self, flag: u64) -> bool {
-        self.account_flags & flag != 0
     }
 
     fn increment_active_orders(&mut self) -> MarginfiResult {

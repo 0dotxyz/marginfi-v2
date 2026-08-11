@@ -72,6 +72,13 @@ impl RequirementType {
     }
 }
 
+pub fn is_marginfi_asset_tag(asset_tag: u8) -> bool {
+    matches!(
+        asset_tag,
+        ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED
+    )
+}
+
 /// Validate that after a deposit to Bank, the users's account contains either all Default/SOL
 /// balances, or all Staked/Sol balances. Default and Staked assets cannot mix.
 pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> bool {

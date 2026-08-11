@@ -11,14 +11,14 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        self, is_marginfi_asset_tag, record_deposit_inflow, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        self, record_deposit_inflow, validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
+use marginfi_type_crate::types::is_marginfi_asset_tag;
 use marginfi_type_crate::{
     constants::TOKENLESS_REPAYMENTS_ALLOWED,
     types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},

@@ -4,7 +4,9 @@ use crate::{
     assert_struct_align, assert_struct_size,
     constants::{
         discriminators, ASSET_TAG_DRIFT, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
+        DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
     },
     types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
 };
@@ -232,6 +234,16 @@ pub struct Bank {
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    #[inline]
+    pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {
+        shares.checked_mul(self.asset_share_value.into())
+    }
+
+    #[inline]
+    pub fn liability_amount(&self, shares: I80F48) -> Option<I80F48> {
+        shares.checked_mul(self.liability_share_value.into())
+    }
 
     pub fn get_balance_decimals(&self) -> u8 {
         if self.config.asset_tag == ASSET_TAG_DRIFT {
@@ -479,6 +491,31 @@ mod feed_family_tests {
             OracleSetup::FixedJuplend,
         ] {
             assert_eq!(setup.feed_family(), None);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BankVaultType {
+    Liquidity,
+    Insurance,
+    Fee,
+}
+
+impl BankVaultType {
+    pub fn get_seed(self) -> &'static [u8] {
+        match self {
+            BankVaultType::Liquidity => LIQUIDITY_VAULT_SEED.as_bytes(),
+            BankVaultType::Insurance => INSURANCE_VAULT_SEED.as_bytes(),
+            BankVaultType::Fee => FEE_VAULT_SEED.as_bytes(),
+        }
+    }
+
+    pub fn get_authority_seed(self) -> &'static [u8] {
+        match self {
+            BankVaultType::Liquidity => LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
+            BankVaultType::Insurance => INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(),
+            BankVaultType::Fee => FEE_VAULT_AUTHORITY_SEED.as_bytes(),
         }
     }
 }

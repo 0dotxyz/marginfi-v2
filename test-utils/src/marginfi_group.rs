@@ -17,12 +17,12 @@ use marginfi::{
     },
     instruction::*,
     instructions::marginfi_group::StakedSettingsConfig,
-    state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
     SAME_ASSET_EMODE_REGISTRY_SEED, STAKED_SETTINGS_SEED,
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,

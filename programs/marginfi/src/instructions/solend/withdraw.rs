@@ -3,7 +3,7 @@ use crate::{
     constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
@@ -27,6 +27,7 @@ use anchor_spl::token_interface::{
 };
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
 };

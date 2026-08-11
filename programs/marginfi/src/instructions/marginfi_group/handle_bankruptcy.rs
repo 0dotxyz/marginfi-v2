@@ -6,22 +6,21 @@ use crate::{
     math_error,
     prelude::MarginfiError,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             check_account_bankrupt, run_cb_price_gate, BankAccountWrapper, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{
-        self, fetch_unbiased_price_for_bank_cache, is_marginfi_asset_tag, validate_bank_state,
-        InstructionKind,
-    },
+    utils::{self, fetch_unbiased_price_for_bank_cache, validate_bank_state, InstructionKind},
     MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
+use marginfi_type_crate::types::is_marginfi_asset_tag;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_SEED,

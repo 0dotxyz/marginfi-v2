@@ -1,7 +1,4 @@
-use crate::{
-    bank_signer, state::bank::BankVaultType, utils::is_drift_asset_tag, MarginfiError,
-    MarginfiResult,
-};
+use crate::{bank_signer, utils::is_drift_asset_tag, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -13,6 +10,7 @@ use drift_mocks::{
     },
     state::MinimalSpotMarket,
 };
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     pdas::DRIFT_PROGRAM_ID,

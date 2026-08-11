@@ -1,4 +1,3 @@
-use crate::state::bank::BankVaultType;
 use crate::utils::is_kamino_asset_tag;
 use crate::{bank_signer, optional_account, MarginfiError, MarginfiResult};
 use anchor_lang::{prelude::*, system_program};
@@ -18,6 +17,7 @@ use kamino_mocks::kamino_lending::cpi::{
 };
 use kamino_mocks::kamino_lending::types::InitObligationArgs;
 use kamino_mocks::state::MinimalReserve;
+use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},

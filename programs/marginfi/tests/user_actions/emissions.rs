@@ -3,7 +3,6 @@ use fixtures::assert_custom_error;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::prelude::*;
 use marginfi::prelude::MarginfiError;
-use marginfi::state::marginfi_account::MarginfiAccountImpl;
 use marginfi_type_crate::types::ACCOUNT_FROZEN;
 use solana_program_test::tokio;
 use solana_sdk::signature::Keypair;
