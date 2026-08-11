@@ -1,5 +1,4 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import BigNumber from "bignumber.js";
 import {
   AccountMeta,
   ComputeBudgetProgram,
@@ -15,7 +14,6 @@ import {
 import {
   bigNumberToWrappedI80F48,
   TOKEN_PROGRAM_ID,
-  wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -60,7 +58,13 @@ import {
   expectFailedTxWithError,
   getTokenBalance,
 } from "../../utils/genericTests";
-import { bnToBigIntSafe, bnToDecimalStringSafe } from "../../utils/bn-utils";
+import {
+  bigIntToBnSafe,
+  bnToBigIntSafe,
+  I80F48_FRACTIONAL_BITS,
+  nativeToI80Scaled,
+  toI80Scaled,
+} from "../../utils/bn-utils";
 import {
   createLookupTableForInstructions,
   getBankrunBlockhash,
@@ -184,7 +188,7 @@ const deriveRebalanceRecord = (
     [
       Buffer.from(REBALANCE_RECORD_SEED),
       marginfiAccount.toBuffer(),
-      new BN(seq.toString()).toArrayLike(Buffer, "le", 8),
+      bigIntToBnSafe(seq).toArrayLike(Buffer, "le", 8),
     ],
     programId,
   );
@@ -194,10 +198,9 @@ const nextSeqOf = async (
   program: Program<Marginfi>,
   marginfiAccount: PublicKey,
 ): Promise<bigint> =>
-  BigInt(
-    (
-      await program.account.marginfiAccount.fetch(marginfiAccount)
-    ).rebalanceExecutionSeq.toString(),
+  bnToBigIntSafe(
+    (await program.account.marginfiAccount.fetch(marginfiAccount))
+      .rebalanceExecutionSeq,
   );
 
 /** The sequence `start_rebalance` last consumed, i.e. the most recent execution's record. */
@@ -304,13 +307,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
     keeper.mrgnProgram.provider.sendAndConfirm(tx);
 
   /** A bank's asset shares (0 if the owner holds no active balance there). */
-  const sharesOf = (acc: any, bank: PublicKey) => {
+  const sharesOf = (acc: any, bank: PublicKey): bigint => {
     const bal = acc.lendingAccount.balances.find(
       (b: any) => b.active && b.bankPk.equals(bank),
     );
-    return bal ? wrappedI80F48toBigNumber(bal.assetShares) : new BigNumber(0);
+    return bal ? toI80Scaled(bal.assetShares) : 0n;
   };
-  const assetShares = async (bank: PublicKey) =>
+  const assetShares = async (bank: PublicKey): Promise<bigint> =>
     sharesOf(await program.account.marginfiAccount.fetch(ownerAcc), bank);
 
   const nextSeq = () => nextSeqOf(program, ownerAcc);
@@ -325,7 +328,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
     const seq = await nextSeq();
     const [record] = deriveRebalanceRecord(program.programId, ownerAcc, seq);
     return program.methods
-      .marginfiAccountStartRebalance(moves, new BN(seq.toString()))
+      .marginfiAccountStartRebalance(moves, bigIntToBnSafe(seq))
       .accountsPartial({
         group,
         marginfiAccount: ownerAcc,
@@ -859,18 +862,18 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
     const before = await program.account.marginfiAccount.fetch(ownerAcc);
     const oldSrc = sharesOf(before, srcBank);
-    assert.equal(sharesOf(before, dstBank).toString(), "0", "dst empty before the move");
-    assert.equal(sharesOf(before, dst2Bank).toString(), "0", "dst2 empty before the move");
+    assert.equal(sharesOf(before, dstBank), 0n, "dst empty before the move");
+    assert.equal(sharesOf(before, dst2Bank), 0n, "dst2 empty before the move");
 
     const tx = await buildSandwich({ order });
     await sendKeeper(tx);
 
     // The source fans out equally into both destinations; value conserved, source drained.
     const after = await program.account.marginfiAccount.fetch(ownerAcc);
-    const half = oldSrc.div(2);
-    assert.equal(sharesOf(after, srcBank).toString(), "0", "src drained after the move");
-    assert.equal(sharesOf(after, dstBank).toString(), half.toString(), "dst holds half");
-    assert.equal(sharesOf(after, dst2Bank).toString(), half.toString(), "dst2 holds half");
+    const half = oldSrc / 2n;
+    assert.equal(sharesOf(after, srcBank), 0n, "src drained after the move");
+    assert.equal(sharesOf(after, dstBank), half, "dst holds half");
+    assert.equal(sharesOf(after, dst2Bank), half, "dst2 holds half");
 
     // Order persists; a tip-free execution escrows nothing, so its record closes at end.
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
@@ -907,14 +910,14 @@ describe("Auto-rebalance orders (native -> native)", () => {
     // full tip is escrowed out of the pool at end, pending settlement.
     await sendKeeper(await buildSandwich({ order }));
 
-    const moved = (await assetShares(dstBank)).plus(await assetShares(dst2Bank));
+    const moved = (await assetShares(dstBank)) + (await assetShares(dst2Bank));
     const escrowed =
       poolBefore - (await bankRunProvider.connection.getBalance(feePool));
 
     // Value conserved to the atomic unit across the whole destination set, no skim.
     assert.equal(
-      moved.toString(),
-      oldBalance.toString(),
+      moved,
+      oldBalance,
       "the two destinations must sum to the original src position exactly",
     );
     // A full move escrows exactly the configured tip out of the SOL pool.
@@ -998,11 +1001,11 @@ describe("Auto-rebalance orders (native -> native)", () => {
     );
 
     // Both sources drained into the single destination; value conserved across the set, one tip escrowed.
-    assert.equal((await assetShares(srcBank)).toString(), "0", "src drained");
-    assert.equal((await assetShares(src2Bank)).toString(), "0", "src2 drained");
+    assert.equal(await assetShares(srcBank), 0n, "src drained");
+    assert.equal(await assetShares(src2Bank), 0n, "src2 drained");
     assert.equal(
-      (await assetShares(dstBank)).toString(),
-      oldSrc.plus(oldSrc2).toString(),
+      await assetShares(dstBank),
+      oldSrc + oldSrc2,
       "dst holds both sources' value exactly",
     );
     const escrowed =
@@ -1088,13 +1091,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
     const dstAfter = await assetShares(dstBank);
     // Share value is 1 in-tx, so shares == native; with no skim same-mint shares are conserved.
     assert.equal(
-      dstAfter.toString(),
-      bnToDecimalStringSafe(usdc(500)),
+      dstAfter,
+      nativeToI80Scaled(usdc(500)),
       "exactly the ordered amount moved to dst",
     );
     assert.equal(
-      srcAfter.plus(dstAfter).toString(),
-      oldSrc.toString(),
+      srcAfter + dstAfter,
+      oldSrc,
       "no skim -> same-mint shares conserved",
     );
 
@@ -2146,7 +2149,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     ];
 
     const startIx = await program.methods
-      .marginfiAccountStartRebalance(moves, new BN(seq.toString()))
+      .marginfiAccountStartRebalance(moves, bigIntToBnSafe(seq))
       .accountsPartial({
         group: groupPk,
         marginfiAccount: ownerAcc,
@@ -2301,10 +2304,9 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       spotMarket,
     );
     assert.equal(
-      wrappedI80F48toBigNumber(
-        (await getBalance(driftBank)).assetShares,
-      ).toFixed(0),
-      expectedDriftShares.toString(),
+      toI80Scaled((await getBalance(driftBank)).assetShares) >>
+        I80F48_FRACTIONAL_BITS,
+      bnToBigIntSafe(expectedDriftShares),
       "dst holds exactly the moved amount as drift scaled balance",
     );
 
@@ -2377,10 +2379,9 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       (await getTokenBalance(bankRunProvider, fTokenVault)) - fTokensBefore;
     assert.isAbove(mintedShares, 0, "the deposit minted fTokens");
     assert.equal(
-      wrappedI80F48toBigNumber(
-        (await getBalance(juplendBank)).assetShares,
-      ).toFixed(0),
-      mintedShares.toString(),
+      toI80Scaled((await getBalance(juplendBank)).assetShares) >>
+        I80F48_FRACTIONAL_BITS,
+      BigInt(mintedShares),
       "dst shares equal the fTokens minted by the move",
     );
 
@@ -2646,7 +2647,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       await program.methods
         .marginfiAccountStartRebalance(
           [buildMove(0, 1, half.toNumber() / 1e6)],
-          new BN(seq.toString()),
+          bigIntToBnSafe(seq),
         )
         .accountsPartial({
           group: groupPk,
@@ -2930,7 +2931,7 @@ describe("Auto-rebalance orders (worst-case balance sets)", () => {
     const startIx = await program.methods
       .marginfiAccountStartRebalance(
         [buildMove(0, 1, move.toNumber() / 1e6)],
-        new BN(seq.toString()),
+        bigIntToBnSafe(seq),
       )
       .accountsPartial({
         group: groupPk,
