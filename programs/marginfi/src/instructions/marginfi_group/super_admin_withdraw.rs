@@ -11,12 +11,11 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_SOL, LIQUIDITY_VAULT_AUTHORITY_SEED, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiGroup},
+    types::{Bank, BankVaultType, MarginfiGroup},
 };
 
 const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu");

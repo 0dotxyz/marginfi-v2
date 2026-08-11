@@ -9,8 +9,7 @@ use fixtures::{
     },
 };
 use marginfi::{errors::MarginfiError, state::bank::BankImpl};
-use marginfi_type_crate::types::BankVaultType;
-use marginfi_type_crate::types::{Bank, BankConfig, BankConfigOpt};
+use marginfi_type_crate::types::{Bank, BankConfig, BankConfigOpt, BankVaultType};
 use solana_program_test::tokio;
 
 #[tokio::test]

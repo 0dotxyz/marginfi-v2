@@ -13,9 +13,10 @@ use marginfi_type_crate::pdas::{
     derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
     derive_juplend_rate_model, derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
-use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
+use marginfi_type_crate::types::{
+    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger,
+};
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{instruction::Instruction, sysvar};

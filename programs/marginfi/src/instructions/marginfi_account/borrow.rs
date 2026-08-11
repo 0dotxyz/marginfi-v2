@@ -23,15 +23,13 @@ use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         EMPTY_BALANCE_THRESHOLD, LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 

@@ -19,16 +19,15 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        Bank, BankOperationalState, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankOperationalState, BankVaultType, HealthCache,
+        MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::cmp::{max, min};

@@ -4,8 +4,7 @@ use fixtures::{
     test::{BankMint, TestBankSetting, TestFixture, TestSettings, DEFAULT_SOL_TEST_BANK_CONFIG},
 };
 use marginfi::errors::MarginfiError;
-use marginfi_type_crate::types::BankVaultType;
-use marginfi_type_crate::types::{BankConfig, BankConfigOpt, ACCOUNT_DISABLED};
+use marginfi_type_crate::types::{BankConfig, BankConfigOpt, BankVaultType, ACCOUNT_DISABLED};
 use solana_program_test::tokio;
 use solana_sdk::pubkey::Pubkey;
 

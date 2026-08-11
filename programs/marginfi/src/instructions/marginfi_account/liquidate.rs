@@ -21,16 +21,14 @@ use crate::{check, debug, prelude::*, utils};
 use anchor_lang::{prelude::*, solana_program::clock::Clock};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
         LIQUIDITY_VAULT_SEED,
     },
     types::{
-        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, u32_to_centi, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
+        MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 

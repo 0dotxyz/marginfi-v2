@@ -28,13 +28,12 @@ use anchor_spl::{
 };
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
+        ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 

@@ -7,8 +7,7 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use marginfi_type_crate::constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, SOLEND_OBLIGATION_SEED};
-use marginfi_type_crate::types::Bank;
-use marginfi_type_crate::types::BankVaultType;
+use marginfi_type_crate::types::{Bank, BankVaultType};
 use solend_mocks::cpi::accounts::{DepositReserveLiquidityAndObligationCollateral, InitObligation};
 use solend_mocks::cpi::{deposit_reserve_liquidity_and_obligation_collateral, init_obligation};
 use solend_mocks::state::{SolendMinimalReserve, OBLIGATION_LEN as SOLEND_OBLIGATION_SIZE};

@@ -18,10 +18,12 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
 use marginfi_type_crate::{
     constants::TOKENLESS_REPAYMENTS_ALLOWED,
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
+    types::{
+        is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// 1. Accrue interest

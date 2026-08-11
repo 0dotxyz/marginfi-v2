@@ -19,10 +19,9 @@ use anchor_spl::{
     },
     token::{self, accessor, Mint, Token, TokenAccount, Transfer},
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
-    types::{Bank, FeeState},
+    types::{Bank, BankVaultType, FeeState},
 };
 
 pub const MERKLE_DISTRIBUTOR_PROGRAM_ID: Pubkey =

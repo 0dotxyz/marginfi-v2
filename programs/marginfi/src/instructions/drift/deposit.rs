@@ -28,11 +28,10 @@ use drift_mocks::{
     state::MinimalUser,
 };
 use fixed::types::I80F48;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
 };
 
 /// Deposit into a Drift spot market through a marginfi account

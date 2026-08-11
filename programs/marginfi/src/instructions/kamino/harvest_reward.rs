@@ -7,11 +7,10 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use kamino_mocks::kamino_farms::cpi::{accounts::HarvestReward, harvest_reward};
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     pdas::FARMS_PROGRAM_ID,
-    types::{Bank, FeeState},
+    types::{Bank, BankVaultType, FeeState},
 };
 
 pub fn kamino_harvest_reward(

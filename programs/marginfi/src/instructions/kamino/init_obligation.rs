@@ -17,11 +17,10 @@ use kamino_mocks::kamino_lending::cpi::{
 };
 use kamino_mocks::kamino_lending::types::InitObligationArgs;
 use kamino_mocks::state::MinimalReserve;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
-    types::Bank,
+    types::{Bank, BankVaultType},
 };
 
 /// Initialize a Kamino obligation for a marginfi account

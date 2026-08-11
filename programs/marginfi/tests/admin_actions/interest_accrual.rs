@@ -6,10 +6,9 @@ use fixtures::{assert_eq_noise, native, prelude::*};
 use marginfi::state::{
     bank::BankImpl, bank_cache::ComputedInterestRates, interest_rate::InterestRateConfigImpl,
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{
-    centi_to_u32, make_points, milli_to_u32, Bank, BankConfig, InterestRateConfig, MarginfiGroup,
-    RatePoint,
+    centi_to_u32, make_points, milli_to_u32, Bank, BankConfig, BankVaultType, InterestRateConfig,
+    MarginfiGroup, RatePoint,
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;

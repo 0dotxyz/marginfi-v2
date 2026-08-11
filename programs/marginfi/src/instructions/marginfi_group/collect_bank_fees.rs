@@ -10,12 +10,11 @@ use fixed::types::I80F48;
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, FEE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         FEE_VAULT_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
-    types::{Bank, FeeState, MarginfiGroup},
+    types::{Bank, BankVaultType, FeeState, MarginfiGroup},
 };
 use std::cmp::min;
 

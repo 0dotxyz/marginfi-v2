@@ -33,9 +33,8 @@ use juplend_mocks::state::{
     Lending as JuplendLending,
 };
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{

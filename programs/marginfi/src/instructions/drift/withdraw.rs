@@ -31,14 +31,13 @@ use drift_mocks::drift::cpi::accounts::{UpdateSpotMarketCumulativeInterest, With
 use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
 };
 use marginfi_type_crate::{
     pdas::DRIFT_PROGRAM_ID,
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };

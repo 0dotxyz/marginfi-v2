@@ -6,11 +6,10 @@ use anchor_spl::{
 };
 use drift_mocks::drift::cpi::{accounts::Withdraw, withdraw};
 use drift_mocks::state::{MinimalSpotMarket, MinimalUser};
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, FeeState},
+    types::{Bank, BankVaultType, FeeState},
 };
 
 /// Harvest rewards from admin deposits in Drift spot markets

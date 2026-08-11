@@ -11,10 +11,9 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::types::is_marginfi_asset_tag;
 use marginfi_type_crate::{
     constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    types::{is_marginfi_asset_tag, Bank, BankConfigOpt, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(

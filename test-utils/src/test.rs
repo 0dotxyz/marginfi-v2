@@ -33,11 +33,10 @@ use marginfi_type_crate::pdas::{
     derive_juplend_token_reserve, derive_kamino_base_obligation,
     derive_kamino_lending_market_authority, derive_kamino_user_metadata,
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
     types::{
-        centi_to_u32, make_points, milli_to_u32, BankConfig, BankOperationalState,
+        centi_to_u32, make_points, milli_to_u32, BankConfig, BankOperationalState, BankVaultType,
         InterestRateConfig, OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
     },
 };

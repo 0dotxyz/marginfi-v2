@@ -10,11 +10,10 @@ use drift_mocks::{
     },
     state::MinimalSpotMarket,
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     pdas::DRIFT_PROGRAM_ID,
-    types::Bank,
+    types::{Bank, BankVaultType},
 };
 
 /// Initialize a Drift user and user stats for a marginfi account

@@ -13,7 +13,6 @@ use marginfi::{
         },
     },
 };
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::{
         BANK_SAME_ASSET_EMODE_ELIGIBLE, BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS,
@@ -22,8 +21,8 @@ use marginfi_type_crate::{
     },
     types::{
         make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
-        INTEREST_CURVE_SEVEN_POINT,
+        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
+        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;

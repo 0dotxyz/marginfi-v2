@@ -10,10 +10,9 @@ use fixtures::{
     ui_to_native,
 };
 use marginfi::state::bank::BankImpl;
-use marginfi_type_crate::types::BankVaultType;
 use marginfi_type_crate::{
     constants::IS_T22,
-    types::{Bank, BankConfig, BankConfigOpt},
+    types::{Bank, BankConfig, BankConfigOpt, BankVaultType},
 };
 use solana_program_test::tokio;
 use test_case::test_case;
