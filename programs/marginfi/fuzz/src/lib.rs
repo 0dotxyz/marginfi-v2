@@ -13,15 +13,15 @@ use arbitrary_helpers::{
 use bank_accounts::{get_bank_map, BankAccounts};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use marginfi::instructions::LendingPoolConfigureBankOracleBumps;
 use marginfi::{errors::MarginfiError, instructions::LendingPoolAddBankBumps};
-use marginfi::{instructions::LendingPoolConfigureBankOracleBumps, state::bank::BankVaultType};
 use marginfi_type_crate::types::{
     centi_to_u32, make_points, milli_to_u32, RatePoint, INTEREST_CURVE_SEVEN_POINT,
 };
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
-        Bank, BankConfigCompact, BankOperationalState, FeeState, InterestRateConfig,
+        Bank, BankConfigCompact, BankOperationalState, BankVaultType, FeeState, InterestRateConfig,
         MarginfiAccount, MarginfiGroup, RiskTier,
     },
 };
@@ -1135,8 +1135,8 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{get_health_components, HealthPriceMode, RiskRequirementType};
-    use marginfi_type_crate::types::MarginfiGroup;
+    use marginfi::state::marginfi_account::get_health_components;
+    use marginfi_type_crate::types::{HealthPriceMode, MarginfiGroup, RequirementType};
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
     use super::*;
@@ -1252,7 +1252,7 @@ mod tests {
                 &marginfi_account,
                 &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
             )
@@ -1318,7 +1318,7 @@ mod tests {
                 &marginfi_account,
                 &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
             )
