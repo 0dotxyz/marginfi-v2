@@ -46,22 +46,22 @@ pub fn monitor_archive_upsert_batch(
             native_apy: update.native_apy,
         };
 
-        if let Some((position, mut record)) = archive.get(mint.to_bytes()) {
-            record
-                .push_latest_snapshot(snapshot)
+        // Records are mutated as raw bytes. A `MintSnapshotRecords` value is wider than the
+        // SBF 4 KiB stack frame, so materializing one here aborts the program on entry.
+        if let Some(position) = archive.position(mint.to_bytes()) {
+            let mut slot = archive
+                .slot_mut_bytes_at(position)
                 .ok_or(MarginfiError::InvalidConfig)?;
 
-            archive
-                .update(position, &record)
+            MintSnapshotRecords::push_latest_snapshot_bytes(&mut slot, snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
         } else {
-            let mut record = MintSnapshotRecords::new(mint);
-            record
-                .push_latest_snapshot(snapshot)
+            let (_, mut slot) = archive
+                .append_slot(MintSnapshotRecords::VERSION_V1)
                 .ok_or(MarginfiError::InvalidConfig)?;
 
-            archive
-                .append(&record)
+            MintSnapshotRecords::init_bytes(&mut slot, mint).ok_or(MarginfiError::InvalidConfig)?;
+            MintSnapshotRecords::push_latest_snapshot_bytes(&mut slot, snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
         }
     }

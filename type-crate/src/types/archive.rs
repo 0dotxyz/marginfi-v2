@@ -263,7 +263,7 @@ where
         Some(())
     }
 
-    fn position(&self, index: [u8; 32]) -> Option<usize> {
+    pub fn position(&self, index: [u8; 32]) -> Option<usize> {
         let data = self.data_bytes()?;
 
         let mut position = 0usize;
@@ -347,6 +347,51 @@ where
 
         record.to_bytes(&mut data_bytes[position..end])?;
         Some(())
+    }
+
+    /// Mutable byte view of the record slot at `position`.
+    ///
+    /// Records wider than the SBF 4 KiB stack frame cannot be materialized on-chain, so
+    /// on-chain writers mutate them through this instead of `get`/`update`.
+    pub fn slot_mut_bytes_at(&self, position: usize) -> Option<RefMut<'_, [u8]>> {
+        let data = self.data_mut_bytes()?;
+
+        let version = *data.get(position.checked_add(32)?)?;
+        let len = T::len(version)?;
+        if len < 33 {
+            return None;
+        }
+
+        let end = position.checked_add(len)?;
+        if end > data.len() {
+            return None;
+        }
+
+        Some(RefMut::map(data, |bytes| &mut bytes[position..end]))
+    }
+
+    /// Reserve the next empty slot for a `version` record and return its still-zeroed
+    /// bytes for the caller to populate. Increments and persists `record_count`.
+    pub fn append_slot(&mut self, version: u8) -> Option<(usize, RefMut<'_, [u8]>)> {
+        let len = T::len(version)?;
+        if len < 33 {
+            return None;
+        }
+
+        let position = self.next_empty_position()?;
+        let end = position.checked_add(len)?;
+        if end > self.data_bytes()?.len() {
+            return None;
+        }
+
+        self.0.record_count = self.0.record_count.checked_add(1)?;
+        self.persist_meta()?;
+
+        let data = self.data_mut_bytes()?;
+        Some((
+            position,
+            RefMut::map(data, |bytes| &mut bytes[position..end]),
+        ))
     }
 
     pub fn upsert(&mut self, record: &T) -> Option<usize> {

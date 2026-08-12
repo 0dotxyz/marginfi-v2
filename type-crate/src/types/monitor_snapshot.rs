@@ -199,6 +199,24 @@ impl MintSnapshotRecords {
         Some(self.snapshots[usize::from(self.tail)])
     }
 
+    /// Initialize a zeroed slot as an empty V1 record for `mint`.
+    ///
+    /// Pairs with [`Self::push_latest_snapshot_bytes`] so on-chain callers never build a
+    /// full `MintSnapshotRecords` value, which does not fit in an SBF stack frame.
+    pub fn init_bytes(slot: &mut [u8], mint: Pubkey) -> Option<()> {
+        if slot.len() != Self::LEN_V1 {
+            return None;
+        }
+
+        slot.get_mut(0..32)?.copy_from_slice(&mint.to_bytes());
+        *slot.get_mut(Self::VERSION_OFFSET)? = Self::VERSION_V1;
+        slot.get_mut(Self::HEAD_OFFSET..Self::HEAD_OFFSET + 2)?
+            .copy_from_slice(&0u16.to_le_bytes());
+        slot.get_mut(Self::TAIL_OFFSET..Self::TAIL_OFFSET + 2)?
+            .copy_from_slice(&0u16.to_le_bytes());
+        Some(())
+    }
+
     /// Append a snapshot by mutating an already-serialized slot in place.
     ///
     /// This avoids full record parse/serialize in hot paths (CU optimization).
