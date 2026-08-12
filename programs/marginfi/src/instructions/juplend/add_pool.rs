@@ -64,9 +64,9 @@ pub fn lending_pool_add_bank_juplend(
     let fee_vault_bump = ctx.bumps.fee_vault;
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.group.key(),
-        config,
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         ctx.accounts.liquidity_vault.key(),

@@ -34,6 +34,7 @@ import {
   MARKET,
   oracles,
   TOKEN_A_RESERVE,
+  USDC_RESERVE,
 } from "../rootHooks";
 import { createBankrunPythOracleAccount } from "./bankrun-oracles";
 import {
@@ -67,16 +68,25 @@ const hasAccount = async (pubkey: PublicKey | null | undefined) => {
   return account !== null;
 };
 
-const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
+const createAndRefreshReserve = async (params: {
+  market: PublicKey;
+  mint: PublicKey;
+  decimals: number;
+  oracle: PublicKey;
+  liquiditySource: PublicKey;
+  reserveLabel: string;
+}): Promise<PublicKey> => {
+  const { market, mint, decimals, oracle, liquiditySource, reserveLabel } =
+    params;
   const reserve = Keypair.generate();
   await createReserve(
     reserve,
     market,
-    ecosystem.tokenAMint.publicKey,
-    TOKEN_A_RESERVE,
-    ecosystem.tokenADecimals,
-    oracles.tokenAOracle.publicKey,
-    groupAdmin.tokenAAccount,
+    mint,
+    reserveLabel,
+    decimals,
+    oracle,
+    liquiditySource,
   );
 
   const refreshTx = new Transaction().add(
@@ -84,7 +94,7 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
       klendBankrunProgram,
       reserve.publicKey,
       market,
-      oracles.tokenAOracle.publicKey,
+      oracle,
     ),
   );
   await processBankrunTransaction(bankrunContext, refreshTx, [
@@ -225,9 +235,34 @@ const ensureKaminoSetup = async () => {
     kaminoAccounts.set(MARKET, market);
   }
 
+  let usdcReserve = kaminoAccounts.get(USDC_RESERVE);
+  if (!(await hasAccount(usdcReserve))) {
+    const mintUsdcTx = new Transaction().add(
+      createMintToInstruction(
+        ecosystem.usdcMint.publicKey,
+        groupAdmin.usdcAccount,
+        globalProgramAdmin.wallet.publicKey,
+        1000 * 10 ** ecosystem.usdcDecimals,
+      ),
+    );
+    await processBankrunTransaction(bankrunContext, mintUsdcTx, [
+      globalProgramAdmin.wallet,
+    ]);
+
+    usdcReserve = await createAndRefreshReserve({
+      market,
+      mint: ecosystem.usdcMint.publicKey,
+      decimals: ecosystem.usdcDecimals,
+      oracle: oracles.usdcOracle.publicKey,
+      liquiditySource: groupAdmin.usdcAccount,
+      reserveLabel: USDC_RESERVE,
+    });
+    kaminoAccounts.set(USDC_RESERVE, usdcReserve);
+  }
+
   let tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
   if (!(await hasAccount(tokenAReserve))) {
-    const mintTx = new Transaction().add(
+    const mintTokenATx = new Transaction().add(
       createMintToInstruction(
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
@@ -235,11 +270,18 @@ const ensureKaminoSetup = async () => {
         1000 * 10 ** ecosystem.tokenADecimals,
       ),
     );
-    await processBankrunTransaction(bankrunContext, mintTx, [
+    await processBankrunTransaction(bankrunContext, mintTokenATx, [
       globalProgramAdmin.wallet,
     ]);
 
-    tokenAReserve = await createTokenAReserve(market);
+    tokenAReserve = await createAndRefreshReserve({
+      market,
+      mint: ecosystem.tokenAMint.publicKey,
+      decimals: ecosystem.tokenADecimals,
+      oracle: oracles.tokenAOracle.publicKey,
+      liquiditySource: groupAdmin.tokenAAccount,
+      reserveLabel: TOKEN_A_RESERVE,
+    });
     kaminoAccounts.set(TOKEN_A_RESERVE, tokenAReserve);
   }
 

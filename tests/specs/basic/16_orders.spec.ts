@@ -1,4 +1,3 @@
-// todo test position extremes (e.g. 16 balances, many involved balances etc. test integrations.)
 import { BN, Program, Wallet } from "@coral-xyz/anchor";
 import {
   bigNumberToWrappedI80F48,
@@ -230,6 +229,7 @@ describe("orders", () => {
       expect(orderAccount.marginfiAccount.toBase58()).to.equal(
         userMarginfiAccount.toBase58(),
       );
+      assert.isAbove(Number(orderAccount.createdAt), 0);
       expect(orderAccount.tags.length).to.equal(2);
       assert.isAbove(Number(orderAccount.tags[0]), 0);
       assert.isAbove(Number(orderAccount.tags[1]), 0);

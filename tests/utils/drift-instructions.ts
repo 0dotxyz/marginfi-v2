@@ -13,10 +13,7 @@ import {
 import { DRIFT_PROGRAM_ID } from "./types";
 import { DriftConfigCompact } from "./drift-utils";
 import { Drift } from "../fixtures/drift";
-import {
-  deriveDriftStatePDA,
-  deriveSpotMarketVaultPDA,
-} from "./pdas";
+import { deriveDriftStatePDA, deriveSpotMarketVaultPDA } from "./pdas";
 import { globalFeeWallet } from "../rootHooks";
 
 export interface AddDriftBankAccounts {

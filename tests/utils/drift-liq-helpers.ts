@@ -640,7 +640,7 @@ async function attemptLiquidation(
     tx,
     [liquidatorUser.wallet],
     false, // trySend=false so it simulates first for logs
-    true, // dumpLogOnFail
+    true // dumpLogOnFail
   )) as BanksTransactionResultWithMeta;
 
   // Transaction succeeded

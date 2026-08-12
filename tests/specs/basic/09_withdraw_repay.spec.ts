@@ -99,11 +99,18 @@ describe("Withdraw funds", () => {
         amount: withdrawAmountTokenA_native,
       })
     );
-    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
     const events = parseMarginfiEvents(program, result.logMessages);
-    const withdrawEvent = events.find((e) => e.name === "lendingAccountWithdrawEvent");
+    const withdrawEvent = events.find(
+      (e) => e.name === "lendingAccountWithdrawEvent"
+    );
     assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
-    assertI80F48Approx(withdrawEvent!.data.shareAmount, withdrawAmountTokenA_native);
+    assertI80F48Approx(
+      withdrawEvent!.data.shareAmount,
+      withdrawAmountTokenA_native
+    );
 
     const bankAfter = await program.account.bank.fetch(bank);
     const [userAccAfter, userTokenAAfter, vaultTokenAAfter] = await Promise.all(
@@ -190,12 +197,20 @@ describe("Withdraw funds", () => {
         amount: repayAmountUsdc_native,
       })
     );
-    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
     const events = parseMarginfiEvents(program, result.logMessages);
-    const repayEvent = events.find((e) => e.name === "lendingAccountRepayEvent");
+    const repayEvent = events.find(
+      (e) => e.name === "lendingAccountRepayEvent"
+    );
     assert.isDefined(repayEvent, "Expected lendingAccountRepayEvent");
     // Repay shares delta can be slightly less than native due to interest, approximate check
-    assertI80F48Approx(repayEvent!.data.shareAmount, repayAmountUsdc_native, 0.01);
+    assertI80F48Approx(
+      repayEvent!.data.shareAmount,
+      repayAmountUsdc_native,
+      0.01
+    );
 
     const bankAfter = await program.account.bank.fetch(bank);
     const [userAccAfter, userUsdcAfter, vaultUsdcAfter] = await Promise.all([
@@ -278,12 +293,19 @@ describe("Withdraw funds", () => {
         repayAll: true,
       })
     );
-    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
     const events = parseMarginfiEvents(program, result.logMessages);
-    const repayEvent = events.find((e) => e.name === "lendingAccountRepayEvent");
+    const repayEvent = events.find(
+      (e) => e.name === "lendingAccountRepayEvent"
+    );
     assert.isDefined(repayEvent, "Expected lendingAccountRepayEvent");
     // All shares burned
-    assertI80F48Approx(repayEvent!.data.shareAmount, balancesBefore[1].liabilityShares);
+    assertI80F48Approx(
+      repayEvent!.data.shareAmount,
+      balancesBefore[1].liabilityShares
+    );
 
     const bankAfter = await program.account.bank.fetch(bank);
     const [userAccAfter, userUsdcAfter, vaultUsdcAfter] = await Promise.all([
@@ -369,11 +391,9 @@ describe("Withdraw funds", () => {
 
     // After repaying USDC, user 0 has Token A and SOL. Exclude the closing
     // bank (Token A) so the health check alignment is correct.
-    const remaining = composeRemainingAccounts(
-      [
-        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-      ]
-    );
+    const remaining = composeRemainingAccounts([
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+    ]);
     const tx = new Transaction().add(
       await withdrawIx(user.mrgnProgram, {
         marginfiAccount: userAccKey,

@@ -72,6 +72,7 @@ async fn transfer_to_new_account_pda_success() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
+        fee_state: test_f.marginfi_group.fee_state,
         instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
@@ -184,6 +185,7 @@ async fn transfer_to_new_account_pda_with_third_party_id() -> anyhow::Result<()>
         fee_payer: old_authority,
         new_authority,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
+        fee_state: test_f.marginfi_group.fee_state,
         instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
@@ -289,6 +291,7 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority: new_authority1,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
+        fee_state: test_f.marginfi_group.fee_state,
         instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
@@ -337,6 +340,7 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority: new_authority2,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
+        fee_state: test_f.marginfi_group.fee_state,
         instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };

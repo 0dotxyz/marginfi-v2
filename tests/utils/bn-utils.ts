@@ -23,6 +23,22 @@ export const bnToBigIntSafe = (value: BN): bigint => {
 export const bnToDecimalStringSafe = (value: BN): string =>
   bnToBigIntSafe(value).toString();
 
+export const bigIntToBnSafe = (value: bigint): BN => {
+  const negative = value < 0n;
+  let remaining = negative ? -value : value;
+  const bytes: number[] = [];
+  while (remaining > 0n) {
+    bytes.unshift(Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+
+  const out = new BN(bytes.length === 0 ? [0] : bytes);
+  return negative ? out.neg() : out;
+};
+
+export const decimalStringToBnSafe = (value: string): BN =>
+  bigIntToBnSafe(BigInt(value));
+
 export const integerToBigInt = (value: IntegerLike): bigint => {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") {
@@ -74,7 +90,8 @@ const decimalToI80Scaled = (value: number): bigint => {
   const scaled = new BigNumber(value.toString())
     .times(new BigNumber(2).pow(Number(I80F48_FRACTIONAL_BITS)))
     .integerValue(BigNumber.ROUND_HALF_UP);
-  return BigInt(scaled.toString());
+  // `toFixed` never uses exponential notation, which `BigInt()` cannot parse.
+  return BigInt(scaled.toFixed(0));
 };
 
 export const toI80Scaled = (value: I80F48Like): bigint => {
@@ -113,6 +130,9 @@ export const fromI80Scaled = (scaled: bigint): WrappedI80F48 => {
 
   return { value: bytes };
 };
+
+export const toWrappedI80F48Safe = (value: I80F48Like): WrappedI80F48 =>
+  fromI80Scaled(toI80Scaled(value));
 
 export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
   (lhsScaled * rhsScaled) >> I80F48_FRACTIONAL_BITS;

@@ -41,8 +41,8 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
   // User 2 has a validator 0 staked deposit [0] position with 1 LST token.
   // Users 0/1/2/3 deposited 10 SOL each, so v0 LST supply is 40 SOL.
   // The v0 pool NAV is 50 SOL: 40 SOL user deposits + 1 SOL initial pool stake
-  // + 9 SOL supplied through the v0 onramp. We no longer subtract the initial
-  // 1 SOL bootstrap stake, so the price is 50 / 40 = 1.25 SOL per LST.
+  // + 9 SOL supplied through the v0 onramp. SVSP prices against a notional supply of raw + 1 SOL
+  // phantom (its bootstrap), so the price is 50 / (40 + 1) ≈ 1.2195 SOL per LST.
 
   /** SOL to add to the validator as pretend-earned mev rewards */
   const stakeSolAppreciation = 30;
@@ -110,7 +110,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       await banksClient.processTransaction(tx);
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
-      assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // (50 + 30) / 40 = 2
+      assert.approximately(priceMultiplierAfterAppreciation, 80 / 41, 0.000001); // (50 + 30) / (40 + 1)
     },
   );
 
@@ -231,7 +231,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       await banksClient.processTransaction(tx);
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
-      assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // still the same
+      assert.approximately(priceMultiplierAfterAppreciation, 80 / 41, 0.000001); // still the same
     },
   );
 

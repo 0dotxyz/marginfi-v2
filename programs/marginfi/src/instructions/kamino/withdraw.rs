@@ -8,7 +8,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -99,16 +100,52 @@ pub fn kamino_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
-    let group = ctx.accounts.group.load()?;
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
+
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+        let mut bank_account = BankAccountWrapper::find(
+            &ctx.accounts.bank.key(),
+            &mut bank,
+            &mut marginfi_account.lending_account,
+        )?;
+
+        (collateral_amount, share_amount) = if withdraw_all {
+            bank_account.withdraw_all(in_receivership)?
+        } else {
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
+        };
+    }
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+    }
+
+    let expected_liquidity_amount = ctx
+        .accounts
+        .integration_acc_1
+        .load()?
+        .collateral_to_liquidity(collateral_amount)?;
+
+    {
+        let mut bank = ctx.accounts.bank.load_mut()?;
+        let group = ctx.accounts.group.load()?;
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        // Fetch oracle price for rate limiting and deleverage tracking
-        // When group rate limiter is enabled, oracle is required
+        // Fetch oracle price for rate limiting and deleverage tracking. When group rate limiting is
+        // enabled, this must happen after any reserve refresh so wrapped-bank prices use the same
+        // exchange rate as the actual redemption.
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
         let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
@@ -128,31 +165,10 @@ pub fn kamino_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
-
-        (collateral_amount, share_amount) = if withdraw_all {
-            bank_account.withdraw_all(in_receivership)?
-        } else {
-            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
-            (amount, share_amount)
-        };
-
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        let rate_limit_amount = if withdraw_all {
-            collateral_amount
-        } else {
-            amount
-        };
-
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
-            rate_limit_amount,
+            expected_liquidity_amount,
+            collateral_amount,
             price,
             &mut bank,
             &group,
@@ -184,16 +200,6 @@ pub fn kamino_withdraw<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
     }
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-    }
-
-    let expected_liquidity_amount = ctx
-        .accounts
-        .integration_acc_1
-        .load()?
-        .collateral_to_liquidity(collateral_amount)?;
 
     ctx.accounts.cpi_kamino_withdraw(collateral_amount)?;
 
@@ -246,27 +252,37 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let group = ctx.accounts.group.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
-        let bank_loader = &ctx.accounts.bank;
-        let mut bank = bank_loader.load_mut()?;
-        let price_for_cache = fetch_unbiased_price_for_bank_cache(
-            &bank_loader.key(),
-            &bank,
-            &clock,
-            ctx.remaining_accounts,
-        )
-        .ok();
+        {
+            let bank_loader = &ctx.accounts.bank;
+            let mut bank = bank_loader.load_mut()?;
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_loader.key(),
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
-        bank.update_cache_price(price_for_cache)?;
+            bank.update_cache_price(price_for_cache)?;
+        }
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
+
+        // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live price
+        // has jumped past the breach threshold; a liability-free withdraw skips it.
+        if marginfi_account.lending_account.has_liabilities() {
+            run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        }
     } else {
         // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
         // that case the cache doesn't update and this does nothing.

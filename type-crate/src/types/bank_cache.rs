@@ -50,7 +50,8 @@ pub struct BankCache {
     /// Confidence interval reported by the oracle when last_oracle_price was fetched
     /// * Always non-negative
     /// * Zero if never updated
-    /// * Note: this value is the confidence reported by oracles, multiplied by `STD_DEV_MULTIPLE`
+    /// * Pyth: confidence * 2.12
+    /// * Switchboard: price * oracle_max_confidence / U32_MAX
     pub last_oracle_price_confidence: WrappedI80F48,
     /// Liquidation cache flags, set during receivership flow.
     /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start
@@ -62,15 +63,15 @@ pub struct BankCache {
     ///   ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
     ///   bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    _pad0: [u8; 7],
+    _cb_cache_pad: [u8; 7],
     /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
     /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
     /// for consumers who are only interested in reading the oracle price and are applying the
     /// multiplier already elsewhere.
     pub price_multiplier: WrappedI80F48,
-    // INFO: these are duplicative of `last_oracle_price` (multiplied by `price_multiplier` when
-    // applicable) and `last_oracle_price_timestamp` so if space is ever needed we can recycle at
-    // least two of these (32 bytes)
+    // INFO: liquidation_price_* are duplicative of `last_oracle_price` (multiplied by
+    // `price_multiplier` when applicable) and `last_oracle_price_timestamp` so if space is ever
+    // needed we can recycle at least two of these (32 bytes).
     /// Cached real-time price for receivership liquidation.
     pub liquidation_price_rt: WrappedI80F48,
     /// Cached real-time price confidence for receivership liquidation.
@@ -90,8 +91,9 @@ impl Default for BankCache {
 impl BankCache {
     pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
 
-    /// Reset cached rate metrics while preserving the last oracle price snapshot.
-    pub fn reset_preserving_oracle_price(&mut self) {
+    /// Reset cached rate metrics while preserving the oracle-price snapshot. Bank-level CB fields
+    /// live on `Bank` and are unaffected by this reset.
+    pub fn reset_preserving_oracle_state(&mut self) {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;

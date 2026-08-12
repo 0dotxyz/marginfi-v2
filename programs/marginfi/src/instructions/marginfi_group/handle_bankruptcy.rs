@@ -7,7 +7,9 @@ use crate::{
     prelude::MarginfiError,
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{check_account_bankrupt, BankAccountWrapper, MarginfiAccountImpl},
+        marginfi_account::{
+            check_account_bankrupt, run_cb_price_gate, BankAccountWrapper, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
@@ -49,20 +51,22 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         group: marginfi_group_loader,
         ..
     } = ctx.accounts;
-    let maybe_bank_mint = {
-        let bank = bank_loader.load()?;
+    let is_admin_or_risk_admin = {
         let group = marginfi_group_loader.load()?;
         let signer = ctx.accounts.signer.key();
-        let is_admin_or_risk_admin = signer == group.risk_admin || signer == group.admin;
+        signer == group.risk_admin || signer == group.admin
+    };
+    let maybe_bank_mint = {
+        let bank = bank_loader.load()?;
         let permissionless_bad_debt_settlement =
             bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG);
 
         if permissionless_bad_debt_settlement {
             // if permissionless, users can bankrupt reduce-only or operational banks
-            validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+            validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
         } else {
-            // admin can bankrupt banks in any state
-            validate_bank_state(&bank, InstructionKind::Unrestricted)?;
+            // admin can bankrupt banks in any state (CB halt included)
+            validate_bank_state(&bank, InstructionKind::Unrestricted, true)?;
             check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
         }
 
@@ -77,8 +81,17 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
+    let group = marginfi_group_loader.load()?;
+
+    // Inline CB gate: the insolvency decision below values the whole portfolio at live
+    // prices with no other CB check on this path. Admins can settle in any state.
+    if !is_admin_or_risk_admin {
+        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    }
+
     check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
@@ -255,6 +268,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::UnexpectedLiquidationState,
+        // Reject bankruptcy during an open flashloan: the account may be only transiently insolvent.
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
         } @MarginfiError::AccountInFlashloan

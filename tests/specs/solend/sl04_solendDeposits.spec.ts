@@ -227,10 +227,7 @@ describe("sl04: Solend - Deposits and Borrows", () => {
       userB.usdcAccount
     );
 
-    assert.equal(
-      (userUsdcBefore - userUsdcAfter).toString(),
-      "50000000000"
-    );
+    assert.equal((userUsdcBefore - userUsdcAfter).toString(), "50000000000");
 
     userB.accounts.set("solend_cusdc", userBCUsdc.publicKey);
   });

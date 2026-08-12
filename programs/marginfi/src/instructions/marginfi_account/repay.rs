@@ -65,7 +65,7 @@ pub fn lending_account_repay<'info>(
     };
 
     let mut bank = bank_loader.load_mut()?;
-    validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+    validate_bank_state(&bank, InstructionKind::FailsInPausedState, true)?;
 
     let group = marginfi_group_loader.load()?;
     bank.accrue_interest(

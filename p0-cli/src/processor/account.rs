@@ -988,6 +988,7 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::StartLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
+            group: group_pk,
             liquidation_receiver: authority,
             instruction_sysvar: sysvar::instructions::id(),
         }
@@ -1004,7 +1005,10 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::EndLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
+            group: group_pk,
             liquidation_receiver: authority,
+            // Optional override; None ⇒ the liquidation_receiver pays the flat fee (default).
+            fee_payer: None,
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::id(),
@@ -1200,6 +1204,7 @@ pub fn marginfi_account_transfer(
             authority,
             fee_payer: config.explicit_fee_payer(),
             new_authority,
+            fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::ID,
         }
@@ -1300,6 +1305,7 @@ pub fn marginfi_account_pulse_health(
         program_id: config.program_id,
         accounts: marginfi::accounts::PulseHealth {
             marginfi_account: marginfi_account_pk,
+            group: marginfi_account.group,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::LendingAccountPulseHealth.data(),

@@ -1,4 +1,4 @@
-use crate::{assert_struct_align, assert_struct_size};
+use crate::{assert_struct_align, assert_struct_size, constants::discriminators};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -45,6 +45,5 @@ impl Default for BankMetadata {
 
 impl BankMetadata {
     pub const LEN: usize = std::mem::size_of::<BankMetadata>();
-    // TODO
-    // pub const DISCRIMINATOR: [u8; 8] = discriminators::BankMetadata;
+    pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK_METADATA;
 }

@@ -66,9 +66,9 @@ pub fn lending_pool_add_bank_drift(
 
     let config = bank_config.to_bank_config(spot_market_key);
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.group.key(),
-        config, // Use the modified BankConfig directly instead of converting from BankConfigCompact
+        &config, // Use the modified BankConfig directly instead of converting from BankConfigCompact
         bank_mint.key(),
         bank_mint.decimals,
         ctx.accounts.liquidity_vault.key(),
