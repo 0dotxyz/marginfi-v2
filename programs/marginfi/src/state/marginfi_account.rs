@@ -487,9 +487,12 @@ fn calc_weighted_asset_value_cached_standalone(
         RiskTier::Collateral => {
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
@@ -1529,12 +1532,15 @@ fn calc_weighted_asset_value_standalone(
 ) -> MarginfiResult<(I80F48, I80F48, u32)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
-            // ReduceOnly banks should not be counted as collateral for Initial checks
+            // Paused/ReduceOnly banks should not be counted as collateral for Initial checks
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO, 0));
             }
 
@@ -2491,6 +2497,47 @@ mod test {
             bank.get_asset_weight(RequirementType::Equity, &reconciled),
             I80F48::ONE
         );
+    }
+
+    #[test]
+    fn paused_bank_assets_confer_no_initial_borrowing_power() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Paused;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
+            I80F48!(0.99)
+        );
+
+        let (asset_value, price) = calc_weighted_asset_value_cached_standalone(
+            &balance,
+            &bank,
+            RequirementType::Initial,
+            &reconciled,
+        )
+        .unwrap();
+        assert_eq!(asset_value, I80F48::ZERO);
+        assert_eq!(price, I80F48::ZERO);
     }
 
     #[test]

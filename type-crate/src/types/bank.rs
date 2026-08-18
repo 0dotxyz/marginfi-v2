@@ -279,7 +279,10 @@ impl Bank {
             && matches!(self.config.risk_tier, RiskTier::Collateral)
             && !matches!(
                 (self.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             )
         {
             asset_weight = max(asset_weight, same_asset.asset_weight);
