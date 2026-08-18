@@ -189,6 +189,10 @@ impl BankConfig {
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigOpt {
     pub asset_weight_init: Option<WrappedI80F48>,
@@ -234,6 +238,10 @@ pub struct BankConfigOpt {
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct BankConfigCompact {
     pub asset_weight_init: WrappedI80F48,

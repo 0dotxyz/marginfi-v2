@@ -1,3 +1,4 @@
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::pdas::derive_bank_vault_authority;
 use {
     super::load_all_banks,
@@ -13,7 +14,6 @@ use {
             send_tx, EXP_10_I80F48,
         },
     },
-    anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::{anyhow, bail, Context, Result},
     base64::Engine as _,
     fixed::types::I80F48,
@@ -283,24 +283,22 @@ pub fn marginfi_account_deposit(
         &token_program,
     );
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountDeposit {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            signer_token_account: deposit_ata,
-            liquidity_vault: bank.liquidity_vault,
-            token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountDeposit {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_deposit(
+            &ix_builders::lending::LendingAccountDeposit {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                signer_token_account: deposit_ata,
+                liquidity_vault: bank.liquidity_vault,
+                token_program,
+            },
             amount,
             deposit_up_to_limit,
-        }
-        .data(),
-    };
+        ),
+        config.program_id,
+    );
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
             .push(AccountMeta::new_readonly(bank.mint, false));
@@ -366,30 +364,28 @@ pub fn marginfi_account_withdraw(
         &token_program,
     );
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountWithdraw {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            liquidity_vault: bank.liquidity_vault,
-            token_program,
-            destination_token_account: withdraw_ata,
-            bank_liquidity_vault_authority: derive_bank_vault_authority(
-                &bank_pk,
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountWithdraw {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_withdraw(
+            &ix_builders::lending::LendingAccountWithdraw {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                liquidity_vault: bank.liquidity_vault,
+                token_program,
+                destination_token_account: withdraw_ata,
+                bank_liquidity_vault_authority: derive_bank_vault_authority(
+                    &bank_pk,
+                    BankVaultType::Liquidity,
+                    &config.program_id,
+                )
+                .0,
+            },
             amount,
-            withdraw_all: if withdraw_all { Some(true) } else { None },
-        }
-        .data(),
-    };
+            if withdraw_all { Some(true) } else { None },
+        ),
+        config.program_id,
+    );
 
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
@@ -454,26 +450,27 @@ pub fn marginfi_account_borrow(
         &token_program,
     );
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountBorrow {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            liquidity_vault: bank.liquidity_vault,
-            token_program,
-            destination_token_account: borrow_ata,
-            bank_liquidity_vault_authority: derive_bank_vault_authority(
-                &bank_pk,
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountBorrow { amount }.data(),
-    };
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_borrow(
+            &ix_builders::lending::LendingAccountBorrow {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                liquidity_vault: bank.liquidity_vault,
+                token_program,
+                destination_token_account: borrow_ata,
+                bank_liquidity_vault_authority: derive_bank_vault_authority(
+                    &bank_pk,
+                    BankVaultType::Liquidity,
+                    &config.program_id,
+                )
+                .0,
+            },
+            amount,
+        ),
+        config.program_id,
+    );
 
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
@@ -552,33 +549,31 @@ pub fn marginfi_account_liquidate(
     let liquidatee_accounts =
         load_observation_account_metas(&liquidatee_marginfi_account, &banks, vec![], vec![]);
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountLiquidate {
-            group,
-            asset_bank: asset_bank_pk,
-            liab_bank: liability_bank_pk,
-            liquidator_marginfi_account: marginfi_account_pk,
-            authority,
-            liquidatee_marginfi_account: liquidatee_marginfi_account_pk,
-            bank_liquidity_vault_authority: derive_bank_vault_authority(
-                &liability_bank_pk,
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-            bank_liquidity_vault: liability_bank.liquidity_vault,
-            bank_insurance_vault: liability_bank.insurance_vault,
-            token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountLiquidate {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_liquidate(
+            &ix_builders::lending::LendingAccountLiquidate {
+                group,
+                asset_bank: asset_bank_pk,
+                liab_bank: liability_bank_pk,
+                liquidator_marginfi_account: marginfi_account_pk,
+                authority,
+                liquidatee_marginfi_account: liquidatee_marginfi_account_pk,
+                bank_liquidity_vault_authority: derive_bank_vault_authority(
+                    &liability_bank_pk,
+                    BankVaultType::Liquidity,
+                    &config.program_id,
+                )
+                .0,
+                bank_liquidity_vault: liability_bank.liquidity_vault,
+                bank_insurance_vault: liability_bank.insurance_vault,
+                token_program,
+            },
             asset_amount,
-            liquidatee_accounts: liquidatee_accounts.len() as u8,
-            liquidator_accounts: liquidator_accounts.len() as u8,
-        }
-        .data(),
-    };
+            liquidatee_accounts.len() as u8,
+            liquidator_accounts.len() as u8,
+        ),
+        config.program_id,
+    );
 
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
@@ -603,20 +598,20 @@ pub fn marginfi_account_create(profile: &Profile, config: &Config) -> Result<()>
 
     let marginfi_account_key = Keypair::new();
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::MarginfiAccountInitialize {
-            marginfi_group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
-            marginfi_account: marginfi_account_key.pubkey(),
-            system_program: system_program::ID,
-            authority,
-            fee_payer: config.explicit_fee_payer(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitialize.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::marginfi_account_initialize(
+            &ix_builders::account::MarginfiAccountInitialize {
+                marginfi_group: profile
+                    .marginfi_group
+                    .context("marginfi group not set in profile")?,
+                marginfi_account: marginfi_account_key.pubkey(),
+                system_program: system_program::ID,
+                authority,
+                fee_payer: config.explicit_fee_payer(),
+            },
+        ),
+        config.program_id,
+    );
 
     let marginfi_account_pk = marginfi_account_key.pubkey();
 
@@ -644,16 +639,14 @@ pub fn marginfi_account_close(profile: &Profile, config: &Config) -> Result<()> 
     ensure_account_unblocked(&marginfi_account, "close account")?;
     println!("Closing marginfi account {}", marginfi_account_pk);
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::MarginfiAccountClose {
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::marginfi_account_close(&ix_builders::account::MarginfiAccountClose {
             marginfi_account: marginfi_account_pk,
             authority,
             fee_payer: config.explicit_fee_payer(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountClose.data(),
-    };
+        }),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -698,21 +691,23 @@ pub fn marginfi_account_place_order(
     println!("Bank 2: {}", bank_2);
     println!("Order PDA: {}", order_pda);
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::PlaceOrder {
-            group: group_pk,
-            marginfi_account: marginfi_account_pk,
-            fee_payer: config.explicit_fee_payer(),
-            authority,
-            order: order_pda,
-            fee_state: fee_state_pk,
-            global_fee_wallet: fee_state.global_fee_wallet,
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_place_order(
+            &ix_builders::order::MarginfiAccountPlaceOrder {
+                group: group_pk,
+                marginfi_account: marginfi_account_pk,
+                fee_payer: config.explicit_fee_payer(),
+                authority,
+                order: order_pda,
+                fee_state: fee_state_pk,
+                global_fee_wallet: fee_state.global_fee_wallet,
+                system_program: system_program::id(),
+            },
+            bank_keys,
+            trigger,
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -741,19 +736,19 @@ pub fn marginfi_account_close_order(
     println!("Closing order: {}", order_pk);
     println!("Fee recipient: {}", fee_recipient);
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::CloseOrder {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            order: order_pk,
-            fee_recipient,
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountCloseOrder.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_close_order(
+            &ix_builders::order::MarginfiAccountCloseOrder {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                order: order_pk,
+                fee_recipient,
+                system_program: system_program::id(),
+            },
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -770,16 +765,16 @@ pub fn marginfi_account_keeper_close_order(
 ) -> Result<()> {
     let fee_recipient = fee_recipient.unwrap_or(config.authority());
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::KeeperCloseOrder {
-            marginfi_account: marginfi_account_pk,
-            fee_recipient,
-            order: order_pk,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountKeeperCloseOrder.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_keeper_close_order(
+            &ix_builders::order::MarginfiAccountKeeperCloseOrder {
+                marginfi_account: marginfi_account_pk,
+                fee_recipient,
+                order: order_pk,
+            },
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -805,17 +800,17 @@ pub fn marginfi_account_init_liquidation_record(
         return Ok(());
     }
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::InitLiquidationRecord {
-            marginfi_account: marginfi_account_pk,
-            fee_payer: config.explicit_fee_payer(),
-            liquidation_record: liq_record_pk,
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitLiqRecord.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::marginfi_account_init_liq_record(
+            &ix_builders::account::MarginfiAccountInitLiqRecord {
+                marginfi_account: marginfi_account_pk,
+                fee_payer: config.explicit_fee_payer(),
+                liquidation_record: liq_record_pk,
+                system_program: system_program::id(),
+            },
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -845,16 +840,16 @@ pub fn marginfi_account_close_liquidation_record(
         .account::<LiquidationRecord>(liq_record_pk)
         .context("Liquidation record does not exist for this account")?;
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::CloseLiquidationRecord {
-            marginfi_account: marginfi_account_pk,
-            liquidation_record: liq_record_pk,
-            record_payer: record.record_payer,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountCloseLiqRecord.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::marginfi_account_close_liq_record(
+            &ix_builders::account::MarginfiAccountCloseLiqRecord {
+                marginfi_account: marginfi_account_pk,
+                liquidation_record: liq_record_pk,
+                record_payer: record.record_payer,
+            },
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -885,37 +880,37 @@ pub fn marginfi_account_keeper_execute_order(
     let execute_record_pk = find_execute_order_pda(&order_pk, &config.program_id).0;
     let fee_state_pk = find_fee_state_pda(&config.program_id).0;
 
-    let mut start_ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::StartExecuteOrder {
-            group: group_pk,
-            marginfi_account: marginfi_account_pk,
-            fee_payer: config.explicit_fee_payer(),
-            executor: authority,
-            order: order_pk,
-            execute_record: execute_record_pk,
-            instruction_sysvar: sysvar::instructions::id(),
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountStartExecuteOrder.data(),
-    };
+    let mut start_ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_start_execute_order(
+            &ix_builders::order::MarginfiAccountStartExecuteOrder {
+                group: group_pk,
+                marginfi_account: marginfi_account_pk,
+                fee_payer: config.explicit_fee_payer(),
+                executor: authority,
+                order: order_pk,
+                execute_record: execute_record_pk,
+                instruction_sysvar: sysvar::instructions::id(),
+                system_program: system_program::id(),
+            },
+        ),
+        config.program_id,
+    );
     start_ix.accounts.extend(observation_metas.clone());
 
-    let mut end_ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::EndExecuteOrder {
-            group: group_pk,
-            marginfi_account: marginfi_account_pk,
-            executor: authority,
-            fee_recipient,
-            order: order_pk,
-            execute_record: execute_record_pk,
-            fee_state: fee_state_pk,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountEndExecuteOrder.data(),
-    };
+    let mut end_ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_end_execute_order(
+            &ix_builders::order::MarginfiAccountEndExecuteOrder {
+                group: group_pk,
+                marginfi_account: marginfi_account_pk,
+                executor: authority,
+                fee_recipient,
+                order: order_pk,
+                execute_record: execute_record_pk,
+                fee_state: fee_state_pk,
+            },
+        ),
+        config.program_id,
+    );
     end_ix.accounts.extend(observation_metas);
 
     let mut ixs = vec![start_ix];
@@ -965,17 +960,17 @@ pub fn marginfi_account_liquidate_receivership(
 
     let liq_record_exists = config.mfi_program.rpc().get_account(&liq_record_pk).is_ok();
     if !liq_record_exists && init_liq_record_if_missing {
-        ixs.push(Instruction {
-            program_id: config.program_id,
-            accounts: marginfi::accounts::InitLiquidationRecord {
-                marginfi_account: liquidatee_marginfi_account_pk,
-                fee_payer: config.explicit_fee_payer(),
-                liquidation_record: liq_record_pk,
-                system_program: system_program::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountInitLiqRecord.data(),
-        });
+        ixs.push(ix_builders::with_program_id(
+            ix_builders::account::marginfi_account_init_liq_record(
+                &ix_builders::account::MarginfiAccountInitLiqRecord {
+                    marginfi_account: liquidatee_marginfi_account_pk,
+                    fee_payer: config.explicit_fee_payer(),
+                    liquidation_record: liq_record_pk,
+                    system_program: system_program::id(),
+                },
+            ),
+            config.program_id,
+        ));
     } else if !liq_record_exists {
         bail!(
             "Liquidation record does not exist for account {}. Run `account init-liq-record` first or pass --init-liq-record-if-missing.",
@@ -983,26 +978,23 @@ pub fn marginfi_account_liquidate_receivership(
         );
     }
 
-    let mut start_ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::StartLiquidation {
+    let mut start_ix = ix_builders::with_program_id(
+        ix_builders::liquidation::start_liquidation(&ix_builders::liquidation::StartLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
             group: group_pk,
             liquidation_receiver: authority,
             instruction_sysvar: sysvar::instructions::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::StartLiquidation.data(),
-    };
+        }),
+        config.program_id,
+    );
     start_ix.accounts.extend(start_metas);
     ixs.push(start_ix);
 
     ixs.extend(load_extra_instructions(extra_ixs_file)?);
 
-    let mut end_ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::EndLiquidation {
+    let mut end_ix = ix_builders::with_program_id(
+        ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
             group: group_pk,
@@ -1012,10 +1004,9 @@ pub fn marginfi_account_liquidate_receivership(
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::EndLiquidation.data(),
-    };
+        }),
+        config.program_id,
+    );
     end_ix.accounts.extend(end_metas);
     ixs.push(end_ix);
 
@@ -1051,16 +1042,17 @@ pub fn marginfi_account_set_keeper_close_flags(
         }
     }
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::SetKeeperCloseFlags {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority: config.authority(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::order::marginfi_account_set_keeper_close_flags(
+            &ix_builders::order::MarginfiAccountSetKeeperCloseFlags {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority: config.authority(),
+            },
+            bank_keys_opt,
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -1105,24 +1097,22 @@ pub fn marginfi_account_repay(
             &token_program,
         );
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountRepay {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            signer_token_account,
-            liquidity_vault: bank.liquidity_vault,
-            token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountRepay {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_repay(
+            &ix_builders::lending::LendingAccountRepay {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                signer_token_account,
+                liquidity_vault: bank.liquidity_vault,
+                token_program,
+            },
             amount,
-            repay_all: if repay_all { Some(true) } else { None },
-        }
-        .data(),
-    };
+            if repay_all { Some(true) } else { None },
+        ),
+        config.program_id,
+    );
 
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
@@ -1156,17 +1146,17 @@ pub fn marginfi_account_close_balance(
         .account::<MarginfiAccount>(marginfi_account_pk)?;
     ensure_account_unblocked(&marginfi_account, "close-balance")?;
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingAccountCloseBalance {
-            group: marginfi_account.group,
-            marginfi_account: marginfi_account_pk,
-            authority: config.authority(),
-            bank: bank_pk,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountCloseBalance.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_close_balance(
+            &ix_builders::lending::LendingAccountCloseBalance {
+                group: marginfi_account.group,
+                marginfi_account: marginfi_account_pk,
+                authority: config.authority(),
+                bank: bank_pk,
+            },
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -1195,22 +1185,22 @@ pub fn marginfi_account_transfer(
     let fee_state_pk = find_fee_state_pda(&config.program_id).0;
     let fee_state: FeeState = config.mfi_program.account(fee_state_pk)?;
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::TransferToNewAccount {
-            group: marginfi_account.group,
-            old_marginfi_account: marginfi_account_pk,
-            new_marginfi_account: new_marginfi_account_key.pubkey(),
-            authority,
-            fee_payer: config.explicit_fee_payer(),
-            new_authority,
-            fee_state: fee_state_pk,
-            global_fee_wallet: fee_state.global_fee_wallet,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccount.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::transfer_to_new_account(
+            &ix_builders::account::TransferToNewAccount {
+                group: marginfi_account.group,
+                old_marginfi_account: marginfi_account_pk,
+                new_marginfi_account: new_marginfi_account_key.pubkey(),
+                authority,
+                fee_payer: config.explicit_fee_payer(),
+                new_authority,
+                fee_state: fee_state_pk,
+                global_fee_wallet: fee_state.global_fee_wallet,
+                system_program: system_program::ID,
+            },
+        ),
+        config.program_id,
+    );
 
     let new_account_pk = new_marginfi_account_key.pubkey();
 
@@ -1254,23 +1244,21 @@ pub fn marginfi_account_create_pda(
         &config.program_id,
     );
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::MarginfiAccountInitializePda {
-            marginfi_group: group_pk,
-            marginfi_account: marginfi_account_pda,
-            authority,
-            fee_payer: config.explicit_fee_payer(),
-            instructions_sysvar: sysvar::instructions::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
+    let ix = ix_builders::with_program_id(
+        ix_builders::account::marginfi_account_initialize_pda(
+            &ix_builders::account::MarginfiAccountInitializePda {
+                marginfi_group: group_pk,
+                marginfi_account: marginfi_account_pda,
+                authority,
+                fee_payer: config.explicit_fee_payer(),
+                instructions_sysvar: sysvar::instructions::ID,
+                system_program: system_program::ID,
+            },
             account_index,
             third_party_id,
-        }
-        .data(),
-    };
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -1301,15 +1289,15 @@ pub fn marginfi_account_pulse_health(
     let observation_metas =
         load_observation_account_metas(&marginfi_account, &banks, vec![], vec![]);
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::PulseHealth {
-            marginfi_account: marginfi_account_pk,
-            group: marginfi_account.group,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountPulseHealth.data(),
-    };
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::lending::lending_account_pulse_health(
+            &ix_builders::lending::LendingAccountPulseHealth {
+                marginfi_account: marginfi_account_pk,
+                group: marginfi_account.group,
+            },
+        ),
+        config.program_id,
+    );
 
     ix.accounts.extend(observation_metas);
 

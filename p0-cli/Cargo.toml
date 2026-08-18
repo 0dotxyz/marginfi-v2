@@ -30,7 +30,7 @@ anchor-spl = { workspace = true, features = ["token_2022"] }
 switchboard-on-demand = { workspace = true }
 borsh = { workspace = true }
 
-marginfi-type-crate = { workspace = true, features = ["anchor"] }
+marginfi-type-crate = { workspace = true, features = ["anchor", "ix_builders"] }
 marginfi = { path = "../programs/marginfi", version = "0.1.0", features = [
     "client",
     "no-entrypoint",

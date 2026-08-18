@@ -12,5 +12,5 @@ staging = []
 stagingalt = []
 
 [dependencies]
-anchor-lang = { workspace = true }
+solana-pubkey = { workspace = true }
 cfg-if = "1.0.0"

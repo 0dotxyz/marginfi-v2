@@ -8,6 +8,7 @@ use fixed::types::I80F48;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::pdas::{
     derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
     derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
@@ -89,18 +90,15 @@ impl MarginfiAccountFixture {
         let account_key = Keypair::new();
 
         let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref).await;
-        let accounts = marginfi::accounts::MarginfiAccountInitialize {
-            marginfi_account: account_key.pubkey(),
-            marginfi_group: *marginfi_group,
-            authority: authority.pubkey(),
-            fee_payer: payer.pubkey(),
-            system_program: system_program::ID,
-        };
-        let init_marginfi_account_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: accounts.to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountInitialize {}.data(),
-        };
+        let init_marginfi_account_ix = ix_builders::account::marginfi_account_initialize(
+            &ix_builders::account::MarginfiAccountInitialize {
+                marginfi_account: account_key.pubkey(),
+                marginfi_group: *marginfi_group,
+                authority: authority.pubkey(),
+                fee_payer: payer.pubkey(),
+                system_program: system_program::ID,
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[init_marginfi_account_ix],
@@ -129,29 +127,25 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut accounts = marginfi::accounts::LendingAccountDeposit {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority,
-            bank: bank.key,
-            signer_token_account: funding_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::lending::lending_account_deposit(
+            &ix_builders::lending::LendingAccountDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                token_program: bank.get_token_program(),
+            },
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+            deposit_up_to_limit,
+        );
         if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(bank.mint.key, false));
         }
 
-        Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountDeposit {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                deposit_up_to_limit,
-            }
-            .data(),
-        }
+        ix
     }
 
     pub async fn make_deposit_ix<T: Into<f64>>(
@@ -284,16 +278,14 @@ impl MarginfiAccountFixture {
     pub async fn try_set_freeze(&self, frozen: bool) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::SetAccountFreeze {
+        let ix = ix_builders::account::marginfi_account_set_freeze(
+            &ix_builders::account::MarginfiAccountSetFreeze {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
-        };
+            },
+            frozen,
+        );
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
@@ -334,30 +326,26 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut accounts = marginfi::accounts::LendingAccountWithdraw {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority,
-            bank: bank.key,
-            destination_token_account: destination_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            bank_liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::lending::lending_account_withdraw(
+            &ix_builders::lending::LendingAccountWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                bank_liquidity_vault_authority: bank
+                    .get_vault_authority(BankVaultType::Liquidity)
+                    .0,
+                token_program: bank.get_token_program(),
+            },
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+            withdraw_all,
+        );
         if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(bank.mint.key, false));
         }
-
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountWithdraw {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                withdraw_all,
-            }
-            .data(),
-        };
 
         if withdraw_all.unwrap_or(false) {
             // For user-driven withdraw_all flows, omit the closing bank's risk accounts unless a
@@ -476,29 +464,25 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut accounts = marginfi::accounts::LendingAccountBorrow {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority,
-            bank: bank.key,
-            destination_token_account: destination_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            bank_liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::lending::lending_account_borrow(
+            &ix_builders::lending::LendingAccountBorrow {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                bank_liquidity_vault_authority: bank
+                    .get_vault_authority(BankVaultType::Liquidity)
+                    .0,
+                token_program: bank.get_token_program(),
+            },
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        );
         if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(bank.mint.key, false));
         }
-
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountBorrow {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-            }
-            .data(),
-        };
 
         ix.accounts.extend_from_slice(
             &self
@@ -645,29 +629,23 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut accounts = marginfi::accounts::LendingAccountRepay {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority,
-            bank: bank.key,
-            signer_token_account: funding_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::lending::lending_account_repay(
+            &ix_builders::lending::LendingAccountRepay {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                token_program: bank.get_token_program(),
+            },
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+            repay_all,
+        );
         if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(bank.mint.key, false));
         }
-
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountRepay {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                repay_all,
-            }
-            .data(),
-        };
 
         if repay_all.unwrap_or(false) {
             ix.accounts.extend_from_slice(
@@ -734,17 +712,14 @@ impl MarginfiAccountFixture {
         let marginfi_account = self.load().await;
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingAccountCloseBalance {
+        let ix = ix_builders::lending::lending_account_close_balance(
+            &ix_builders::lending::LendingAccountCloseBalance {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: payer.pubkey(),
                 bank: bank.key,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountCloseBalance.data(),
-        };
+            },
+        );
 
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
@@ -786,39 +761,6 @@ impl MarginfiAccountFixture {
         let asset_bank = asset_bank_fixture.load().await;
         let liab_bank = liab_bank_fixture.load().await;
 
-        let mut accounts = marginfi::accounts::LendingAccountLiquidate {
-            group: marginfi_account.group,
-            asset_bank: asset_bank_fixture.key,
-            liab_bank: liab_bank_fixture.key,
-            liquidator_marginfi_account: self.key,
-            authority: authority.pubkey(),
-            liquidatee_marginfi_account: liquidatee.key,
-            bank_liquidity_vault_authority: liab_bank_fixture
-                .get_vault_authority(BankVaultType::Liquidity)
-                .0,
-            bank_liquidity_vault: liab_bank_fixture.get_vault(BankVaultType::Liquidity).0,
-            bank_insurance_vault: liab_bank_fixture.get_vault(BankVaultType::Insurance).0,
-            token_program: liab_bank_fixture.get_token_program(),
-        }
-        .to_account_metas(Some(true));
-
-        if liab_bank_fixture.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(liab_bank_fixture.mint.key, false));
-        }
-
-        if asset_bank.config.oracle_setup != OracleSetup::Fixed {
-            accounts.push(AccountMeta::new_readonly(
-                asset_bank.config.oracle_keys[0],
-                false,
-            ));
-        }
-        if liab_bank.config.oracle_setup != OracleSetup::Fixed {
-            accounts.push(AccountMeta::new_readonly(
-                liab_bank.config.oracle_keys[0],
-                false,
-            ));
-        }
-
         let liquidator_obs_accounts = &self
             .load_observation_account_metas(
                 vec![asset_bank_fixture.key, liab_bank_fixture.key],
@@ -832,19 +774,46 @@ impl MarginfiAccountFixture {
             .await;
         let liquidatee_accounts = liquidatee_obs_accounts.len() as u8;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountLiquidate {
-                asset_amount: ui_to_native!(
-                    asset_ui_amount.into(),
-                    asset_bank_fixture.mint.mint.decimals
-                ),
-                liquidatee_accounts,
-                liquidator_accounts,
-            }
-            .data(),
-        };
+        let mut ix = ix_builders::lending::lending_account_liquidate(
+            &ix_builders::lending::LendingAccountLiquidate {
+                group: marginfi_account.group,
+                asset_bank: asset_bank_fixture.key,
+                liab_bank: liab_bank_fixture.key,
+                liquidator_marginfi_account: self.key,
+                authority: authority.pubkey(),
+                liquidatee_marginfi_account: liquidatee.key,
+                bank_liquidity_vault_authority: liab_bank_fixture
+                    .get_vault_authority(BankVaultType::Liquidity)
+                    .0,
+                bank_liquidity_vault: liab_bank_fixture.get_vault(BankVaultType::Liquidity).0,
+                bank_insurance_vault: liab_bank_fixture.get_vault(BankVaultType::Insurance).0,
+                token_program: liab_bank_fixture.get_token_program(),
+            },
+            ui_to_native!(
+                asset_ui_amount.into(),
+                asset_bank_fixture.mint.mint.decimals
+            ),
+            liquidatee_accounts,
+            liquidator_accounts,
+        );
+
+        if liab_bank_fixture.mint.token_program == anchor_spl::token_2022::ID {
+            ix.accounts
+                .push(AccountMeta::new_readonly(liab_bank_fixture.mint.key, false));
+        }
+
+        if asset_bank.config.oracle_setup != OracleSetup::Fixed {
+            ix.accounts.push(AccountMeta::new_readonly(
+                asset_bank.config.oracle_keys[0],
+                false,
+            ));
+        }
+        if liab_bank.config.oracle_setup != OracleSetup::Fixed {
+            ix.accounts.push(AccountMeta::new_readonly(
+                liab_bank.config.oracle_keys[0],
+                false,
+            ));
+        }
 
         #[cfg(feature = "transfer-hook")]
         if liab_bank_fixture.mint.token_program == anchor_spl::token_2022::ID {
@@ -900,16 +869,13 @@ impl MarginfiAccountFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let ctx = self.ctx.borrow();
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+        let ix = ix_builders::account::marginfi_account_update_emissions_destination_account(
+            &ix_builders::account::MarginfiAccountUpdateEmissionsDestinationAccount {
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
                 destination_account,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
-        };
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -933,16 +899,13 @@ impl MarginfiAccountFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+        let ix = ix_builders::account::marginfi_account_update_emissions_destination_account(
+            &ix_builders::account::MarginfiAccountUpdateEmissionsDestinationAccount {
                 marginfi_account: self.key,
                 authority: authority.pubkey(),
                 destination_account,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
-        };
+            },
+        );
 
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
@@ -958,16 +921,14 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn make_lending_account_start_flashloan_ix(&self, end_index: u64) -> Instruction {
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingAccountStartFlashloan {
+        ix_builders::lending::lending_account_start_flashloan(
+            &ix_builders::lending::LendingAccountStartFlashloan {
                 marginfi_account: self.key,
                 authority: self.ctx.borrow().payer.pubkey(),
                 ixs_sysvar: solana_instructions_sysvar::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountStartFlashloan { end_index }.data(),
-        }
+            },
+            end_index,
+        )
     }
 
     pub async fn make_lending_account_end_flashloan_ix(
@@ -975,23 +936,20 @@ impl MarginfiAccountFixture {
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = marginfi::accounts::LendingAccountEndFlashloan {
-            marginfi_account: self.key,
-            group: self.load().await.group,
-            authority: self.ctx.borrow().payer.pubkey(),
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::lending::lending_account_end_flashloan(
+            &ix_builders::lending::LendingAccountEndFlashloan {
+                marginfi_account: self.key,
+                group: self.load().await.group,
+                authority: self.ctx.borrow().payer.pubkey(),
+            },
+        );
 
-        account_metas.extend(
+        ix.accounts.extend(
             self.load_observation_account_metas(include_banks, exclude_banks)
                 .await,
         );
 
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: account_metas,
-            data: marginfi::instruction::LendingAccountEndFlashloan {}.data(),
-        }
+        ix
     }
 
     /// Wrap `ixs` between a start and end flashloan instruction,
@@ -1161,9 +1119,8 @@ impl MarginfiAccountFixture {
             &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
             &marginfi::ID,
         );
-        let transfer_account_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::TransferToNewAccount {
+        let transfer_account_ix = ix_builders::account::transfer_to_new_account(
+            &ix_builders::account::TransferToNewAccount {
                 old_marginfi_account: self.key,
                 new_marginfi_account,
                 group: marginfi_account.group,
@@ -1173,10 +1130,8 @@ impl MarginfiAccountFixture {
                 global_fee_wallet,
                 fee_state,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(None),
-            data: marginfi::instruction::TransferToNewAccount {}.data(),
-        };
+            },
+        );
 
         let mut signers = vec![new_account_keypair];
         let is_signer_fee_payer = signer.pubkey() == fee_payer.pubkey();
@@ -1252,16 +1207,13 @@ impl MarginfiAccountFixture {
     pub async fn try_close_account(&self, nonce: u64) -> std::result::Result<(), BanksClientError> {
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiAccountClose {
+        let ix = ix_builders::account::marginfi_account_close(
+            &ix_builders::account::MarginfiAccountClose {
                 marginfi_account: self.key,
                 authority: payer.pubkey(),
                 fee_payer: payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountClose {}.data(),
-        };
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ComputeBudgetInstruction::set_compute_unit_price(nonce), ix],
@@ -1294,18 +1246,15 @@ impl MarginfiAccountFixture {
         liquidation_record: Pubkey,
         liquidation_receiver: Pubkey,
     ) -> Instruction {
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::StartLiquidation {
+        let mut ix = ix_builders::liquidation::start_liquidation(
+            &ix_builders::liquidation::StartLiquidation {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
                 group: self.load().await.group,
                 instruction_sysvar: solana_instructions_sysvar::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::StartLiquidation {}.data(),
-        };
+            },
+        );
         ix.accounts.extend_from_slice(
             &self
                 .load_observation_account_metas_with_flags(vec![], vec![], true, false)
@@ -1322,9 +1271,8 @@ impl MarginfiAccountFixture {
         global_fee_wallet: Pubkey,
         exclude_banks: Vec<Pubkey>,
     ) -> Instruction {
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::EndLiquidation {
+        let mut ix =
+            ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
@@ -1333,10 +1281,7 @@ impl MarginfiAccountFixture {
                 global_fee_wallet,
                 system_program: system_program::ID,
                 fee_payer: None,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::EndLiquidation {}.data(),
-        };
+            });
         ix.accounts.extend_from_slice(
             &self
                 .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
@@ -1350,17 +1295,14 @@ impl MarginfiAccountFixture {
         liquidation_record: Pubkey,
         payer: Pubkey,
     ) -> Instruction {
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::InitLiquidationRecord {
+        ix_builders::account::marginfi_account_init_liq_record(
+            &ix_builders::account::MarginfiAccountInitLiqRecord {
                 marginfi_account: self.key,
                 fee_payer: payer,
                 liquidation_record,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountInitLiqRecord {}.data(),
-        }
+            },
+        )
     }
 
     pub async fn make_close_liquidation_record_ix(
@@ -1368,16 +1310,13 @@ impl MarginfiAccountFixture {
         liquidation_record: Pubkey,
         record_payer: Pubkey,
     ) -> Instruction {
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::CloseLiquidationRecord {
+        ix_builders::account::marginfi_account_close_liq_record(
+            &ix_builders::account::MarginfiAccountCloseLiqRecord {
                 marginfi_account: self.key,
                 liquidation_record,
                 record_payer,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountCloseLiqRecord {}.data(),
-        }
+            },
+        )
     }
 
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
@@ -1471,9 +1410,8 @@ impl MarginfiAccountFixture {
         let (lending_market_authority, _) =
             derive_kamino_lending_market_authority(&reserve.lending_market);
 
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::KaminoDeposit {
+        ix_builders::kamino::kamino_deposit(
+            &ix_builders::kamino::KaminoDeposit {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1496,14 +1434,10 @@ impl MarginfiAccountFixture {
                 collateral_token_program: anchor_spl::token::spl_token::ID,
                 liquidity_token_program: bank.get_token_program(),
                 instruction_sysvar_account: sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoDeposit {
-                amount,
-                refresh_reserve: Some(false),
-            }
-            .data(),
-        }
+            },
+            amount,
+            Some(false),
+        )
     }
 
     pub async fn make_kamino_withdraw_ix(
@@ -1543,9 +1477,8 @@ impl MarginfiAccountFixture {
             None
         };
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::KaminoWithdraw {
+        let mut ix = ix_builders::kamino::kamino_withdraw(
+            &ix_builders::kamino::KaminoWithdraw {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1568,10 +1501,10 @@ impl MarginfiAccountFixture {
                 collateral_token_program: anchor_spl::token::spl_token::ID,
                 liquidity_token_program: bank.get_token_program(),
                 instruction_sysvar_account: sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoWithdraw { amount, flags }.data(),
-        };
+            },
+            amount,
+            flags,
+        );
 
         self.append_integration_withdraw_health_accounts(&mut ix)
             .await;
@@ -1610,9 +1543,8 @@ impl MarginfiAccountFixture {
         let drift_state = derive_drift_state().0;
         let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index).0;
 
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::DriftDeposit {
+        ix_builders::drift::drift_deposit(
+            &ix_builders::drift::DriftDeposit {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1630,10 +1562,9 @@ impl MarginfiAccountFixture {
                 drift_program: DRIFT_PROGRAM_ID,
                 token_program: bank.get_token_program(),
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::DriftDeposit { amount }.data(),
-        }
+            },
+            amount,
+        )
     }
 
     pub async fn make_drift_withdraw_ix(
@@ -1671,9 +1602,8 @@ impl MarginfiAccountFixture {
         let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index).0;
         let drift_signer = derive_drift_signer().0;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::DriftWithdraw {
+        let mut ix = ix_builders::drift::drift_withdraw(
+            &ix_builders::drift::DriftWithdraw {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1698,14 +1628,10 @@ impl MarginfiAccountFixture {
                 drift_program: DRIFT_PROGRAM_ID,
                 token_program: bank.get_token_program(),
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::DriftWithdraw {
-                amount,
-                withdraw_all,
-            }
-            .data(),
-        };
+            },
+            amount,
+            withdraw_all,
+        );
 
         self.append_integration_withdraw_health_accounts(&mut ix)
             .await;
@@ -1749,9 +1675,8 @@ impl MarginfiAccountFixture {
         );
         let lending_admin = derive_juplend_lending_admin().0;
 
-        Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::JuplendDeposit {
+        ix_builders::juplend::juplend_deposit(
+            &ix_builders::juplend::JuplendDeposit {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1775,10 +1700,9 @@ impl MarginfiAccountFixture {
                 token_program: bank.get_token_program(),
                 associated_token_program: anchor_spl::associated_token::ID,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::JuplendDeposit { amount }.data(),
-        }
+            },
+            amount,
+        )
     }
 
     pub async fn make_juplend_withdraw_ix(
@@ -1825,9 +1749,8 @@ impl MarginfiAccountFixture {
         )
         .0;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::JuplendWithdraw {
+        let mut ix = ix_builders::juplend::juplend_withdraw(
+            &ix_builders::juplend::JuplendWithdraw {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority,
@@ -1852,14 +1775,10 @@ impl MarginfiAccountFixture {
                 token_program: bank.get_token_program(),
                 associated_token_program: anchor_spl::associated_token::ID,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::JuplendWithdraw {
-                amount,
-                withdraw_all,
-            }
-            .data(),
-        };
+            },
+            amount,
+            withdraw_all,
+        );
 
         self.append_integration_withdraw_health_accounts(&mut ix)
             .await;
@@ -1875,15 +1794,12 @@ impl MarginfiAccountFixture {
     pub async fn try_lending_account_pulse_health(
         &self,
     ) -> std::result::Result<(), BanksClientError> {
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::PulseHealth {
+        let mut ix = ix_builders::lending::lending_account_pulse_health(
+            &ix_builders::lending::LendingAccountPulseHealth {
                 marginfi_account: self.key,
                 group: self.load().await.group,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountPulseHealth {}.data(),
-        };
+            },
+        );
 
         // Add bank and oracle accounts for pulse_health (need to pass banks and oracles for all active balances)
         ix.accounts
@@ -1910,18 +1826,15 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::StartDeleverage {
+        let mut ix = ix_builders::liquidation::start_deleverage(
+            &ix_builders::liquidation::StartDeleverage {
                 marginfi_account: self.key,
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
                 instruction_sysvar: solana_instructions_sysvar::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::StartDeleverage {}.data(),
-        };
+            },
+        );
         ix.accounts.extend_from_slice(
             &self
                 .load_observation_account_metas_with_flags(vec![], vec![], true, false)
@@ -1938,17 +1851,13 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::EndDeleverage {
+        let mut ix =
+            ix_builders::liquidation::end_deleverage(&ix_builders::liquidation::EndDeleverage {
                 marginfi_account: self.key,
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::EndDeleverage {}.data(),
-        };
+            });
         ix.accounts.extend_from_slice(
             &self
                 .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
@@ -1987,9 +1896,8 @@ impl MarginfiAccountFixture {
 
         let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::PlaceOrder {
+        let ix = ix_builders::order::marginfi_account_place_order(
+            &ix_builders::order::MarginfiAccountPlaceOrder {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 fee_payer: ctx.payer.pubkey(),
@@ -1998,10 +1906,10 @@ impl MarginfiAccountFixture {
                 fee_state: fee_state_key,
                 global_fee_wallet,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
-        };
+            },
+            bank_keys,
+            trigger,
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -2028,19 +1936,16 @@ impl MarginfiAccountFixture {
         let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::CloseOrder {
+        let ix = ix_builders::order::marginfi_account_close_order(
+            &ix_builders::order::MarginfiAccountCloseOrder {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
                 order,
                 fee_recipient,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountCloseOrder {}.data(),
-        };
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -2065,16 +1970,13 @@ impl MarginfiAccountFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let ctx = self.ctx.borrow();
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::KeeperCloseOrder {
+        let ix = ix_builders::order::marginfi_account_keeper_close_order(
+            &ix_builders::order::MarginfiAccountKeeperCloseOrder {
                 marginfi_account: self.key,
                 order,
                 fee_recipient,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountKeeperCloseOrder {}.data(),
-        };
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -2098,17 +2000,14 @@ impl MarginfiAccountFixture {
         let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::SetKeeperCloseFlags {
+        let ix = ix_builders::order::marginfi_account_set_keeper_close_flags(
+            &ix_builders::order::MarginfiAccountSetKeeperCloseFlags {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }
-                .data(),
-        };
+            },
+            bank_keys_opt,
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -2147,9 +2046,8 @@ impl MarginfiAccountFixture {
         let marginfi_account = self.load().await;
         let (execute_record, _) = find_execute_order_pda(&order);
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::StartExecuteOrder {
+        let mut ix = ix_builders::order::marginfi_account_start_execute_order(
+            &ix_builders::order::MarginfiAccountStartExecuteOrder {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 fee_payer: executor,
@@ -2158,10 +2056,8 @@ impl MarginfiAccountFixture {
                 execute_record,
                 instruction_sysvar: solana_instructions_sysvar::id(),
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountStartExecuteOrder {}.data(),
-        };
+            },
+        );
 
         let observation_metas = match observation_metas {
             Some(metas) => metas,
@@ -2183,9 +2079,8 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::EndExecuteOrder {
+        let mut ix = ix_builders::order::marginfi_account_end_execute_order(
+            &ix_builders::order::MarginfiAccountEndExecuteOrder {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 executor,
@@ -2197,10 +2092,8 @@ impl MarginfiAccountFixture {
                     &marginfi::ID,
                 )
                 .0,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountEndExecuteOrder {}.data(),
-        };
+            },
+        );
 
         ix.accounts.extend_from_slice(
             &self
@@ -2217,16 +2110,12 @@ impl MarginfiAccountFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::AdminCloseAccount {
+        let ix =
+            ix_builders::account::admin_close_account(&ix_builders::account::AdminCloseAccount {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 global_fee_wallet,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::AdminCloseAccount {}.data(),
-        };
+            });
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
@@ -2238,14 +2127,9 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn try_sync_indexer_flags(&self) -> std::result::Result<(), BanksClientError> {
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::SyncIndexerFlags {
-                payer: self.ctx.borrow().payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::SyncIndexerFlags {}.data(),
-        };
+        let mut ix = ix_builders::pool::sync_indexer_flags(&ix_builders::pool::SyncIndexerFlags {
+            payer: self.ctx.borrow().payer.pubkey(),
+        });
         ix.accounts.push(AccountMeta::new(self.key, false));
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;

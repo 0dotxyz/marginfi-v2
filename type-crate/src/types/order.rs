@@ -27,6 +27,10 @@ unsafe impl Pod for OrderTriggerType {}
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
 pub enum OrderTrigger {
     StopLoss {

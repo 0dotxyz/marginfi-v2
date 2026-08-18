@@ -3221,8 +3221,8 @@ dependencies = [
 name = "id-crate"
 version = "0.1.0"
 dependencies = [
- "anchor-lang",
  "cfg-if",
+ "solana-pubkey 4.2.0",
 ]
 
 [[package]]
@@ -3786,7 +3786,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.10"
+version = "0.2.0"
 dependencies = [
  "anchor-lang",
  "borsh",
@@ -3796,6 +3796,7 @@ dependencies = [
  "fixed-macro",
  "id-crate",
  "solana-instruction",
+ "solana-pubkey 4.2.0",
  "spl-associated-token-account",
  "static_assertions",
 ]

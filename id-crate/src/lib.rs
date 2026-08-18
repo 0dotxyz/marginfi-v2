@@ -1,4 +1,4 @@
-use anchor_lang::prelude::*;
+use solana_pubkey::declare_id;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "mainnet-beta")] {

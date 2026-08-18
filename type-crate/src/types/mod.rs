@@ -2,18 +2,24 @@ pub mod bank;
 pub mod bank_cache;
 pub mod bank_config;
 pub mod bank_metadata;
+pub mod drift_config;
 pub mod emode;
 pub mod fee_state;
 pub mod group;
 pub mod health_cache;
 pub mod interest_rate;
+pub mod juplend_config;
+pub mod kamino_config;
 pub mod liquidation_record;
 pub mod order;
 pub mod panic_state_cache;
 pub mod price;
+// Always compiled so `types::pubkey::*` stays a valid path under every feature set; which
+// type `types::Pubkey` resolves to still depends on the features below.
 pub mod pubkey;
 pub mod rate_limiter;
 pub mod same_asset_emode_registry;
+pub mod solend_config;
 pub mod staked_settings;
 pub mod user_account;
 pub mod wrapped_i80f48;
@@ -22,18 +28,29 @@ pub use bank::*;
 pub use bank_cache::*;
 pub use bank_config::*;
 pub use bank_metadata::*;
+pub use drift_config::*;
 pub use emode::*;
 pub use fee_state::*;
 pub use group::*;
 pub use health_cache::*;
 pub use interest_rate::*;
+pub use juplend_config::*;
+pub use kamino_config::*;
 pub use liquidation_record::*;
 pub use order::*;
 pub use panic_state_cache::*;
 pub use price::*;
+#[cfg(not(any(feature = "anchor", feature = "ix_builders", feature = "pdas")))]
 pub use pubkey::*;
 pub use rate_limiter::*;
 pub use same_asset_emode_registry::*;
+pub use solend_config::*;
+// Same names the stub module exports, so `types::{Pubkey, AccountMeta}` resolves under every
+// feature set. Here they are the real solana types, matching what the account fields hold.
+#[cfg(any(feature = "anchor", feature = "ix_builders", feature = "pdas"))]
+pub use solana_instruction::AccountMeta;
+#[cfg(any(feature = "anchor", feature = "ix_builders", feature = "pdas"))]
+pub use solana_pubkey::Pubkey;
 pub use staked_settings::*;
 pub use user_account::*;
 pub use wrapped_i80f48::*;

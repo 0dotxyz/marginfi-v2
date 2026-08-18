@@ -6,10 +6,29 @@ pub mod constants;
 pub mod macros;
 pub mod types;
 
-#[cfg(feature = "anchor")]
+#[cfg(feature = "ix_builders")]
+pub mod ix_builders;
+#[cfg(feature = "pdas")]
 pub mod pdas;
 
-#[cfg(feature = "anchor")]
+/// Builders address every instruction to [`ID`], which id-crate resolves from the network
+/// feature. Picking one is mandatory here so a client cannot ship instructions aimed at the
+/// wrong cluster's program.
+#[cfg(all(
+    feature = "ix_builders",
+    not(any(
+        feature = "mainnet-beta",
+        feature = "devnet",
+        feature = "staging",
+        feature = "stagingalt",
+        feature = "localnet",
+    ))
+))]
+compile_error!(
+    "marginfi-type-crate: `ix_builders` requires a network feature, one of `mainnet-beta`, \
+     `devnet`, `staging`, `stagingalt`, or `localnet`."
+);
+
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

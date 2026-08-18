@@ -3,10 +3,7 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{
-        bank::BankImpl, bank_config::BankConfigImpl, juplend::JuplendConfigCompact,
-        marginfi_group::MarginfiGroupImpl,
-    },
+    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -18,7 +15,7 @@ use marginfi_type_crate::constants::{
     INSURANCE_VAULT_SEED, IS_T22, JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
     LIQUIDITY_VAULT_SEED,
 };
-use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
+use marginfi_type_crate::types::{Bank, JuplendConfigCompact, MarginfiGroup, OracleSetup};
 
 /// Add a JupLend bank to the marginfi lending pool.
 ///

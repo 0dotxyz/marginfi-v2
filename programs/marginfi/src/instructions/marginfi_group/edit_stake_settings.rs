@@ -5,7 +5,8 @@ use crate::state::staked_settings::StakedSettingsImpl;
 use crate::set_if_some;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{MarginfiGroup, RiskTier, StakedSettings, WrappedI80F48};
+use marginfi_type_crate::types::StakedSettingsEditConfig;
+use marginfi_type_crate::types::{MarginfiGroup, StakedSettings};
 
 pub fn edit_staked_settings(
     ctx: Context<EditStakedSettings>,
@@ -57,25 +58,4 @@ pub struct EditStakedSettings<'info> {
         has_one = marginfi_group @ MarginfiError::InvalidGroup
     )]
     pub staked_settings: AccountLoader<'info, StakedSettings>,
-}
-
-#[derive(AnchorDeserialize, AnchorSerialize, Default)]
-pub struct StakedSettingsEditConfig {
-    pub oracle: Option<Pubkey>,
-
-    pub asset_weight_init: Option<WrappedI80F48>,
-    pub asset_weight_maint: Option<WrappedI80F48>,
-
-    pub deposit_limit: Option<u64>,
-    pub total_asset_value_init_limit: Option<u64>,
-
-    pub oracle_max_age: Option<u16>,
-    /// WARN: You almost certainly want "Collateral", using Isolated risk tier makes the asset
-    /// worthless as collateral, making all outstanding accounts eligible to be liquidated, and is
-    /// generally useful only when creating a staked collateral pool for rewards purposes only.
-    pub risk_tier: Option<RiskTier>,
-    // Note: we may want to make `oracleMaxConfidence` editable at some point, so it doesn't use the
-    // default max. Since staked collateral banks only trade SOL, which only uses the ever-popular
-    // SOL oracle, this is unlikely to ever come up. If SOL confidence is poor, we are in dire
-    // straights!
 }

@@ -302,6 +302,10 @@ impl Bank {
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum RiskTier {
     #[default]
@@ -319,6 +323,10 @@ unsafe impl Pod for RiskTier {}
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum BankOperationalState {
     /// All operations are halted
@@ -355,6 +363,10 @@ impl BankOperationalState {
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum OracleSetup {
     None,                   // 0

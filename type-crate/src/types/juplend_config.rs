@@ -1,13 +1,15 @@
+#[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi_type_crate::{
-    constants::{ASSET_TAG_JUPLEND, PYTH_PUSH_MIGRATED_DEPRECATED},
-    types::{
-        make_points, BankConfig, BankOperationalState, InterestRateConfig, OracleSetup, RatePoint,
-        RiskTier, WrappedI80F48, INTEREST_CURVE_SEVEN_POINT,
-    },
+
+#[cfg(not(feature = "anchor"))]
+use super::Pubkey;
+use super::{
+    make_points, BankConfig, BankOperationalState, InterestRateConfig, OracleSetup, RatePoint,
+    RiskTier, WrappedI80F48, INTEREST_CURVE_SEVEN_POINT,
 };
+use crate::constants::{ASSET_TAG_JUPLEND, PYTH_PUSH_MIGRATED_DEPRECATED};
 
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since JupLend banks cannot earn interest or be borrowed from.
@@ -15,7 +17,12 @@ use marginfi_type_crate::{
 /// Note: JupLend banks do not take an Operational State, they always start in `Uninitialized`
 /// state and are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken
 /// vault).
-#[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct JuplendConfigCompact {
     pub oracle: Pubkey,
     pub asset_weight_init: WrappedI80F48,
