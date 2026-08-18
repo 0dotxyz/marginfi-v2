@@ -2200,7 +2200,16 @@ impl<'a> BankAccountWrapper<'a> {
         // liability to repay, a pure repay adds no assets). The amounts are `max(_, 0)`, so `> 0`
         // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
         let asset_shares_increase = if asset_amount_increase > I80F48::ZERO {
+            // `get_asset_shares` truncates toward zero. At an inflated asset share value a
+            // positive token transfer can round down to zero raw share bits, recording no
+            // claim while taking the caller's tokens. Reject that the same way we reject a
+            // zero-burn withdrawal.
             let shares = bank.get_asset_shares(asset_amount_increase)?;
+            check!(
+                shares > I80F48::ZERO,
+                MarginfiError::IllegalBalanceState,
+                "Deposit would transfer assets without minting shares"
+            );
             balance.change_asset_shares(shares)?;
             bank.change_asset_shares(
                 shares,
@@ -2306,7 +2315,19 @@ impl<'a> BankAccountWrapper<'a> {
         // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
         // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
         let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
-            let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            // Round the burn UP. `get_asset_shares` truncates, which would surrender fewer shares
+            // than the tokens leaving the vault are worth; at a high `asset_share_value` that gap
+            // is a material quantity, not dust. Clamp to the balance so withdrawing the position's
+            // full value cannot over-burn by the added ULP.
+            let truncated = bank.get_asset_shares(asset_amount_decrease)?;
+            let shares = if bank.get_asset_amount(truncated)? < asset_amount_decrease {
+                min(
+                    I80F48::from_bits(truncated.to_bits() + 1),
+                    current_asset_shares,
+                )
+            } else {
+                truncated
+            };
             // If asset share value > 2^48, this prevents a 1-satoshi withdraw from trunctuating.
             check!(
                 shares > I80F48::ZERO,
@@ -2984,8 +3005,13 @@ mod test {
             );
         }
 
+        /// With `asset_share_value > 2^48`, a 1-satoshi withdraw truncates to a
+        /// zero-share burn. Rounding the burn up covers the transfer with a
+        /// single raw share bit instead of rejecting the withdrawal, so the
+        /// user is not locked out of a tiny redemption and the vault is never
+        /// short. Previously this case returned `IllegalBalanceState`.
         #[test]
-        fn withdraw_rejects_positive_amount_with_zero_asset_shares_burned() {
+        fn withdraw_burns_at_least_the_value_it_transfers_at_high_share_value() {
             let asset_share_value = I80F48::from_num((1u64 << 48) + 1);
             let (mut bank, mut balance) =
                 make_bank_and_balance(asset_share_value, I80F48::ONE, I80F48::ONE, I80F48::ZERO);
@@ -2995,8 +3021,19 @@ mod test {
                 bank: &mut bank,
             };
 
-            let err = wrapper.withdraw(I80F48::ONE).unwrap_err();
-            assert_eq!(err, MarginfiError::IllegalBalanceState.into());
+            let withdraw_amount = I80F48::ONE;
+            let burned = wrapper.withdraw(withdraw_amount).unwrap();
+
+            assert!(
+                burned > I80F48::ZERO,
+                "withdraw transferred tokens without burning shares"
+            );
+            assert!(
+                burned * asset_share_value >= withdraw_amount,
+                "burned shares worth {} do not cover the {} transferred",
+                burned * asset_share_value,
+                withdraw_amount
+            );
         }
 
         /// `repay` on a bank with fractional `liability_share_value`. Choose
@@ -3366,6 +3403,140 @@ mod test {
                 bank.borrowing_position_count, 0,
                 "borrowing_position_count incorrectly decremented for sub-threshold liability dust"
             );
+        }
+    }
+
+    /// A withdrawal must never move more token value out of the vault than the
+    /// value of the shares it burns. `get_asset_shares` truncates toward zero,
+    /// so the burn leg under-counts by up to one raw share bit. That bit is
+    /// worth `asset_share_value * 2^-48`, which is harmless at a normal share
+    /// value but becomes a material quantity once `asset_share_value` is
+    /// inflated (permissionless `lending_pool_emissions_deposit` can do this on
+    /// a bank whose share supply is dust).
+    mod share_burn_solvency {
+        use super::*;
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{Balance, Bank};
+
+        /// Native units per raw share bit once the share value is inflated.
+        const Q: u64 = 1_000_000;
+
+        /// `asset_share_value = Q * 2^48`, so one raw I80F48 share bit is worth
+        /// exactly `Q` native units.
+        fn inflated_share_value() -> I80F48 {
+            I80F48::from_num(Q) * I80F48::from_num(1u64 << 48)
+        }
+
+        /// Sole-holder bank: the balance owns every share, as in an empty bank
+        /// that a single actor has seeded. Caps are disabled so the test
+        /// isolates the conversion invariant.
+        fn make_sole_holder_bank(asset_shares: I80F48) -> (Bank, Balance) {
+            let mut bank = Bank::zeroed();
+            bank.asset_share_value = inflated_share_value().into();
+            bank.liability_share_value = I80F48::ONE.into();
+            bank.total_asset_shares = asset_shares.into();
+            bank.config.deposit_limit = u64::MAX;
+            bank.config.borrow_limit = u64::MAX;
+
+            let mut balance = Balance::zeroed();
+            balance.active = 1;
+            balance.asset_shares = asset_shares.into();
+            (bank, balance)
+        }
+
+        /// A single partial withdraw must burn shares worth at least the tokens
+        /// transferred out. Withdrawing `2Q - 1` truncates to one raw share bit
+        /// (worth `Q`), so `Q - 1` native units leave the vault unbacked while
+        /// the PR #620 `shares > 0` guard is satisfied.
+        #[test]
+        fn partial_withdraw_burns_shares_worth_at_least_tokens_transferred() {
+            // Two raw bits are worth 2Q, so withdrawing 2Q - 1 stays inside the
+            // balance and cannot be rejected as a disguised borrow.
+            let two_raw_bits = I80F48::from_bits(2);
+            let (mut bank, mut balance) = make_sole_holder_bank(two_raw_bits);
+
+            let withdraw_amount = I80F48::from_num(2 * Q - 1);
+            let share_value = inflated_share_value();
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            let burned = wrapper.withdraw(withdraw_amount).unwrap();
+
+            // The guard added in PR #620 only proves the burn is non-empty.
+            assert!(burned > I80F48::ZERO, "precondition: PR #620 guard passes");
+
+            let value_burned = burned * share_value;
+            assert!(
+                value_burned >= withdraw_amount,
+                "withdraw transferred {} native units but burned shares worth only {} \
+                 (short by {}); a burn must be rounded up, not truncated",
+                withdraw_amount,
+                value_burned,
+                withdraw_amount - value_burned,
+            );
+        }
+
+        /// Repeating `deposit(2Q)` / `withdraw(2Q - 1)` must not let a caller
+        /// accumulate a book claim larger than the tokens they actually put in.
+        /// Each pair mints exactly two raw bits and truncates the burn to one,
+        /// so the claim grows by `Q` for a cost of one native unit.
+        #[test]
+        fn deposit_withdraw_cycle_cannot_manufacture_claims() {
+            let one_raw_bit = I80F48::from_bits(1);
+            let (mut bank, mut balance) = make_sole_holder_bank(one_raw_bit);
+            let share_value = inflated_share_value();
+
+            // Tokens the caller has net contributed, starting from the seed
+            // that the single raw bit represents.
+            let mut net_contributed = (one_raw_bit * share_value).to_num::<i128>();
+
+            for _ in 0..5 {
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                wrapper.deposit(I80F48::from_num(2 * Q)).unwrap();
+                net_contributed += (2 * Q) as i128;
+
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                wrapper.withdraw(I80F48::from_num(2 * Q - 1)).unwrap();
+                net_contributed -= (2 * Q - 1) as i128;
+            }
+
+            let book_claim = (I80F48::from(balance.asset_shares) * share_value).to_num::<i128>();
+            assert!(
+                book_claim <= net_contributed,
+                "caller contributed {} native units but holds a book claim of {} \
+                 ({} units are unbacked)",
+                net_contributed,
+                book_claim,
+                book_claim - net_contributed,
+            );
+        }
+
+        /// A deposit must mint a positive number of shares when tokens are
+        /// transferred in. With `asset_share_value = Q * 2^48`, a deposit of
+        /// `Q - 1` atoms truncates to zero raw share bits but the tokens would
+        /// still be taken.
+        #[test]
+        fn deposit_rejects_positive_amount_with_zero_asset_shares_minted() {
+            let one_raw_bit = I80F48::from_bits(1);
+            let (mut bank, mut balance) = make_sole_holder_bank(one_raw_bit);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+
+            let err = wrapper
+                .deposit(I80F48::from_num(Q - 1))
+                .unwrap_err();
+            assert_eq!(err, MarginfiError::IllegalBalanceState.into());
         }
     }
 }
