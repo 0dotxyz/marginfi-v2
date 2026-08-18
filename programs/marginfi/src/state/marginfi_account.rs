@@ -3533,9 +3533,7 @@ mod test {
                 bank: &mut bank,
             };
 
-            let err = wrapper
-                .deposit(I80F48::from_num(Q - 1))
-                .unwrap_err();
+            let err = wrapper.deposit(I80F48::from_num(Q - 1)).unwrap_err();
             assert_eq!(err, MarginfiError::IllegalBalanceState.into());
         }
     }
