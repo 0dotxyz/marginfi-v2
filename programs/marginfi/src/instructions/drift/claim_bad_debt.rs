@@ -2,7 +2,6 @@ use crate::{
     bank_signer,
     events::{DriftClaimBadDebtEvent, GroupEventHeader},
     ix_utils::get_discrim_hash,
-    state::bank::BankVaultType,
     utils::is_drift_asset_tag,
     MarginfiError, MarginfiResult,
 };
@@ -22,7 +21,7 @@ use anchor_spl::{
 };
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
-    types::{Bank, FeeState},
+    types::{Bank, BankVaultType, FeeState},
 };
 
 pub const MERKLE_DISTRIBUTOR_PROGRAM_ID: Pubkey =

@@ -4,7 +4,6 @@ use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_FROZEN};
 use crate::{
     check,
     prelude::{MarginfiError, MarginfiResult},
-    state::marginfi_account::MarginfiAccountImpl,
 };
 
 /// (account authority) Set the wallet whose canonical ATA will receive

@@ -3,7 +3,7 @@ use crate::{
     constants::SOLEND_PROGRAM_ID,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
             BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
@@ -24,7 +24,7 @@ use anchor_spl::token_interface::{
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
 use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
 };
 use solend_mocks::cpi::accounts::DepositReserveLiquidityAndObligationCollateral;
 use solend_mocks::cpi::deposit_reserve_liquidity_and_obligation_collateral;

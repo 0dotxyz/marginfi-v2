@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::{
     pdas::{
         derive_kamino_farm_vaults_authority, derive_kamino_lending_market_authority,
@@ -10,7 +9,7 @@ use marginfi_type_crate::{
         derive_kamino_reserve_liquidity_supply, derive_kamino_rewards_treasury_vault,
         derive_kamino_rewards_vault, derive_kamino_user_metadata, derive_kamino_user_state,
     },
-    types::Bank,
+    types::{Bank, BankVaultType},
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -18,7 +17,8 @@ use super::require_field;
 use crate::config::{Config, GlobalOptions};
 use crate::configs;
 use crate::processor;
-use crate::utils::{find_bank_vault_authority_pda, get_oracle_setup, load_kamino_reserve};
+use crate::utils::{get_oracle_setup, load_kamino_reserve};
+use marginfi_type_crate::pdas::derive_bank_vault_authority;
 
 /// Kamino integration commands (user / permissionless).
 #[derive(Debug, Parser)]
@@ -105,7 +105,7 @@ fn derive_kamino_accounts(config: &Config, bank_pk: Pubkey) -> Result<KaminoDeri
     let reserve = &reserve_state;
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let (lending_market_authority, _) =
         derive_kamino_lending_market_authority(&reserve.lending_market);
     let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve_pk);
@@ -151,7 +151,7 @@ fn derive_kamino_harvest_reward_accounts(
     let (rewards_treasury_vault, _) =
         derive_kamino_rewards_treasury_vault(&global_config, &reward_mint);
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let reward_mint_account = config.mfi_program.rpc().get_account(&reward_mint)?;
     let reward_token_program = reward_mint_account.owner;
     let user_reward_ata =
