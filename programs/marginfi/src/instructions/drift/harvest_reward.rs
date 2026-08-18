@@ -1,7 +1,4 @@
-use crate::{
-    bank_signer, state::bank::BankVaultType, utils::is_drift_asset_tag, MarginfiError,
-    MarginfiResult,
-};
+use crate::{bank_signer, utils::is_drift_asset_tag, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     token::accessor,
@@ -12,7 +9,7 @@ use drift_mocks::state::{MinimalSpotMarket, MinimalUser};
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, FeeState},
+    types::{Bank, BankVaultType, FeeState},
 };
 
 /// Harvest rewards from admin deposits in Drift spot markets

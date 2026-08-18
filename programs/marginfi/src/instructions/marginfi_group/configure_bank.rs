@@ -5,7 +5,6 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
@@ -14,7 +13,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    types::{is_marginfi_asset_tag, Bank, BankConfigOpt, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(

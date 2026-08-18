@@ -4,8 +4,8 @@ use crate::{
 };
 use anchor_client::anchor_lang::{prelude::*, InstructionData};
 use anyhow::Result;
-use marginfi::{bank_authority_seed, state::bank::BankVaultType};
 use marginfi_type_crate::types::Bank;
+use marginfi_type_crate::{bank_authority_seed, types::BankVaultType};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 pub fn process_collect_fees(config: Config, bank_pk: Pubkey) -> Result<()> {

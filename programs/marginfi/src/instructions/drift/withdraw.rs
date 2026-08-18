@@ -4,7 +4,7 @@ use crate::{
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
@@ -37,7 +37,7 @@ use marginfi_type_crate::{
 use marginfi_type_crate::{
     pdas::DRIFT_PROGRAM_ID,
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };

@@ -11,9 +11,7 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{
-        self, is_marginfi_asset_tag, record_deposit_inflow, validate_bank_state, InstructionKind,
-    },
+    utils::{self, record_deposit_inflow, validate_bank_state, InstructionKind},
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
@@ -25,8 +23,8 @@ use marginfi_type_crate::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
