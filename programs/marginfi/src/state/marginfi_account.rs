@@ -861,11 +861,19 @@ fn update_reconciled_same_asset_config(
     // exchange-rate multiplier represents redemption-value risk. They must never establish the
     // liability side, however, because that would make independently moving multipliers appear
     // price-equivalent. Do not rely on `asset_tag` here; it is an admin-configurable field.
+    //
+    // The native multiplier setups (mSOL / LST / PT) are admissible on the same footing as
+    // `StakedWithPythPush`: each has its own feed family, so a liability of that family can only
+    // pair with collateral of the same family, mint, and `oracle_keys[0]`, pinning both sides to
+    // one multiplier source. Their `Kamino*` / `Juplend*` wrappers stay excluded.
     if !matches!(
         bank.config.oracle_setup,
         OracleSetup::PythPushOracle
             | OracleSetup::SwitchboardPull
             | OracleSetup::StakedWithPythPush
+            | OracleSetup::PythMSOL
+            | OracleSetup::PythLST
+            | OracleSetup::PTPyth
     ) {
         *lowest_liab_weight = None;
         return false;

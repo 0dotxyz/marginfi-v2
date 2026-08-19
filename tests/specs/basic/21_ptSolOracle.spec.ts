@@ -35,23 +35,48 @@ import { assert } from "chai";
 const EXPONENT_PROGRAM = new PublicKey(
   "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
 );
-// Real mainnet Exponent vault (validates as a genuine vault regardless of the test clock)
+// Real mainnet Exponent vault. Its `mint_pt` is a real PT mint, so it is only usable where a mint
+// mismatch is the expected outcome.
 const REAL_VAULT = new PublicKey(
   "9YbaicMsXrtupkpD72pdWBfU6R7EJfSByw75sEpDM1uH",
 );
 const VAULT_DISCRIMINATOR = Buffer.from([211, 8, 232, 43, 2, 152, 117, 119]);
 
-// Minimal Exponent vault bytes: discriminator + start_ts @264 + duration @268
-const makeVault = (startTs: number, duration: number) => {
-  const data = Buffer.alloc(272);
+/** Precision of Exponent's `Number` type. */
+const SY_RATE_PRECISION = 1_000_000_000_000n;
+
+// Minimal Exponent vault bytes, at absolute offsets 104 / 264 / 268 / 337 / 441 / 449. Defaults
+// describe a fully-backed vault (sy_for_pt = pt_supply / sy_rate), whose redemption rate is 1.0
+// and so never caps the linear price.
+const makeVault = (
+  startTs: number,
+  duration: number,
+  opts: {
+    mintPt?: PublicKey;
+    syRate?: bigint;
+    syForPt?: bigint;
+    ptSupply?: bigint;
+  } = {},
+) => {
+  const syRate = opts.syRate ?? 2n * SY_RATE_PRECISION;
+  const ptSupply = opts.ptSupply ?? 1_000_000_000_000n;
+  const syForPt = opts.syForPt ?? (ptSupply * SY_RATE_PRECISION) / syRate;
+
+  const data = Buffer.alloc(457);
   VAULT_DISCRIMINATOR.copy(data, 0);
+  (opts.mintPt ?? ecosystem.wsolMint.publicKey).toBuffer().copy(data, 104);
   data.writeUInt32LE(startTs, 264);
   data.writeUInt32LE(duration, 268);
+  data.writeBigUInt64LE(syRate, 337);
+  data.writeBigUInt64LE(syForPt, 441);
+  data.writeBigUInt64LE(ptSupply, 449);
   return data;
 };
 
 const ptGroup = Keypair.generate();
 const ptBank = Keypair.generate();
+/** Synthetic vault carrying the bank's own PT mint, used for the setup happy paths. */
+const okVault = Keypair.generate().publicKey;
 
 let program: Program<Marginfi>;
 /** SOL/USD as the program reports it, captured from a plain Pyth pulse. */
@@ -95,6 +120,10 @@ describe("PT-SOL internal oracle setup", () => {
 
     const base = await pulseCache([]);
     baseSolPrice = wrappedI80F48toBigNumber(base.lastOraclePrice).toNumber();
+
+    // Matured, fully backed, carrying the bank's mint.
+    const now = await getBankrunTime(bankrunContext);
+    setVault(okVault, makeVault(now - 10_000, 5_000));
   });
 
   const setVault = (pubkey: PublicKey, data: Buffer) =>
@@ -133,11 +162,11 @@ describe("PT-SOL internal oracle setup", () => {
   };
 
   it("(admin) sets up PTPyth (setup + start price + vault) - happy path", async () => {
-    await setPtsol(0.9, REAL_VAULT);
+    await setPtsol(0.9, okVault);
     const { config } = await program.account.bank.fetch(ptBank.publicKey);
     assert.deepEqual(config.oracleSetup, { ptPyth: {} });
     assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
-    assertKeysEqual(config.oracleKeys[1], REAL_VAULT);
+    assertKeysEqual(config.oracleKeys[1], okVault);
     assertI80F48Approx(config.fixedPrice, 0.9);
   });
 
@@ -154,10 +183,22 @@ describe("PT-SOL internal oracle setup", () => {
   it("(admin) tries to set up PTPyth - fails with a start price above par", async () => {
     await expectFailedTxWithError(
       async () => {
-        await setPtsol(1.5, REAL_VAULT);
+        await setPtsol(1.5, okVault);
       },
       "InvalidPtStartPrice",
       6138,
+    );
+  });
+
+  it("(admin) tries to set up PTPyth - fails when the vault's PT mint is not the bank mint", async () => {
+    // A genuine mainnet vault, so it clears the owner/discriminator checks and is rejected purely
+    // on the mint.
+    await expectFailedTxWithError(
+      async () => {
+        await setPtsol(0.9, REAL_VAULT);
+      },
+      "ExponentVaultValidationFailed",
+      6137,
     );
   });
 
@@ -182,6 +223,26 @@ describe("PT-SOL internal oracle setup", () => {
     const cache = await pulseCache([vault]);
     // now < start_ts -> multiplier clamps to start_price 0.85
     assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * 0.85);
+  });
+
+  it("caps an under-backed matured vault at its redemption rate", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    // Escrow covers only 45% of the SY needed for PT supply => 0.9 asset per PT, so the cap wins
+    // over the linear model's par at maturity.
+    setVault(
+      vault,
+      makeVault(now - 10_000, 5_000, {
+        syRate: 2n * SY_RATE_PRECISION,
+        ptSupply: 1_000_000_000_000n,
+        syForPt: 450_000_000_000n,
+      }),
+    );
+    await setPtsol(0.9, vault);
+
+    const cache = await pulseCache([vault]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * 0.9);
+    assertI80F48Approx(cache.priceMultiplier, 1);
   });
 
   it("prices a mid-life vault along the linear curve", async () => {
@@ -226,17 +287,17 @@ describe("PT-SOL internal oracle setup", () => {
   };
 
   it("(admin) sets up PTFixed (vault only) - happy path", async () => {
-    await setPthyusd(0.95, REAL_VAULT);
+    await setPthyusd(0.95, okVault);
     const { config } = await program.account.bank.fetch(ptBank.publicKey);
     assert.deepEqual(config.oracleSetup, { ptFixed: {} });
-    assertKeysEqual(config.oracleKeys[0], REAL_VAULT);
+    assertKeysEqual(config.oracleKeys[0], okVault);
     assertI80F48Approx(config.fixedPrice, 0.95);
   });
 
   it("(admin) tries to set up PTFixed - fails with a start price above par", async () => {
     await expectFailedTxWithError(
       async () => {
-        await setPthyusd(1.5, REAL_VAULT);
+        await setPthyusd(1.5, okVault);
       },
       "InvalidPtStartPrice",
       6138,

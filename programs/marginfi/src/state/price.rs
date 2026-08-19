@@ -5,8 +5,8 @@ use crate::state::bank_config::BankConfigImpl;
 use crate::state::lst_stake_price::{
     expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
     load_marinade_state, marinade_price_multiplier, pt_linear_multiplier,
-    stake_pool_price_multiplier, staked_pool_net_asset_value, validate_marinade_state_account,
-    validate_stake_pool_account,
+    stake_pool_price_multiplier, staked_pool_net_asset_value, validate_exponent_vault_account,
+    validate_marinade_state_account, validate_stake_pool_account,
 };
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
@@ -1051,7 +1051,7 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1, clock)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1087,7 +1087,7 @@ impl OraclePriceFeedAdapter {
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
                 let kamino_rate = kamino_price_multiplier(&reserve)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, clock)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1124,7 +1124,7 @@ impl OraclePriceFeedAdapter {
                 ensure_juplend_lending_fresh(&lending, clock)?;
                 let juplend_rate = juplend_price_multiplier(&lending)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, clock)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1799,7 +1799,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                load_exponent_vault(bank_config, &oracle_ais[1], 1)?;
+                validate_exponent_vault_account(bank_config, &oracle_ais[1], 1, bank_mint)?;
                 Ok(())
             }
             OracleSetup::PTFixed => {
@@ -1814,7 +1814,7 @@ impl OraclePriceFeedAdapter {
                     1,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
-                load_exponent_vault(bank_config, &oracle_ais[0], 0)?;
+                validate_exponent_vault_account(bank_config, &oracle_ais[0], 0, bank_mint)?;
                 Ok(())
             }
         }
@@ -2349,7 +2349,7 @@ mod tests {
 
     use crate::constants::SPL_STAKE_POOL_ID;
     use anchor_lang::solana_program::account_info::AccountInfo;
-    use exponent_mocks::state::MinimalExponentVault;
+    use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
     use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
     use solana_stake_interface::{
         stake_flags::StakeFlags,
@@ -2500,16 +2500,33 @@ mod tests {
         assert_eq!(parsed.msol_price(), 5_992_546_810);
     }
 
-    #[test]
-    fn stake_pool_rate_matches_total_over_supply() {
-        use bytemuck::Zeroable;
-        // Fake SPL StakePool account: account_type = 1, total_lamports @258, pool_token_supply @266.
-        let total_lamports: u64 = 1_292_015_000_000;
-        let pool_token_supply: u64 = 1_000_000_000_000;
+    /// Fake SPL StakePool: account_type @0, total_lamports @258, supply @266, epoch @274.
+    fn serialized_stake_pool(
+        total_lamports: u64,
+        pool_token_supply: u64,
+        last_update_epoch: u64,
+    ) -> Vec<u8> {
         let mut data = vec![0u8; 300];
         data[0] = 1;
         data[258..266].copy_from_slice(&total_lamports.to_le_bytes());
         data[266..274].copy_from_slice(&pool_token_supply.to_le_bytes());
+        data[274..282].copy_from_slice(&last_update_epoch.to_le_bytes());
+        data
+    }
+
+    fn at_epoch(epoch: u64) -> Clock {
+        Clock {
+            epoch,
+            ..Clock::default()
+        }
+    }
+
+    #[test]
+    fn stake_pool_rate_matches_total_over_supply() {
+        use bytemuck::Zeroable;
+        let total_lamports: u64 = 1_292_015_000_000;
+        let pool_token_supply: u64 = 1_000_000_000_000;
+        let mut data = serialized_stake_pool(total_lamports, pool_token_supply, 700);
 
         let key = Pubkey::new_unique();
         let owner = SPL_STAKE_POOL_ID;
@@ -2519,18 +2536,57 @@ mod tests {
         let mut config = BankConfig::zeroed();
         config.oracle_keys[1] = key;
 
-        let rate = stake_pool_price_multiplier(&config, &ai, 1).unwrap();
+        let rate = stake_pool_price_multiplier(&config, &ai, 1, &at_epoch(700)).unwrap();
         let expected = I80F48::from_num(total_lamports) / I80F48::from_num(pool_token_supply);
         assert_eq!(rate, expected);
         assert!(rate > I80F48::from_num(1.29) && rate < I80F48::from_num(1.30));
     }
 
     #[test]
-    fn pt_linear_multiplier_lerps_to_par() {
+    fn stake_pool_rate_rejects_stale_and_zero() {
+        use bytemuck::Zeroable;
+        let key = Pubkey::new_unique();
+        let owner = SPL_STAKE_POOL_ID;
+        let mut config = BankConfig::zeroed();
+        config.oracle_keys[1] = key;
+
+        let rate_at = |data: &mut Vec<u8>, epoch: u64| {
+            let mut lamports = 0u64;
+            let ai = test_account_info(&key, &mut lamports, data, &owner);
+            stake_pool_price_multiplier(&config, &ai, 1, &at_epoch(epoch))
+        };
+
+        // Updated this epoch, and one epoch of lag, are both accepted.
+        let mut fresh = serialized_stake_pool(1_292_015_000_000, 1_000_000_000_000, 700);
+        assert!(rate_at(&mut fresh, 700).is_ok());
+        assert!(rate_at(&mut fresh, 701).is_ok());
+        // Two epochs of lag is stale.
+        assert!(rate_at(&mut fresh, 702).is_err());
+
+        let mut no_supply = serialized_stake_pool(1_292_015_000_000, 0, 700);
+        assert!(rate_at(&mut no_supply, 700).is_err());
+
+        // Zero backing yields rate 0, which must not mark every deposit in the bank at zero.
+        let mut zero_rate = serialized_stake_pool(0, 1_000_000_000_000, 700);
+        assert!(rate_at(&mut zero_rate, 700).is_err());
+    }
+
+    /// Exponent maintains `sy_for_pt = pt_supply / sy_exchange_rate` while fully backed, so the
+    /// redemption rate is exactly 1.0 and never binds the linear rate.
+    fn fully_backed_vault(start_ts: u32, duration: u32) -> MinimalExponentVault {
         use bytemuck::Zeroable;
         let mut vault = MinimalExponentVault::zeroed();
-        vault.start_ts = 1_000;
-        vault.duration = 1_000; // maturity = 2_000
+        vault.start_ts = start_ts;
+        vault.duration = duration;
+        vault.last_seen_sy_exchange_rate = [2 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
+        vault.pt_supply = 1_000_000_000_000;
+        vault.sy_for_pt = 500_000_000_000;
+        vault
+    }
+
+    #[test]
+    fn pt_linear_multiplier_lerps_to_par() {
+        let vault = fully_backed_vault(1_000, 1_000); // maturity = 2_000
         let start_price = I80F48::from_num(0.8);
         let at = |ts: i64| Clock {
             unix_timestamp: ts,
@@ -2553,6 +2609,70 @@ mod tests {
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
         let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
+    }
+
+    #[test]
+    fn pt_linear_multiplier_capped_by_redemption_backing() {
+        // Every expected value here is a binary fraction, so it is exactly representable in I80F48
+        // and the assertions can be exact.
+        let start_price = I80F48::from_num(0.5);
+        let at = |ts: i64| Clock {
+            unix_timestamp: ts,
+            ..Clock::default()
+        };
+
+        // 0.4375 SY per PT * 2.0 asset per SY = 0.875, so the cap must beat par at maturity.
+        let mut vault = fully_backed_vault(1_000, 1_000);
+        vault.sy_for_pt = 437_500_000_000;
+        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        assert_eq!(matured, I80F48::from_num(0.875));
+
+        // Below the ceiling, the cap is inert: halfway from 0.5 to par is 0.75.
+        let early = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        assert_eq!(early, I80F48::from_num(0.75));
+
+        vault.sy_for_pt = 125_000_000_000; // 0.25
+        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        assert_eq!(broken, I80F48::from_num(0.25));
+
+        // Degenerate vaults are rejected rather than priced at zero.
+        let mut zero_supply = fully_backed_vault(1_000, 1_000);
+        zero_supply.pt_supply = 0;
+        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price).is_err());
+
+        let mut zero_rate = fully_backed_vault(1_000, 1_000);
+        zero_rate.last_seen_sy_exchange_rate = [0; 4];
+        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price).is_err());
+
+        let mut overflowed = fully_backed_vault(1_000, 1_000);
+        overflowed.last_seen_sy_exchange_rate = [0, 1, 0, 0];
+        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price).is_err());
+    }
+
+    #[test]
+    fn exponent_vault_field_offsets_match_borsh_layout() {
+        // Round-trip raw bytes to prove the mirrored fields land on the right struct offsets.
+        let mut raw = [0u8; core::mem::size_of::<MinimalExponentVault>()];
+        assert_eq!(raw.len(), 449);
+
+        let mint_pt = Pubkey::new_unique();
+        raw[96..128].copy_from_slice(&mint_pt.to_bytes());
+        raw[256..260].copy_from_slice(&1_700_000_000u32.to_le_bytes());
+        raw[260..264].copy_from_slice(&31_536_000u32.to_le_bytes());
+        raw[329..337].copy_from_slice(&(2 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
+        raw[433..441].copy_from_slice(&500_000_000_000u64.to_le_bytes());
+        raw[441..449].copy_from_slice(&1_000_000_000_000u64.to_le_bytes());
+
+        let parsed: &MinimalExponentVault = bytemuck::from_bytes(&raw);
+        assert_eq!(parsed.mint_pt(), mint_pt);
+        assert_eq!(parsed.start_ts(), 1_700_000_000);
+        assert_eq!(parsed.duration(), 31_536_000);
+        assert_eq!(
+            parsed.last_seen_sy_exchange_rate_raw(),
+            Some(2 * SY_EXCHANGE_RATE_PRECISION as u64)
+        );
+        assert_eq!(parsed.sy_for_pt(), 500_000_000_000);
+        assert_eq!(parsed.pt_supply(), 1_000_000_000_000);
     }
 
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {

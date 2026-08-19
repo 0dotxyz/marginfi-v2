@@ -6,7 +6,7 @@
 use crate::state::interest_rate::InterestRateCalc;
 use crate::{check, check_eq, math_error, prelude::*};
 use anchor_lang::prelude::*;
-use exponent_mocks::state::MinimalExponentVault;
+use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
 use fixed::types::I80F48;
 use marginfi_type_crate::pdas::derive_staked_onramp_from_vote;
 use marginfi_type_crate::types::{Bank, BankConfig};
@@ -121,6 +121,7 @@ struct MinimalStakePool {
     token_program_id: Pubkey,
     total_lamports: u64,
     pool_token_supply: u64,
+    last_update_epoch: u64,
 }
 
 /// Parses and validates the *identity* of an SPL / Sanctum stake pool — key, owner (vanilla SPL or
@@ -174,6 +175,7 @@ pub(crate) fn stake_pool_price_multiplier(
     bank_config: &BankConfig,
     stake_pool_info: &AccountInfo,
     key_index: usize,
+    clock: &Clock,
 ) -> MarginfiResult<I80F48> {
     let pool = load_stake_pool(bank_config, stake_pool_info, key_index)?;
     check!(
@@ -181,11 +183,18 @@ pub(crate) fn stake_pool_price_multiplier(
         MarginfiError::ZeroSupplyInStakePool
     );
 
+    // `total_lamports` only refreshes when the pool is cranked, so every pool sits one epoch behind
+    // from a rollover until `UpdateStakePoolBalance` lands. One epoch of slack covers that window.
+    check!(
+        clock.epoch.saturating_sub(pool.last_update_epoch) <= 1,
+        MarginfiError::StakePoolStale
+    );
+
     let rate = I80F48::from_num(pool.total_lamports)
         .checked_div(I80F48::from_num(pool.pool_token_supply))
         .ok_or_else(math_error!())?;
     check!(
-        rate < I80F48::from_num(MAX_LST_SOL_RATE),
+        rate > I80F48::ZERO && rate < I80F48::from_num(MAX_LST_SOL_RATE),
         MarginfiError::StakePoolValidationFailed
     );
     Ok(rate)
@@ -222,8 +231,52 @@ pub(crate) fn load_exponent_vault<'info>(
     Ok(loader)
 }
 
+pub(crate) fn validate_exponent_vault_account<'info>(
+    bank_config: &BankConfig,
+    info: &'info AccountInfo<'info>,
+    key_index: usize,
+    bank_mint: Pubkey,
+) -> MarginfiResult {
+    // Constructing the loader validates the key, owner, and discriminator.
+    let loader = load_exponent_vault(bank_config, info, key_index)?;
+    check_eq!(
+        loader.load()?.mint_pt(),
+        bank_mint,
+        MarginfiError::ExponentVaultValidationFailed
+    );
+    Ok(())
+}
+
+/// Ceiling on what a PT can redeem for, in asset per PT. Exponent's `sy_for_pt / pt_supply` is SY
+/// per PT, converted here with `last_seen_sy_exchange_rate` (asset per SY). Reads exactly 1.0 while
+/// the vault is fully backed, and drops below only when its escrow is short of PT supply.
+fn pt_redemption_multiplier(vault: &MinimalExponentVault) -> MarginfiResult<I80F48> {
+    let pt_supply = vault.pt_supply();
+    check!(pt_supply > 0, MarginfiError::ExponentVaultValidationFailed);
+
+    let sy_exchange_rate_raw = vault
+        .last_seen_sy_exchange_rate_raw()
+        .ok_or(MarginfiError::ExponentVaultValidationFailed)?;
+    check!(
+        sy_exchange_rate_raw > 0,
+        MarginfiError::ExponentVaultValidationFailed
+    );
+
+    let sy_per_pt = I80F48::from_num(vault.sy_for_pt())
+        .checked_div(I80F48::from_num(pt_supply))
+        .ok_or_else(math_error!())?;
+    let asset_per_sy = I80F48::from_num(sy_exchange_rate_raw)
+        .checked_div(I80F48::from_num(SY_EXCHANGE_RATE_PRECISION))
+        .ok_or_else(math_error!())?;
+
+    Ok(sy_per_pt
+        .checked_mul(asset_per_sy)
+        .ok_or_else(math_error!())?)
+}
+
 /// PT linear rate: accretion from `start_price` to par (1.0) over the vault's
-/// `[start_ts, start_ts + duration]`, clamped at both ends.
+/// `[start_ts, start_ts + duration]`, clamped at both ends, then capped by the redemption backing
+/// so a depegged or under-backed vault cannot mark above what its PT can redeem for.
 pub(crate) fn pt_linear_multiplier(
     vault: &MinimalExponentVault,
     clock: &Clock,
@@ -245,12 +298,14 @@ pub(crate) fn pt_linear_multiplier(
         MarginfiError::ExponentVaultValidationFailed
     );
 
-    Ok(InterestRateCalc::lerp(
+    let expected_rate = InterestRateCalc::lerp(
         I80F48::from_num(start_ts),
         start_price,
         I80F48::from_num(maturity),
         I80F48::ONE,
         I80F48::from_num(now),
     )
-    .ok_or_else(math_error!())?)
+    .ok_or_else(math_error!())?;
+
+    Ok(expected_rate.min(pt_redemption_multiplier(vault)?))
 }

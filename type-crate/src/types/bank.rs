@@ -402,8 +402,9 @@ impl OracleSetup {
     }
 
     /// Base feed semantics for `oracle_keys[0]`. Setups in the same family read that key as the
-    /// same kind of feed account (integration setups additionally apply an exchange-rate
-    /// multiplier), so two banks sharing a family and `oracle_keys[0]` price from the same source.
+    /// same kind of feed account *and* derive the mint's price from it the same way, so two banks
+    /// sharing a family and `oracle_keys[0]` price from the same source. Venue integrations
+    /// stay in their base family.
     /// Returns `None` for fixed-price, deprecated, and unset setups.
     pub fn feed_family(self) -> Option<OracleFeedFamily> {
         match self {
@@ -411,18 +412,19 @@ impl OracleSetup {
             | Self::KaminoPythPush
             | Self::DriftPythPull
             | Self::SolendPythPull
-            | Self::JuplendPythPull
-            | Self::PythMSOL
-            | Self::KaminoMSOL
-            | Self::JuplendMSOL
-            | Self::PythLST
-            | Self::KaminoLST
-            | Self::JuplendLST
-            | Self::PTPyth => Some(OracleFeedFamily::PythPush),
-            // Staked reads `oracle_keys[0]` as a proxy for the pool's underlying asset and derives
-            // the mint's price from the stake-pool multiplier, so it is not price-equivalent to a
-            // setup that reads that same key as the mint's own price.
+            | Self::JuplendPythPull => Some(OracleFeedFamily::PythPush),
+            // The setups below read `oracle_keys[0]` as a proxy for some underlying asset and bake
+            // their own multiplier into the price, so they are not price-equivalent to a setup
+            // reading that key directly, nor to each other. Each multiplier kind therefore gets its
+            // own family.
             Self::StakedWithPythPush => Some(OracleFeedFamily::StakedPythPush),
+            Self::PythMSOL | Self::KaminoMSOL | Self::JuplendMSOL => {
+                Some(OracleFeedFamily::MSOLPythPull)
+            }
+            Self::PythLST | Self::KaminoLST | Self::JuplendLST => {
+                Some(OracleFeedFamily::LSTPythPull)
+            }
+            Self::PTPyth => Some(OracleFeedFamily::PtPythPull),
             Self::SwitchboardPull
             | Self::KaminoSwitchboardPull
             | Self::DriftSwitchboardPull
@@ -446,6 +448,9 @@ pub enum OracleFeedFamily {
     PythPush,
     StakedPythPush,
     SwitchboardPull,
+    MSOLPythPull,
+    LSTPythPull,
+    PtPythPull,
 }
 
 #[cfg(test)]
@@ -465,17 +470,6 @@ mod feed_family_tests {
             OracleSetup::JuplendSwitchboardPull.feed_family(),
             OracleSetup::SwitchboardPull.feed_family()
         );
-        for setup in [
-            OracleSetup::PythMSOL,
-            OracleSetup::KaminoMSOL,
-            OracleSetup::JuplendMSOL,
-            OracleSetup::PythLST,
-            OracleSetup::KaminoLST,
-            OracleSetup::JuplendLST,
-            OracleSetup::PTPyth,
-        ] {
-            assert_eq!(setup.feed_family(), Some(OracleFeedFamily::PythPush));
-        }
         assert_ne!(
             OracleSetup::PythPushOracle.feed_family(),
             OracleSetup::SwitchboardPull.feed_family()
@@ -502,5 +496,47 @@ mod feed_family_tests {
         ] {
             assert_eq!(setup.feed_family(), None);
         }
+    }
+
+    /// If a multiplier setup shared `PythPush`, an admin could migrate a same-asset-e-mode bank
+    /// between them without tripping the `config_bank_oracle` guard (which compares only
+    /// `oracle_keys[0]` and the feed family), re-marking collateral at `base × multiplier` while
+    /// the liability side stayed on the bare base feed.
+    #[test]
+    fn multiplier_setups_are_isolated_from_the_base_feed_and_each_other() {
+        let multiplier_families = [
+            OracleSetup::StakedWithPythPush.feed_family(),
+            OracleSetup::PythMSOL.feed_family(),
+            OracleSetup::PythLST.feed_family(),
+            OracleSetup::PTPyth.feed_family(),
+        ];
+
+        for family in multiplier_families {
+            assert!(family.is_some());
+            assert_ne!(family, OracleSetup::PythPushOracle.feed_family());
+        }
+        for (i, a) in multiplier_families.iter().enumerate() {
+            for b in &multiplier_families[i + 1..] {
+                assert_ne!(a, b, "multiplier kinds must not share a feed family");
+            }
+        }
+
+        // Venue wrappers stay in their base multiplier's family.
+        assert_eq!(
+            OracleSetup::KaminoMSOL.feed_family(),
+            OracleSetup::PythMSOL.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::JuplendMSOL.feed_family(),
+            OracleSetup::PythMSOL.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::KaminoLST.feed_family(),
+            OracleSetup::PythLST.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::JuplendLST.feed_family(),
+            OracleSetup::PythLST.feed_family()
+        );
     }
 }
