@@ -275,7 +275,6 @@ impl ToAccountMetas for EnableStakedOracleOnramp {
 }
 
 /// (admin only) Enable SPL single-pool on-ramp lamports in staked-collateral oracle pricing.
-/// To be removed once SVSP update is rolled out (likely in 1.10)
 /// This flips a per-group config flag so that every staked oracle uses the canonical single-pool NAV
 /// formula.
 pub fn enable_staked_oracle_onramp(accounts: &EnableStakedOracleOnramp) -> Instruction {
@@ -309,8 +308,6 @@ impl ToAccountMetas for DisableStakedOracles {
 }
 
 /// (admin only) Disable stake pricing, i.e. effectively forbidding all operations involving stake banks.
-/// To be used during the rollout of the SVSP upgrade.
-/// To be removed once SVSP update is rolled out (likely in 1.10)
 pub fn disable_staked_oracles(accounts: &DisableStakedOracles) -> Instruction {
     Instruction {
         program_id: crate::ID,

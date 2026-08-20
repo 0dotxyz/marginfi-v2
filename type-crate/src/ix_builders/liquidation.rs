@@ -31,6 +31,9 @@ impl ToAccountMetas for StartLiquidation {
 
 /// (permissionless) Begin receivership liquidation on an unhealthy account. Snapshots health
 /// and marks the account in receivership. Must have `end_liquidation` as the last ix in the tx.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn start_liquidation(accounts: &StartLiquidation) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -76,6 +79,9 @@ impl ToAccountMetas for EndLiquidation {
 
 /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
 /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn end_liquidation(accounts: &EndLiquidation) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -112,6 +118,9 @@ impl ToAccountMetas for StartDeleverage {
 
 /// (risk_admin only) Begin forced deleverage on an account. Similar to start_liquidation but
 /// does not require the account to be unhealthy.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn start_deleverage(accounts: &StartDeleverage) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -145,6 +154,9 @@ impl ToAccountMetas for EndDeleverage {
 }
 
 /// (risk_admin only) End forced deleverage. Validates health did not worsen.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn end_deleverage(accounts: &EndDeleverage) -> Instruction {
     Instruction {
         program_id: crate::ID,

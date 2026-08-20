@@ -285,9 +285,8 @@ impl ToAccountMetas for LendingPoolAddBankJuplend {
 
 /// (admin) Add a JupLend bank to the marginfi group.
 ///
-/// Remaining accounts (for oracle validation):
-/// 0. underlying oracle feed (pyth push or switchboard pull)
-/// 1. JupLend `Lending` state
+/// `remaining_accounts` must contain the underlying oracle feed (Pyth Push or Switchboard Pull)
+/// followed by `integration_acc_1`, the JupLend `Lending` state.
 pub fn lending_pool_add_bank_juplend(
     accounts: &LendingPoolAddBankJuplend,
     bank_config: JuplendConfigCompact,

@@ -13,8 +13,7 @@ use {
         pdas::{
             derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
             derive_juplend_liquidity_vault, derive_juplend_rate_model,
-            derive_juplend_rewards_rate_model,
-            JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
+            derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
         },
         types::{Bank, MarginfiAccount},
     },
@@ -391,7 +390,6 @@ pub const EXP_10_I80F48: [I80F48; 15] = [
     I80F48!(10_000_000_000_000),
     I80F48!(100_000_000_000_000),
 ];
-
 
 fn collect_observation_bank_pks(
     marginfi_account: &MarginfiAccount,

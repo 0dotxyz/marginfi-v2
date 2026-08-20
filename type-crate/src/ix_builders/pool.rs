@@ -180,6 +180,10 @@ impl ToAccountMetas for LendingPoolWithdrawFees {
 }
 
 /// (admin only) Withdraw collected group fees from the fee vault.
+///
+/// For a Token-2022 bank, `remaining_accounts` must begin with the bank mint. Append any extra
+/// accounts required by the mint's transfer-hook program after it, in transfer-hook resolution
+/// order. Legacy SPL Token banks require neither.
 pub fn lending_pool_withdraw_fees(accounts: &LendingPoolWithdrawFees, amount: u64) -> Instruction {
     let mut data = LendingPoolWithdrawFees::DISCRIMINATOR.to_vec();
     amount.serialize(&mut data).unwrap();
@@ -219,6 +223,10 @@ impl ToAccountMetas for LendingPoolWithdrawFeesPermissionless {
 }
 
 /// (permissionless) Withdraw group fees to the pre-configured `fees_destination_account`.
+///
+/// For a Token-2022 bank, `remaining_accounts` must begin with the bank mint. Append any extra
+/// accounts required by the mint's transfer-hook program after it, in transfer-hook resolution
+/// order. Legacy SPL Token banks require neither.
 pub fn lending_pool_withdraw_fees_permissionless(
     accounts: &LendingPoolWithdrawFeesPermissionless,
     amount: u64,
@@ -263,6 +271,10 @@ impl ToAccountMetas for LendingPoolWithdrawInsurance {
 }
 
 /// (admin only) Withdraw from the insurance vault.
+///
+/// For a Token-2022 bank, `remaining_accounts` must begin with the bank mint. Append any extra
+/// accounts required by the mint's transfer-hook program after it, in transfer-hook resolution
+/// order. Legacy SPL Token banks require neither.
 pub fn lending_pool_withdraw_insurance(
     accounts: &LendingPoolWithdrawInsurance,
     amount: u64,
@@ -417,6 +429,9 @@ impl ToAccountMetas for LendingPoolConfigureBankOracle {
 }
 
 /// (admin only)
+///
+/// After applying `setup` and `oracle` to the bank configuration, `remaining_accounts` must
+/// contain the keys returned by [`crate::pdas::bank_observation_keys`] in that exact order.
 pub fn lending_pool_configure_bank_oracle(
     accounts: &LendingPoolConfigureBankOracle,
     setup: u8,
@@ -1047,6 +1062,9 @@ impl ToAccountMetas for LendingPoolSetFixedOraclePrice {
 }
 
 /// (admin only)
+///
+/// This switches the bank to its fixed-price oracle setup, which does not require
+/// `remaining_accounts`.
 pub fn lending_pool_set_fixed_oracle_price(
     accounts: &LendingPoolSetFixedOraclePrice,
     price: WrappedI80F48,

@@ -3,10 +3,21 @@ name = "marginfi-type-crate"
 version = "0.2.0"
 edition = "2021"
 publish = true
+description = "Anchor-optional marginfi account types, instruction builders, and PDA derivations"
+license = "Apache-2.0"
+repository = "https://github.com/0dotxyz/marginfi-v2"
+documentation = "https://docs.rs/marginfi-type-crate"
+readme = "README.md"
+keywords = ["solana", "marginfi", "defi", "cpi"]
+categories = ["cryptography::cryptocurrencies", "api-bindings"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
 name = "marginfi_type_crate"
+
+[[example]]
+name = "native_cpi"
+required-features = ["ix_builders"]
 
 [features]
 default = []
@@ -40,3 +51,6 @@ borsh = { workspace = true, features = ["derive"], optional = true }
 # Pins `pdas::get_associated_token_address_with_program_id` against the canonical
 # implementation without making SPL a dependency of the crate itself.
 spl-associated-token-account = { workspace = true }
+solana-account-info = "3.1.1"
+solana-cpi = "3.1.0"
+solana-program-error = "3.0.1"

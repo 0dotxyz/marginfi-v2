@@ -386,8 +386,9 @@ impl ToAccountMetas for LendingAccountPulseHealth {
 /// (Permissionless) Refresh the internal risk engine health cache. Useful for liquidators and
 /// other consumers that want to see the internal risk state of a user account. This cache is
 /// read-only and serves no purpose except being populated by this ix.
-/// * remaining accounts expected in the same order as borrow, etc. I.e., for each balance the
-///   user has, pass bank and oracle: <bank1, oracle1, bank2, oracle2>
+/// `remaining_accounts` must contain each active bank followed by that bank's oracle accounts,
+/// repeating this group for every active balance. Use [`crate::pdas::bank_observation_keys`] for
+/// the oracle order within each group.
 pub fn lending_account_pulse_health(accounts: &LendingAccountPulseHealth) -> Instruction {
     Instruction {
         program_id: crate::ID,

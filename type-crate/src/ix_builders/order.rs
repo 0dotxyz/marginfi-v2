@@ -208,6 +208,9 @@ impl ToAccountMetas for MarginfiAccountStartExecuteOrder {
 /// * CPI is forbidden
 /// * Costs a small amount of rent, which is returned at the end of the tx, make sure you have
 ///   enough SOL to start the tx.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn marginfi_account_start_execute_order(
     accounts: &MarginfiAccountStartExecuteOrder,
 ) -> Instruction {
@@ -257,6 +260,9 @@ impl ToAccountMetas for MarginfiAccountEndExecuteOrder {
 /// * Must appear last in the tx
 /// * CPI is forbidden
 /// * Returns rent for ephemeral accounts created during `StartExecuteOrder`
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account.
 pub fn marginfi_account_end_execute_order(
     accounts: &MarginfiAccountEndExecuteOrder,
 ) -> Instruction {

@@ -296,6 +296,9 @@ impl ToAccountMetas for DriftHarvestReward {
 /// (permissionless) Harvest rewards from admin deposits in Drift spot markets.
 /// Rewards are always sent to the global fee wallet's canonical ATA.
 /// The harvest spot market must be different from the bank's main drift spot market.
+///
+/// `remaining_accounts` is forwarded to Drift's withdraw CPI in this order: optional oracle
+/// accounts, required spot-market accounts, then the token mint for Token-2022 markets.
 pub fn drift_harvest_reward(accounts: &DriftHarvestReward) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -420,7 +423,8 @@ impl ToAccountMetas for LendingPoolAddBankDrift {
     }
 }
 
-/// (group admin only) Add a Drift bank to the group.
+/// (group admin only) Add a Drift bank to the group. `remaining_accounts` must contain the
+/// configured oracle feed followed by `integration_acc_1`, the Drift spot-market account.
 pub fn lending_pool_add_bank_drift(
     accounts: &LendingPoolAddBankDrift,
     bank_config: DriftConfigCompact,

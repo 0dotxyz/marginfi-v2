@@ -1,10 +1,10 @@
 //! Instruction builders for the marginfi program.
 //!
-//! Each instruction has an accounts struct mirroring its on-chain `Accounts` layout and a
-//! builder returning a ready-to-send [`Instruction`]. Builders emit only the fixed accounts.
-//! Many instructions additionally read `remaining_accounts`; each builder's doc states the
-//! layout it expects, and [`crate::pdas::bank_observation_keys`] derives the oracle set a bank
-//! contributes to a health check.
+//! Each instruction has an accounts struct mirroring its on-chain `Accounts` layout. Its builder
+//! returns an [`Instruction`] containing the discriminator, serialized arguments, and fixed
+//! account metas. Instructions that use `remaining_accounts` become ready to submit or invoke
+//! only after the caller appends the documented dynamic metas. For health checks,
+//! [`crate::pdas::bank_observation_keys`] derives the oracle set a bank contributes.
 //!
 //! Every instruction is addressed to [`crate::ID`], which the network feature selects; clients
 //! that pick a cluster at runtime retarget with [`with_program_id`]. Struct names follow the

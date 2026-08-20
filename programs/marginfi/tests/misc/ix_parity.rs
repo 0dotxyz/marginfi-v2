@@ -14,8 +14,8 @@ fn key(n: u32) -> Pubkey {
     Pubkey::new_from_array(bytes)
 }
 
-/// Builds the same instruction through anchor's generated client structs and through the
-/// type-crate builder, then asserts the two are identical.
+// Builds the same instruction through anchor's generated client structs and through the
+// type-crate builder, then asserts the two are identical.
 thread_local! {
     /// Builder names reached by `assert_parity!`, checked against `BUILDERS` at the end of the run.
     static EXERCISED: std::cell::RefCell<std::collections::BTreeSet<String>> =
@@ -1796,6 +1796,10 @@ fn every_idl_instruction_is_covered_or_allowlisted() {
     // Build artifact of `anchor build -p marginfi`; skip where it was never generated, matching
     // `ix_utils::tests::check_discrims_match_idl`.
     let Ok(idl_str) = std::fs::read_to_string(idl_path) else {
+        assert!(
+            std::env::var("CI").is_err(),
+            "{idl_path} is missing; CI must run `anchor build -p marginfi` first"
+        );
         eprintln!("skipping every_idl_instruction_is_covered_or_allowlisted: {idl_path} not found");
         return;
     };
@@ -1862,7 +1866,10 @@ fn every_builder_has_a_parity_case() {
         "builders with no assert_parity! case: {missing:?}"
     );
     let unknown: Vec<_> = exercised.difference(&declared).collect();
-    assert!(unknown.is_empty(), "parity case for an unknown builder: {unknown:?}");
+    assert!(
+        unknown.is_empty(),
+        "parity case for an unknown builder: {unknown:?}"
+    );
 }
 
 /// Anchor decodes an optional account as `None` only when its key matches the invoked program,
@@ -1871,16 +1878,17 @@ fn every_builder_has_a_parity_case() {
 fn with_program_id_retargets_omitted_optional_accounts() {
     use marginfi_type_crate::ix_builders;
 
-    let built = ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
-        marginfi_account: key(901),
-        liquidation_record: key(902),
-        group: key(903),
-        liquidation_receiver: key(904),
-        fee_state: key(905),
-        global_fee_wallet: key(906),
-        system_program: key(907),
-        fee_payer: None,
-    });
+    let built =
+        ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
+            marginfi_account: key(901),
+            liquidation_record: key(902),
+            group: key(903),
+            liquidation_receiver: key(904),
+            fee_state: key(905),
+            global_fee_wallet: key(906),
+            system_program: key(907),
+            fee_payer: None,
+        });
     assert_eq!(
         built.accounts.last().unwrap().pubkey,
         marginfi_type_crate::ID,
@@ -1897,16 +1905,17 @@ fn with_program_id_retargets_omitted_optional_accounts() {
     );
 
     // A real optional account is left alone.
-    let with_payer = ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
-        marginfi_account: key(901),
-        liquidation_record: key(902),
-        group: key(903),
-        liquidation_receiver: key(904),
-        fee_state: key(905),
-        global_fee_wallet: key(906),
-        system_program: key(907),
-        fee_payer: Some(key(908)),
-    });
+    let with_payer =
+        ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
+            marginfi_account: key(901),
+            liquidation_record: key(902),
+            group: key(903),
+            liquidation_receiver: key(904),
+            fee_state: key(905),
+            global_fee_wallet: key(906),
+            system_program: key(907),
+            fee_payer: Some(key(908)),
+        });
     let moved = ix_builders::with_program_id(with_payer, elsewhere);
     assert_eq!(moved.accounts.last().unwrap().pubkey, key(908));
 }

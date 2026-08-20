@@ -260,7 +260,8 @@ impl ToAccountMetas for LendingPoolAddBankSolend {
     }
 }
 
-/// (admin) Add a Solend bank to the marginfi group
+/// (admin) Add a Solend bank to the marginfi group. `remaining_accounts` must contain the
+/// configured oracle feed followed by `integration_acc_1`, the Solend reserve account.
 pub fn lending_pool_add_bank_solend(
     accounts: &LendingPoolAddBankSolend,
     bank_config: SolendConfigCompact,

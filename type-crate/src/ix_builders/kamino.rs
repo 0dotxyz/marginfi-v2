@@ -407,8 +407,8 @@ impl ToAccountMetas for LendingPoolAddBankKamino {
     }
 }
 
-/// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining
-/// accounts 0 and 1 respectively.
+/// (group admin only) Add a Kamino bank to the group. `remaining_accounts` must contain the
+/// configured oracle feed followed by `integration_acc_1`, the Kamino reserve account.
 pub fn lending_pool_add_bank_kamino(
     accounts: &LendingPoolAddBankKamino,
     bank_config: KaminoConfigCompact,
