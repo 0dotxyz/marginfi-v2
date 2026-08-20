@@ -673,6 +673,16 @@ const DRIFT_INIT_USER_NOMINAL_AMOUNT: u64 = 100;
 const JUPLEND_TEST_BANK_SEED: u64 = 888;
 const JUPLEND_INIT_POSITION_NOMINAL_AMOUNT: u64 = 1_000_000;
 
+/// Program ID of `programs/native-cpi-example`, declared here so the harness does not pull that
+/// crate into the anchor-enabled graph.
+pub const NATIVE_CPI_EXAMPLE_ID: Pubkey = pubkey!("NatCP1EXampLe111111111111111111111111111111");
+
+fn sbf_out_dir_has(file: &str) -> bool {
+    std::env::var_os("SBF_OUT_DIR")
+        .map(|d| PathBuf::from(d).join(file).exists())
+        .unwrap_or(false)
+}
+
 impl TestFixture {
     // Full serialized LendingMarket account payload size (without 8-byte discriminator).
     // Keep this aligned with Kamino's on-chain account layout used by integration tests.
@@ -709,6 +719,10 @@ impl TestFixture {
         #[cfg(feature = "transfer-hook")]
         program.add_program("test_transfer_hook", TEST_HOOK_ID, None);
         program.add_program("mocks", mocks::ID, None);
+        // Optional: only present once `scripts/build-workspace.sh` has built it.
+        if sbf_out_dir_has("native_cpi_example.so") {
+            program.add_program("native_cpi_example", NATIVE_CPI_EXAMPLE_ID, None);
+        }
 
         program.prefer_bpf(false);
         let requires_real_kamino_program = add_integration_programs;

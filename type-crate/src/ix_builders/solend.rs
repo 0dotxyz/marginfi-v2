@@ -196,8 +196,8 @@ impl ToAccountMetas for SolendWithdraw {
 
 /// (user) Withdraw from a Solend reserve through a marginfi account
 /// * amount - in collateral tokens (cTokens), in native decimals  
-/// * if group rate limits are enabled, include the withdrawn bank's oracle group in
-///   `remaining_accounts`
+/// * `remaining_accounts` must hold a bank and its oracles for every active balance, plus
+///   the withdrawn bank's oracle group when group rate limits are enabled.
 /// * withdraw_all - withdraw entire position if true
 pub fn solend_withdraw(
     accounts: &SolendWithdraw,

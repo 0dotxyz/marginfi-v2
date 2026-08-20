@@ -1,7 +1,22 @@
+//! Asserts every builder produces the same `Instruction` as anchor's generated client.
+//!
+//! Proves the envelope: account order, writable and signer flags, optional-account encoding,
+//! discriminators, and the order and pass-through of arguments. It cannot prove the byte layout
+//! of argument types shared with the program, because this target builds the type crate with
+//! `anchor` on, so both sides call the same derive. That layout is covered by
+//! `anchor_arg_encoding` here and `borsh_arg_encoding` in the type crate.
+
 use anchor_lang::{InstructionData, ToAccountMetas};
 use bytemuck::Zeroable;
 use fixed_macro::types::I80F48;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+
+/// A value that differs from `Default`, so a builder that drops its argument fails.
+fn non_default<T: Default>(f: impl FnOnce(&mut T)) -> T {
+    let mut v = T::default();
+    f(&mut v);
+    v
+}
 
 /// Distinct fixed-point value per argument slot.
 fn wi(n: i64) -> marginfi_type_crate::types::WrappedI80F48 {
@@ -667,7 +682,7 @@ fn kamino_ix_builders_match_anchor() {
         token_program: key(743),
         system_program: key(744),
     }, {
-        bank_config: KaminoConfigCompact::default(),
+        bank_config: non_default(|c: &mut KaminoConfigCompact| c.deposit_limit = 6_701),
         bank_seed: 88u64,
     });
 
@@ -938,7 +953,7 @@ fn drift_ix_builders_match_anchor() {
         token_program: key(759),
         system_program: key(760),
     }, {
-        bank_config: DriftConfigCompact::default(),
+        bank_config: non_default(|c: &mut DriftConfigCompact| c.deposit_limit = 9_411),
         bank_seed: 89u64,
     });
 
@@ -1080,7 +1095,7 @@ fn juplend_ix_builders_match_anchor() {
         token_program: key(775),
         system_program: key(776),
     }, {
-        bank_config: JuplendConfigCompact::default(),
+        bank_config: non_default(|c: &mut JuplendConfigCompact| c.deposit_limit = 10_831),
         bank_seed: 90u64,
     });
 
@@ -1235,7 +1250,7 @@ fn solend_ix_builders_match_anchor() {
         token_program: key(1033),
         system_program: key(1034),
     }, {
-        bank_config: SolendConfigCompact::default(),
+        bank_config: non_default(|c: &mut SolendConfigCompact| c.deposit_limit = 12_381),
         bank_seed: 27u64,
     });
 }
@@ -1412,7 +1427,7 @@ fn pool_ix_builders_match_anchor() {
         token_program: key(676),
         system_program: key(677),
     }, {
-        bank_config: BankConfigCompact::default(),
+        bank_config: non_default(|c: &mut BankConfigCompact| c.deposit_limit = 14_151),
     });
 
     assert_parity!(LendingPoolAddBankWithSeed, LendingPoolAddBankWithSeed, lending_pool_add_bank_with_seed, {
@@ -1432,7 +1447,7 @@ fn pool_ix_builders_match_anchor() {
         token_program: key(691),
         system_program: key(692),
     }, {
-        bank_config: BankConfigCompact::default(),
+        bank_config: non_default(|c: &mut BankConfigCompact| c.deposit_limit = 14_351),
         bank_seed: 81u64,
     });
 
@@ -1458,7 +1473,11 @@ fn pool_ix_builders_match_anchor() {
         bank: key(702),
     }, {
         emode_tag: 83u16,
-        entries: [EmodeEntry::zeroed(); 10],
+        entries: [{
+            let mut e = EmodeEntry::zeroed();
+            e.collateral_bank_emode_tag = 1_468;
+            e
+        }; 10],
     });
 
     assert_parity!(LendingPoolConfigureBankInterestOnly, LendingPoolConfigureBankInterestOnly, lending_pool_configure_bank_interest_only, {
@@ -1466,7 +1485,7 @@ fn pool_ix_builders_match_anchor() {
         delegate_curve_admin: key(704),
         bank: key(705),
     }, {
-        interest_rate_config: InterestRateConfigOpt::default(),
+        interest_rate_config: non_default(|c: &mut InterestRateConfigOpt| c.insurance_ir_fee = Some(wi(146))),
     });
 
     assert_parity!(LendingPoolConfigureBankLimitsOnly, LendingPoolConfigureBankLimitsOnly, lending_pool_configure_bank_limits_only, {
@@ -1508,7 +1527,7 @@ fn pool_ix_builders_match_anchor() {
         admin: key(721),
         bank: key(722),
     }, {
-        price: WrappedI80F48::default(),
+        price: wi(151),
     });
 
     assert_parity!(InitBankMetadata, InitBankMetadata, init_bank_metadata, {
@@ -1637,7 +1656,7 @@ fn admin_ix_builders_match_anchor() {
         staked_settings: key(795),
         system_program: key(796),
     }, {
-        settings: StakedSettingsConfig::default(),
+        settings: non_default(|c: &mut StakedSettingsConfig| c.deposit_limit = 16_401),
     });
 
     assert_parity!(PropagateStakedSettings, PropagateStakedSettings, propagate_staked_settings, {
@@ -1740,7 +1759,7 @@ fn admin_ix_builders_match_anchor() {
         admin: key(1002),
         staked_settings: key(1003),
     }, {
-        settings: StakedSettingsEditConfig::default(),
+        settings: non_default(|c: &mut StakedSettingsEditConfig| c.asset_weight_init = Some(wi(174))),
     });
 
     assert_parity!(ConfigureBankRateLimits, ConfigureBankRateLimits, configure_bank_rate_limits, {

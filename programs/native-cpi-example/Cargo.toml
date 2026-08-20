@@ -1,0 +1,31 @@
+[package]
+name = "native-cpi-example"
+version = "0.1.0"
+edition = "2021"
+description = "Non-anchor program that CPIs into marginfi using marginfi-type-crate"
+
+# Detached from the root workspace on purpose: cargo unifies features per package, and the
+# workspace enables `anchor` on the type crate. A separate graph keeps this build anchor-free.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "native_cpi_example"
+
+[features]
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+marginfi-type-crate = { path = "../../type-crate", default-features = false, features = ["ix_builders", "pdas", "mainnet-beta"] }
+solana-account-info = "=3.1.1"
+solana-cpi = "=3.1.0"
+solana-instruction = "=3.4.0"
+solana-program-entrypoint = "=3.1.0"
+solana-program-error = "=3.0.1"
+solana-pubkey = "=4.2.0"
+
+[lints.rust]
+# `solana_program_entrypoint` emits `cfg(target_os = "solana")`, unknown to host builds.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

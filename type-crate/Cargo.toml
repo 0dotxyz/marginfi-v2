@@ -19,6 +19,11 @@ name = "marginfi_type_crate"
 name = "native_cpi"
 required-features = ["ix_builders"]
 
+# Must not run with `anchor` on, or it re-tests the anchor derive instead of the borsh one.
+[[test]]
+name = "borsh_arg_encoding"
+required-features = ["ix_builders"]
+
 [features]
 default = []
 anchor = ["dep:anchor-lang", "pdas"]

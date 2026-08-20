@@ -282,8 +282,8 @@ impl ToAccountMetas for KaminoWithdraw {
 /// (user) Withdraw from a Kamino pool through a marginfi account
 /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
 ///   from collateral to liquidity token amounts using the current exchange rate.
-/// * if group rate limits are enabled, include the withdrawn bank's oracle group in
-///   `remaining_accounts`
+/// * `remaining_accounts` must hold a bank and its oracles for every active balance, plus
+///   the withdrawn bank's oracle group when group rate limits are enabled.
 /// * flags - optional bitflags:
 ///   - bit 0 (`0x01`): withdraw all
 ///   - bit 1 (`0x02`): refresh reserve via batch refresh

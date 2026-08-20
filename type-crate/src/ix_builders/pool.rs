@@ -430,8 +430,7 @@ impl ToAccountMetas for LendingPoolConfigureBankOracle {
 
 /// (admin only)
 ///
-/// After applying `setup` and `oracle` to the bank configuration, `remaining_accounts` must
-/// contain the keys returned by [`crate::pdas::bank_observation_keys`] in that exact order.
+/// `remaining_accounts` must hold the oracle accounts the new `setup` validates against.
 pub fn lending_pool_configure_bank_oracle(
     accounts: &LendingPoolConfigureBankOracle,
     setup: u8,
@@ -521,7 +520,9 @@ impl ToAccountMetas for LendingPoolHandleBankruptcy {
 /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
 /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
 /// insurance fund and socializes any remainder among depositors.
-/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
+///
+/// `remaining_accounts` is the Token-2022 mint when the bank uses one, then a bank and its
+/// oracles for every active balance on the bankrupt account.
 pub fn lending_pool_handle_bankruptcy(accounts: &LendingPoolHandleBankruptcy) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -1063,8 +1064,8 @@ impl ToAccountMetas for LendingPoolSetFixedOraclePrice {
 
 /// (admin only)
 ///
-/// This switches the bank to its fixed-price oracle setup, which does not require
-/// `remaining_accounts`.
+/// This switches the bank to its fixed-price oracle setup. `remaining_accounts` must hold the
+/// oracle accounts the resulting setup validates against; an integration bank keeps its own.
 pub fn lending_pool_set_fixed_oracle_price(
     accounts: &LendingPoolSetFixedOraclePrice,
     price: WrappedI80F48,

@@ -43,6 +43,7 @@ const _: () = assert!(
      `staging`, `stagingalt`, or `localnet`)."
 );
 
+#[cfg(any(feature = "anchor", feature = "ix_builders"))]
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

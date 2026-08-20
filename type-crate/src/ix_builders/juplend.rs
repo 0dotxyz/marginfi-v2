@@ -218,8 +218,8 @@ impl ToAccountMetas for JuplendWithdraw {
 
 /// (user) Withdraw from a JupLend lending pool through a marginfi account.
 /// * amount - in the underlying token (e.g., USDC), in native decimals
-/// * if group rate limits are enabled, include the withdrawn bank's oracle group in
-///   `remaining_accounts`
+/// * `remaining_accounts` must hold a bank and its oracles for every active balance, plus
+///   the withdrawn bank's oracle group when group rate limits are enabled.
 pub fn juplend_withdraw(
     accounts: &JuplendWithdraw,
     amount: u64,

@@ -231,8 +231,8 @@ impl ToAccountMetas for DriftWithdraw {
 
 /// (user) Withdraw from a Drift spot market through a marginfi account
 /// * amount - in the underlying token (e.g., USDC), in native decimals
-/// * if group rate limits are enabled, include the withdrawn bank's oracle group in
-///   `remaining_accounts`
+/// * `remaining_accounts` must hold a bank and its oracles for every active balance, plus
+///   the withdrawn bank's oracle group when group rate limits are enabled.
 /// * withdraw_all - if true, withdraws entire position
 pub fn drift_withdraw(
     accounts: &DriftWithdraw,

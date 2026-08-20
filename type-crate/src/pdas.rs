@@ -301,7 +301,7 @@ pub fn derive_bank_vault_authority(
 pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
     let keys = &bank.config.oracle_keys;
 
-    let mut out = match bank.config.oracle_setup {
+    match bank.config.oracle_setup {
         OracleSetup::None | OracleSetup::Fixed => vec![],
         OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
             vec![keys[1]]
@@ -328,10 +328,7 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::SolendSwitchboardPull
         | OracleSetup::JuplendPythPull
         | OracleSetup::JuplendSwitchboardPull => vec![keys[0], keys[1]],
-    };
-
-    out.retain(|pk| *pk != Pubkey::default());
-    out
+    }
 }
 
 #[cfg(test)]

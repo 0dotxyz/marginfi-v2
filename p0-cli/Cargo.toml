@@ -31,7 +31,7 @@ switchboard-on-demand = { workspace = true }
 borsh = { workspace = true }
 
 marginfi-type-crate = { workspace = true, features = ["anchor", "ix_builders"] }
-marginfi = { path = "../programs/marginfi", version = "0.1.0", features = [
+marginfi = { path = "../programs/marginfi", version = "0.1.0", default-features = false, features = [
     "client",
     "no-entrypoint",
 ] }
