@@ -1793,8 +1793,8 @@ fn every_idl_instruction_is_covered_or_allowlisted() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../target/idl/marginfi.json"
     );
-    // Build artifact of `anchor build -p marginfi`; skip where it was never generated, matching
-    // `ix_utils::tests::check_discrims_match_idl`.
+    // Build artifact of `anchor build -p marginfi`. The job running this test downloads it in the
+    // anchor-build artifact, so a miss under CI is a broken pipeline rather than a local build.
     let Ok(idl_str) = std::fs::read_to_string(idl_path) else {
         assert!(
             std::env::var("CI").is_err(),
