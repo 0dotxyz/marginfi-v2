@@ -10,6 +10,7 @@ cfg_if::cfg_if! {
     } else if #[cfg(feature = "stagingalt")] {
         declare_id!("5UDghkpgW1HfYSrmEj2iAApHShqU44H6PKTAar9LL9bY");
     } else {
+        // `localnet`, and the fallback when no network feature is set.
         declare_id!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
     }
 }

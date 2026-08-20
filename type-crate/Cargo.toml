@@ -21,7 +21,7 @@ stagingalt = ["id-crate/stagingalt"]
 devnet = ["id-crate/devnet"]
 # Selects the localnet program ID, which is also what id-crate falls back to when no network
 # feature is set. Exists so `ix_builders` consumers must name a cluster instead of defaulting to one.
-localnet = []
+localnet = ["id-crate/localnet"]
 
 [dependencies]
 id-crate = { workspace = true }

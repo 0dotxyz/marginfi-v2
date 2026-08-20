@@ -1,9 +1,10 @@
 //! Instruction builders for the marginfi program.
 //!
 //! Each instruction has an accounts struct mirroring its on-chain `Accounts` layout and a
-//! builder returning a ready-to-send [`Instruction`]. Builders emit only the fixed accounts;
-//! where a doc comment names `remaining_accounts`, append those to `Instruction::accounts`
-//! after building.
+//! builder returning a ready-to-send [`Instruction`]. Builders emit only the fixed accounts.
+//! Many instructions additionally read `remaining_accounts`; each builder's doc states the
+//! layout it expects, and [`crate::pdas::bank_observation_keys`] derives the oracle set a bank
+//! contributes to a health check.
 //!
 //! Every instruction is addressed to [`crate::ID`], which the network feature selects; clients
 //! that pick a cluster at runtime retarget with [`with_program_id`]. Struct names follow the
@@ -39,7 +40,16 @@ pub trait ToAccountMetas {
 
 /// Retargets a built instruction at another deployment of the program, for clients that pick
 /// their cluster at runtime rather than through the network feature.
+///
+/// An omitted optional account is encoded as a meta addressed to the program itself, and anchor
+/// only reads it as `None` when it matches the invoked program, so those metas move too.
 pub fn with_program_id(mut ix: Instruction, program_id: Pubkey) -> Instruction {
+    let previous = ix.program_id;
+    for meta in ix.accounts.iter_mut() {
+        if meta.pubkey == previous {
+            meta.pubkey = program_id;
+        }
+    }
     ix.program_id = program_id;
     ix
 }

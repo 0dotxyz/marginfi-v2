@@ -241,6 +241,9 @@ impl ToAccountMetas for PropagateStakedSettings {
 }
 
 /// (permissionless) Propagate updated staked settings to a staked collateral bank.
+///
+/// `remaining_accounts` must hold the settings' oracle account; propagation after an oracle
+/// change fails without it.
 pub fn propagate_staked_settings(accounts: &PropagateStakedSettings) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -430,6 +433,7 @@ impl ToAccountMetas for SuperAdminDeposit {
 
 /// (primary admin only) Deposit directly into a bank liquidity vault and raise
 /// `asset_share_value` proportionally. No marginfi account is involved.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn super_admin_deposit(accounts: &SuperAdminDeposit, amount: u64) -> Instruction {
     let mut data = SuperAdminDeposit::DISCRIMINATOR.to_vec();
     amount.serialize(&mut data).unwrap();
@@ -472,6 +476,7 @@ impl ToAccountMetas for SuperAdminWithdraw {
 
 /// (primary admin only) Withdraw directly from a bank liquidity vault and lower
 /// `asset_share_value` proportionally. No marginfi account is involved.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn super_admin_withdraw(accounts: &SuperAdminWithdraw, amount: u64) -> Instruction {
     let mut data = SuperAdminWithdraw::DISCRIMINATOR.to_vec();
     amount.serialize(&mut data).unwrap();

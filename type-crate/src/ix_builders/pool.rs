@@ -1,7 +1,9 @@
 use super::ToAccountMetas;
 use crate::constants::ix_discriminators;
 use crate::types::BankConfigOpt;
-use crate::types::{BankConfigCompact, EmodeEntry, InterestRateConfigOpt, WrappedI80F48};
+use crate::types::{
+    BankConfigCompact, EmodeEntry, InterestRateConfigOpt, WrappedI80F48, MAX_EMODE_ENTRIES,
+};
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -89,6 +91,9 @@ impl ToAccountMetas for LendingPoolPulseBankPriceCache {
 }
 
 /// (Permissionless) Refresh the cached oracle price for a bank.
+///
+/// `remaining_accounts` must hold the bank's oracle accounts, which
+/// [`crate::pdas::bank_observation_keys`] derives from `oracle_setup`.
 pub fn lending_pool_pulse_bank_price_cache(
     accounts: &LendingPoolPulseBankPriceCache,
 ) -> Instruction {
@@ -135,6 +140,7 @@ impl ToAccountMetas for LendingPoolCollectBankFees {
 
 /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
 /// vaults.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_pool_collect_bank_fees(accounts: &LendingPoolCollectBankFees) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -500,6 +506,7 @@ impl ToAccountMetas for LendingPoolHandleBankruptcy {
 /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
 /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
 /// insurance fund and socializes any remainder among depositors.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_pool_handle_bankruptcy(accounts: &LendingPoolHandleBankruptcy) -> Instruction {
     Instruction {
         program_id: crate::ID,
@@ -821,7 +828,7 @@ impl ToAccountMetas for LendingPoolConfigureBankEmode {
 pub fn lending_pool_configure_bank_emode(
     accounts: &LendingPoolConfigureBankEmode,
     emode_tag: u16,
-    entries: [EmodeEntry; 10],
+    entries: [EmodeEntry; MAX_EMODE_ENTRIES],
 ) -> Instruction {
     let mut data = LendingPoolConfigureBankEmode::DISCRIMINATOR.to_vec();
     emode_tag.serialize(&mut data).unwrap();

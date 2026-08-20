@@ -3,6 +3,11 @@ use bytemuck::Zeroable;
 use fixed_macro::types::I80F48;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
+/// Distinct fixed-point value per argument slot.
+fn wi(n: i64) -> marginfi_type_crate::types::WrappedI80F48 {
+    fixed::types::I80F48::from_num(n).into()
+}
+
 fn key(n: u32) -> Pubkey {
     let mut bytes = [0u8; 32];
     bytes[..4].copy_from_slice(&n.to_le_bytes());
@@ -11,9 +16,16 @@ fn key(n: u32) -> Pubkey {
 
 /// Builds the same instruction through anchor's generated client structs and through the
 /// type-crate builder, then asserts the two are identical.
+thread_local! {
+    /// Builder names reached by `assert_parity!`, checked against `BUILDERS` at the end of the run.
+    static EXERCISED: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        std::cell::RefCell::new(std::collections::BTreeSet::new());
+}
+
 macro_rules! assert_parity {
     ($anchor:ident, $ours:ident, $builder:ident, { $($f:ident: $v:expr),* $(,)? },
      { $($a:ident: $av:expr),* $(,)? }) => {{
+        EXERCISED.with(|e| e.borrow_mut().insert(stringify!($builder).to_string()));
         let expected = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::$anchor { $($f: $v),* }.to_account_metas(None),
@@ -1377,10 +1389,10 @@ fn pool_ix_builders_match_anchor() {
         new_emissions_admin: Some(key(660)),
         new_metadata_admin: Some(key(661)),
         new_risk_admin: Some(key(662)),
-        emode_max_init_leverage: Some(WrappedI80F48::default()),
-        emode_max_maint_leverage: Some(WrappedI80F48::default()),
-        same_asset_emode_init_leverage: Some(WrappedI80F48::default()),
-        same_asset_emode_maint_leverage: Some(WrappedI80F48::default()),
+        emode_max_init_leverage: Some(wi(11)),
+        emode_max_maint_leverage: Some(wi(12)),
+        same_asset_emode_init_leverage: Some(wi(13)),
+        same_asset_emode_maint_leverage: Some(wi(14)),
     });
 
     assert_parity!(LendingPoolAddBank, LendingPoolAddBank, lending_pool_add_bank, {
@@ -1582,10 +1594,10 @@ fn admin_ix_builders_match_anchor() {
         bank_init_flat_sol_fee: 91u32,
         liquidation_flat_sol_fee: 92u32,
         order_init_flat_sol_fee: 93u32,
-        program_fee_fixed: WrappedI80F48::default(),
-        program_fee_rate: WrappedI80F48::default(),
-        liquidation_max_fee: WrappedI80F48::default(),
-        order_execution_max_fee: WrappedI80F48::default(),
+        program_fee_fixed: wi(21),
+        program_fee_rate: wi(22),
+        liquidation_max_fee: wi(23),
+        order_execution_max_fee: wi(24),
     });
 
     assert_parity!(EditFeeState, EditGlobalFeeState, edit_global_fee_state, {
@@ -1597,10 +1609,10 @@ fn admin_ix_builders_match_anchor() {
         bank_init_flat_sol_fee: Some(94u32),
         liquidation_flat_sol_fee: Some(95u32),
         order_init_flat_sol_fee: Some(96u32),
-        program_fee_fixed: Some(WrappedI80F48::default()),
-        program_fee_rate: Some(WrappedI80F48::default()),
-        liquidation_max_fee: Some(WrappedI80F48::default()),
-        order_execution_max_fee: Some(WrappedI80F48::default()),
+        program_fee_fixed: Some(wi(31)),
+        program_fee_rate: Some(wi(32)),
+        liquidation_max_fee: Some(wi(33)),
+        order_execution_max_fee: Some(wi(34)),
         pause_delegate_admin: Some(key(786)),
         account_transfer_fee: Some(97u32),
     });
@@ -1821,4 +1833,80 @@ fn every_idl_instruction_is_covered_or_allowlisted() {
         stale.is_empty(),
         "named here but absent from the IDL: {stale:?}"
     );
+}
+
+/// Every name in `BUILDERS` must be reached by an `assert_parity!` block. The per-module blocks
+/// are re-run here so the recorded set is complete within this thread.
+#[test]
+fn every_builder_has_a_parity_case() {
+    lending_ix_builders_match_anchor();
+    account_ix_builders_match_anchor();
+    order_ix_builders_match_anchor();
+    liquidation_ix_builders_match_anchor();
+    kamino_ix_builders_match_anchor();
+    drift_ix_builders_match_anchor();
+    juplend_ix_builders_match_anchor();
+    solend_ix_builders_match_anchor();
+    pool_ix_builders_match_anchor();
+    admin_ix_builders_match_anchor();
+
+    let exercised = EXERCISED.with(|e| e.borrow().clone());
+    let declared: std::collections::BTreeSet<String> = marginfi_type_crate::ix_builders::BUILDERS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let missing: Vec<_> = declared.difference(&exercised).collect();
+    assert!(
+        missing.is_empty(),
+        "builders with no assert_parity! case: {missing:?}"
+    );
+    let unknown: Vec<_> = exercised.difference(&declared).collect();
+    assert!(unknown.is_empty(), "parity case for an unknown builder: {unknown:?}");
+}
+
+/// Anchor decodes an optional account as `None` only when its key matches the invoked program,
+/// so retargeting moves the sentinel with the program id.
+#[test]
+fn with_program_id_retargets_omitted_optional_accounts() {
+    use marginfi_type_crate::ix_builders;
+
+    let built = ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
+        marginfi_account: key(901),
+        liquidation_record: key(902),
+        group: key(903),
+        liquidation_receiver: key(904),
+        fee_state: key(905),
+        global_fee_wallet: key(906),
+        system_program: key(907),
+        fee_payer: None,
+    });
+    assert_eq!(
+        built.accounts.last().unwrap().pubkey,
+        marginfi_type_crate::ID,
+        "None must be encoded as the compile-time program id"
+    );
+
+    let elsewhere = key(999);
+    let moved = ix_builders::with_program_id(built, elsewhere);
+    assert_eq!(moved.program_id, elsewhere);
+    assert_eq!(
+        moved.accounts.last().unwrap().pubkey,
+        elsewhere,
+        "sentinel must follow the program id or anchor reads it as a real account"
+    );
+
+    // A real optional account is left alone.
+    let with_payer = ix_builders::liquidation::end_liquidation(&ix_builders::liquidation::EndLiquidation {
+        marginfi_account: key(901),
+        liquidation_record: key(902),
+        group: key(903),
+        liquidation_receiver: key(904),
+        fee_state: key(905),
+        global_fee_wallet: key(906),
+        system_program: key(907),
+        fee_payer: Some(key(908)),
+    });
+    let moved = ix_builders::with_program_id(with_payer, elsewhere);
+    assert_eq!(moved.accounts.last().unwrap().pubkey, key(908));
 }

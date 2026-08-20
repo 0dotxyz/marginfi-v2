@@ -1,5 +1,5 @@
 use crate::constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, JUPLEND_F_TOKEN_VAULT_SEED};
-use crate::types::BankVaultType;
+use crate::types::{Bank, BankVaultType, OracleSetup};
 use solana_pubkey::{pubkey, Pubkey};
 
 pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
@@ -318,4 +318,42 @@ mod tests {
             );
         }
     }
+}
+
+/// Oracle accounts a bank contributes to a health check, in the order the risk engine expects.
+/// Append these after the fixed accounts for any instruction that prices this bank.
+pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
+    let keys = &bank.config.oracle_keys;
+
+    let mut out = match bank.config.oracle_setup {
+        OracleSetup::None | OracleSetup::Fixed => vec![],
+        OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
+            vec![keys[1]]
+        }
+        OracleSetup::StakedWithPythPush => {
+            let onramp = if keys[3] != Pubkey::default() {
+                keys[3]
+            } else if bank.integration_acc_1 != Pubkey::default() {
+                derive_staked_onramp_from_vote(bank.integration_acc_1)
+            } else {
+                Pubkey::default()
+            };
+            vec![keys[0], keys[1], keys[2], onramp]
+        }
+        OracleSetup::PythLegacy
+        | OracleSetup::SwitchboardV2
+        | OracleSetup::PythPushOracle
+        | OracleSetup::SwitchboardPull => vec![keys[0]],
+        OracleSetup::KaminoPythPush
+        | OracleSetup::KaminoSwitchboardPull
+        | OracleSetup::DriftPythPull
+        | OracleSetup::DriftSwitchboardPull
+        | OracleSetup::SolendPythPull
+        | OracleSetup::SolendSwitchboardPull
+        | OracleSetup::JuplendPythPull
+        | OracleSetup::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+    };
+
+    out.retain(|pk| *pk != Pubkey::default());
+    out
 }

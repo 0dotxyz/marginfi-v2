@@ -29,6 +29,18 @@ compile_error!(
      `devnet`, `staging`, `stagingalt`, or `localnet`."
 );
 
+/// Number of network features enabled; `id-crate` resolves exactly one program ID.
+const NETWORK_FEATURES: usize = cfg!(feature = "mainnet-beta") as usize
+    + cfg!(feature = "devnet") as usize
+    + cfg!(feature = "staging") as usize
+    + cfg!(feature = "stagingalt") as usize
+    + cfg!(feature = "localnet") as usize;
+const _: () = assert!(
+    NETWORK_FEATURES <= 1,
+    "marginfi-type-crate: enable exactly one network feature (`mainnet-beta`, `devnet`, \
+     `staging`, `stagingalt`, or `localnet`)."
+);
+
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

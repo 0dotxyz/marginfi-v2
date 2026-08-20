@@ -36,6 +36,7 @@ impl ToAccountMetas for LendingAccountDeposit {
 
 /// (account authority) Deposit assets into a bank. Accrues interest, records deposit, and
 /// transfers tokens from the signer's token account to the bank's liquidity vault.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_deposit(
     accounts: &LendingAccountDeposit,
     amount: u64,
@@ -83,6 +84,7 @@ impl ToAccountMetas for LendingAccountRepay {
 
 /// (account authority, or any signer during receivership) Repay borrowed assets. Accrues
 /// interest, records repayment, and transfers tokens to the bank's liquidity vault.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_repay(
     accounts: &LendingAccountRepay,
     amount: u64,
@@ -132,8 +134,9 @@ impl ToAccountMetas for LendingAccountWithdraw {
 
 /// (account authority, or any signer during receivership) Withdraw assets from a bank. Accrues
 /// interest, records withdrawal, transfers tokens, and runs a health check (skipped during
-/// receivership). If group rate limits are enabled, `remaining_accounts` must include the
-/// withdrawn bank's oracle group for USD pricing.
+/// receivership). `remaining_accounts` must hold a bank and its oracles for every active
+/// balance, plus the withdrawn bank's oracle group when group rate limits are enabled.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_withdraw(
     accounts: &LendingAccountWithdraw,
     amount: u64,
@@ -182,9 +185,10 @@ impl ToAccountMetas for LendingAccountBorrow {
 }
 
 /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
-/// origination fee, transfers tokens, and runs a health check. If group rate limits are
-/// enabled, `remaining_accounts` must include the borrowed bank's oracle group for USD
-/// pricing.
+/// origination fee, transfers tokens, and runs a health check. `remaining_accounts` must hold
+/// a bank and its oracles for every active balance, plus the borrowed bank's oracle group when
+/// group rate limits are enabled.
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_borrow(accounts: &LendingAccountBorrow, amount: u64) -> Instruction {
     let mut data = LendingAccountBorrow::DISCRIMINATOR.to_vec();
     amount.serialize(&mut data).unwrap();
@@ -270,6 +274,7 @@ impl ToAccountMetas for LendingAccountLiquidate {
 /// * `asset_amount` - amount of collateral to liquidate
 /// * `liquidatee_accounts` - number of remaining accounts for the liquidatee
 /// * `liquidator_accounts` - number of remaining accounts for the liquidator
+/// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_liquidate(
     accounts: &LendingAccountLiquidate,
     asset_amount: u64,
@@ -347,6 +352,9 @@ impl ToAccountMetas for LendingAccountEndFlashloan {
 }
 
 /// (account authority) End a flash loan and run the health check.
+///
+/// `remaining_accounts` must hold a bank and its oracles for every active balance on the
+/// account; the init-health check prices all of them.
 pub fn lending_account_end_flashloan(accounts: &LendingAccountEndFlashloan) -> Instruction {
     Instruction {
         program_id: crate::ID,
