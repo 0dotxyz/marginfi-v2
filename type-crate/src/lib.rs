@@ -35,6 +35,8 @@ const NETWORK_FEATURES: usize = cfg!(feature = "mainnet-beta") as usize
     + cfg!(feature = "staging") as usize
     + cfg!(feature = "stagingalt") as usize
     + cfg!(feature = "localnet") as usize;
+// Folds to a literal in each configuration; only the multi-feature case can fail.
+#[allow(clippy::absurd_extreme_comparisons)]
 const _: () = assert!(
     NETWORK_FEATURES <= 1,
     "marginfi-type-crate: enable exactly one network feature (`mainnet-beta`, `devnet`, \

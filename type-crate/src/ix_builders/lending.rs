@@ -274,6 +274,7 @@ impl ToAccountMetas for LendingAccountLiquidate {
 /// * `asset_amount` - amount of collateral to liquidate
 /// * `liquidatee_accounts` - number of remaining accounts for the liquidatee
 /// * `liquidator_accounts` - number of remaining accounts for the liquidator
+///
 /// When the bank's mint is Token-2022, `remaining_accounts` must begin with that mint.
 pub fn lending_account_liquidate(
     accounts: &LendingAccountLiquidate,

@@ -296,30 +296,6 @@ pub fn derive_bank_vault_authority(
     Pubkey::find_program_address(crate::bank_authority_seed!(vault_type, bank_pk), program_id)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ata_derivation_matches_spl() {
-        let wallet = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-        let mint = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-        for token_program in [
-            pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-            pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
-        ] {
-            assert_eq!(
-                get_associated_token_address_with_program_id(&wallet, &mint, &token_program),
-                spl_associated_token_account::get_associated_token_address_with_program_id(
-                    &wallet,
-                    &mint,
-                    &token_program,
-                ),
-            );
-        }
-    }
-}
-
 /// Oracle accounts a bank contributes to a health check, in the order the risk engine expects.
 /// Append these after the fixed accounts for any instruction that prices this bank.
 pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
@@ -356,4 +332,28 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
 
     out.retain(|pk| *pk != Pubkey::default());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ata_derivation_matches_spl() {
+        let wallet = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
+        let mint = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+        for token_program in [
+            pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+        ] {
+            assert_eq!(
+                get_associated_token_address_with_program_id(&wallet, &mint, &token_program),
+                spl_associated_token_account::get_associated_token_address_with_program_id(
+                    &wallet,
+                    &mint,
+                    &token_program,
+                ),
+            );
+        }
+    }
 }
