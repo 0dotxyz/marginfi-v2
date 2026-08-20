@@ -1,5 +1,7 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
+use fixtures::assert_custom_error;
 use fixtures::test::TestFixture;
+use marginfi::{prelude::MarginfiError, state::marginfi_account::MarginfiAccountImpl};
 use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_DISABLED};
 use solana_program_test::tokio;
 use solana_sdk::{
@@ -370,6 +372,61 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         .await;
 
     assert!(transfer_res2.is_err(), "Second transfer should fail");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let old_account_f = test_f.create_marginfi_account().await;
+    let new_authority = Keypair::new().pubkey();
+
+    let mut old_account: MarginfiAccount = old_account_f.load().await;
+    old_account.set_flag(ACCOUNT_DISABLED, false);
+    old_account_f.set_account(&old_account).await?;
+
+    let (new_marginfi_account_pda, _bump) =
+        MarginfiAccount::derive_pda(&test_f.marginfi_group.key, &new_authority, 0, None, &marginfi::ID);
+
+    let transfer_ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::TransferToNewAccountPda {
+            group: test_f.marginfi_group.key,
+            old_marginfi_account: old_account_f.key,
+            new_marginfi_account: new_marginfi_account_pda,
+            authority: test_f.payer(),
+            fee_payer: test_f.payer(),
+            new_authority,
+            global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::TransferToNewAccountPda {
+            account_index: 0,
+            third_party_id: None,
+        }
+        .data(),
+    };
+
+    let transfer_tx = Transaction::new_signed_with_payer(
+        &[transfer_ix],
+        Some(&test_f.payer()),
+        &[&test_f.payer_keypair()],
+        test_f.get_latest_blockhash().await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(transfer_tx)
+        .await;
+
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountDisabled);
 
     Ok(())
 }
