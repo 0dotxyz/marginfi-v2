@@ -1,0 +1,7 @@
+# Fetch git dependencies (crucible — pinned by rev in Cargo.toml) through the git
+# CLI so cargo reuses the environment's git credentials / credential helper.
+# Without this, cargo's built-in (libgit2) transport often fails to authenticate
+# against a private repo on CI / FuzzCorp. Building asymmetric-research/crucible
+# as a git dependency requires authenticated access.
+[net]
+git-fetch-with-cli = true

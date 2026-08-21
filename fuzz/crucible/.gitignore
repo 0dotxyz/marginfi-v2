@@ -1,0 +1,10 @@
+/target
+/corpus
+/crashes
+/output
+/coverage
+*.orig
+.build-state.json
+/bundle
+/programs/*.so
+/target-linux

@@ -1,0 +1,71 @@
+[package]
+name = "marginfi_fuzz"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+# Standalone workspace - isolated from parent project to avoid Solana version conflicts
+
+[dependencies]
+# Fuzzing framework, tracked at its main branch. It is a private repo, so CI fetches it
+# with a token (CRUCIBLE_TOKEN) plus the git-fetch-with-cli setting in .cargo/config.toml.
+crucible-fuzzer = { git = "https://github.com/asymmetric-research/crucible.git", branch = "main" }
+crucible-test-context = { git = "https://github.com/asymmetric-research/crucible.git", branch = "main" }
+crucible-idl-gen = { git = "https://github.com/asymmetric-research/crucible.git", branch = "main" }
+
+anchor-lang = "1.0.1"
+
+# Solana v3.x (required for litesvm 0.9.0)
+# `serde` feature: generated native-program (bincode) arg structs derive
+# serde::Serialize, so Pubkey fields must implement it too.
+solana-pubkey = { version = "3.0", features = ["serde"] }
+solana-keypair = "3.1"
+solana-signer = "3.0"
+solana-program = "3.0"
+solana-message = "3.0"
+solana-signature = "3.1"
+solana-instruction = "3.1"
+
+# Fuzzing
+libafl = { version = "0.15.1", features = ["std", "cli", "prelude"] }
+libafl_bolts = { version = "0.15.1", features = ["std"] }
+arbitrary = { version = "1", features = ["derive"] }
+
+# Utilities
+anyhow = "1.0"
+bytemuck = "1.14"
+ctor = "0.6"
+ctrlc = "3.4"
+
+# Native-program (bincode) instruction encoding — generated code for 4-byte
+# discriminator IDLs serializes args with serde + bincode (fixint, LE).
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# SPL Token program id (litesvm bundles the real program as a builtin) — needed directly since
+# it isn't re-exported by crucible-test-context/crucible-fuzzer.
+spl-token = "9.0"
+spl-token-2022-interface = "=3.1.1"
+solana-account = "4.3.2"
+
+# crucible-idl-gen special-cases any bytemuck-serialized [u8; 16] IDL type as an I80F48 wrapper
+# (WrappedI80F48 here) and emits `From<fixed::types::I80F48>`/`to_i80f48`/`from_i80f48` directly
+# referencing the `fixed` crate (crucible-idl-gen/src/codegen/types.rs) -- undocumented dependency
+# requirement, so the consuming harness must add it itself. Version pinned to match marginfi's own
+# workspace Cargo.toml exactly (marginfi-v2/Cargo.toml: `fixed = "=1.28.0"`).
+fixed = "=1.28.0"
+
+[[bin]]
+name = "invariant_test"
+path = "src/main.rs"
+
+[features]
+# Admin/config/init actions are generated behind this gate so ordinary fuzzing
+# never re-configures or freezes the world setup() built. Enable only for admin-focused runs.
+admin_actions = []
+external_cpi_actions = []
+invariant_test = []
+# Marks test modules whose helper methods went missing (quarantine_orphan_tests.py). Never
+# intended to be enabled -- only exists so cfg-checking recognizes the flag and doesn't warn.
+# NOT for gating standalone action methods; only test modules are ever auto-gated with it.
+scout_orphaned_tests = []

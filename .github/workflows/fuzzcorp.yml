@@ -1,0 +1,83 @@
+name: FuzzCorp bundle
+
+# Builds the marginfi program FROM SOURCE, compiles the crucible invariant harness
+# against it, and submits the bundle to FuzzCorp. Every change to the program is
+# therefore compiled and fuzzed — no prebuilt/static program binary is shipped.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   CRUCIBLE_TOKEN  - PAT/deploy token with read access to the private framework
+#                     repo github.com/asymmetric-research/crucible
+#   FUZZ_API_KEY    - FuzzCorp dashboard API key (service account)
+# Optional repo variables (defaults below):
+#   FUZZ_ORGANIZATION (project-0), FUZZ_PROJECT (marginfi)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+
+concurrency:
+  group: fuzzcorp-bundle
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: 1.79.0
+  SOLANA_CLI_VERSION: 2.1.20
+  ANCHOR_CLI_VERSION: 0.31.1
+  ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # marginfi's own toolchain (rust 1.79 + solana + anchor), then build the
+      # program from the current source -> target/deploy/marginfi.so
+      - uses: ./.github/actions/base-setup/
+        with:
+          include-anchor: "true"
+      - uses: ./.github/actions/build-workspace/
+
+      - name: Stage freshly-built program into the harness
+        run: |
+          test -f target/deploy/marginfi.so
+          mkdir -p fuzz/crucible/programs
+          cp target/deploy/marginfi.so fuzz/crucible/programs/marginfi_program.so
+
+      # Harness build uses rustup 'stable' (via fuzz/crucible/rust-toolchain.toml),
+      # independent of the program's 1.79 toolchain.
+      - name: Install Rust (stable) for the harness
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Authenticate to the private crucible framework repo
+        env:
+          CRUCIBLE_TOKEN: ${{ secrets.CRUCIBLE_TOKEN }}
+        run: |
+          git config --global \
+            url."https://x-access-token:${CRUCIBLE_TOKEN}@github.com/asymmetric-research/crucible".insteadOf \
+            "https://github.com/asymmetric-research/crucible"
+
+      - name: Build harness (crucible main)
+        working-directory: fuzz/crucible
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo build --release --features invariant_test
+
+      - name: Assemble FuzzCorp bundle
+        working-directory: fuzz/crucible
+        env:
+          FUZZ_REVISION: ${{ github.sha }}
+        run: ./build-bundle.sh
+
+      - name: Upload bundle to FuzzCorp
+        uses: asymmetric-research/fuzz-upload-action@v2
+        with:
+          upload_type: bundle
+          upload_path: fuzz/crucible/bundle
+        env:
+          FUZZ_ORGANIZATION: ${{ vars.FUZZ_ORGANIZATION || 'project-0' }}
+          FUZZ_PROJECT: ${{ vars.FUZZ_PROJECT || 'marginfi' }}
+          FUZZ_API_KEY: ${{ secrets.FUZZ_API_KEY }}
