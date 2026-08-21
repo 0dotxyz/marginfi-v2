@@ -43,7 +43,16 @@ const _: () = assert!(
      `staging`, `stagingalt`, or `localnet`)."
 );
 
-#[cfg(any(feature = "anchor", feature = "ix_builders"))]
+// Exported once a cluster is named, and under `anchor` regardless: `#[account]` generates an
+// `Owner` impl that references it.
+#[cfg(any(
+    feature = "anchor",
+    feature = "mainnet-beta",
+    feature = "devnet",
+    feature = "staging",
+    feature = "stagingalt",
+    feature = "localnet",
+))]
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

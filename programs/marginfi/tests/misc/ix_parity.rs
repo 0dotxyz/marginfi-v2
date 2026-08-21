@@ -29,14 +29,14 @@ fn key(n: u32) -> Pubkey {
     Pubkey::new_from_array(bytes)
 }
 
-// Builds the same instruction through anchor's generated client structs and through the
-// type-crate builder, then asserts the two are identical.
 thread_local! {
     /// Builder names reached by `assert_parity!`, checked against `BUILDERS` at the end of the run.
     static EXERCISED: std::cell::RefCell<std::collections::BTreeSet<String>> =
         std::cell::RefCell::new(std::collections::BTreeSet::new());
 }
 
+/// Builds the same instruction through anchor's generated client structs and through the
+/// type-crate builder, then asserts the two are identical.
 macro_rules! assert_parity {
     ($anchor:ident, $ours:ident, $builder:ident, { $($f:ident: $v:expr),* $(,)? },
      { $($a:ident: $av:expr),* $(,)? }) => {{
