@@ -1,3 +1,4 @@
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::pdas::derive_bank_vault_authority;
 use {
     super::load_all_banks,
@@ -11,7 +12,6 @@ use {
             EXP_10_I80F48,
         },
     },
-    anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::Result,
     fixed::types::I80F48,
     kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
@@ -112,36 +112,37 @@ fn build_kamino_init_obligation_ix(
     let (liquidity_vault_authority, _) =
         derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
-    Ok(Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::KaminoInitObligation {
-            fee_payer,
-            bank: bank_pk,
-            signer_token_account,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            integration_acc_2: bank.integration_acc_2,
-            user_metadata,
-            lending_market,
-            lending_market_authority,
-            integration_acc_1: bank.integration_acc_1,
-            mint: bank.mint,
-            reserve_liquidity_supply,
-            reserve_collateral_mint,
-            reserve_destination_deposit_collateral,
-            obligation_farm_user_state,
-            reserve_farm_state,
-            kamino_program: KAMINO_PROGRAM_ID,
-            farms_program: FARMS_PROGRAM_ID,
-            collateral_token_program: anchor_spl::token::ID,
-            liquidity_token_program: token_program,
-            instruction_sysvar_account: sysvar::instructions::ID,
-            rent: sysvar::rent::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoInitObligation { amount }.data(),
-    })
+    Ok(ix_builders::with_program_id(
+        ix_builders::kamino::kamino_init_obligation(
+            &ix_builders::kamino::KaminoInitObligation {
+                fee_payer,
+                bank: bank_pk,
+                signer_token_account,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                integration_acc_2: bank.integration_acc_2,
+                user_metadata,
+                lending_market,
+                lending_market_authority,
+                integration_acc_1: bank.integration_acc_1,
+                mint: bank.mint,
+                reserve_liquidity_supply,
+                reserve_collateral_mint,
+                reserve_destination_deposit_collateral,
+                obligation_farm_user_state,
+                reserve_farm_state,
+                kamino_program: KAMINO_PROGRAM_ID,
+                farms_program: FARMS_PROGRAM_ID,
+                collateral_token_program: anchor_spl::token::ID,
+                liquidity_token_program: token_program,
+                instruction_sysvar_account: sysvar::instructions::ID,
+                rent: sysvar::rent::ID,
+                system_program: system_program::ID,
+            },
+            amount,
+        ),
+        config.program_id,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -160,29 +161,30 @@ fn build_drift_init_user_ix(
     let (liquidity_vault_authority, _) =
         derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
-    Ok(Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::DriftInitUser {
-            fee_payer,
-            signer_token_account,
-            bank: bank_pk,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            mint: bank.mint,
-            integration_acc_3: bank.integration_acc_3,
-            integration_acc_2: bank.integration_acc_2,
-            drift_state,
-            integration_acc_1: bank.integration_acc_1,
-            drift_spot_market_vault,
-            drift_oracle,
-            drift_program: DRIFT_PROGRAM_ID,
-            token_program,
-            rent: sysvar::rent::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::DriftInitUser { amount }.data(),
-    })
+    Ok(ix_builders::with_program_id(
+        ix_builders::drift::drift_init_user(
+            &ix_builders::drift::DriftInitUser {
+                fee_payer,
+                signer_token_account,
+                bank: bank_pk,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                mint: bank.mint,
+                integration_acc_3: bank.integration_acc_3,
+                integration_acc_2: bank.integration_acc_2,
+                drift_state,
+                integration_acc_1: bank.integration_acc_1,
+                drift_spot_market_vault,
+                drift_oracle,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program,
+                rent: sysvar::rent::ID,
+                system_program: system_program::ID,
+            },
+            amount,
+        ),
+        config.program_id,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -199,34 +201,35 @@ fn build_juplend_init_position_ix(
     let (liquidity_vault_authority, _) =
         derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
-    Ok(Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::JuplendInitPosition {
-            fee_payer,
-            signer_token_account,
-            bank: bank_pk,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            mint: bank.mint,
-            integration_acc_1: bank.integration_acc_1,
-            f_token_mint: jl.f_token_mint,
-            integration_acc_2: bank.integration_acc_2,
-            lending_admin: jl.lending_admin,
-            supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
-            lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
-            rate_model: jl.rate_model,
-            vault: jl.vault,
-            liquidity: jl.liquidity,
-            liquidity_program: jl.liquidity_program,
-            rewards_rate_model: jl.rewards_rate_model,
-            juplend_program: JUPLEND_LENDING_PROGRAM_ID,
-            token_program,
-            associated_token_program: anchor_spl::associated_token::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::JuplendInitPosition { amount }.data(),
-    })
+    Ok(ix_builders::with_program_id(
+        ix_builders::juplend::juplend_init_position(
+            &ix_builders::juplend::JuplendInitPosition {
+                fee_payer,
+                signer_token_account,
+                bank: bank_pk,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                mint: bank.mint,
+                integration_acc_1: bank.integration_acc_1,
+                f_token_mint: jl.f_token_mint,
+                integration_acc_2: bank.integration_acc_2,
+                lending_admin: jl.lending_admin,
+                supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
+                lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
+                rate_model: jl.rate_model,
+                vault: jl.vault,
+                liquidity: jl.liquidity,
+                liquidity_program: jl.liquidity_program,
+                rewards_rate_model: jl.rewards_rate_model,
+                juplend_program: JUPLEND_LENDING_PROGRAM_ID,
+                token_program,
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            },
+            amount,
+        ),
+        config.program_id,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -331,39 +334,37 @@ pub fn kamino_deposit(
         &token_program,
     );
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::KaminoDeposit {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            signer_token_account: user_ata,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            integration_acc_2: bank.integration_acc_2,
-            lending_market,
-            lending_market_authority,
-            integration_acc_1: bank.integration_acc_1,
-            mint: bank.mint,
-            reserve_liquidity_supply,
-            reserve_collateral_mint,
-            reserve_destination_deposit_collateral,
-            obligation_farm_user_state,
-            reserve_farm_state,
-            kamino_program: KAMINO_PROGRAM_ID,
-            farms_program: FARMS_PROGRAM_ID,
-            collateral_token_program: anchor_spl::token::ID,
-            liquidity_token_program: token_program,
-            instruction_sysvar_account: sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoDeposit {
+    let ix = ix_builders::with_program_id(
+        ix_builders::kamino::kamino_deposit(
+            &ix_builders::kamino::KaminoDeposit {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                signer_token_account: user_ata,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                integration_acc_2: bank.integration_acc_2,
+                lending_market,
+                lending_market_authority,
+                integration_acc_1: bank.integration_acc_1,
+                mint: bank.mint,
+                reserve_liquidity_supply,
+                reserve_collateral_mint,
+                reserve_destination_deposit_collateral,
+                obligation_farm_user_state,
+                reserve_farm_state,
+                kamino_program: KAMINO_PROGRAM_ID,
+                farms_program: FARMS_PROGRAM_ID,
+                collateral_token_program: anchor_spl::token::ID,
+                liquidity_token_program: token_program,
+                instruction_sysvar_account: sysvar::instructions::ID,
+            },
             amount,
-            refresh_reserve: Some(false),
-        }
-        .data(),
-    };
+            Some(false),
+        ),
+        config.program_id,
+    );
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
     let reserve_state = load_kamino_reserve(&rpc_client, bank.integration_acc_1)?;
@@ -437,35 +438,37 @@ pub fn kamino_withdraw(
         None
     };
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::KaminoWithdraw {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            destination_token_account: user_ata,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            integration_acc_2: bank.integration_acc_2,
-            lending_market,
-            lending_market_authority,
-            integration_acc_1: bank.integration_acc_1,
-            mint: bank.mint,
-            reserve_liquidity_supply,
-            reserve_collateral_mint,
-            reserve_source_collateral,
-            obligation_farm_user_state,
-            reserve_farm_state,
-            kamino_program: KAMINO_PROGRAM_ID,
-            farms_program: FARMS_PROGRAM_ID,
-            collateral_token_program: anchor_spl::token::ID,
-            liquidity_token_program: token_program,
-            instruction_sysvar_account: sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoWithdraw { amount, flags }.data(),
-    };
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::kamino::kamino_withdraw(
+            &ix_builders::kamino::KaminoWithdraw {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                destination_token_account: user_ata,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                integration_acc_2: bank.integration_acc_2,
+                lending_market,
+                lending_market_authority,
+                integration_acc_1: bank.integration_acc_1,
+                mint: bank.mint,
+                reserve_liquidity_supply,
+                reserve_collateral_mint,
+                reserve_source_collateral,
+                obligation_farm_user_state,
+                reserve_farm_state,
+                kamino_program: KAMINO_PROGRAM_ID,
+                farms_program: FARMS_PROGRAM_ID,
+                collateral_token_program: anchor_spl::token::ID,
+                liquidity_token_program: token_program,
+                instruction_sysvar_account: sysvar::instructions::ID,
+            },
+            amount,
+            flags,
+        ),
+        config.program_id,
+    );
     ix.accounts.extend(observation_metas);
 
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
@@ -520,28 +523,29 @@ pub fn kamino_harvest_reward(
 
     let _ = bank; // bank was loaded to validate it exists
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::KaminoHarvestReward {
-            bank: bank_pk,
-            fee_state,
-            destination_token_account,
-            liquidity_vault_authority,
-            user_state,
-            farm_state,
-            global_config,
-            reward_mint,
-            user_reward_ata,
-            rewards_vault,
-            rewards_treasury_vault,
-            farm_vaults_authority,
-            scope_prices,
-            farms_program: FARMS_PROGRAM_ID,
-            token_program: reward_token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoHarvestReward { reward_index }.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::kamino::kamino_harvest_reward(
+            &ix_builders::kamino::KaminoHarvestReward {
+                bank: bank_pk,
+                fee_state,
+                destination_token_account,
+                liquidity_vault_authority,
+                user_state,
+                farm_state,
+                global_config,
+                reward_mint,
+                user_reward_ata,
+                rewards_vault,
+                rewards_treasury_vault,
+                farm_vaults_authority,
+                scope_prices,
+                farms_program: FARMS_PROGRAM_ID,
+                token_program: reward_token_program,
+            },
+            reward_index,
+        ),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -638,30 +642,31 @@ pub fn drift_deposit(
         &token_program,
     );
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::DriftDeposit {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            drift_oracle,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            signer_token_account: user_ata,
-            drift_state,
-            integration_acc_2: bank.integration_acc_2,
-            integration_acc_3: bank.integration_acc_3,
-            integration_acc_1: bank.integration_acc_1,
-            drift_spot_market_vault,
-            mint: bank.mint,
-            drift_program: DRIFT_PROGRAM_ID,
-            token_program,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::DriftDeposit { amount }.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::drift::drift_deposit(
+            &ix_builders::drift::DriftDeposit {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                drift_oracle,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                signer_token_account: user_ata,
+                drift_state,
+                integration_acc_2: bank.integration_acc_2,
+                integration_acc_3: bank.integration_acc_3,
+                integration_acc_1: bank.integration_acc_1,
+                drift_spot_market_vault,
+                mint: bank.mint,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program,
+                system_program: system_program::ID,
+            },
+            amount,
+        ),
+        config.program_id,
+    );
 
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
     let signing_keypairs = config.get_signers(false);
@@ -725,41 +730,39 @@ pub fn drift_withdraw(
         withdraw_all.then_some(bank_pk),
     )?;
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::DriftWithdraw {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            drift_oracle,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            destination_token_account: user_ata,
-            drift_state,
-            integration_acc_2: bank.integration_acc_2,
-            integration_acc_3: bank.integration_acc_3,
-            integration_acc_1: bank.integration_acc_1,
-            drift_spot_market_vault,
-            drift_reward_oracle,
-            drift_reward_spot_market,
-            drift_reward_mint,
-            drift_reward_oracle_2,
-            drift_reward_spot_market_2,
-            drift_reward_mint_2,
-            drift_signer,
-            mint: bank.mint,
-            drift_program: DRIFT_PROGRAM_ID,
-            token_program,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::DriftWithdraw {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::drift::drift_withdraw(
+            &ix_builders::drift::DriftWithdraw {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                drift_oracle,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                destination_token_account: user_ata,
+                drift_state,
+                integration_acc_2: bank.integration_acc_2,
+                integration_acc_3: bank.integration_acc_3,
+                integration_acc_1: bank.integration_acc_1,
+                drift_spot_market_vault,
+                drift_reward_oracle,
+                drift_reward_spot_market,
+                drift_reward_mint,
+                drift_reward_oracle_2,
+                drift_reward_spot_market_2,
+                drift_reward_mint_2,
+                drift_signer,
+                mint: bank.mint,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program,
+                system_program: system_program::ID,
+            },
             amount,
-            withdraw_all: if withdraw_all { Some(true) } else { None },
-        }
-        .data(),
-    };
+            if withdraw_all { Some(true) } else { None },
+        ),
+        config.program_id,
+    );
     ix.accounts.extend(observation_metas);
 
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
@@ -811,9 +814,8 @@ pub fn drift_harvest_reward(
 
     let _ = bank; // bank was loaded to validate it exists
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::DriftHarvestReward {
+    let ix = ix_builders::with_program_id(
+        ix_builders::drift::drift_harvest_reward(&ix_builders::drift::DriftHarvestReward {
             bank: bank_pk,
             fee_state,
             liquidity_vault_authority,
@@ -828,10 +830,9 @@ pub fn drift_harvest_reward(
             reward_mint,
             drift_program: DRIFT_PROGRAM_ID,
             token_program: reward_token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::DriftHarvestReward {}.data(),
-    };
+        }),
+        config.program_id,
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
@@ -935,36 +936,37 @@ pub fn juplend_deposit(
         &token_program,
     );
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::JuplendDeposit {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            signer_token_account: user_ata,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            mint: bank.mint,
-            integration_acc_1: bank.integration_acc_1,
-            f_token_mint: jl.f_token_mint,
-            integration_acc_2: bank.integration_acc_2,
-            lending_admin: jl.lending_admin,
-            supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
-            lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
-            rate_model: jl.rate_model,
-            vault: jl.vault,
-            liquidity: jl.liquidity,
-            liquidity_program: jl.liquidity_program,
-            rewards_rate_model: jl.rewards_rate_model,
-            juplend_program: JUPLEND_LENDING_PROGRAM_ID,
-            token_program,
-            associated_token_program: anchor_spl::associated_token::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::JuplendDeposit { amount }.data(),
-    };
+    let ix = ix_builders::with_program_id(
+        ix_builders::juplend::juplend_deposit(
+            &ix_builders::juplend::JuplendDeposit {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                signer_token_account: user_ata,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                mint: bank.mint,
+                integration_acc_1: bank.integration_acc_1,
+                f_token_mint: jl.f_token_mint,
+                integration_acc_2: bank.integration_acc_2,
+                lending_admin: jl.lending_admin,
+                supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
+                lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
+                rate_model: jl.rate_model,
+                vault: jl.vault,
+                liquidity: jl.liquidity,
+                liquidity_program: jl.liquidity_program,
+                rewards_rate_model: jl.rewards_rate_model,
+                juplend_program: JUPLEND_LENDING_PROGRAM_ID,
+                token_program,
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            },
+            amount,
+        ),
+        config.program_id,
+    );
 
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
     let signing_keypairs = config.get_signers(false);
@@ -1019,41 +1021,39 @@ pub fn juplend_withdraw(
         withdraw_all.then_some(bank_pk),
     )?;
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::JuplendWithdraw {
-            group,
-            marginfi_account: marginfi_account_pk,
-            authority,
-            bank: bank_pk,
-            destination_token_account: user_ata,
-            liquidity_vault_authority,
-            mint: bank.mint,
-            integration_acc_1: bank.integration_acc_1,
-            f_token_mint: jl.f_token_mint,
-            integration_acc_2: bank.integration_acc_2,
-            integration_acc_3: bank.integration_acc_3,
-            lending_admin: jl.lending_admin,
-            supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
-            lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
-            rate_model: jl.rate_model,
-            vault: jl.vault,
-            claim_account: jl.claim_account,
-            liquidity: jl.liquidity,
-            liquidity_program: jl.liquidity_program,
-            rewards_rate_model: jl.rewards_rate_model,
-            juplend_program: JUPLEND_LENDING_PROGRAM_ID,
-            token_program,
-            associated_token_program: anchor_spl::associated_token::ID,
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::JuplendWithdraw {
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::juplend::juplend_withdraw(
+            &ix_builders::juplend::JuplendWithdraw {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority,
+                bank: bank_pk,
+                destination_token_account: user_ata,
+                liquidity_vault_authority,
+                mint: bank.mint,
+                integration_acc_1: bank.integration_acc_1,
+                f_token_mint: jl.f_token_mint,
+                integration_acc_2: bank.integration_acc_2,
+                integration_acc_3: bank.integration_acc_3,
+                lending_admin: jl.lending_admin,
+                supply_token_reserves_liquidity: jl.supply_token_reserves_liquidity,
+                lending_supply_position_on_liquidity: jl.lending_supply_position_on_liquidity,
+                rate_model: jl.rate_model,
+                vault: jl.vault,
+                claim_account: jl.claim_account,
+                liquidity: jl.liquidity,
+                liquidity_program: jl.liquidity_program,
+                rewards_rate_model: jl.rewards_rate_model,
+                juplend_program: JUPLEND_LENDING_PROGRAM_ID,
+                token_program,
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            },
             amount,
-            withdraw_all: if withdraw_all { Some(true) } else { None },
-        }
-        .data(),
-    };
+            if withdraw_all { Some(true) } else { None },
+        ),
+        config.program_id,
+    );
     ix.accounts.extend(observation_metas);
 
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);

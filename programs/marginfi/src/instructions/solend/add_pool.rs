@@ -3,10 +3,7 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{
-        bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl,
-        solend::SolendConfigCompact,
-    },
+    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -16,7 +13,7 @@ use marginfi_type_crate::constants::{
     INSURANCE_VAULT_SEED, IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     SOLEND_OBLIGATION_SEED,
 };
-use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
+use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup, SolendConfigCompact};
 use solend_mocks::state::SolendMinimalReserve;
 
 /// Add a Solend bank to the marginfi lending pool

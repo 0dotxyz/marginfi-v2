@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
@@ -49,17 +48,6 @@ pub async fn load_and_deserialize<T: AccountDeserialize>(
 pub async fn latest_blockhash(ctx: &Rc<RefCell<ProgramTestContext>>) -> Hash {
     let banks_client = ctx.borrow().banks_client.clone();
     banks_client.get_latest_blockhash().await.unwrap()
-}
-
-pub fn make_ix<T>(accounts: T, ix_data: Vec<u8>) -> Instruction
-where
-    T: ToAccountMetas,
-{
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: ix_data,
-    }
 }
 
 pub fn create_pyth_push_oracle_account_from_bytes(data: Vec<u8>) -> Account {

@@ -3,10 +3,7 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{
-        bank::BankImpl, bank_config::BankConfigImpl, kamino::KaminoConfigCompact,
-        marginfi_group::MarginfiGroupImpl,
-    },
+    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -19,7 +16,7 @@ use marginfi_type_crate::{
         INSURANCE_VAULT_SEED, IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
     pdas::KAMINO_PROGRAM_ID,
-    types::{Bank, MarginfiGroup, OracleSetup},
+    types::{Bank, KaminoConfigCompact, MarginfiGroup, OracleSetup},
 };
 
 /// Add a Kamino bank to the marginfi lending pool

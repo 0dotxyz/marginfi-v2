@@ -3,10 +3,7 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{
-        bank::BankImpl, bank_config::BankConfigImpl, drift::DriftConfigCompact,
-        marginfi_group::MarginfiGroupImpl,
-    },
+    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -19,7 +16,7 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, MarginfiGroup, OracleSetup},
+    types::{Bank, DriftConfigCompact, MarginfiGroup, OracleSetup},
 };
 
 /// Add a Drift bank to the marginfi lending pool

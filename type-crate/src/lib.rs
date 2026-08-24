@@ -6,10 +6,53 @@ pub mod constants;
 pub mod macros;
 pub mod types;
 
-#[cfg(feature = "anchor")]
+#[cfg(feature = "ix_builders")]
+pub mod ix_builders;
+#[cfg(feature = "pdas")]
 pub mod pdas;
 
-#[cfg(feature = "anchor")]
+/// Builders address every instruction to [`ID`], which id-crate resolves from the network
+/// feature. Picking one is mandatory here so a client cannot ship instructions aimed at the
+/// wrong cluster's program.
+#[cfg(all(
+    feature = "ix_builders",
+    not(any(
+        feature = "mainnet-beta",
+        feature = "devnet",
+        feature = "staging",
+        feature = "stagingalt",
+        feature = "localnet",
+    ))
+))]
+compile_error!(
+    "marginfi-type-crate: `ix_builders` requires a network feature, one of `mainnet-beta`, \
+     `devnet`, `staging`, `stagingalt`, or `localnet`."
+);
+
+/// Number of network features enabled; `id-crate` resolves exactly one program ID.
+const NETWORK_FEATURES: usize = cfg!(feature = "mainnet-beta") as usize
+    + cfg!(feature = "devnet") as usize
+    + cfg!(feature = "staging") as usize
+    + cfg!(feature = "stagingalt") as usize
+    + cfg!(feature = "localnet") as usize;
+// Folds to a literal in each configuration; only the multi-feature case can fail.
+#[allow(clippy::absurd_extreme_comparisons)]
+const _: () = assert!(
+    NETWORK_FEATURES <= 1,
+    "marginfi-type-crate: enable exactly one network feature (`mainnet-beta`, `devnet`, \
+     `staging`, `stagingalt`, or `localnet`)."
+);
+
+// Exported once a cluster is named, and under `anchor` regardless: `#[account]` generates an
+// `Owner` impl that references it.
+#[cfg(any(
+    feature = "anchor",
+    feature = "mainnet-beta",
+    feature = "devnet",
+    feature = "staging",
+    feature = "stagingalt",
+    feature = "localnet",
+))]
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

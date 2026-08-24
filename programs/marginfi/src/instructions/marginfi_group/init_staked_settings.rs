@@ -5,7 +5,7 @@ use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::STAKED_SETTINGS_SEED,
-    types::{MarginfiGroup, RiskTier, StakedSettings, WrappedI80F48},
+    types::{MarginfiGroup, StakedSettings, StakedSettingsConfig},
 };
 
 pub fn initialize_staked_settings(
@@ -72,21 +72,4 @@ pub struct InitStakedSettings<'info> {
     pub staked_settings: AccountLoader<'info, StakedSettings>,
 
     pub system_program: Program<'info, System>,
-}
-
-#[derive(AnchorDeserialize, AnchorSerialize, Default)]
-pub struct StakedSettingsConfig {
-    pub oracle: Pubkey,
-
-    pub asset_weight_init: WrappedI80F48,
-    pub asset_weight_maint: WrappedI80F48,
-
-    pub deposit_limit: u64,
-    pub total_asset_value_init_limit: u64,
-
-    pub oracle_max_age: u16,
-    /// WARN: You almost certainly want "Collateral", using Isolated risk tier makes the asset
-    /// worthless as collateral, and is generally useful only when creating a staked collateral pool
-    /// for rewards purposes only.
-    pub risk_tier: RiskTier,
 }

@@ -1,6 +1,6 @@
 use crate::constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, JUPLEND_F_TOKEN_VAULT_SEED};
-use crate::types::BankVaultType;
-use anchor_lang::prelude::*;
+use crate::types::{Bank, BankVaultType, OracleSetup};
+use solana_pubkey::{pubkey, Pubkey};
 
 pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 pub const FARMS_PROGRAM_ID: Pubkey = pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
@@ -13,6 +13,20 @@ pub const JUPLEND_REWARDS_PROGRAM_ID: Pubkey =
     pubkey!("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar");
 pub const SPL_SINGLE_POOL_PROGRAM_ID: Pubkey =
     pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
+const SYSTEM_PROGRAM_ID: Pubkey = pubkey!("11111111111111111111111111111111");
+const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+pub fn get_associated_token_address_with_program_id(
+    wallet: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[wallet.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN_PROGRAM_ID,
+    )
+    .0
+}
 
 /// Derive the SPL single-pool PDA chain from a validator vote account:
 /// `vote_account -> stake_pool -> (lst_mint, sol_pool, pool_onramp)`.
@@ -65,11 +79,7 @@ pub fn derive_juplend_rate_model(mint: &Pubkey) -> (Pubkey, u8) {
 
 pub fn derive_juplend_liquidity_vault(mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
     let (liquidity, _) = derive_juplend_liquidity();
-    spl_associated_token_account::get_associated_token_address_with_program_id(
-        &liquidity,
-        mint,
-        token_program,
-    )
+    get_associated_token_address_with_program_id(&liquidity, mint, token_program)
 }
 
 pub fn derive_juplend_f_token_mint(mint: &Pubkey) -> (Pubkey, u8) {
@@ -195,8 +205,8 @@ pub fn derive_kamino_base_obligation(owner: &Pubkey, lending_market: &Pubkey) ->
     derive_kamino_obligation(
         owner,
         lending_market,
-        &anchor_lang::solana_program::system_program::ID,
-        &anchor_lang::solana_program::system_program::ID,
+        &SYSTEM_PROGRAM_ID,
+        &SYSTEM_PROGRAM_ID,
         0,
         0,
     )
@@ -284,4 +294,63 @@ pub fn derive_bank_vault_authority(
     program_id: &Pubkey,
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(crate::bank_authority_seed!(vault_type, bank_pk), program_id)
+}
+
+/// Oracle accounts a bank contributes to a health check, in the order the risk engine expects.
+/// Append these after the fixed accounts for any instruction that prices this bank.
+pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
+    let keys = &bank.config.oracle_keys;
+
+    match bank.config.oracle_setup {
+        OracleSetup::None | OracleSetup::Fixed => vec![],
+        OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
+            vec![keys[1]]
+        }
+        OracleSetup::StakedWithPythPush => {
+            let onramp = if keys[3] != Pubkey::default() {
+                keys[3]
+            } else if bank.integration_acc_1 != Pubkey::default() {
+                derive_staked_onramp_from_vote(bank.integration_acc_1)
+            } else {
+                Pubkey::default()
+            };
+            vec![keys[0], keys[1], keys[2], onramp]
+        }
+        OracleSetup::PythLegacy
+        | OracleSetup::SwitchboardV2
+        | OracleSetup::PythPushOracle
+        | OracleSetup::SwitchboardPull => vec![keys[0]],
+        OracleSetup::KaminoPythPush
+        | OracleSetup::KaminoSwitchboardPull
+        | OracleSetup::DriftPythPull
+        | OracleSetup::DriftSwitchboardPull
+        | OracleSetup::SolendPythPull
+        | OracleSetup::SolendSwitchboardPull
+        | OracleSetup::JuplendPythPull
+        | OracleSetup::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ata_derivation_matches_spl() {
+        let wallet = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
+        let mint = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+        for token_program in [
+            pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+        ] {
+            assert_eq!(
+                get_associated_token_address_with_program_id(&wallet, &mint, &token_program),
+                spl_associated_token_account::get_associated_token_address_with_program_id(
+                    &wallet,
+                    &mint,
+                    &token_program,
+                ),
+            );
+        }
+    }
 }

@@ -2,11 +2,12 @@ use crate::{
     config::Config,
     utils::{find_fee_state_pda, send_tx},
 };
-use anchor_client::anchor_lang::{prelude::*, InstructionData};
+use anchor_client::anchor_lang::prelude::*;
 use anyhow::Result;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::Bank;
 use marginfi_type_crate::{bank_authority_seed, types::BankVaultType};
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 
 pub fn process_collect_fees(config: Config, bank_pk: Pubkey) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
@@ -38,22 +39,22 @@ pub fn process_collect_fees(config: Config, bank_pk: Pubkey) -> Result<()> {
             &token_program,
         );
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolCollectBankFees {
-            group: bank.group,
-            bank: bank_pk,
-            fee_vault: bank.fee_vault,
-            token_program,
-            liquidity_vault_authority,
-            liquidity_vault: bank.liquidity_vault,
-            insurance_vault: bank.insurance_vault,
-            fee_state: find_fee_state_pda(&config.program_id).0,
-            fee_ata,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolCollectBankFees {}.data(),
-    };
+    let mut ix = ix_builders::with_program_id(
+        ix_builders::pool::lending_pool_collect_bank_fees(
+            &ix_builders::pool::LendingPoolCollectBankFees {
+                group: bank.group,
+                bank: bank_pk,
+                fee_vault: bank.fee_vault,
+                token_program,
+                liquidity_vault_authority,
+                liquidity_vault: bank.liquidity_vault,
+                insurance_vault: bank.insurance_vault,
+                fee_state: find_fee_state_pda(&config.program_id).0,
+                fee_ata,
+            },
+        ),
+        config.program_id,
+    );
     ix.accounts
         .push(AccountMeta::new_readonly(bank.mint, false));
 

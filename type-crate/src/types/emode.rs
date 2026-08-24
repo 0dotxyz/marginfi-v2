@@ -116,6 +116,10 @@ assert_struct_size!(EmodeEntry, 40);
 assert_struct_align!(EmodeEntry, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Pod, Zeroable, Copy, Clone, Eq)]
 pub struct EmodeEntry {
     /// emode_tag of the bank(s) whose collateral you wish to treat preferentially.

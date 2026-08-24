@@ -14,8 +14,9 @@ pub mod utils;
 use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
-    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    WrappedI80F48, MAX_EMODE_ENTRIES,
+    BankConfigCompact, BankConfigOpt, DriftConfigCompact, EmodeEntry, InterestRateConfigOpt,
+    JuplendConfigCompact, KaminoConfigCompact, OrderTrigger, SolendConfigCompact,
+    StakedSettingsConfig, StakedSettingsEditConfig, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -905,7 +906,7 @@ pub mod marginfi {
 
     /// (user) Withdraw from a Kamino pool through a marginfi account
     /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
-    ///     from collateral to liquidity token amounts using the current exchange rate.
+    ///   from collateral to liquidity token amounts using the current exchange rate.
     /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
     ///   `remaining_accounts`
     /// * flags - optional bitflags:
@@ -923,7 +924,7 @@ pub mod marginfi {
     /// accounts 0 and 1 respectively.
     pub fn lending_pool_add_bank_kamino(
         ctx: Context<LendingPoolAddBankKamino>,
-        bank_config: state::kamino::KaminoConfigCompact,
+        bank_config: KaminoConfigCompact,
         bank_seed: u64,
     ) -> MarginfiResult {
         kamino::lending_pool_add_bank_kamino(ctx, bank_config, bank_seed)
@@ -945,7 +946,7 @@ pub mod marginfi {
     /// (group admin only) Add a Drift bank to the group.
     pub fn lending_pool_add_bank_drift(
         ctx: Context<LendingPoolAddBankDrift>,
-        bank_config: state::drift::DriftConfigCompact,
+        bank_config: DriftConfigCompact,
         bank_seed: u64,
     ) -> MarginfiResult {
         drift::lending_pool_add_bank_drift(ctx, bank_config, bank_seed)
@@ -1003,7 +1004,7 @@ pub mod marginfi {
     /// (admin) Add a Solend bank to the marginfi group
     pub fn lending_pool_add_bank_solend(
         ctx: Context<LendingPoolAddBankSolend>,
-        bank_config: state::solend::SolendConfigCompact,
+        bank_config: SolendConfigCompact,
         bank_seed: u64,
     ) -> MarginfiResult {
         solend::lending_pool_add_bank_solend(ctx, bank_config, bank_seed)
@@ -1050,7 +1051,7 @@ pub mod marginfi {
     /// 1. JupLend `Lending` state
     pub fn lending_pool_add_bank_juplend(
         ctx: Context<LendingPoolAddBankJuplend>,
-        bank_config: state::juplend::JuplendConfigCompact,
+        bank_config: JuplendConfigCompact,
         bank_seed: u64,
     ) -> MarginfiResult {
         juplend::lending_pool_add_bank_juplend(ctx, bank_config, bank_seed)
