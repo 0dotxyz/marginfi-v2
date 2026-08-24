@@ -1,3 +1,4 @@
+use crate::constants::MIN_EMISSIONS_SHARE_SUPPLY;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -125,10 +126,13 @@ pub fn lending_pool_emissions_deposit(
         MarginfiError::InvalidTransfer
     );
 
+    // Emissions raise the share value by `amount / total_asset_shares`, so a floor on the supply
+    // bounds how far any caller can move it. See `MIN_EMISSIONS_SHARE_SUPPLY`.
     let total_asset_shares = I80F48::from(bank.total_asset_shares);
     check!(
-        total_asset_shares > I80F48::ZERO,
-        MarginfiError::EmissionsUpdateError
+        total_asset_shares >= MIN_EMISSIONS_SHARE_SUPPLY,
+        MarginfiError::EmissionsUpdateError,
+        "Bank share supply is too small to accept emissions"
     );
 
     bank.accrue_interest(

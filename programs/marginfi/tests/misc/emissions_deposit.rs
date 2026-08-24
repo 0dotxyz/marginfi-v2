@@ -1,7 +1,10 @@
 use fixed::types::I80F48;
 use fixtures::{assert_custom_error, native, prelude::*};
-use marginfi::{assert_eq_with_tolerance, prelude::MarginfiError, state::bank::BankImpl};
-use marginfi_type_crate::types::{BankConfigOpt, BankOperationalState};
+use marginfi::{
+    assert_eq_with_tolerance, constants::MIN_EMISSIONS_SHARE_SUPPLY, prelude::MarginfiError,
+    state::bank::BankImpl,
+};
+use marginfi_type_crate::types::{BalanceSide, BankConfigOpt, BankOperationalState};
 use solana_program_test::*;
 
 #[tokio::test]
@@ -370,6 +373,86 @@ async fn emissions_not_same_bank_deposit_updates_asset_share_value() -> anyhow::
         .await;
 
     assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidEmissionsMint);
+
+    Ok(())
+}
+
+/// A donation moves `asset_share_value` by `amount / total_asset_shares`, so banks below
+/// `MIN_EMISSIONS_SHARE_SUPPLY` do not accept one.
+#[tokio::test]
+async fn emissions_deposit_fails_below_minimum_share_supply() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let depositor = test_f.create_marginfi_account().await;
+    let depositor_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    let below_floor = MIN_EMISSIONS_SHARE_SUPPLY.to_num::<u64>() - 1;
+    depositor
+        .try_bank_deposit(
+            depositor_usdc.key,
+            usdc_bank,
+            below_floor as f64 / 10f64.powi(6),
+            None,
+        )
+        .await?;
+
+    let funding = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    let res = usdc_bank
+        .try_emissions_deposit(native!(10, "USDC"), funding.key)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::EmissionsUpdateError);
+
+    // Rejected before the transfer, so nothing moved.
+    let bank = usdc_bank.load().await;
+    assert_eq!(I80F48::from(bank.asset_share_value), I80F48::ONE);
+    assert_eq!(
+        I80F48::from(bank.total_asset_shares),
+        I80F48::from_num(below_floor)
+    );
+
+    Ok(())
+}
+
+/// The floor is inclusive: a bank sitting exactly on it accepts emissions normally.
+#[tokio::test]
+async fn emissions_deposit_succeeds_at_minimum_share_supply() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let depositor = test_f.create_marginfi_account().await;
+    let depositor_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    let at_floor = MIN_EMISSIONS_SHARE_SUPPLY.to_num::<u64>();
+    depositor
+        .try_bank_deposit(
+            depositor_usdc.key,
+            usdc_bank,
+            at_floor as f64 / 10f64.powi(6),
+            None,
+        )
+        .await?;
+
+    let bank = usdc_bank.load().await;
+    assert_eq!(
+        I80F48::from(bank.total_asset_shares),
+        MIN_EMISSIONS_SHARE_SUPPLY
+    );
+
+    let funding = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    let donation = native!(10, "USDC");
+    usdc_bank
+        .try_emissions_deposit(donation, funding.key)
+        .await?;
+
+    // Share value rises by donation / supply, and the supply is unchanged.
+    let bank = usdc_bank.load().await;
+    assert_eq!(
+        I80F48::from(bank.total_asset_shares),
+        MIN_EMISSIONS_SHARE_SUPPLY
+    );
+    assert_eq!(
+        I80F48::from(bank.asset_share_value),
+        I80F48::ONE + I80F48::from_num(donation) / MIN_EMISSIONS_SHARE_SUPPLY
+    );
 
     Ok(())
 }
