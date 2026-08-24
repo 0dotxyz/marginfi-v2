@@ -307,6 +307,23 @@ impl KaminoBankSetup {
             .await
     }
 
+    /// Put the reserve into emergency mode, in the state a later `refresh_reserve` leaves it:
+    /// current slot, not stale, price status cleared.
+    pub async fn set_reserve_emergency_mode(&self) {
+        let slot = self.test_f.get_clock().await.slot;
+        let reserve_key = self.bank_f.load().await.integration_acc_1;
+        let mut account = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut account.data[8..]);
+        reserve.emergency_mode = 1;
+        reserve.slot = slot;
+        reserve.stale = 0;
+        reserve.price_status = 0;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
     pub async fn load_user_accounted_collateral(
         &self,
         user: &MarginfiAccountFixture,
