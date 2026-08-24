@@ -23,10 +23,10 @@ Use `distill_kamino_macro_idl.py` to generate minimal Kamino IDLs for macro gene
 
 ### 1. Fetch raw Kamino lending IDL
 
-From `scripts/raw_idl/` (or any folder):
+`./scripts/update_idls.sh` does this for every venue. To do it by hand:
 
 ```bash
-anchor idl fetch KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD > k_lend_idl_xxx.json --provider.cluster mainnet
+curl -sSfL https://raw.githubusercontent.com/Kamino-Finance/klend-sdk/master/src/idl/klend.json -o k_lend_idl_xxx.json
 ```
 
 ### 2. Refresh `idls-complete/` first (full IDs)
@@ -45,8 +45,8 @@ If needed, convert/fetch your final full file and write it to:
 idls-complete/kamino_lending.json
 ```
 
-Note: Kamino's IDL is in a legacy format with various compatibility issues: use
-`distill_kamino_idl.sh` to create a useable version for the TS side.
+Note: Kamino's IDL is in a legacy format with various compatibility issues; `update_idls.sh` runs
+`anchor idl convert` on it to create a useable version for the TS side.
 
 ### 3. Generate minimal canonical IDs in `idls/`
 

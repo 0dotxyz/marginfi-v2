@@ -727,10 +727,10 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift", drift_mocks::drift::ID, None);
-            program.add_program("juplend_lending", juplend_mocks::ID, None);
-            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program("juplend_earn", juplend_mocks::ID, None);
+            program.add_program("liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
-                "juplend_rewards_rate_model",
+                "lending_reward_rate_model",
                 juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
