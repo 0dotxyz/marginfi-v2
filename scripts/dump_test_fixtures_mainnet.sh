@@ -80,9 +80,9 @@ dump_program "${DRIFT_PROGRAM_ID}" "${OUT_DIR}/drift.so"
 dump_program "${SOLEND_PROGRAM_ID}" "${OUT_DIR}/solend.so"
 dump_program "${SPL_SINGLE_POOL_PROGRAM_ID}" "${OUT_DIR}/spl_single_pool.so"
 
-dump_program "${JUPLEND_LENDING_PROGRAM_ID}" "${OUT_DIR}/juplend_lending.so"
-dump_program "${JUPLEND_LIQUIDITY_PROGRAM_ID}" "${OUT_DIR}/juplend_liquidity.so"
-dump_program "${JUPLEND_REWARDS_RATE_MODEL_PROGRAM_ID}" "${OUT_DIR}/juplend_rewards_rate_model.so"
+dump_program "${JUPLEND_LENDING_PROGRAM_ID}" "${OUT_DIR}/juplend_earn.so"
+dump_program "${JUPLEND_LIQUIDITY_PROGRAM_ID}" "${OUT_DIR}/liquidity.so"
+dump_program "${JUPLEND_REWARDS_RATE_MODEL_PROGRAM_ID}" "${OUT_DIR}/lending_reward_rate_model.so"
 
 dump_program "${TOKEN_METADATA_PROGRAM_ID}" "${OUT_DIR}/token_metadata.so"
 
