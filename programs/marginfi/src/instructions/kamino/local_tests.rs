@@ -517,4 +517,13 @@ mod tests {
         let col = r.liquidity_to_collateral(2_500_000).unwrap();
         assert!(50_000_000 - col < 2);
     }
+
+    /// We read `emergency_mode` out of a padding run, so a wrong offset silently reads garbage.
+    /// Kamino's `ReserveConfig` starts at 4848 and the field is its 9th byte.
+    #[test]
+    fn minimal_reserve_field_offsets_match_kamino() {
+        assert_eq!(std::mem::offset_of!(MinimalReserve, emergency_mode), 4856);
+        assert_eq!(std::mem::offset_of!(MinimalReserve, price_status), 17);
+        assert_eq!(std::mem::offset_of!(MinimalReserve, lending_market), 24);
+    }
 }

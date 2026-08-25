@@ -1604,6 +1604,14 @@ fn calc_weighted_asset_value_standalone(
                 .as_ref()
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
+            // Worth nothing for new borrows, but keeps Maintenance value for liquidation.
+            if !price_feed.has_borrow_power()
+                && matches!(requirement_type, RequirementType::Initial)
+            {
+                debug!("Bank without borrow power is worth 0 for Initial margin");
+                return Ok((I80F48::ZERO, I80F48::ZERO, 0));
+            }
+
             // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
             let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 

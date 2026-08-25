@@ -87,15 +87,15 @@ pub struct MinimalReserve {
     /// Token or Token22. If token22, note that Kamino does not support all Token22 extensions.
     pub token_program: Pubkey,
     // Padding to completion of ReserveLiquidity
-    padding2_part1: [u8; 256],
-    padding2_part2: [u8; 128],
-    padding2_part3: [u8; 24],
-    padding3: [u8; 512],
+    padding_1: [u8; 256],
+    padding_2: [u8; 128],
+    padding_3: [u8; 24],
+    padding_4: [u8; 512],
     // end of reserve liquidity
-    padding_part1: [u8; 512],
-    padding_part2: [u8; 512],
-    padding_part3: [u8; 128],
-    padding_part4: [u8; 48],
+    padding_5: [u8; 512],
+    padding_6: [u8; 512],
+    padding_7: [u8; 128],
+    padding_8: [u8; 48],
 
     // ReserveCollateral section
     /// Mints collateral tokens
@@ -109,16 +109,27 @@ pub struct MinimalReserve {
     /// * A PDA
     pub collateral_supply_vault: Pubkey,
 
-    padding1_reserve_collateral: [u8; 512],
-    padding2_reserve_collateral: [u8; 512],
+    padding_9: [u8; 512],
+    padding_10: [u8; 512],
+    padding_11: [u8; 1024],
+    padding_12: [u8; 128],
+    padding_13: [u8; 32],
+    padding_14: [u8; 24],
 
-    // Remaining padding to match account size
-    padding4_part1: [u8; 4096],
-    padding4_part2: [u8; 512],
-    padding4_part3: [u8; 256],
-    padding4_part4: [u8; 64],
-    padding4_part5: [u8; 32],
-    padding4_part6: [u8; 8],
+    /// `ReserveConfig.emergency_mode`. When set, `refresh_reserve` clears the price status:
+    /// https://github.com/Kamino-Finance/klend/blob/release/v1.25.0/programs/klend/src/lending_market/lending_operations.rs#L67-L70
+    pub emergency_mode: u8,
+
+    padding_15: [u8; 2048],
+    padding_16: [u8; 512],
+    padding_17: [u8; 256],
+    padding_18: [u8; 64],
+    padding_19: [u8; 7],
+    padding_20: [u8; 512],
+    padding_21: [u8; 256],
+    padding_22: [u8; 64],
+    padding_23: [u8; 32],
+    padding_24: [u8; 8],
 }
 
 // Notable Kamino naming conventions:
@@ -211,6 +222,11 @@ impl MinimalReserve {
     /// always fail
     pub fn is_stale(&self, current_slot: u64) -> bool {
         self.slot < current_slot
+    }
+
+    /// True if Kamino put this reserve into emergency mode.
+    pub fn is_emergency_mode(&self) -> bool {
+        self.emergency_mode != 0
     }
 }
 
