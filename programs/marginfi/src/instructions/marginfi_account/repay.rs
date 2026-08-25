@@ -126,10 +126,7 @@ pub fn lending_account_repay<'info>(
         &clock,
     )?;
 
-    if authority.key() == group.risk_admin
-        && bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
-        && repay_all
-    {
+    if tokenless_repayment {
         // In some rare cases (e.g. super illiquid token sunset) we allow risk admin
         // to "repay" the debt with nothing. Hence we skip the actual transfer here.
 
