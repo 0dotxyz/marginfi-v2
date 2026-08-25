@@ -387,8 +387,13 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
     old_account.set_flag(ACCOUNT_DISABLED, false);
     old_account_f.set_account(&old_account).await?;
 
-    let (new_marginfi_account_pda, _bump) =
-        MarginfiAccount::derive_pda(&test_f.marginfi_group.key, &new_authority, 0, None, &marginfi::ID);
+    let (new_marginfi_account_pda, _bump) = MarginfiAccount::derive_pda(
+        &test_f.marginfi_group.key,
+        &new_authority,
+        0,
+        None,
+        &marginfi::ID,
+    );
 
     let transfer_ix = Instruction {
         program_id: marginfi::ID,
