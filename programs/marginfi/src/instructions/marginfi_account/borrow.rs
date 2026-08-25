@@ -5,7 +5,7 @@ use crate::{
     math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
             run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
@@ -15,8 +15,8 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank_with_cache, is_marginfi_asset_tag,
-        record_withdrawal_outflow, validate_asset_tags, validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank_with_cache, record_withdrawal_outflow,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -29,8 +29,8 @@ use marginfi_type_crate::{
         EMPTY_BALANCE_THRESHOLD, LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 

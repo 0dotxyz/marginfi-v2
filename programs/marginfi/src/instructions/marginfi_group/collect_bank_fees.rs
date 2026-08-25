@@ -1,5 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankCollectFeesEvent};
-use crate::state::bank::{BankImpl, BankVaultType};
+use crate::state::bank::BankImpl;
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{bank_signer, math_error, MarginfiResult};
 use crate::{check, utils, MarginfiError};
@@ -14,7 +14,7 @@ use marginfi_type_crate::{
     constants::{
         FEE_VAULT_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
-    types::{Bank, FeeState, MarginfiGroup},
+    types::{Bank, BankVaultType, FeeState, MarginfiGroup},
 };
 use std::cmp::min;
 

@@ -112,6 +112,10 @@ impl MarginfiGroup {
     /// Struct size of the PREVIOUS (v1) group layout — the size of accounts created before
     /// `_padding_2` existed, and a byte-identical prefix of the current layout.
     pub const V1_LEN: usize = 1056;
+
+    pub fn program_fees_enabled(&self) -> bool {
+        (self.group_flags & PROGRAM_FEES_ENABLED) != 0
+    }
 }
 
 impl Default for MarginfiGroup {
@@ -119,6 +123,9 @@ impl Default for MarginfiGroup {
         Self::zeroed()
     }
 }
+
+/// `MarginfiGroup.group_flags` bit 0 — if set, program-level fees are enabled.
+pub const PROGRAM_FEES_ENABLED: u64 = 1;
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]

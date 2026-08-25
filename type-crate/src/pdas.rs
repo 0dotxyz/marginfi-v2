@@ -1,4 +1,5 @@
 use crate::constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, JUPLEND_F_TOKEN_VAULT_SEED};
+use crate::types::BankVaultType;
 use anchor_lang::prelude::*;
 
 pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
@@ -267,4 +268,20 @@ pub fn derive_drift_user_stats(authority: &Pubkey) -> (Pubkey, u8) {
         &[DRIFT_USER_STATS_SEED.as_bytes(), authority.as_ref()],
         &DRIFT_PROGRAM_ID,
     )
+}
+
+pub fn derive_bank_vault(
+    bank_pk: &Pubkey,
+    vault_type: BankVaultType,
+    program_id: &Pubkey,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(crate::bank_seed!(vault_type, bank_pk), program_id)
+}
+
+pub fn derive_bank_vault_authority(
+    bank_pk: &Pubkey,
+    vault_type: BankVaultType,
+    program_id: &Pubkey,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(crate::bank_authority_seed!(vault_type, bank_pk), program_id)
 }

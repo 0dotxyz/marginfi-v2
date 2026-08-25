@@ -6,7 +6,9 @@ use crate::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar, Hashable,
     },
     prelude::*,
-    state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
+    state::marginfi_account::{
+        check_account_init_health, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+    },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
@@ -143,6 +145,10 @@ pub fn lending_account_end_flashloan<'info>(
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
     )?;
+
+    if marginfi_account.lending_account.has_liabilities() {
+        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    }
 
     Ok(())
 }

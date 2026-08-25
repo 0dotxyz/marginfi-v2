@@ -1761,7 +1761,7 @@ async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Resul
         blockhash,
     );
     let result = {
-        let mut ctx = test_f.context.borrow_mut();
+        let ctx = test_f.context.borrow_mut();
         ctx.banks_client.process_transaction(tx).await
     };
 

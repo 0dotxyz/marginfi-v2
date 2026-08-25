@@ -1,7 +1,4 @@
-use crate::{
-    bank_signer, state::bank::BankVaultType, utils::is_juplend_asset_tag, MarginfiError,
-    MarginfiResult,
-};
+use crate::{bank_signer, utils::is_juplend_asset_tag, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -12,7 +9,7 @@ use juplend_mocks::juplend_earn::cpi::deposit;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
-use marginfi_type_crate::types::{Bank, BankOperationalState};
+use marginfi_type_crate::types::{Bank, BankOperationalState, BankVaultType};
 
 /// Initialize the bank-level JupLend position used by marginfi.
 ///

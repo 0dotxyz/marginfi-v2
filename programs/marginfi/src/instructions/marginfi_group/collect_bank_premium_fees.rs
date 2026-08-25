@@ -1,5 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolPremiumFeesCollectedEvent};
-use crate::state::bank::{BankImpl, BankVaultType};
+use crate::state::bank::BankImpl;
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{bank_signer, math_error, MarginfiResult};
 use crate::{check, utils, MarginfiError};
@@ -9,7 +9,7 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
-    types::{Bank, FeeState, MarginfiGroup},
+    types::{Bank, BankVaultType, FeeState, MarginfiGroup},
 };
 use std::cmp::min;
 

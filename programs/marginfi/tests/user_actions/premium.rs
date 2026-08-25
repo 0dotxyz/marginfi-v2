@@ -382,7 +382,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
     advance_clock(&test_f, YEAR).await;
 
     let vault_before = usdc_bank_f
-        .get_vault_token_account(marginfi::state::bank::BankVaultType::Liquidity)
+        .get_vault_token_account(marginfi_type_crate::types::BankVaultType::Liquidity)
         .await
         .balance()
         .await;
@@ -404,7 +404,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
     assert_eq_noise!(collected, I80F48::from(native!(10, "USDC")), I80F48!(50));
 
     let vault_after = usdc_bank_f
-        .get_vault_token_account(marginfi::state::bank::BankVaultType::Liquidity)
+        .get_vault_token_account(marginfi_type_crate::types::BankVaultType::Liquidity)
         .await
         .balance()
         .await;
@@ -2533,7 +2533,7 @@ async fn premium_story5_dormant_account_becomes_liquidatable() -> anyhow::Result
 #[tokio::test]
 async fn premium_sunset_workflow_retag_settle_then_deactivate() -> anyhow::Result<()> {
     const TAG_UNUSED: u16 = 999;
-    let mut test_f = premium_test_fixture().await;
+    let test_f = premium_test_fixture().await;
     let group_f = &test_f.marginfi_group;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let (_lender, borrower, borrower_usdc) = setup_borrower(&test_f, 1_000.0).await;
