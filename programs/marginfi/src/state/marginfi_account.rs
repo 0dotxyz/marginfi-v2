@@ -1651,9 +1651,8 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
 ///
 /// Calculates asset or liability value with appropriate weights and price biases. When
 /// `need_premium_price` is set (asset legs of premium-relevant accounts only), the returned
-/// 5th element is the UNBIASED RealTime price for the premium scratch — derived from the same
-/// normalization pass as the health price (see `PriceAdapter::get_health_and_premium_prices`),
-/// so it costs ~nothing extra.
+/// 5th element is the requirement-typed price for the premium scratch — derived from the same
+/// normalization pass as the health price, so it costs ~nothing extra.
 #[inline(always)]
 fn calc_weighted_value_for_balance(
     balance: &Balance,
