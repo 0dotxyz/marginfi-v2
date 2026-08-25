@@ -2,9 +2,12 @@ import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "../../utils/litesvm";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
+import * as fs from "fs";
+import * as path from "path";
 import {
   bankKeypairA,
   bankKeypairUsdc,
+  bankrunContext,
   bankrunProgram,
   bankRunProvider,
   ecosystem,
@@ -13,7 +16,11 @@ import {
   oracles,
   users,
 } from "../../rootHooks";
-import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "../../utils/types";
+import {
+  CLOSE_ENABLED_FLAG,
+  defaultBankConfig,
+  ORACLE_SETUP_PYTH_PUSH,
+} from "../../utils/types";
 import { addBankWithSeed } from "../../utils/group-instructions";
 import {
   composeRemainingAccounts,
@@ -159,5 +166,69 @@ describe("Close bank", () => {
 
     const info = await provider.connection.getAccountInfo(bankKey);
     assert.isNull(info);
+  });
+
+  // Uses a real mainnet fixture: the legacy staked bank Hco1P3dGRXz3ZGFvMkbDgghZQy47Tp7vp7koSYRvP6nm
+  // (MRGN3). It predates 0.1.4, so CLOSE_ENABLED_FLAG is unset and a normal close is rejected — but
+  // it holds zero shares/emissions, so it can be force-closed. The fixture's `group` field is
+  // re-pointed to the test group (whose admin is `groupAdmin`) during fixture prep.
+  describe("force_close", () => {
+    const FORCE_BANK = new PublicKey(
+      "Hco1P3dGRXz3ZGFvMkbDgghZQy47Tp7vp7koSYRvP6nm"
+    );
+
+    before(() => {
+      const fixture = JSON.parse(
+        fs.readFileSync(
+          path.resolve(__dirname, "../../fixtures/mainnet_force_close_bank.json"),
+          "utf8"
+        )
+      );
+      bankrunContext.setAccount(new PublicKey(fixture.pubkey), {
+        lamports: Number(fixture.account.lamports),
+        owner: new PublicKey(fixture.account.owner),
+        executable: fixture.account.executable,
+        rentEpoch: Number(fixture.account.rentEpoch ?? 0),
+        data: Buffer.from(fixture.account.data[0], "base64"),
+      });
+    });
+
+    it("rejects a normal close (CLOSE_ENABLED_FLAG unset)", async () => {
+      const bank = await program.account.bank.fetch(FORCE_BANK);
+      assert.equal(bank.flags.toNumber() & CLOSE_ENABLED_FLAG, 0);
+
+      await expectFailedTxWithError(
+        async () => {
+          await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+            new Transaction().add(
+              await closeBank(groupAdmin.mrgnProgram, { bank: FORCE_BANK })
+            )
+          );
+        },
+        "BankCannotClose",
+        6081
+      );
+
+      assert.isNotNull(await provider.connection.getAccountInfo(FORCE_BANK));
+    });
+
+    it("closes with force_close = true", async () => {
+      const groupBefore = await program.account.marginfiGroup.fetch(
+        marginfiGroup.publicKey
+      );
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await closeBank(groupAdmin.mrgnProgram, {
+            bank: FORCE_BANK,
+            forceClose: true,
+          })
+        )
+      );
+      const groupAfter = await program.account.marginfiGroup.fetch(
+        marginfiGroup.publicKey
+      );
+      assert.equal(groupAfter.banks, groupBefore.banks - 1);
+      assert.isNull(await provider.connection.getAccountInfo(FORCE_BANK));
+    });
   });
 });

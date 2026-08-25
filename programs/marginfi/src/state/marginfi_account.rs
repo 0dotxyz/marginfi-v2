@@ -79,7 +79,6 @@ pub trait MarginfiAccountImpl {
     fn initialize(&mut self, group: Pubkey, authority: Pubkey, current_timestamp: u64);
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
-    fn get_flag(&self, flag: u64) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -286,10 +285,6 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.account_flags &= !flag;
     }
 
-    fn get_flag(&self, flag: u64) -> bool {
-        self.account_flags & flag != 0
-    }
-
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
         // orders one account can open.
@@ -493,30 +488,6 @@ fn get_cached_price_with_confidence(
     }
 }
 
-fn get_same_asset_weight_for_balance(
-    balance: &Balance,
-    bank: &Bank,
-    requirement_type: RequirementType,
-    reconciled_emode_config: &ReconciledEmodeConfig,
-) -> Option<I80F48> {
-    if balance.is_empty(BalanceSide::Assets)
-        || !reconciled_emode_config.same_asset.is_enabled()
-        || bank.mint != reconciled_emode_config.same_asset.mint
-        || bank.config.oracle_keys[0] != reconciled_emode_config.same_asset.oracle_key
-        || bank.config.oracle_setup.feed_family() != reconciled_emode_config.same_asset.feed_family
-        || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
-        || !matches!(bank.config.risk_tier, RiskTier::Collateral)
-        || matches!(
-            (bank.config.operational_state, requirement_type),
-            (BankOperationalState::ReduceOnly, RequirementType::Initial)
-        )
-    {
-        return None;
-    }
-
-    Some(reconciled_emode_config.same_asset.asset_weight)
-}
-
 #[inline(always)]
 fn calc_weighted_asset_value_cached_standalone(
     balance: &Balance,
@@ -528,26 +499,16 @@ fn calc_weighted_asset_value_cached_standalone(
         RiskTier::Collateral => {
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
@@ -1591,12 +1552,15 @@ fn calc_weighted_asset_value_standalone(
 ) -> MarginfiResult<(I80F48, I80F48, u32)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
-            // ReduceOnly banks should not be counted as collateral for Initial checks
+            // Paused/ReduceOnly banks should not be counted as collateral for Initial checks
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO, 0));
             }
 
@@ -1629,21 +1593,8 @@ fn calc_weighted_asset_value_standalone(
                 .as_ref()
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
-            // Determine asset weight (emode or bank default)
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
+            let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
@@ -1984,13 +1935,18 @@ impl<'a> BankAccountWrapper<'a> {
     /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
     /// Returns `(spl_withdraw_amount, asset_share_delta)`.
     pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<(u64, I80F48)> {
-        let balance = &mut self.balance;
-        let bank = &mut self.bank;
+        let total_asset_shares: I80F48;
+        let current_asset_amount: I80F48;
+        let current_liability_amount: I80F48;
+        {
+            let balance = &mut self.balance;
+            let bank = &mut self.bank;
 
-        let total_asset_shares: I80F48 = balance.asset_shares.into();
-        let current_asset_amount = bank.get_asset_amount(total_asset_shares)?;
-        let current_liability_amount =
-            bank.get_liability_amount(balance.liability_shares.into())?;
+            total_asset_shares = balance.asset_shares.into();
+            current_asset_amount = bank.get_asset_amount(total_asset_shares)?;
+            current_liability_amount =
+                bank.get_liability_amount(balance.liability_shares.into())?;
+        }
 
         debug!("Withdrawing all: {}", current_asset_amount);
 
@@ -1999,36 +1955,22 @@ impl<'a> BankAccountWrapper<'a> {
             MarginfiError::NoAssetFound
         );
 
+        // Note: a deposit can, in edge cases, have liability dust below the ZERO threshold. This
+        // dust becomes "bad debt"
         check!(
             current_liability_amount.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
             MarginfiError::NoAssetFound
         );
 
-        balance.close()?;
-
-        // Only clear the lock when this account is actually in receivership.
-        // The lock is bank-level global state, so clearing it unconditionally
-        // would affect unrelated accounts sharing the same bank.
-        if in_receivership {
-            bank.cache.clear_liquidation_price_cache_locked();
-        }
-
-        bank.decrement_lending_position_count();
-        bank.change_asset_shares(-total_asset_shares, false)?;
-        bank.check_utilization_ratio()?;
-
         let spl_withdraw_amount = current_asset_amount
             .checked_floor()
             .ok_or_else(math_error!())?;
+        let insurance_fee_amount = current_asset_amount
+            .checked_sub(spl_withdraw_amount)
+            .ok_or_else(math_error!())?;
 
-        bank.collected_insurance_fees_outstanding = {
-            current_asset_amount
-                .checked_sub(spl_withdraw_amount)
-                .ok_or_else(math_error!())?
-                .checked_add(bank.collected_insurance_fees_outstanding.into())
-                .ok_or_else(math_error!())?
-                .into()
-        };
+        self.close_balance_internal(in_receivership, insurance_fee_amount)?;
+        self.bank.check_utilization_ratio()?;
 
         let spl_withdraw_amount = spl_withdraw_amount
             .checked_to_num()
@@ -2042,12 +1984,17 @@ impl<'a> BankAccountWrapper<'a> {
     /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
     /// Returns `(spl_repay_amount, liability_share_delta)`.
     pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<(u64, I80F48)> {
-        let balance = &mut self.balance;
-        let bank = &mut self.bank;
+        let total_liability_shares: I80F48;
+        let current_liability_amount: I80F48;
+        let current_asset_amount: I80F48;
+        {
+            let balance = &mut self.balance;
+            let bank = &mut self.bank;
 
-        let total_liability_shares: I80F48 = balance.liability_shares.into();
-        let current_liability_amount = bank.get_liability_amount(total_liability_shares)?;
-        let current_asset_amount = bank.get_asset_amount(balance.asset_shares.into())?;
+            total_liability_shares = balance.liability_shares.into();
+            current_liability_amount = bank.get_liability_amount(total_liability_shares)?;
+            current_asset_amount = bank.get_asset_amount(balance.asset_shares.into())?;
+        }
 
         debug!("Repaying all: {}", current_liability_amount,);
 
@@ -2056,35 +2003,23 @@ impl<'a> BankAccountWrapper<'a> {
             MarginfiError::NoLiabilityFound
         );
 
+        // Note: a debt can, in edge cases, have asset dust below the ZERO threshold. This dust is
+        // credited to insurance.
         check!(
             current_asset_amount.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
             MarginfiError::NoLiabilityFound
         );
 
-        balance.close()?;
-
-        // Only clear the lock when this account is actually in receivership.
-        // The lock is bank-level global state, so clearing it unconditionally
-        // would affect unrelated accounts sharing the same bank.
-        if in_receivership {
-            bank.cache.clear_liquidation_price_cache_locked();
-        }
-
-        bank.decrement_borrowing_position_count();
-        bank.change_liability_shares(-total_liability_shares, false)?;
-
         let spl_deposit_amount = current_liability_amount
             .checked_ceil()
             .ok_or_else(math_error!())?;
+        let insurance_fee_amount = spl_deposit_amount
+            .checked_sub(current_liability_amount)
+            .ok_or_else(math_error!())?
+            .checked_add(current_asset_amount)
+            .ok_or_else(math_error!())?;
 
-        bank.collected_insurance_fees_outstanding = {
-            spl_deposit_amount
-                .checked_sub(current_liability_amount)
-                .ok_or_else(math_error!())?
-                .checked_add(bank.collected_insurance_fees_outstanding.into())
-                .ok_or_else(math_error!())?
-                .into()
-        };
+        self.close_balance_internal(in_receivership, insurance_fee_amount)?;
 
         let spl_repay_amount = spl_deposit_amount
             .checked_to_num()
@@ -2096,12 +2031,16 @@ impl<'a> BankAccountWrapper<'a> {
     /// When `in_receivership` is true, clears the bank's liquidation price cache lock
     /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
     pub fn close_balance(&mut self, in_receivership: bool) -> MarginfiResult<()> {
-        let balance = &mut self.balance;
-        let bank = &mut self.bank;
+        let current_liability_amount: I80F48;
+        let current_asset_amount: I80F48;
+        {
+            let balance = &mut self.balance;
+            let bank = &mut self.bank;
 
-        let current_liability_amount =
-            bank.get_liability_amount(balance.liability_shares.into())?;
-        let current_asset_amount = bank.get_asset_amount(balance.asset_shares.into())?;
+            current_liability_amount =
+                bank.get_liability_amount(balance.liability_shares.into())?;
+            current_asset_amount = bank.get_asset_amount(balance.asset_shares.into())?;
+        }
 
         check!(
             current_liability_amount.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
@@ -2114,6 +2053,26 @@ impl<'a> BankAccountWrapper<'a> {
             MarginfiError::IllegalBalanceState,
             "Balance has existing assets"
         );
+
+        self.close_balance_internal(in_receivership, current_asset_amount)?;
+
+        Ok(())
+    }
+
+    /// Finalizes a close (AFTER the caller has validated that the balance is closeable for its
+    /// instruction-specific semantics).
+    ///
+    /// Closing tolerates dust on the opposite side:
+    /// * A liability might still have dust asset shares. Pass what is leftover in
+    ///   `insurance_fee_amount` so the shares are not orphaned but rather added to insurance.
+    /// * Assets that still have a dust-liability will transform those dust shares into bad debt.
+    fn close_balance_internal(
+        &mut self,
+        in_receivership: bool,
+        insurance_fee_amount: I80F48,
+    ) -> MarginfiResult {
+        let balance = &mut self.balance;
+        let bank = &mut self.bank;
 
         let asset_shares: I80F48 = balance.asset_shares.into();
         let liability_shares: I80F48 = balance.liability_shares.into();
@@ -2129,18 +2088,15 @@ impl<'a> BankAccountWrapper<'a> {
             bank.cache.clear_liquidation_price_cache_locked();
         }
 
-        // Asset-side dust = real tokens still in the liquidity vault that the
-        // user never withdrew. Route to `collected_insurance_fees_outstanding`
-        // so vault content stays fully accounted for, mirroring the fractional-
-        // remainder handling in `withdraw_all`.
-        if current_asset_amount > I80F48::ZERO {
+        if insurance_fee_amount > I80F48::ZERO {
             bank.collected_insurance_fees_outstanding =
                 I80F48::from(bank.collected_insurance_fees_outstanding)
-                    .checked_add(current_asset_amount)
+                    .checked_add(insurance_fee_amount)
                     .ok_or_else(math_error!())?
                     .into();
         }
 
+        // Note: deposit limits only apply to positive share changes, so it doesn't matter here.
         bank.change_asset_shares(-asset_shares, false)?;
         // Liability-side dust = bad debt the borrower never repaid. Decrementing
         // here makes the loss explicit instead of leaving phantom shares in
@@ -2418,7 +2374,7 @@ mod test {
     }
 
     #[test]
-    fn same_asset_weight_applies_to_matching_collateral_only() {
+    fn get_asset_weight_applies_to_matching_collateral_only() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2428,10 +2384,6 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
@@ -2439,29 +2391,47 @@ mod test {
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(0.99)
         );
+
+        bank.config.asset_weight_init = I80F48!(1).into();
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(1)
+        );
+        bank.config.asset_weight_init = I80F48!(0).into();
+
+        bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        bank.config.risk_tier = RiskTier::Isolated;
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.config.risk_tier = RiskTier::Collateral;
+
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.config.oracle_keys[0] = reconciled.same_asset.oracle_key;
 
         bank.mint = Pubkey::new_unique();
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_requires_matching_feed_family() {
+    fn get_asset_weight_requires_matching_feed_family() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2471,10 +2441,6 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
@@ -2483,40 +2449,25 @@ mod test {
 
         // Integration setups in the same feed family qualify (kToken collateral vs native debt).
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(0.99)
         );
 
         bank.config.oracle_setup = OracleSetup::SwitchboardPull;
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
 
         bank.config.oracle_setup = OracleSetup::Fixed;
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_disabled_when_reconciled_family_missing() {
+    fn get_asset_weight_disabled_when_reconciled_family_missing() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2526,33 +2477,55 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
+    fn get_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
         bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
+            I80F48!(0.99)
+        );
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Equity, &reconciled),
+            I80F48::ONE
+        );
+    }
+
+    #[test]
+    fn paused_bank_assets_confer_no_initial_borrowing_power() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Paused;
         bank.config.oracle_setup = OracleSetup::PythPushOracle;
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
@@ -2568,32 +2541,23 @@ mod test {
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Maintenance,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
+            I80F48!(0.99)
         );
-        assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Equity,
-                &ReconciledEmodeConfig::default(),
-            ),
-            None
-        );
+
+        let (asset_value, price) = calc_weighted_asset_value_cached_standalone(
+            &balance,
+            &bank,
+            RequirementType::Initial,
+            &reconciled,
+        )
+        .unwrap();
+        assert_eq!(asset_value, I80F48::ZERO);
+        assert_eq!(price, I80F48::ZERO);
     }
 
     #[test]
@@ -3284,6 +3248,102 @@ mod test {
             assert_eq!(
                 bank.lending_position_count, 0,
                 "lending_position_count not decremented for above-threshold shares"
+            );
+        }
+
+        #[test]
+        fn repay_all_unwinds_opposite_asset_dust() {
+            let asset_dust = I80F48!(0.00005);
+            let liability_shares = I80F48::from_num(10);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                I80F48::ONE,
+                I80F48::ONE,
+                asset_dust,
+                liability_shares,
+                /* lending_count */ 0,
+                /* borrowing_count */ 1,
+            );
+            let total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+            let total_liability_shares_before = I80F48::from(bank.total_liability_shares);
+            let insurance_fees_before = I80F48::from(bank.collected_insurance_fees_outstanding);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.repay_all(false).unwrap();
+
+            assert_eq!(balance.active, 0, "balance slot not freed");
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                total_asset_shares_before - asset_dust,
+                "repay_all left asset dust in bank.total_asset_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_liability_shares),
+                total_liability_shares_before - liability_shares,
+                "repay_all did not remove liability shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.collected_insurance_fees_outstanding),
+                insurance_fees_before + asset_dust,
+                "repay_all did not route closed asset dust to insurance fees"
+            );
+            assert_eq!(
+                bank.lending_position_count, 0,
+                "lending_position_count incorrectly decremented for sub-threshold asset dust"
+            );
+            assert_eq!(
+                bank.borrowing_position_count, 0,
+                "borrowing_position_count not decremented for closed liability"
+            );
+        }
+
+        #[test]
+        fn withdraw_all_unwinds_opposite_liability_dust() {
+            let asset_shares = I80F48::from_num(10);
+            let liability_dust = I80F48!(0.00005);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                I80F48::ONE,
+                I80F48::ONE,
+                asset_shares,
+                liability_dust,
+                /* lending_count */ 1,
+                /* borrowing_count */ 0,
+            );
+            let total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+            let total_liability_shares_before = I80F48::from(bank.total_liability_shares);
+            let insurance_fees_before = I80F48::from(bank.collected_insurance_fees_outstanding);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.withdraw_all(false).unwrap();
+
+            assert_eq!(balance.active, 0, "balance slot not freed");
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                total_asset_shares_before - asset_shares,
+                "withdraw_all did not remove asset shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_liability_shares),
+                total_liability_shares_before - liability_dust,
+                "withdraw_all left liability dust in bank.total_liability_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.collected_insurance_fees_outstanding),
+                insurance_fees_before,
+                "withdraw_all should not route liability dust to insurance fees"
+            );
+            assert_eq!(
+                bank.lending_position_count, 0,
+                "lending_position_count not decremented for closed asset"
+            );
+            assert_eq!(
+                bank.borrowing_position_count, 0,
+                "borrowing_position_count incorrectly decremented for sub-threshold liability dust"
             );
         }
     }

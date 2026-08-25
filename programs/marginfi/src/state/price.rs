@@ -1,5 +1,6 @@
 use crate::constants::{
-    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
+    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID,
+    SVSP_PHANTOM_TOKEN_AMOUNT, SWITCHBOARD_PULL_ID,
 };
 use crate::state::bank_config::BankConfigImpl;
 use crate::state::lst_stake_price::{
@@ -354,7 +355,8 @@ impl OraclePriceFeedAdapter {
                 let lst_supply = lst_mint.supply;
                 check!(lst_supply > 0, MarginfiError::ZeroSupplyInStakePool);
 
-                let sol_pool_adjusted_balance = match bank.on_ramp_transition() {
+                let (sol_pool_adjusted_balance, effective_supply) = match bank.on_ramp_transition()
+                {
                     OnRampTransition::OnRampEnabled => {
                         let expected_onramp = expected_staked_onramp(bank)?;
                         if ais[3].key != &expected_onramp {
@@ -367,18 +369,24 @@ impl OraclePriceFeedAdapter {
                         }
 
                         let rent = Rent::get()?;
-                        staked_pool_net_asset_value(&ais[2], &ais[3], &rent)?
+                        // The full pool NAV includes SVSP's non-refundable 1 SOL bootstrap, which no LST is minted against.
+                        // The single-pool program prices against a notional supply of `raw supply + PHANTOM_TOKEN_AMOUNT`
+                        // so divide by the same to match what a withdrawal redeems.
+                        // See https://github.com/solana-program/single-pool/blob/main/program/src/processor.rs#L301
+                        let nav = staked_pool_net_asset_value(&ais[2], &ais[3], &rent)?;
+                        (nav, lst_supply.saturating_add(SVSP_PHANTOM_TOKEN_AMOUNT))
                     }
                     OnRampTransition::PreTransition => {
-                        // To be removed once SVSP update is rolled out (likely in 1.10)
-                        legacy_staked_pool_delegated_value(&ais[2])?
+                        // To be removed once SVSP update is rolled out (likely in 1.10). The legacy
+                        // numerator already subtracts the bootstrap, so it divides by raw supply.
+                        (legacy_staked_pool_delegated_value(&ais[2])?, lst_supply)
                     }
                     OnRampTransition::StakeOraclesDisabled => {
                         return Err(error!(MarginfiError::StakeOraclesDisabled));
                     }
                 };
 
-                // Note: exchange rate is `pool_nav / lst_supply`, but we will do the
+                // Note: exchange rate is `pool_nav / effective_supply`, but we will do the
                 // division last to avoid precision loss. Division does not need to be
                 // decimal-adjusted because both SOL and stake positions use 9 decimals
 
@@ -387,7 +395,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut feed = PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
                 let multiplier = I80F48::from_num(sol_pool_adjusted_balance)
-                    .checked_div(I80F48::from_num(lst_supply))
+                    .checked_div(I80F48::from_num(effective_supply))
                     .ok_or_else(math_error!())?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
@@ -398,14 +406,14 @@ impl OraclePriceFeedAdapter {
                 let adjusted_price = (feed.price.price as i128)
                     .checked_mul(sol_pool_adjusted_balance as i128)
                     .ok_or_else(math_error!())?
-                    .checked_div(lst_supply as i128)
+                    .checked_div(effective_supply as i128)
                     .ok_or_else(math_error!())?;
                 feed.price.price = adjusted_price.try_into().ok().ok_or_else(math_error!())?;
 
                 let adjusted_ema_price = (feed.ema_price.price as i128)
                     .checked_mul(sol_pool_adjusted_balance as i128)
                     .ok_or_else(math_error!())?
-                    .checked_div(lst_supply as i128)
+                    .checked_div(effective_supply as i128)
                     .ok_or_else(math_error!())?;
                 feed.ema_price.price = adjusted_ema_price
                     .try_into()
@@ -416,13 +424,13 @@ impl OraclePriceFeedAdapter {
                 feed.price.conf = mul_div_u64(
                     feed.price.conf,
                     sol_pool_adjusted_balance as u128,
-                    lst_supply as u128,
+                    effective_supply as u128,
                 )
                 .ok_or_else(math_error!())?;
                 feed.ema_price.conf = mul_div_u64(
                     feed.ema_price.conf,
                     sol_pool_adjusted_balance as u128,
-                    lst_supply as u128,
+                    effective_supply as u128,
                 )
                 .ok_or_else(math_error!())?;
 
@@ -2703,6 +2711,27 @@ mod tests {
             .unwrap()
             .try_into()
             .unwrap()
+    }
+
+    #[test]
+    fn svsp_phantom_supply_matches_canonical_redeemable_rate() {
+        // Report PoC (MFI-LOW-18): 3 SOL NAV, 2 SOL raw LST supply, 1 SOL SVSP phantom.
+        // Dividing by raw supply over-values (3 / 2 = 1.5); the single-pool program prices against
+        // `raw + PHANTOM_TOKEN_AMOUNT`, so the correct redeemable rate is 3 / (2 + 1) = 1.0.
+        assert_eq!(SVSP_PHANTOM_TOKEN_AMOUNT, 1_000_000_000);
+
+        let nav: u64 = 3_000_000_000;
+        let raw_supply: u64 = 2_000_000_000;
+        let effective_supply = raw_supply.saturating_add(SVSP_PHANTOM_TOKEN_AMOUNT);
+
+        let corrected = I80F48::from_num(nav)
+            .checked_div(I80F48::from_num(effective_supply))
+            .unwrap();
+        assert_eq!(corrected, I80F48::ONE);
+
+        // The uncorrected (raw-supply) rate would have over-valued at 1.5.
+        let buggy = I80F48::from_num(nav) / I80F48::from_num(raw_supply);
+        assert_eq!(buggy, I80F48::from_num(1.5));
     }
 
     #[test]

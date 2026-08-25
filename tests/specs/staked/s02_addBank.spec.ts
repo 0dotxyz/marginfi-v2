@@ -980,7 +980,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertBankrunTxFailed(result, 6052);
   });
 
-  it("(permissionless) Pulse staked bank (validator 0) with no on-ramp balance - same price as before, but multiplier changes", async () => {
+  it("(permissionless) Pulse staked bank (validator 0) with no on-ramp balance - same price, same multiplier", async () => {
     const tx = new Transaction().add(
       await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
         bank: validators[0].bank,
@@ -1004,15 +1004,14 @@ describe("Init group and add banks with asset category flags", () => {
       bank.cache.priceMultiplier,
     ).toNumber();
 
-    // The price multiplier grows by 1/40 because we now account for that one initial SOL
-    // in the stake pool. So the total NAV becomes 41 (1 + 4x deposits of 10 SOL to v0 in s01 test)
-    // and the math is changing from:
+    // The total NAV is 41 (1 + 4x deposits of 10 SOL to v0 in s01 test). SVSP prices against a
+    // notional supply of raw + 1 SOL phantom, so bootstrap and phantom cancel:
     // BEFORE: (41 - 1) / 40 = 1
-    // AFTER:  (41 + 0) / 40 = 1.025, where "+ 0" is for currently-zero on-ramp balance
-    assert.approximately(priceMultiplierWithoutOnRamp, 1.025, 0.000001);
+    // AFTER:  (41 + 0) / (40 + 1) = 1, where "+ 0" is for currently-zero on-ramp balance
+    assert.approximately(priceMultiplierWithoutOnRamp, 1.0, 0.000001);
   });
 
-  it("(user 0) Adds 9 SOL to the validator 0's on-ramp pool - multiplier changes again", async () => {
+  it("(user 0) Adds 9 SOL to the validator 0's on-ramp pool - multiplier changes", async () => {
     let tx = new Transaction();
     tx.add(
       SystemProgram.transfer({
@@ -1027,7 +1026,7 @@ describe("Init group and add banks with asset category flags", () => {
 
     const priceMultiplierWithOnRamp = await fetchLstPriceMultiplier();
 
-    // (41 + 9) / 40 = 1.25
-    assert.approximately(priceMultiplierWithOnRamp, 1.25, 0.000001);
+    // (41 + 9) / (40 + 1) = 50 / 41 = 1.2195...
+    assert.approximately(priceMultiplierWithOnRamp, 50 / 41, 0.000001);
   });
 });

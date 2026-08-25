@@ -3,7 +3,7 @@ use crate::{
     constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
@@ -34,7 +34,7 @@ use juplend_mocks::state::{
 };
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{

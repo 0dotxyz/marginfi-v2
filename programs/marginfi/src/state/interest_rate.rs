@@ -4,8 +4,8 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::SECONDS_PER_YEAR,
     types::{
-        InterestRateConfig, InterestRateConfigOpt, MarginfiGroup, RatePoint, INTEREST_CURVE_LEGACY,
-        INTEREST_CURVE_SEVEN_POINT,
+        u32_to_centi, u32_to_milli, InterestRateConfig, InterestRateConfigOpt, MarginfiGroup,
+        RatePoint, INTEREST_CURVE_LEGACY, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 
@@ -244,8 +244,8 @@ impl InterestRateCalc {
     /// * Points defined as 1: (0, Y1), 2-6: (X2-6, Y2-6), 7: (100, Y7), where 0 < X2-6 < 100
     #[inline]
     fn interest_rate_multipoint_curve(&self, ur: I80F48) -> Option<I80F48> {
-        let zero_rate: I80F48 = Self::rate_from_u32(self.zero_util_rate);
-        let hundred_rate: I80F48 = Self::rate_from_u32(self.hundred_util_rate);
+        let zero_rate: I80F48 = u32_to_milli(self.zero_util_rate);
+        let hundred_rate: I80F48 = u32_to_milli(self.hundred_util_rate);
 
         // The first point is at (0, zero_rate)
         let mut prev_util: I80F48 = I80F48::ZERO;
@@ -254,8 +254,8 @@ impl InterestRateCalc {
         let ur: I80F48 = ur.max(I80F48::ZERO).min(I80F48::ONE);
 
         for point in self.points.iter().filter(|point| point.util() != 0) {
-            let point_util: I80F48 = Self::util_from_u32(point.util());
-            let point_rate: I80F48 = Self::rate_from_u32(point.rate());
+            let point_util: I80F48 = u32_to_centi(point.util());
+            let point_rate: I80F48 = u32_to_milli(point.rate());
 
             if ur <= point_util {
                 return Self::lerp(prev_util, prev_rate, point_util, point_rate, ur);
@@ -305,17 +305,6 @@ impl InterestRateCalc {
         let scaled_delta: I80F48 = delta_y.checked_mul(proportion)?;
         // Safe: start_y + scaled_delta < end_y
         Some(start_y + scaled_delta)
-    }
-
-    #[inline]
-    fn rate_from_u32(rate: u32) -> I80F48 {
-        let ratio: I80F48 = I80F48::from_num(rate) / I80F48::from_num(u32::MAX);
-        ratio * I80F48::from_num(10)
-    }
-
-    #[inline]
-    fn util_from_u32(util: u32) -> I80F48 {
-        I80F48::from_num(util) / I80F48::from_num(u32::MAX)
     }
 
     pub fn get_fees(&self) -> Fees {

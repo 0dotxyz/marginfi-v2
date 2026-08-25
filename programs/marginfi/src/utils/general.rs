@@ -1,8 +1,8 @@
 use crate::{
-    bank_authority_seed, bank_seed, check,
+    check,
     events::RateLimitFlowEvent,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{OraclePriceFeedAdapter, OraclePriceWithMultiplier, PriceAdapter},
         rate_limiter::{
@@ -26,23 +26,12 @@ use anchor_spl::{
 };
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
-    },
+    constants::{ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOLEND},
     types::{
         Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
         OraclePriceWithConfidence, PriceBias, WrappedI80F48,
     },
 };
-
-pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_seed!(vault_type, bank_pk), &crate::ID)
-}
-
-pub fn find_bank_vault_authority_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_authority_seed!(vault_type, bank_pk), &crate::ID)
-}
 
 pub trait NumTraitsWithTolerance<T> {
     fn is_zero_with_tolerance(&self, t: T) -> bool;
@@ -447,14 +436,6 @@ macro_rules! assert_eq_with_tolerance {
             $tolerance
         );
     };
-}
-
-/// Helper function for constraint validation - checks if asset tag is valid for MarginFi operations
-pub fn is_marginfi_asset_tag(asset_tag: u8) -> bool {
-    matches!(
-        asset_tag,
-        ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED
-    )
 }
 
 /// Helper function for constraint validation - checks if asset tag is valid for Kamino operations

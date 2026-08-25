@@ -1,6 +1,6 @@
+use crate::state::bank::BankImpl;
 // Permissionless ix to propagate a group's staked collateral settings to any bank in that group.
 use crate::check;
-use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;

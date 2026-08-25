@@ -40,6 +40,12 @@ cfg_if::cfg_if! {
 /// The SPL single-validator stake pool program. Deployed under the same address on every cluster.
 pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
 
+/// The SPL single-pool program mints no tokens against its initial non-refundable 1 SOL bootstrap
+/// stake, so it prices deposits/withdrawals against a notional supply of `raw supply + this`
+/// (single-pool `PHANTOM_TOKEN_AMOUNT = LAMPORTS_PER_SOL`). Staked on-ramp pricing divides the full
+/// pool NAV by the same notional supply so the exchange rate matches what a withdrawal redeems.
+pub const SVSP_PHANTOM_TOKEN_AMOUNT: u64 = 1_000_000_000;
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "devnet")] {
         pub const SWITCHBOARD_PULL_ID: Pubkey = pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
@@ -47,6 +53,9 @@ cfg_if::cfg_if! {
         pub const SWITCHBOARD_PULL_ID: Pubkey = pubkey!("SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv");
     }
 }
+
+/// Minimum share supply before a bank accepts a permissionless same-mint emissions donation.
+pub const MIN_EMISSIONS_SHARE_SUPPLY: I80F48 = I80F48!(1_048_576); // 2^20
 
 pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111111111111111");
 pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");

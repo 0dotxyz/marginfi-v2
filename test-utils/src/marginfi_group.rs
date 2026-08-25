@@ -17,7 +17,6 @@ use marginfi::{
     },
     instruction::*,
     instructions::marginfi_group::StakedSettingsConfig,
-    state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
@@ -25,8 +24,8 @@ use marginfi_type_crate::constants::{
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
-    BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
-    MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
+    BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
+    InterestRateConfigOpt, MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
