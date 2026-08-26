@@ -347,7 +347,7 @@ export const makeKaminoWithdrawIx = async (
   );
 
   const flags =
-    (args.isWithdrawAll ? 1 : 0) | ((args.refreshReserve ?? false) ? 2 : 0);
+    (args.isWithdrawAll ? 1 : 0) | (args.refreshReserve ?? false ? 2 : 0);
 
   const ix = await program.methods
     .kaminoWithdraw(args.amount, flags === 0 ? null : flags)

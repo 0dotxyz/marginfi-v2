@@ -26,6 +26,7 @@ import {
   ecosystem,
   groupAdmin,
   juplendAccounts,
+  LIQUIDATION_FLAT_FEE,
   oracles,
   users,
 } from "../../rootHooks";
@@ -549,6 +550,11 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       liquidator.tokenBAccount,
     );
 
+    // groupAdmin (a separate, funded wallet) pays the flat liquidation fee instead of the receiver.
+    const feePayerSolBefore = Number(
+      await banksClient.getBalance(groupAdmin.wallet.publicKey)
+    );
+
     const rxLiquidationIxs = [
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_300_000 }),
       await refreshJupSimple(juplendPrograms.lending, { pool: jupPool }),
@@ -574,6 +580,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       await endLiquidationIx(liquidator.mrgnBankrunProgram!, {
         marginfiAccount: liquidateeAccountPk,
         remaining: remainingEnd,
+        feePayer: groupAdmin.wallet.publicKey,
       }),
     ];
 
@@ -591,10 +598,16 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     await processBankrunV0Transaction(
       bankrunContext,
       rxLiquidationTx,
-      [liquidator.wallet],
+      [liquidator.wallet, groupAdmin.wallet],
       false,
       true,
     );
+
+    // The flat liquidation fee was charged to the separate fee payer, not the receiver.
+    const feePayerSolAfter = Number(
+      await banksClient.getBalance(groupAdmin.wallet.publicKey)
+    );
+    assert.equal(feePayerSolBefore - feePayerSolAfter, LIQUIDATION_FLAT_FEE);
 
     const liquidatorUsdcAfter = await getTokenBalance(
       bankRunProvider,

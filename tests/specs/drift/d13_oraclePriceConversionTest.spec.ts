@@ -360,7 +360,12 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     const actualUsdcValue = new BN(
       Math.floor(assetValue.toNumber() * 10 ** ecosystem.usdcDecimals),
     );
-    assertBNApproximately(actualUsdcValue, expectedUsdcValue, new BN(2)); // TODO: why is this fluctuating?
+    // The ±2 base-unit slack is precision drift, not nondeterminism: the program keeps the
+    // price * interest * (1 - conf) * shares product in fractional I80F48 the whole way, whereas
+    // `calculateExpectedValue` truncates toward zero at each chained BN integer division; the single
+    // base-unit rounding on our side is the `toNumber()` + Math.floor read-back of the program's
+    // I80F48 assetValue.
+    assertBNApproximately(actualUsdcValue, expectedUsdcValue, new BN(2));
   });
 
   it("Validates Token A oracle price conversion matches health check valuation", async () => {

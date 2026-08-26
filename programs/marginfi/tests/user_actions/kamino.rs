@@ -1,7 +1,14 @@
+use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token::error::TokenError;
+use fixed::types::I80F48;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
-use marginfi::{assert_eq_with_tolerance, errors::MarginfiError};
+use marginfi::{
+    assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
+};
 use solana_program_test::*;
+use solana_sdk::{
+    clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
+};
 use test_case::test_case;
 
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
@@ -133,6 +140,81 @@ async fn kamino_withdraw_local_instruction_call_success(
     Ok(())
 }
 
+/// e2e: the bank rate limiter must debit a Kamino withdraw in underlying liquidity, not collateral
+/// shares — so it nets against the deposit inflow (which is recorded in underlying).
+#[tokio::test]
+async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    // Enable a generous hourly limit so the withdraw is recorded but not blocked. The group admin
+    // is the payer (default test settings).
+    let hourly_limit = 1_000_000_000_000u64;
+    let admin = setup.test_f.payer_keypair();
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureBankRateLimits {
+            group: setup.test_f.marginfi_group.key,
+            admin: admin.pubkey(),
+            bank: setup.bank_f.key,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureBankRateLimits {
+            hourly_max_outflow: Some(hourly_limit),
+            daily_max_outflow: None,
+        }
+        .data(),
+    };
+    {
+        let ctx = setup.test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&admin.pubkey()),
+            &[&admin],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+
+    let withdraw_amount = 1_000_000_000u64; // collateral shares
+    let expected_underlying = setup
+        .load_reserve()
+        .await
+        .collateral_to_liquidity(withdraw_amount)?;
+    assert_ne!(
+        expected_underlying, withdraw_amount,
+        "fixture exchange rate must differ from 1 for this test to be meaningful"
+    );
+
+    setup
+        .test_f
+        .run_kamino_withdraw(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            withdraw_amount,
+            Some(false),
+        )
+        .await?;
+
+    let bank = setup.bank_f.load().await;
+    let now = {
+        let ctx = setup.test_f.context.borrow_mut();
+        ctx.banks_client.get_sysvar::<Clock>().await?.unix_timestamp
+    };
+    assert_eq_with_tolerance!(
+        bank.rate_limiter.hourly.remaining_capacity(now),
+        hourly_limit as i64 - expected_underlying as i64,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i64
+    );
+
+    Ok(())
+}
+
 // (wallet_funding_ui, deposit_native)
 #[test_case(0.01, 1_000_000)] // try deposit 1 USDC with 0.01 wallet
 #[test_case(1.0, 100_000_000)] // try deposit 100 USDC with 1 wallet
@@ -211,5 +293,56 @@ async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
         "marginfi accounted collateral should be unchanged on oversized withdraw failure"
     );
 
+    Ok(())
+}
+
+/// The circuit breaker tracks the multiplier-adjusted effective price on integration banks: for a
+/// Kamino bank the risk price is base_oracle_price x reserve_exchange_rate. Enabling the breaker
+/// must seed the reference at that adjusted price, not the raw base, or an integration bank with a
+/// non-unit multiplier would spuriously trip on its first observation.
+#[tokio::test]
+async fn kamino_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+
+    // Deposit then withdraw: the Kamino withdraw path warms the bank cache with the raw base price
+    // and the reserve exchange-rate multiplier (deposit only refreshes interest rates).
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 100_000_000)
+        .await?;
+    setup
+        .test_f
+        .run_kamino_withdraw(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            10_000_000,
+            Some(false),
+        )
+        .await?;
+
+    let warmed = setup.bank_f.load().await;
+    let raw_price: I80F48 = warmed.cache.last_oracle_price.into();
+    let multiplier: I80F48 = warmed.cache.price_multiplier.into();
+    assert!(
+        raw_price > I80F48::ZERO,
+        "cache should be warm after withdraw"
+    );
+    assert_ne!(
+        multiplier,
+        I80F48::ONE,
+        "the Kamino reserve must produce a non-unit multiplier for this test to be meaningful"
+    );
+
+    // Enable the breaker; the reference must be the effective (multiplier-adjusted) price.
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
+
+    let enabled = setup.bank_f.load().await;
+    let seeded_ref: I80F48 = enabled.cb_reference_price.into();
+    assert_eq!(seeded_ref, raw_price * multiplier);
     Ok(())
 }

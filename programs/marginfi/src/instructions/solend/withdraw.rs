@@ -3,10 +3,11 @@ use crate::{
     constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -27,7 +28,8 @@ use anchor_spl::token_interface::{
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -86,7 +88,14 @@ pub fn solend_withdraw<'info>(
         let clock = Clock::get()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -125,9 +134,15 @@ pub fn solend_withdraw<'info>(
         } else {
             amount
         };
+
+        let native_outflow = ctx
+            .accounts
+            .integration_acc_1
+            .load()?
+            .collateral_to_liquidity(rate_limit_amount)?;
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
+            native_outflow,
             rate_limit_amount,
             price,
             &mut bank,
@@ -247,6 +262,7 @@ pub fn solend_withdraw<'info>(
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
             check_account_init_health(
                 &marginfi_account,
+                &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;
@@ -267,6 +283,12 @@ pub fn solend_withdraw<'info>(
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
+
+            // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
+            // price has jumped past the breach threshold; a liability-free withdraw skips it.
+            if marginfi_account.lending_account.has_liabilities() {
+                run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+            }
         } else {
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,
             // that case the cache doesn't update and this does nothing.

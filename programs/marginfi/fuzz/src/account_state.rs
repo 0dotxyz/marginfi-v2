@@ -13,8 +13,8 @@ use anchor_spl::token_2022::spl_token_2022::{
     state::Mint,
 };
 use bumpalo::Bump;
-use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::constants::FEE_STATE_SEED;
+use marginfi_type_crate::types::BankVaultType;
 use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
 use safe_transmute::transmute_to_bytes_mut;
 use solana_program::{
@@ -76,7 +76,9 @@ impl AccountsState {
                 false,
                 true,
                 self.bump.alloc(9999999),
-                self.allocate_dex_owned_account(256 + 8),
+                self.allocate_dex_owned_account(
+                    std::mem::size_of::<marginfi_type_crate::types::FeeState>() + 8,
+                ),
                 self.bump.alloc(program_id),
                 false,
             ),

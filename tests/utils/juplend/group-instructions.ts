@@ -86,7 +86,8 @@ export const makeJuplendInitPositionIx = async (
         bank: accounts.bank,
         lendingAdmin: accounts.pool.lendingAdmin,
         supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-        lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
+        lendingSupplyPositionOnLiquidity:
+          accounts.pool.supplyPositionOnLiquidity,
         rateModel: accounts.pool.rateModel,
         vault: accounts.pool.vault,
         liquidity: accounts.pool.liquidity,

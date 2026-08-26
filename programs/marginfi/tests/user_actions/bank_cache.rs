@@ -1,3 +1,4 @@
+use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_eq_noise, marginfi_account::MarginfiAccountFixture, prelude::*};
@@ -122,6 +123,16 @@ async fn bank_cache_pulse_refreshes_price_from_oracle() -> anyhow::Result<()> {
         I80F48::ZERO,
         "cache should be zeroed before pulse"
     );
+    let liab_share_value_before: I80F48 = bank_before_pulse.liability_share_value.into();
+
+    // Advance the clock (within oracle max age) so the pulse has interest to accrue
+    let time_delta = 60;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp += time_delta;
+        ctx.set_sysvar(&clock);
+    }
 
     test_f
         .marginfi_group
@@ -137,6 +148,21 @@ async fn bank_cache_pulse_refreshes_price_from_oracle() -> anyhow::Result<()> {
     assert_eq_noise!(cached_price_after_pulse, expected_price);
     // Note: No confidence bands in the Rust tests
     assert_eq_noise!(cached_conf_after_pulse, I80F48::ZERO);
+
+    // Pulse also accrues interest
+    let liab_share_value_after: I80F48 = bank_after_pulse.liability_share_value.into();
+    assert!(
+        liab_share_value_after > liab_share_value_before,
+        "pulse should accrue interest on the bank"
+    );
+    assert_eq!(
+        bank_after_pulse.cache.interest_accumulated_for,
+        time_delta as u32
+    );
+    assert_eq!(
+        bank_after_pulse.last_update,
+        bank_before_pulse.last_update + time_delta
+    );
 
     Ok(())
 }

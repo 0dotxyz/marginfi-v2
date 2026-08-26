@@ -21,6 +21,8 @@ use solana_sha256_hasher::hash;
 declare_id!(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID);
 
 declare_program!(kamino_lending);
+#[cfg(not(target_os = "solana"))]
+declare_program!(kamino_lending_complete);
 declare_program!(kamino_farms);
 
 #[program]

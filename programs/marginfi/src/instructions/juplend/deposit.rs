@@ -2,10 +2,10 @@ use crate::{
     bank_signer,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -26,7 +26,7 @@ use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate};
 use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
 use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup};
 use marginfi_type_crate::{constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_DISABLED};
 
 /// Deposit into a JupLend lending pool through a marginfi account.
@@ -46,7 +46,11 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
+        )?;
     }
 
     // Refresh the exchange price (interest/rewards) for this slot.

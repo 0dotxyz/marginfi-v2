@@ -5,17 +5,17 @@ use crate::{
     math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank_with_cache, is_marginfi_asset_tag,
-        record_withdrawal_outflow, validate_asset_tags, validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank_with_cache, record_withdrawal_outflow,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -28,8 +28,8 @@ use marginfi_type_crate::{
         EMPTY_BALANCE_THRESHOLD, LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -88,7 +88,7 @@ pub fn lending_account_borrow<'info>(
         let mut bank = bank_loader.load_mut()?;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, false)?;
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
         let origination_fee_rate: I80F48 = bank
@@ -214,10 +214,14 @@ pub fn lending_account_borrow<'info>(
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
     check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
+
+    // Revert if any involved bank's oracle price has jumped past the breach threshold.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;

@@ -93,7 +93,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
     for (let i = 0; i < NUM_KAMINO_BANKS; i++) {
       // Create Kamino market
       const market = await createKaminoMarket(
-        Array(32).fill(0), // USD quote currency
+        Array(32).fill(0) // USD quote currency
       );
 
       // Create Kamino reserve

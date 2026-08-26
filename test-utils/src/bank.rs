@@ -9,15 +9,12 @@ use anchor_lang::{
     InstructionData, ToAccountMetas,
 };
 use fixed::types::I80F48;
-use marginfi::{
-    bank_authority_seed,
-    state::{
-        bank::BankVaultType,
-        price::{OraclePriceFeedAdapter, PriceAdapter},
-    },
-    utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
+use marginfi::state::price::{OraclePriceFeedAdapter, PriceAdapter};
+use marginfi_type_crate::bank_authority_seed;
+use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
+use marginfi_type_crate::types::{
+    Bank, BankConfigOpt, BankVaultType, OraclePriceType, OracleSetup,
 };
-use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
 use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
@@ -52,11 +49,11 @@ impl BankFixture {
     }
 
     pub fn get_vault(&self, vault_type: BankVaultType) -> (Pubkey, u8) {
-        find_bank_vault_pda(&self.key, vault_type)
+        derive_bank_vault(&self.key, vault_type, &marginfi::ID)
     }
 
     pub fn get_vault_authority(&self, vault_type: BankVaultType) -> (Pubkey, u8) {
-        find_bank_vault_authority_pda(&self.key, vault_type)
+        derive_bank_vault_authority(&self.key, vault_type, &marginfi::ID)
     }
 
     pub async fn get_price(&self) -> f64 {
@@ -404,6 +401,55 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Directly mutate the bank's emissions fields in test state.
+    pub async fn set_emissions(
+        &self,
+        emissions_mint: Pubkey,
+        emissions_rate: u64,
+        emissions_remaining: I80F48,
+        flags: u64,
+    ) {
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+
+        bank.emissions_mint = emissions_mint;
+        bank.emissions_rate = emissions_rate;
+        bank.emissions_remaining = emissions_remaining.into();
+        bank.flags |= flags;
+
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Build (but do not send) a `lending_pool_clear_circuit_breaker` ix.
+    /// `authority` must be either `group.admin` or `group.risk_admin`.
+    pub async fn make_clear_circuit_breaker_ix(
+        &self,
+        authority: Pubkey,
+        reseed_reference: bool,
+    ) -> Instruction {
+        let bank = self.load().await;
+        let accounts = marginfi::accounts::LendingPoolClearCircuitBreaker {
+            group: bank.group,
+            authority,
+            bank: self.key,
+        }
+        .to_account_metas(Some(true));
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolClearCircuitBreaker { reseed_reference }.data(),
+        }
     }
 
     pub async fn set_asset_share_value(&self, value: I80F48) {

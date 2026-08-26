@@ -13,8 +13,14 @@ pub enum PriceBias {
 
 #[derive(Copy, Clone, Debug)]
 pub struct OraclePriceWithConfidence {
+    /// Spot oracle price in USD, no bias.
     pub price: I80F48,
+    /// Confidence band in absolute price units (same scale as `price`), already multiplied by
+    /// `oracle_max_confidence` and clamped to the bank's max-confidence ceiling.
     pub confidence: I80F48,
+    /// Publisher-side timestamp (unix seconds): Pyth `publish_time` or Switchboard
+    /// `last_update_timestamp`. Zero when the adapter doesn't expose one (e.g. `Fixed`).
+    pub source_time: i64,
 }
 
 /// Temporary struct used to store prices during receivership liquidation, these price will
@@ -238,4 +244,34 @@ pub fn convert_decimals(n: I80F48, from_dec: u8, to_dec: u8) -> Option<I80F48> {
     };
 
     Some(out)
+}
+
+#[inline]
+pub fn calc_value(
+    amount: I80F48,
+    price: I80F48,
+    mint_decimals: u8,
+    weight: Option<I80F48>,
+) -> Option<I80F48> {
+    if amount == I80F48::ZERO {
+        return Some(I80F48::ZERO);
+    }
+
+    let scaling_factor = *EXP_10_I80F48.get(mint_decimals as usize)?;
+
+    let weighted_amount = match weight {
+        Some(weight) => amount.checked_mul(weight)?,
+        None => amount,
+    };
+
+    weighted_amount
+        .checked_mul(price)?
+        .checked_div(scaling_factor)
+}
+
+#[inline]
+pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> Option<I80F48> {
+    let scaling_factor = *EXP_10_I80F48.get(mint_decimals as usize)?;
+
+    value.checked_mul(scaling_factor)?.checked_div(price)
 }

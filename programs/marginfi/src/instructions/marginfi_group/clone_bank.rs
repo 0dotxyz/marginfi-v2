@@ -97,9 +97,9 @@ pub fn lending_pool_clone_bank(
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
 
     let mut bank = ctx.accounts.bank.load_init()?;
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        source_config,
+        &source_config,
         source_mint,
         source_mint_decimals,
         ctx.accounts.liquidity_vault.key(),

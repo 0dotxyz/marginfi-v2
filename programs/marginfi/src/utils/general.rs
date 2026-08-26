@@ -1,8 +1,8 @@
 use crate::{
-    bank_authority_seed, bank_seed, check,
+    check,
     events::RateLimitFlowEvent,
     state::{
-        bank::BankVaultType,
+        bank::BankImpl,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{OraclePriceFeedAdapter, OraclePriceWithMultiplier, PriceAdapter},
         rate_limiter::{
@@ -26,23 +26,12 @@ use anchor_spl::{
 };
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
-    },
+    constants::{ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOLEND},
     types::{
         Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
         OraclePriceWithConfidence, PriceBias, WrappedI80F48,
     },
 };
-
-pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_seed!(vault_type, bank_pk), &crate::ID)
-}
-
-pub fn find_bank_vault_authority_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_authority_seed!(vault_type, bank_pk), &crate::ID)
-}
 
 pub trait NumTraitsWithTolerance<T> {
     fn is_zero_with_tolerance(&self, t: T) -> bool;
@@ -262,8 +251,18 @@ pub enum InstructionKind {
 
 // TODO remove redundant checks for these elsewhere in the program (they are nested many laters deep
 // in various value delta functions)
-/// Validate the bank's state does not forbid the execution of an instruction
-pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult {
+/// Validate the bank's state does not forbid the execution of an instruction.
+///
+/// `is_halt_safe` marks an ix as allowed while the bank is under a circuit-breaker halt or in
+/// the non-expiring `CircuitBroken` end state (for example repay/deposit, a risk-free withdraw,
+/// or a caller that has already enforced risk-admin-only liquidation). Even when halt-safe, the
+/// action still obeys the bank's effective operational state — and for a `CircuitBroken` bank
+/// that is the *pre-break* state, so e.g. a bank that was `ReduceOnly` keeps deposits disabled.
+pub fn validate_bank_state(
+    bank: &Bank,
+    kind: InstructionKind,
+    is_halt_safe: bool,
+) -> MarginfiResult {
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);
     }
@@ -273,26 +272,41 @@ pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult
         return err!(MarginfiError::BankUninitialized);
     }
 
+    // A temporal CB halt and the non-expiring `CircuitBroken` end state both block any action
+    // that isn't halt-safe (borrows, risk-carrying withdraws).
+    let circuit_broken = bank.config.operational_state == BankOperationalState::CircuitBroken;
+    if !is_halt_safe && (circuit_broken || bank.is_cb_halted(Clock::get()?.unix_timestamp)) {
+        return err!(MarginfiError::BankCircuitBreakerHalted);
+    }
+
+    // For a `CircuitBroken` bank this resolves to the pre-break state; otherwise it is just
+    // `operational_state`.
+    let effective_state = bank.cb_effective_operational_state();
+    if effective_state == BankOperationalState::KilledByBankruptcy {
+        return err!(MarginfiError::BankKilledByBankruptcy);
+    }
+    if effective_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
+
     match kind {
-        InstructionKind::FailsInReduceState if bank.config.operational_state.is_reduce_only() => {
+        InstructionKind::FailsInReduceState if effective_state.is_reduce_only() => {
             return err!(MarginfiError::BankReduceOnly);
         }
 
-        InstructionKind::FailsInPausedState
-            if bank.config.operational_state == BankOperationalState::Paused =>
-        {
+        InstructionKind::FailsInPausedState if effective_state == BankOperationalState::Paused => {
             return err!(MarginfiError::BankPaused);
         }
 
         InstructionKind::FailsIfPausedOrReduceState
             if matches!(
-                bank.config.operational_state,
+                effective_state,
                 BankOperationalState::Paused
                     | BankOperationalState::ReduceOnly
                     | BankOperationalState::ReduceOnlyWithBorrowingPower
             ) =>
         {
-            return match bank.config.operational_state {
+            return match effective_state {
                 BankOperationalState::Paused => {
                     err!(MarginfiError::BankPaused)
                 }
@@ -312,6 +326,10 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
     let as_i80: I80F48 = n.into();
     let as_f64: f64 = as_i80.to_num();
     as_f64
+}
+
+pub fn i80f48_to_f64(n: I80F48) -> f64 {
+    n.to_num()
 }
 
 /// Fetch a low-biased price for a given bank from a properly structured remaining accounts slice as
@@ -418,14 +436,6 @@ macro_rules! assert_eq_with_tolerance {
             $tolerance
         );
     };
-}
-
-/// Helper function for constraint validation - checks if asset tag is valid for MarginFi operations
-pub fn is_marginfi_asset_tag(asset_tag: u8) -> bool {
-    matches!(
-        asset_tag,
-        ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED
-    )
 }
 
 /// Helper function for constraint validation - checks if asset tag is valid for Kamino operations

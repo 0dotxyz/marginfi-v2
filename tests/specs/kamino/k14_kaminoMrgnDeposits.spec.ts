@@ -31,9 +31,7 @@ import { MockUser, USER_ACCOUNT_K } from "../../utils/mocks";
 import { processBankrunTransaction, toBnFromI80 } from "../../utils/tools";
 import { getTokenBalance, assertBankrunTxFailed } from "../../utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import {
-  composeRemainingAccounts,
-} from "../../utils/user-instructions";
+import { composeRemainingAccounts } from "../../utils/user-instructions";
 import {
   makeKaminoDepositIx,
   makeKaminoWithdrawIx,
@@ -154,7 +152,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               lendingMarket: kaminoAccounts.get(MARKET)!,
               reserve: usdcReserve,
             },
-            DEPOSIT_AMOUNT, // Separate amount parameter
+            DEPOSIT_AMOUNT // Separate amount parameter
           ),
         );
         await processBankrunTransaction(bankrunContext, depositTx, [
@@ -711,7 +709,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         secondDepositTx,
         [userA.wallet],
         true, // trySend=true
-        false, // dumpLogOnFail=false
+        false // dumpLogOnFail=false
       );
 
       // Assert that we get the expected ReserveStale error (same error as Solend)
@@ -778,7 +776,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         withdrawTx,
         [userA.wallet],
         true, // trySend=true
-        false, // dumpLogOnFail=false
+        false // dumpLogOnFail=false
       );
 
       // Assert that we get the expected ReserveStale error (6005 = 0x1775)

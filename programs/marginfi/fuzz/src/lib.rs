@@ -13,15 +13,15 @@ use arbitrary_helpers::{
 use bank_accounts::{get_bank_map, BankAccounts};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use marginfi::instructions::LendingPoolConfigureBankOracleBumps;
 use marginfi::{errors::MarginfiError, instructions::LendingPoolAddBankBumps};
-use marginfi::{instructions::LendingPoolConfigureBankOracleBumps, state::bank::BankVaultType};
 use marginfi_type_crate::types::{
     centi_to_u32, make_points, milli_to_u32, RatePoint, INTEREST_CURVE_SEVEN_POINT,
 };
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
-        Bank, BankConfigCompact, BankOperationalState, FeeState, InterestRateConfig,
+        Bank, BankConfigCompact, BankOperationalState, BankVaultType, FeeState, InterestRateConfig,
         MarginfiAccount, MarginfiGroup, RiskTier,
     },
 };
@@ -533,7 +533,6 @@ impl<'state> MarginfiFuzzContext<'state> {
                 vec![
                     MarginfiError::NoLiabilityFound.into(),
                     MarginfiError::OperationRepayOnly.into(),
-                    // TODO: maybe change
                     MarginfiError::BankAccountNotFound.into(),
                     MarginfiError::AccountDisabled.into(),
                 ]
@@ -1084,6 +1083,8 @@ fn initialize_marginfi_group<'a>(
         Some(admin.key()), // risk_admin
         None,              // emode_max_init_leverage
         None,              // emode_max_maint_leverage
+        None,              // same_asset_emode_init_leverage
+        None,              // same_asset_emode_maint_leverage
     )
     .unwrap();
 
@@ -1134,10 +1135,8 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{
-        get_health_components, HealthPriceMode, RiskRequirementType,
-    };
-    use marginfi_type_crate::types::MarginfiGroup;
+    use marginfi::state::marginfi_account::get_health_components;
+    use marginfi_type_crate::types::{HealthPriceMode, MarginfiGroup, RequirementType};
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
     use super::*;
@@ -1242,11 +1241,18 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
             )
@@ -1301,11 +1307,18 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
             )

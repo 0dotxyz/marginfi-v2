@@ -46,6 +46,7 @@ import {
   mintToTokenAccount,
   processBankrunTransaction,
 } from "../../utils/tools";
+import { bnToBigIntSafe } from "../../utils/bn-utils";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import {
   addJuplendBankIx,
@@ -133,7 +134,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       t22Mint.publicKey,
       destination,
       globalProgramAdmin.wallet.publicKey,
-      BigInt(amount.toString()),
+      bnToBigIntSafe(amount),
       [],
       TOKEN_2022_PROGRAM_ID,
     );
@@ -192,7 +193,9 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
 
     const mintLen = getMintLen([]);
     const mintRent =
-      await bankRunProvider.connection.getMinimumBalanceForRentExemption(mintLen);
+      await bankRunProvider.connection.getMinimumBalanceForRentExemption(
+        mintLen
+      );
     const createMintIx = SystemProgram.createAccount({
       fromPubkey: globalProgramAdmin.wallet.publicKey,
       newAccountPubkey: t22Mint.publicKey,
@@ -345,7 +348,10 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       true,
     );
 
-    juplendAccounts.set(JUPLEND_STATE_KEYS.jlr09BankToken2022, t22JuplendBankPk);
+    juplendAccounts.set(
+      JUPLEND_STATE_KEYS.jlr09BankToken2022,
+      t22JuplendBankPk
+    );
 
     const [initBorrowerIx, initLiquidatorIx] = await Promise.all([
       accountInit(borrower.mrgnBankrunProgram!, {
@@ -541,7 +547,10 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       borrowerMarginfiAccount.publicKey,
     );
     const netBeforeLiq = netHealth(accountBeforeLiq.healthCache);
-    assert.ok(netBeforeLiq.lt(0), "borrower should be unhealthy after reweight");
+    assert.ok(
+      netBeforeLiq.lt(0),
+      "borrower should be unhealthy after reweight"
+    );
 
     const [assetBank, liabBank] = await Promise.all([
       bankrunProgram.account.bank.fetch(t22JuplendBankPk),

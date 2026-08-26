@@ -1,3 +1,4 @@
+use marginfi_type_crate::pdas::derive_bank_vault_authority;
 use {
     super::load_all_banks,
     crate::{
@@ -5,10 +6,9 @@ use {
         output,
         profile::Profile,
         utils::{
-            build_wsol_wrap_ixs, find_bank_vault_authority_pda, find_execute_order_pda,
-            find_fee_state_pda, find_liquidation_record_pda, find_order_pda,
-            load_bank_oracle_account_metas, load_observation_account_metas,
-            load_observation_account_metas_close_last,
+            build_wsol_wrap_ixs, find_execute_order_pda, find_fee_state_pda,
+            find_liquidation_record_pda, find_order_pda, load_bank_oracle_account_metas,
+            load_observation_account_metas, load_observation_account_metas_close_last,
             load_observation_account_metas_with_bank_writable, load_observation_bank_only_metas,
             send_tx, EXP_10_I80F48,
         },
@@ -17,7 +17,7 @@ use {
     anyhow::{anyhow, bail, Context, Result},
     base64::Engine as _,
     fixed::types::I80F48,
-    marginfi::state::bank::BankVaultType,
+    marginfi_type_crate::types::BankVaultType,
     marginfi_type_crate::{
         constants::MARGINFI_ACCOUNT_SEED,
         types::{
@@ -376,7 +376,7 @@ pub fn marginfi_account_withdraw(
             liquidity_vault: bank.liquidity_vault,
             token_program,
             destination_token_account: withdraw_ata,
-            bank_liquidity_vault_authority: find_bank_vault_authority_pda(
+            bank_liquidity_vault_authority: derive_bank_vault_authority(
                 &bank_pk,
                 BankVaultType::Liquidity,
                 &config.program_id,
@@ -464,7 +464,7 @@ pub fn marginfi_account_borrow(
             liquidity_vault: bank.liquidity_vault,
             token_program,
             destination_token_account: borrow_ata,
-            bank_liquidity_vault_authority: find_bank_vault_authority_pda(
+            bank_liquidity_vault_authority: derive_bank_vault_authority(
                 &bank_pk,
                 BankVaultType::Liquidity,
                 &config.program_id,
@@ -561,7 +561,7 @@ pub fn marginfi_account_liquidate(
             liquidator_marginfi_account: marginfi_account_pk,
             authority,
             liquidatee_marginfi_account: liquidatee_marginfi_account_pk,
-            bank_liquidity_vault_authority: find_bank_vault_authority_pda(
+            bank_liquidity_vault_authority: derive_bank_vault_authority(
                 &liability_bank_pk,
                 BankVaultType::Liquidity,
                 &config.program_id,
@@ -988,6 +988,7 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::StartLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
+            group: group_pk,
             liquidation_receiver: authority,
             instruction_sysvar: sysvar::instructions::id(),
         }
@@ -1004,7 +1005,10 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::EndLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
+            group: group_pk,
             liquidation_receiver: authority,
+            // Optional override; None ⇒ the liquidation_receiver pays the flat fee (default).
+            fee_payer: None,
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::id(),
@@ -1200,6 +1204,7 @@ pub fn marginfi_account_transfer(
             authority,
             fee_payer: config.explicit_fee_payer(),
             new_authority,
+            fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::ID,
         }
@@ -1300,6 +1305,7 @@ pub fn marginfi_account_pulse_health(
         program_id: config.program_id,
         accounts: marginfi::accounts::PulseHealth {
             marginfi_account: marginfi_account_pk,
+            group: marginfi_account.group,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::LendingAccountPulseHealth.data(),

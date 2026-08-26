@@ -65,8 +65,7 @@ export const assertBNGreaterThan = (
 
   if (!(aB > bB)) {
     throw new Error(
-      message ||
-        `Expected ${aB.toString()} to be greater than ${bB.toString()}`,
+      message || `Expected ${aB.toString()} to be greater than ${bB.toString()}`
     );
   }
 };
@@ -150,7 +149,7 @@ export const assertI80F48Approx = (
 
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
-      `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
+      `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()}
       Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }

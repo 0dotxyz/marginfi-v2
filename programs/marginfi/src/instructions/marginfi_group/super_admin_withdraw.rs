@@ -4,7 +4,7 @@ use crate::{
     events::{GroupEventHeader, LendingPoolSuperAdminWithdrawEvent},
     live, math_error,
     prelude::{MarginfiError, MarginfiResult},
-    state::bank::{BankImpl, BankVaultType},
+    state::bank::BankImpl,
     utils,
 };
 use anchor_lang::prelude::*;
@@ -15,7 +15,7 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_SOL, LIQUIDITY_VAULT_AUTHORITY_SEED, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiGroup},
+    types::{Bank, BankVaultType, MarginfiGroup},
 };
 
 const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu");

@@ -152,6 +152,16 @@ export const deriveStakedSettings = (
   );
 };
 
+export const deriveSameAssetEmodeRegistry = (
+  programId: PublicKey,
+  group: PublicKey,
+) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("same_asset_emode_registry", "utf-8"), group.toBuffer()],
+    programId,
+  );
+};
+
 export const deriveLiquidationRecord = (
   programId: PublicKey,
   marginfiAccount: PublicKey,

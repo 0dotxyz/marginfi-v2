@@ -2,10 +2,10 @@ use crate::{
     bank_signer,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -31,7 +31,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
 };
 
 /// Deposit into a Drift spot market through a marginfi account
@@ -51,7 +51,11 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
+        )?;
 
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         market_index = integration_acc_1.market_index;

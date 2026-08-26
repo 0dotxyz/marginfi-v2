@@ -1,9 +1,5 @@
 import { assert } from "chai";
-import {
-  Keypair,
-  Transaction,
-  SystemProgram,
-} from "@solana/web3.js";
+import { Keypair, Transaction, SystemProgram } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
   bankrunContext,

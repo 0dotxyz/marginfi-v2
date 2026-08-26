@@ -134,6 +134,7 @@ async fn test_pause_delegate_admin_cannot_edit_fee_state() -> anyhow::Result<()>
             liquidation_max_fee: Some(fee_state.liquidation_max_fee),
             order_execution_max_fee: Some(fee_state.order_execution_max_fee),
             pause_delegate_admin: None,
+            account_transfer_fee: None,
         }
         .data(),
     };

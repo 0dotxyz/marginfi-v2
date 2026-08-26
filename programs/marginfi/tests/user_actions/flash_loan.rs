@@ -1,7 +1,7 @@
 use anchor_lang::prelude::AccountMeta;
 use anchor_lang::solana_program::{instruction::Instruction, pubkey::Pubkey};
 use anchor_lang::{InstructionData, ToAccountMetas};
-use fixtures::{assert_custom_error, prelude::*};
+use fixtures::{assert_custom_error, bank::BankFixture, prelude::*};
 use marginfi::prelude::*;
 use marginfi_type_crate::constants::{
     INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_SEED,
@@ -549,6 +549,7 @@ async fn flashloan_fail_account_transfer_during_flashloan() -> anyhow::Result<()
             fee_payer: test_f.payer(),
             new_authority: new_authority.pubkey(),
             global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
             system_program: system_program::ID,
         }
         .to_account_metas(None),
@@ -671,6 +672,141 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
         flash_loan_result.unwrap_err(),
         MarginfiError::AccountInFlashloan
     );
+
+    Ok(())
+}
+
+/// Seeds `sol_bank`'s circuit-breaker reference from `PYTH_SOL_FEED` at $10, then moves the live
+/// price 10% past that reference (tier-0 is 5%). Nothing pulses the bank after the move, so it
+/// never halts and the breach is visible only to the live price gate.
+async fn seed_cb_reference_then_breach(
+    test_f: &TestFixture,
+    sol_bank: &BankFixture,
+) -> anyhow::Result<()> {
+    const WARM_SLOT: u64 = 1_000;
+    const WARM_TIME: i64 = 100;
+
+    test_f.set_clock(WARM_SLOT, WARM_TIME).await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, WARM_TIME)
+        .await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, WARM_TIME)
+        .await;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
+        .await?;
+    sol_bank.update_config(standard_cb_config(), None).await?;
+
+    test_f.set_clock(WARM_SLOT + 10, WARM_TIME + 1).await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 11_000_000_000, 0, WARM_TIME + 1)
+        .await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, WARM_TIME + 1)
+        .await;
+
+    Ok(())
+}
+
+#[tokio::test]
+// A bank that joins the account after the borrow is invisible to every inline gate.
+async fn flashloan_fail_cb_gate_on_bank_added_after_borrow() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    seed_cb_reference_then_breach(&test_f, sol_bank).await?;
+
+    // Fund USDC lender
+    let lender_mfi_account_f = test_f.create_marginfi_account().await;
+    let lender_token_account_f_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    lender_mfi_account_f
+        .try_bank_deposit(lender_token_account_f_usdc.key, usdc_bank, 1_000, None)
+        .await?;
+
+    // 105 USDC against 10 SOL passes initial health only at the breached $11, not at the $10
+    // reference. On the normal ordering the borrow's inline gate sees the SOL bank and rejects.
+    let control_mfi_account_f = test_f.create_marginfi_account().await;
+    let control_token_account_f_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let control_token_account_f_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    control_mfi_account_f
+        .try_bank_deposit(control_token_account_f_sol.key, sol_bank, 10, None)
+        .await?;
+
+    let control_result = control_mfi_account_f
+        .try_bank_borrow(control_token_account_f_usdc.key, usdc_bank, 105)
+        .await;
+
+    assert_custom_error!(
+        control_result.unwrap_err(),
+        MarginfiError::CircuitBreakerPriceJump
+    );
+
+    // Same observation and same amounts, but the SOL balance is opened after the borrow
+    let borrower_mfi_account_f = test_f.create_marginfi_account().await;
+    let borrower_token_account_f_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let borrower_token_account_f_usdc = test_f.usdc_mint.create_empty_token_account().await;
+
+    let borrow_ix = borrower_mfi_account_f
+        .make_bank_borrow_ix(borrower_token_account_f_usdc.key, usdc_bank, 105)
+        .await;
+    let deposit_ix = borrower_mfi_account_f
+        .make_deposit_ix(borrower_token_account_f_sol.key, sol_bank, 10, None)
+        .await;
+
+    let flash_loan_result = borrower_mfi_account_f
+        .try_flashloan(
+            vec![borrow_ix, deposit_ix],
+            vec![],
+            vec![usdc_bank.key, sol_bank.key],
+            None,
+        )
+        .await;
+
+    assert_custom_error!(
+        flash_loan_result.unwrap_err(),
+        MarginfiError::CircuitBreakerPriceJump
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+// An envelope that ends with no liabilities carries no price risk and stays ungated.
+async fn flashloan_ok_no_liabilities_during_cb_breach() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    seed_cb_reference_then_breach(&test_f, sol_bank).await?;
+
+    let depositor_mfi_account_f = test_f.create_marginfi_account().await;
+    let depositor_token_account_f_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    depositor_mfi_account_f
+        .try_bank_deposit(depositor_token_account_f_sol.key, sol_bank, 9, None)
+        .await?;
+
+    let deposit_ix = depositor_mfi_account_f
+        .make_deposit_ix(depositor_token_account_f_sol.key, sol_bank, 1, None)
+        .await;
+    let withdraw_ix = depositor_mfi_account_f
+        .make_bank_withdraw_ix(depositor_token_account_f_sol.key, sol_bank, 1, None)
+        .await;
+
+    let flash_loan_result = depositor_mfi_account_f
+        .try_flashloan(
+            vec![deposit_ix, withdraw_ix],
+            vec![],
+            vec![sol_bank.key],
+            None,
+        )
+        .await;
+
+    assert!(flash_loan_result.is_ok());
 
     Ok(())
 }

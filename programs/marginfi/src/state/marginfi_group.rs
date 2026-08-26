@@ -1,12 +1,16 @@
-use crate::state::emode::{DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_EMODE_LEVERAGE};
+use crate::state::emode::{
+    DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+    DEFAULT_MAINT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+};
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::basis_to_u32;
-use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup};
+use marginfi_type_crate::{
+    constants::DAILY_RESET_INTERVAL,
+    types::{MarginfiGroup, PROGRAM_FEES_ENABLED},
+};
 use std::fmt::Debug;
-
-pub const PROGRAM_FEES_ENABLED: u64 = 1;
 
 pub trait MarginfiGroupImpl {
     fn update_admin(&mut self, new_admin: Pubkey);
@@ -21,7 +25,6 @@ pub trait MarginfiGroupImpl {
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
-    fn program_fees_enabled(&self) -> bool;
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool;
     fn add_bank(&mut self) -> MarginfiResult;
     fn is_protocol_paused(&self) -> bool;
@@ -154,6 +157,10 @@ impl MarginfiGroupImpl for MarginfiGroup {
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
+        self.same_asset_emode_init_leverage =
+            basis_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.same_asset_emode_maint_leverage =
+            basis_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
     }
 
     fn get_group_bank_config(&self) -> GroupBankConfig {
@@ -168,11 +175,6 @@ impl MarginfiGroupImpl for MarginfiGroup {
         } else {
             self.group_flags &= !PROGRAM_FEES_ENABLED;
         }
-    }
-
-    /// True if program fees are enabled
-    fn program_fees_enabled(&self) -> bool {
-        (self.group_flags & PROGRAM_FEES_ENABLED) != 0
     }
 
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool {

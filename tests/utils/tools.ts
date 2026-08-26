@@ -53,6 +53,7 @@ export {
   toBn,
   toBnFromI80,
   toI80Scaled,
+  toWrappedI80F48Safe,
 } from "./bn-utils";
 
 /**

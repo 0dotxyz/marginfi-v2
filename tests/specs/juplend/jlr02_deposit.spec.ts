@@ -315,7 +315,9 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       false,
       true,
     );
-    const bankAfterPulse = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const bankAfterPulse = await bankrunProgram.account.bank.fetch(
+      usdcJupBankPk
+    );
     firstDepositCacheMultiplier = Number(
       wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
     );
@@ -800,12 +802,15 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       lendingBefore.liquidityExchangePrice,
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    const pulsePostInterestCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
-      bank: usdcJupBankPk,
-      remaining: bankAfter.config.oracleKeys.filter(
-        (key) => !key.equals(PublicKey.default),
-      ),
-    });
+    const pulsePostInterestCacheIx = await pulseBankPrice(
+      user.mrgnBankrunProgram!,
+      {
+        bank: usdcJupBankPk,
+        remaining: bankAfter.config.oracleKeys.filter(
+          (key) => !key.equals(PublicKey.default)
+        ),
+      }
+    );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(pulsePostInterestCacheIx),
@@ -813,7 +818,9 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       false,
       true,
     );
-    const bankAfterPulse = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const bankAfterPulse = await bankrunProgram.account.bank.fetch(
+      usdcJupBankPk
+    );
     const expectedCacheMultiplier =
       Number(bnToBigIntSafe(lendingAfter.tokenExchangePrice)) /
       Number(EXCHANGE_PRICES_PRECISION.toString());

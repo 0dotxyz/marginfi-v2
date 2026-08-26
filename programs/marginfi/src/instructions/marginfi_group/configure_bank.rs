@@ -1,3 +1,4 @@
+use crate::constants::MIN_EMISSIONS_SHARE_SUPPLY;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -5,7 +6,6 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
@@ -13,8 +13,8 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::FREEZE_SETTINGS,
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
+    types::{is_marginfi_asset_tag, Bank, BankConfigOpt, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(
@@ -40,6 +40,20 @@ pub fn lending_pool_configure_bank(
             borrow_limit: bank.config.borrow_limit,
         });
     } else {
+        // Consume the interest freeze before the disable: accrual excludes the halted time up to
+        // now and restarts from here.
+        if bank_config.circuit_breaker_enabled == Some(false)
+            && bank.get_flag(CIRCUIT_BREAKER_ENABLED)
+        {
+            let group = ctx.accounts.group.load()?;
+            bank.accrue_interest(
+                Clock::get()?.unix_timestamp,
+                &group,
+                #[cfg(not(feature = "client"))]
+                ctx.accounts.bank.key(),
+            )?;
+        }
+
         // Settings are not frozen, everything updates
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
@@ -95,7 +109,11 @@ pub fn lending_pool_emissions_deposit(
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
-    utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
+    utils::validate_bank_state(
+        &bank,
+        utils::InstructionKind::FailsIfPausedOrReduceState,
+        true,
+    )?;
 
     // Reject mints with non-zero transfer fees or active transfer hooks.
     let mint_ai = ctx.accounts.mint.to_account_info();
@@ -108,10 +126,13 @@ pub fn lending_pool_emissions_deposit(
         MarginfiError::InvalidTransfer
     );
 
+    // Emissions raise the share value by `amount / total_asset_shares`, so a floor on the supply
+    // bounds how far any caller can move it. See `MIN_EMISSIONS_SHARE_SUPPLY`.
     let total_asset_shares = I80F48::from(bank.total_asset_shares);
     check!(
-        total_asset_shares > I80F48::ZERO,
-        MarginfiError::EmissionsUpdateError
+        total_asset_shares >= MIN_EMISSIONS_SHARE_SUPPLY,
+        MarginfiError::EmissionsUpdateError,
+        "Bank share supply is too small to accept emissions"
     );
 
     bank.accrue_interest(

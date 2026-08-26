@@ -286,8 +286,9 @@ describe("d08: Drift Withdraw Tests", () => {
     );
 
     // has_drift persists across a partial withdraw
-    const marginfiAccAfter =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    const marginfiAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
+      marginfiAccount
+    );
     assert.equal(marginfiAccAfter.indexerFlags.hasDrift, 1);
   });
 
@@ -556,8 +557,9 @@ describe("d08: Drift Withdraw Tests", () => {
     await assertBankBalance(marginfiAccount, driftTokenABank, null);
 
     // has_drift clears once the last Drift position is withdrawn
-    const marginfiAccAfter =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    const marginfiAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
+      marginfiAccount
+    );
     assert.equal(marginfiAccAfter.indexerFlags.hasDrift, 0);
 
     // Note: this time the actual underlying Drift position is NOT simply the (initial_deposit -

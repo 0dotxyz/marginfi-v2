@@ -1,4 +1,3 @@
-use crate::state::bank::BankVaultType;
 use crate::utils::record_deposit_inflow;
 use crate::{
     bank_signer,
@@ -7,8 +6,8 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -35,7 +34,9 @@ use kamino_mocks::{
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
+use marginfi_type_crate::types::{
+    Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+};
 
 /// Deposit into a Kamino pool through a marginfi account
 ///
@@ -57,7 +58,11 @@ pub fn kamino_deposit<'info>(
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
+        )?;
     }
 
     // Get initial obligation data to verify deposit amount later

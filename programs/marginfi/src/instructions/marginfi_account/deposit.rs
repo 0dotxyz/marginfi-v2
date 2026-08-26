@@ -5,14 +5,13 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        self, is_marginfi_asset_tag, record_deposit_inflow, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        self, record_deposit_inflow, validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -21,7 +20,10 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::TOKENLESS_REPAYMENTS_ALLOWED,
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
+    types::{
+        is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// 1. Accrue interest
@@ -57,7 +59,11 @@ pub fn lending_account_deposit<'info>(
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
     validate_asset_tags(&bank, &marginfi_account)?;
-    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+    validate_bank_state(
+        &bank,
+        InstructionKind::FailsIfPausedOrReduceState,
+        deposit_is_halt_safe(&marginfi_account, &bank_loader.key()),
+    )?;
 
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED)
