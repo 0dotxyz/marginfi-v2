@@ -13,7 +13,6 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import BigNumber from "bignumber.js";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
@@ -36,6 +35,7 @@ import {
   assertI80F48Approx,
   assertI80F48Equal,
   getTokenBalance,
+  i80ToBn,
 } from "../../utils/genericTests";
 import { deriveLiquidityVaultAuthority } from "../../utils/pdas";
 import { deriveJuplendPoolKeys } from "../../utils/juplend/juplend-pdas";
@@ -177,13 +177,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     user = nextUser;
     activeMarginfiAccountPk = marginfiAccount;
   };
-
-  const i80ToBn = (value: any): BN =>
-    new BN(
-      wrappedI80F48toBigNumber(value)
-        .integerValue(BigNumber.ROUND_FLOOR)
-        .toFixed(0),
-    );
 
   const previewSharesForDeposit = (
     assets: BN,
