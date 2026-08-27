@@ -994,8 +994,8 @@ impl FuzzTest {
         )
         .accounts(types::marginfi::EndLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
-            record,
             self.marginfi_group,
+            record,
             liquidation_receiver,
             self.fee_state,
             global_fee_wallet,

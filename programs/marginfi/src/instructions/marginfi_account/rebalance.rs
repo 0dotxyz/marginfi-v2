@@ -51,6 +51,7 @@ use crate::{
             run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         price::OraclePriceFeedAdapter,
         rate::{self, rate_at, rate_of, RewardsAccounts},
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
@@ -992,7 +993,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
     let mut health_cache = HealthCache::zeroed();
     let (value_moved, tip_pending, move_yield_indices) = {
-        let account = ctx.accounts.marginfi_account.load()?;
+        let mut account = ctx.accounts.marginfi_account.load_mut()?;
 
         // Every referenced bank holds the order's mint, so one decimals value scales all of them.
         let mint_decimals = banks[0].loader.load()?.mint_decimals;
@@ -1048,11 +1049,12 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
         // health once here over the post-move balance set. The bar is MAINTENANCE, so a move may
         // reduce initial-weighted collateral as long as the account stays non-liquidatable.
-        check_account_maint_health(
-            &account,
+        check_rebalance_health_and_refresh_premium(
+            &mut account,
             &*ctx.accounts.group.load()?,
             health_obs,
-            &mut Some(&mut health_cache),
+            &mut health_cache,
+            clock.unix_timestamp as u64,
         )?;
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);
@@ -1179,6 +1181,28 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         tip_escrowed: tip_pending,
     });
     Ok(())
+}
+
+/// Rebalance completion needs one health pass for the whole sandwich and, like every completed
+/// balance-changing instruction, refreshes the variable-borrow premium snapshots. Keeping the
+/// scratch in this non-inlined helper preserves the end instruction's SBF stack budget.
+#[inline(never)]
+fn check_rebalance_health_and_refresh_premium<'info>(
+    account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    health_obs: &'info [AccountInfo<'info>],
+    health_cache: &mut HealthCache,
+    now: u64,
+) -> MarginfiResult {
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_maint_health(
+        account,
+        group,
+        health_obs,
+        &mut Some(health_cache),
+        &mut Some(&mut premium_scratch),
+    )?;
+    account.update_premium_snapshots(group, &premium_scratch, now)
 }
 
 #[derive(Accounts)]

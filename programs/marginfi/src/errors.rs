@@ -448,6 +448,24 @@ pub enum MarginfiError {
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
 
+    // ************** BEGIN PREMIUM ERRORS (starting at 6610)
+    #[msg("Premium entry has a zero collateral or liability tag")]
+    PremiumEntryInvalid = 610, // 6610
+    #[msg("Too many premium entries for the group's capacity")]
+    PremiumMatrixFull, // 6611
+    #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
+    InvalidPremiumAta, // 6612
+    #[msg("Premium wallet is not configured on the fee state")]
+    PremiumWalletNotSet, // 6613
+    #[msg("Premium (collateral, liability) pair is not in the matrix")]
+    PremiumEntryNotFound, // 6614
+    #[msg(
+        "Premium rate cannot be computed (a collateral oracle failed); retry with valid oracles"
+    )]
+    PremiumSnapshotUnavailable, // 6615
+
+    // ************** END PREMIUM ERRORS
+
     // ************** BEGIN AUTO-REBALANCE ERRORS (starting at 6700)
     #[msg("Rebalance venue not supported for on-chain rate verification")]
     RebalanceVenueUnsupported = 700, // 6700
@@ -485,7 +503,7 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
-                                 // **************END AUTO-REBALANCE ERRORS
+                                 // ************** END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -748,6 +766,14 @@ impl From<u32> for MarginfiError {
             6715 => MarginfiError::RebalanceNotBestVenue,
             6716 => MarginfiError::RebalanceStaleExecutionSeq,
             6717 => MarginfiError::RebalanceAllowlistLiability,
+
+            // Premium-specific errors (starting at 6610)
+            6610 => MarginfiError::PremiumEntryInvalid,
+            6611 => MarginfiError::PremiumMatrixFull,
+            6612 => MarginfiError::InvalidPremiumAta,
+            6613 => MarginfiError::PremiumWalletNotSet,
+            6614 => MarginfiError::PremiumEntryNotFound,
+            6615 => MarginfiError::PremiumSnapshotUnavailable,
 
             _ => MarginfiError::InternalLogicError,
         }
