@@ -20,9 +20,9 @@ use marginfi_type_crate::{
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
-        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
+        centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
+        BankMetadata, BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
+        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -2336,6 +2336,50 @@ async fn configure_bank_oracle_min_age_validation() -> anyhow::Result<()> {
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
     assert_eq!(bank_after.config.oracle_max_age, 30);
+
+    Ok(())
+}
+
+/// The fee and the leverage it has to clear are validated from whichever side moves.
+#[tokio::test]
+async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let collateral = test_f.get_bank(&BankMint::Sol);
+    let debt = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(collateral, 1, &[])
+        .await?;
+    // 0.9 against the 1.0 USDC liability weight is 10x, so both cuts together must stay under 10%
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            debt,
+            2,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: 1,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+
+    let raise_fees = |liquidator: f64, insurance: f64| BankConfigOpt {
+        liquidation_liquidator_fee: Some(centi_to_u32(I80F48::from_num(liquidator))),
+        liquidation_insurance_fee: Some(centi_to_u32(I80F48::from_num(insurance))),
+        ..Default::default()
+    };
+    // 4% + 5% still clears 10x
+    debt.update_config(raise_fees(0.04, 0.05), None).await?;
+    // 5% + 6% does not
+    let res = debt.update_config(raise_fees(0.05, 0.06), None).await;
+    assert_custom_error!(
+        res.unwrap_err().downcast::<BanksClientError>().unwrap(),
+        MarginfiError::MaxMaintLeverageExceeded
+    );
 
     Ok(())
 }

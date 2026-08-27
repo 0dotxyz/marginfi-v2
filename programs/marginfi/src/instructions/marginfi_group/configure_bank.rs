@@ -4,7 +4,7 @@ use crate::events::{
 };
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
-use crate::state::emode::EmodeSettingsImpl;
+use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
@@ -59,11 +59,18 @@ pub fn lending_pool_configure_bank(
         msg!("Bank configured!");
 
         let group = ctx.accounts.group.load()?;
+        let total_liquidation_fee = bank.total_liquidation_fee();
         bank.emode.validate_entries_with_liability_weights(
             &bank.config,
+            total_liquidation_fee,
             group.emode_max_init_leverage,
             group.emode_max_maint_leverage,
         )?;
+        if bank_config.liquidation_liquidator_fee.is_some()
+            || bank_config.liquidation_insurance_fee.is_some()
+        {
+            check_same_asset_fee(&bank, &group)?;
+        }
 
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {
