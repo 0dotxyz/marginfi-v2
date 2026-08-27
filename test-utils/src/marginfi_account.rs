@@ -1713,6 +1713,24 @@ impl MarginfiAccountFixture {
         }
     }
 
+    pub async fn make_tag_liquidation_record_ix(&self) -> Instruction {
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::TagLiquidationRecord {
+                marginfi_account: self.key,
+                group: self.load().await.group,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountTagLiqRecord {}.data(),
+        };
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                .await,
+        );
+        ix
+    }
+
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
         let bank_state = bank.load().await;
         let (lending_market, pyth_oracle, scope_prices) = if let Some(kamino) = &bank.kamino {

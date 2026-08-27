@@ -415,6 +415,56 @@ async fn rebalance_borrowing_account_passes_health() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `end_rebalance` proves maintenance health, the bar that makes an account taggable, so it clears
+/// the premium-growth tag the same way `pulse_health` does.
+#[tokio::test]
+async fn rebalance_clears_the_liquidation_tag() -> anyhow::Result<()> {
+    const TAG_TIME: i64 = 1_000;
+
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    f.user.try_bank_borrow(user_sol.key, sol_bank, 10.0).await?;
+
+    f.pin_clock(TAG_TIME).await;
+    f.test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, TAG_TIME)
+        .await;
+
+    // Strip the source's weights so the borrow leaves the account taggable
+    let original = f.src_bank_f.load().await.config;
+    f.src_bank_f
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48::from_num(0.01).into()),
+                asset_weight_maint: Some(I80F48::from_num(0.01).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let tag_ix = f.user.make_tag_liquidation_record_ix().await;
+    f.process_as_payer(&[tag_ix]).await?;
+    assert_eq!(f.user.load().await.liquidation_tagged_at, TAG_TIME);
+
+    f.src_bank_f
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(original.asset_weight_init),
+                asset_weight_maint: Some(original.asset_weight_maint),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_eq!(f.user.load().await.liquidation_tagged_at, 0);
+    Ok(())
+}
+
 /// An unlimited order permits a partial fill (e.g. the destination is near its deposit cap): moving
 /// part of the position succeeds, leaves the remainder in the source, and conserves value.
 #[tokio::test]

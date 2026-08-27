@@ -1,9 +1,11 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
 use crate::state::{
     bank::BankImpl,
+    liquidation_record::tag_after_liquidation,
     marginfi_account::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
-        check_account_init_health, check_post_liquidation_condition_and_get_account_health,
+        check_account_init_health_and_clear_tag,
+        check_post_liquidation_condition_and_get_account_health,
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
     },
@@ -521,6 +523,13 @@ pub fn lending_account_liquidate<'info>(
     // persisted to its health cache here. Writing it would add CU to the hot liquidation path for a
     // value any consumer can refresh on demand via `lending_account_pulse_health`.
 
+    liquidatee_marginfi_account.liquidation_tagged_at = tag_after_liquidation(
+        liquidatee_marginfi_account.liquidation_tagged_at,
+        pre_liquidation_health,
+        post_liquidation_health,
+        current_timestamp,
+    );
+
     liquidatee_marginfi_account
         .indexer_flags
         .has_ever_been_liquidated = 1;
@@ -630,7 +639,7 @@ fn check_liquidator_health_and_refresh_premium<'info>(
     now: u64,
 ) -> MarginfiResult {
     let mut premium_scratch = PremiumScratch::default();
-    check_account_init_health(
+    check_account_init_health_and_clear_tag(
         liquidator_marginfi_account,
         group,
         liquidator_remaining_accounts,

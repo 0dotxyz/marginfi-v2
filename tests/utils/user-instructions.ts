@@ -459,6 +459,25 @@ export const endLiquidationIx = (
     .instruction();
 };
 
+export type TagLiquidationRecordArgs = {
+  marginfiAccount: PublicKey;
+  remaining: PublicKey[] | AccountMeta[];
+};
+
+export const tagLiquidationRecordIx = (
+  program: Program<Marginfi>,
+  args: TagLiquidationRecordArgs
+) => {
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  return program.methods
+    .marginfiAccountTagLiqRecord()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+    })
+    .remainingAccounts(oracleMeta)
+    .instruction();
+};
+
 export type StartDeleverageArgs = {
   marginfiAccount: PublicKey;
   riskAdmin: PublicKey;

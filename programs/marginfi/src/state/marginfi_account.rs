@@ -336,6 +336,10 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.indexer_flags
             .sync_balance_derived(&self.lending_account.balances);
         self.indexer_flags.mark_active_now();
+        // A liability-free account is never taggable (see `tag_liquidation_record`)
+        if self.indexer_flags.is_lending_only == 1 {
+            self.liquidation_tagged_at = 0;
+        }
     }
 }
 
@@ -1052,6 +1056,11 @@ pub fn get_health_components<'info>(
     let mut first_err_index = NO_INDEX_FOUND;
     let mut account_index = 0usize;
 
+    // Skips the per-balance weight comparison below entirely for accounts no entry can reach.
+    let emode_possible = matches!(requirement_type, RequirementType::Maintenance)
+        && (reconciled_emode_config.count > 0 || reconciled_emode_config.same_asset.is_enabled());
+    let mut emode_boosted = false;
+
     // `position_index` is the ordinal among ACTIVE balances (health-cache indexing);
     // `balance_index` is the raw array slot (premium scratch addressing — inactive holes must
     // not shift it).
@@ -1154,6 +1163,16 @@ pub fn get_health_components<'info>(
             )?
         };
 
+        if emode_possible
+            && !balance.is_empty(BalanceSide::Assets)
+            && bank.get_asset_weight(requirement_type, &reconciled_emode_config)
+                > bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+        {
+            emode_boosted = true;
+        }
+
         // Record error index if applicable
         if err_code != 0 && first_err_index == NO_INDEX_FOUND {
             first_err_index = position_index;
@@ -1218,6 +1237,7 @@ pub fn get_health_components<'info>(
             RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
+                cache.set_emode_boosted(emode_boosted);
             }
             RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();
@@ -1596,6 +1616,29 @@ fn check_account_health<'info>(
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)
+}
+
+/// `check_account_init_health`, additionally clearing the account's premium-growth tag. Init
+/// weights are stricter than maintenance ones, so passing implies the account is untaggable. Risk
+/// checks are skipped inside flashloans, where a pass proves nothing.
+pub fn check_account_init_health_and_clear_tag<'info>(
+    marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+    premium_scratch: &mut Option<&mut PremiumScratch>,
+) -> MarginfiResult {
+    check_account_init_health(
+        marginfi_account,
+        group,
+        remaining_ais,
+        health_cache,
+        premium_scratch,
+    )?;
+    if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+    Ok(())
 }
 
 /// Initial health check: errors if initial health is negative.

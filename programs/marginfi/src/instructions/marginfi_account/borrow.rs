@@ -7,8 +7,9 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, check_account_init_health_and_clear_tag,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -214,8 +215,8 @@ pub fn lending_account_borrow<'info>(
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
     let mut premium_scratch = PremiumScratch::default();
-    check_account_init_health(
-        &marginfi_account,
+    check_account_init_health_and_clear_tag(
+        &mut marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),

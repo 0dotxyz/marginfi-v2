@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Account is already tagged for liquidation")] // 6054
+    AccountAlreadyTagged,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -581,7 +581,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::AccountAlreadyTagged,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,

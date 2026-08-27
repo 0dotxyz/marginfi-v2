@@ -84,7 +84,12 @@ pub struct MarginfiAccount {
     pub indexer_flags: IndexerFlags,
     /// Monotonic counter. seeding each rebalance execution's `RebalanceRecord`.
     pub rebalance_execution_seq: u64,
-    pub _padding0: [u64; 3],
+    /// Unix timestamp when this account was tagged as unhealthy, growing the allowed liquidation
+    /// premium over time. Cleared when the account regains health, restarted when a liquidation
+    /// erases a material share of the health deficit.
+    /// * 0 if not tagged
+    pub liquidation_tagged_at: i64,
+    pub _padding0: [u64; 2],
 }
 
 impl MarginfiAccount {

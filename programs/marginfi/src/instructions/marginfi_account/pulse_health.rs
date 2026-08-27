@@ -149,6 +149,11 @@ pub fn lending_account_pulse_health<'info>(
         equity_flags_decisive = true;
     }
 
+    // A maintenance-healthy account is untaggable, matching `tag_liquidation_record`
+    if liquidatable_flag_update == Some(0) {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+
     let equity_assets: I80F48 = health_cache.asset_value_equity.into();
     let equity_liabs: I80F48 = health_cache.liability_value_equity.into();
     let elapsed = clock

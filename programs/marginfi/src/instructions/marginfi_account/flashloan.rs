@@ -7,7 +7,8 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_account_init_health, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+        check_account_init_health_and_clear_tag, run_cb_price_gate, LendingAccountImpl,
+        MarginfiAccountImpl,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
@@ -124,8 +125,8 @@ pub fn lending_account_end_flashloan<'info>(
 
     let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
-    check_account_init_health(
-        &marginfi_account,
+    check_account_init_health_and_clear_tag(
+        &mut marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut None,

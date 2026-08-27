@@ -4,11 +4,14 @@ use crate::{
     events::{DeleverageEvent, LiquidationReceiverEvent},
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
-    state::marginfi_account::{
-        check_pre_liquidation_condition_and_get_account_health,
-        clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+    state::{
+        liquidation_record::{tag_adjusted_premium, tag_after_liquidation},
+        marginfi_account::{
+            check_pre_liquidation_condition_and_get_account_health,
+            clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+        },
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
-    state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
@@ -25,9 +28,11 @@ use marginfi_type_crate::{
 
 /// (Permissionless) Ends a liquidation. Records the liquidation event in the user's record. Debits a
 /// small flat sol fee to the global fee wallet.
-/// * Fails if account is less healthy than it was at start
+/// * Fails if the account lost more health than the value the liquidator took out of it
+/// * Fails if a solvent account would be left in bad debt
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
-///   liabs that they were allowed)
+///   liabs that they were allowed). A tag grows that allowance over time, except on emode-boosted
+///   collateral or an account already in bad debt, which hold it at the configured base.
 pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
@@ -38,27 +43,39 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let pre_assets_equity: I80F48 = liq_record.cache.asset_value_equity.into();
 
-    // Note: We guarantee that liquidation improves health to at most 0, unless the account's net value is
-    // below the threshold, then we can clear it regardless (or not).
-    let ignore_healthy = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
+    // Note: We guarantee that liquidation improves health to at most 0, unless the account's net
+    // value is below the threshold: such dust accounts may be fully cleared (ending healthy) and
+    // skip the premium cap, since a partial liquidation isn't worth the fees.
+    let is_dust_closeout = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
+    let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
+    let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
+    // Read before `end_receivership` updates the tag and overwrites the cache. Receivership
+    // withdraw/repay leave the cache alone, so this is the state the account was seized in.
+    let tagged_at = marginfi_account.liquidation_tagged_at;
+    let emode_boosted = marginfi_account.health_cache.is_emode_boosted();
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        ignore_healthy,
+        is_dust_closeout,
+        true,
     )?;
 
-    // Liquidator's allowed fee cannot go lower than the bonus fee minimum
+    // Allowed fee floors at the bonus minimum and grows once tagged. Emode collateral and accounts
+    // already in bad debt hold at the base: neither has borrower equity to fund the growth.
     let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
-    let max_fee: I80F48 = I80F48::max(
-        I80F48!(1) + fee_state_max_fee,
-        I80F48!(1) + LIQUIDATION_BONUS_FEE_MINIMUM,
-    );
+    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
+    let premium = if emode_boosted || in_bad_debt {
+        base_premium
+    } else {
+        tag_adjusted_premium(base_premium, tagged_at, Clock::get()?.unix_timestamp)
+    };
+    let max_fee: I80F48 = I80F48!(1) + premium;
 
     // Ensure seized asset‐value ≤ N% of repaid liability‐value, where N = 100% + the bonus fee
-    if !ignore_healthy {
+    if !is_dust_closeout {
         check!(
             seized <= repaid * max_fee,
             MarginfiError::LiquidationPremiumTooHigh
@@ -85,7 +102,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 }
 
 /// (Permissioned) Ends a deleverage. Records the liquidation event in the user's record.
-/// * Fails if account is less healthy than it was at start
+/// * Fails if account is less healthy than it was at start. No premium is taken, so there is no
+///   extracted value to fund a health loss.
 ///   Note: no fees taken.
 pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -101,6 +119,7 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
         &mut liq_record,
         ctx.remaining_accounts,
         true,
+        false,
     )?;
 
     emit!(DeleverageEvent {
@@ -113,13 +132,16 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
     Ok(())
 }
 
-// Common logic for both liquidation and deleverage
+// Common logic for both liquidation and deleverage.
+// * `premium_capped`: the caller enforces a premium cap on what the receiver seized, so health may
+//   fall by up to that premium. Deleverage takes no premium and must not worsen health at all.
 pub fn end_receivership<'info>(
     marginfi_account: &mut MarginfiAccount,
     group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
+    premium_capped: bool,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
     let pre_assets: I80F48 = liq_record.cache.asset_value_maint.into();
     let pre_liabs: I80F48 = liq_record.cache.liability_value_maint.into();
@@ -160,8 +182,34 @@ pub fn end_receivership<'info>(
         Clock::get()?.unix_timestamp as u64,
     )?;
 
-    // health must not get worse
-    if pre_health > post_health {
+    let seized: I80F48 = pre_assets_equity - post_assets_equity;
+    let repaid: I80F48 = pre_liabs_equity - post_liabilities_equity;
+
+    if premium_capped {
+        // The receivership may cost the account at most the value the receiver took out of it,
+        // which the premium cap bounds.
+        let extracted: I80F48 = I80F48::max(I80F48::ZERO, seized - repaid);
+        if pre_health - post_health > extracted {
+            msg!(
+                "health fell by more than the {} extracted: {} -> {}",
+                extracted,
+                pre_health,
+                post_health
+            );
+            return err!(MarginfiError::WorseHealthPostLiquidation);
+        }
+
+        // The premium comes out of the liquidatee's equity, so an account may be drained to zero
+        // equity but not into bad debt.
+        if pre_assets_equity >= pre_liabs_equity && post_assets_equity < post_liabilities_equity {
+            msg!(
+                "premium leaves the account insolvent: {} < {}",
+                post_assets_equity,
+                post_liabilities_equity
+            );
+            return err!(MarginfiError::WorseHealthPostLiquidation);
+        }
+    } else if pre_health > post_health {
         msg!(
             "pre_health > post_health: {} >= {}",
             pre_health,
@@ -170,12 +218,17 @@ pub fn end_receivership<'info>(
         return err!(MarginfiError::WorseHealthPostLiquidation);
     }
 
-    let seized: I80F48 = pre_assets_equity - post_assets_equity;
-    let repaid: I80F48 = pre_liabs_equity - post_liabilities_equity;
+    let now = Clock::get()?.unix_timestamp;
 
     // clear receivership
     marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
+    marginfi_account.liquidation_tagged_at = tag_after_liquidation(
+        marginfi_account.liquidation_tagged_at,
+        pre_health,
+        post_health,
+        now,
+    );
 
     let seized_f64 = seized.to_num::<f64>();
     let repaid_f64 = repaid.to_num::<f64>();
@@ -187,7 +240,7 @@ pub fn end_receivership<'info>(
 
         entry.asset_amount_seized = seized_f64.to_le_bytes();
         entry.liab_amount_repaid = repaid_f64.to_le_bytes();
-        entry.timestamp = Clock::get()?.unix_timestamp;
+        entry.timestamp = now;
     }
 
     Ok((
