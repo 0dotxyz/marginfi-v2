@@ -95,6 +95,11 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
         MarginfiError::AccountAlreadyMigrated
     );
 
+    check!(
+        !old_account.get_flag(ACCOUNT_DISABLED),
+        MarginfiError::AccountDisabled
+    );
+
     let mut new_account = ctx.accounts.new_marginfi_account.load_init()?;
     let current_timestamp = Clock::get()?.unix_timestamp as u64;
     initialize_migrated_account(
@@ -241,6 +246,11 @@ pub fn transfer_to_new_account_pda(
         old_account.migrated_to,
         Pubkey::default(),
         MarginfiError::AccountAlreadyMigrated
+    );
+
+    check!(
+        !old_account.get_flag(ACCOUNT_DISABLED),
+        MarginfiError::AccountDisabled
     );
 
     // Validate third-party id restriction if provided
