@@ -145,7 +145,7 @@ pub struct TransferToNewAccount<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -304,7 +304,7 @@ pub struct TransferToNewAccountPda<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
