@@ -5,7 +5,6 @@ use {
     fixed::types::I80F48,
     fixed_macro::types::I80F48,
     kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
-    marginfi::{bank_authority_seed, bank_seed, state::bank::BankVaultType},
     marginfi_type_crate::{
         constants::{
             EMISSIONS_TOKEN_ACCOUNT_SEED, EXECUTE_ORDER_SEED, FEE_STATE_SEED,
@@ -238,22 +237,6 @@ pub fn send_tx(config: &Config, ixs: Vec<Instruction>, signers: &[&Keypair]) -> 
             Ok(sig)
         }
     }
-}
-
-pub fn find_bank_vault_pda(
-    bank_pk: &Pubkey,
-    vault_type: BankVaultType,
-    program_id: &Pubkey,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_seed!(vault_type, bank_pk), program_id)
-}
-
-pub fn find_bank_vault_authority_pda(
-    bank_pk: &Pubkey,
-    vault_type: BankVaultType,
-    program_id: &Pubkey,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(bank_authority_seed!(vault_type, bank_pk), program_id)
 }
 
 pub fn find_bank_emssions_token_account_pda(

@@ -1,6 +1,6 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
 use crate::state::{
-    bank::{BankImpl, BankVaultType},
+    bank::BankImpl,
     marginfi_account::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
         check_account_init_health, check_post_liquidation_condition_and_get_account_health,
@@ -13,9 +13,8 @@ use crate::state::{
     },
 };
 use crate::utils::{
-    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
-    is_marginfi_asset_tag, validate_asset_tags, validate_bank_asset_tags, validate_bank_state,
-    InstructionKind,
+    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache, validate_asset_tags,
+    validate_bank_asset_tags, validate_bank_state, InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
@@ -28,8 +27,8 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_SEED,
     },
     types::{
-        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, u32_to_centi, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
+        MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 

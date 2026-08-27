@@ -294,7 +294,6 @@ impl MarginfiAccountImpl for MarginfiAccount {
     fn defers_health_to_end_instruction(&self) -> bool {
         self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
     }
-
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
         // orders one account can open.
@@ -492,30 +491,6 @@ fn get_cached_price_with_confidence(
     }
 }
 
-fn get_same_asset_weight_for_balance(
-    balance: &Balance,
-    bank: &Bank,
-    requirement_type: RequirementType,
-    reconciled_emode_config: &ReconciledEmodeConfig,
-) -> Option<I80F48> {
-    if balance.is_empty(BalanceSide::Assets)
-        || !reconciled_emode_config.same_asset.is_enabled()
-        || bank.mint != reconciled_emode_config.same_asset.mint
-        || bank.config.oracle_keys[0] != reconciled_emode_config.same_asset.oracle_key
-        || bank.config.oracle_setup.feed_family() != reconciled_emode_config.same_asset.feed_family
-        || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
-        || !matches!(bank.config.risk_tier, RiskTier::Collateral)
-        || matches!(
-            (bank.config.operational_state, requirement_type),
-            (BankOperationalState::ReduceOnly, RequirementType::Initial)
-        )
-    {
-        return None;
-    }
-
-    Some(reconciled_emode_config.same_asset.asset_weight)
-}
-
 #[inline(always)]
 fn calc_weighted_asset_value_cached_standalone(
     balance: &Balance,
@@ -527,26 +502,16 @@ fn calc_weighted_asset_value_cached_standalone(
         RiskTier::Collateral => {
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
@@ -1621,12 +1586,15 @@ fn calc_weighted_asset_value_standalone(
 ) -> MarginfiResult<(I80F48, I80F48, u32)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
-            // ReduceOnly banks should not be counted as collateral for Initial checks
+            // Paused/ReduceOnly banks should not be counted as collateral for Initial checks
             if matches!(
                 (bank.config.operational_state, requirement_type),
-                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
             ) {
-                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
                 return Ok((I80F48::ZERO, I80F48::ZERO, 0));
             }
 
@@ -1659,21 +1627,8 @@ fn calc_weighted_asset_value_standalone(
                 .as_ref()
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
-            // Determine asset weight (emode or bank default)
-            let mut asset_weight = bank
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
-                asset_weight = max(asset_weight, emode_entry.asset_weight);
-            }
-            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
-                balance,
-                bank,
-                requirement_type,
-                reconciled_emode_config,
-            ) {
-                asset_weight = max(asset_weight, same_asset_weight);
-            }
+            // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
+            let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
@@ -2453,7 +2408,7 @@ mod test {
     }
 
     #[test]
-    fn same_asset_weight_applies_to_matching_collateral_only() {
+    fn get_asset_weight_applies_to_matching_collateral_only() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2463,10 +2418,6 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
@@ -2474,29 +2425,47 @@ mod test {
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(0.99)
         );
+
+        bank.config.asset_weight_init = I80F48!(1).into();
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(1)
+        );
+        bank.config.asset_weight_init = I80F48!(0).into();
+
+        bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        bank.config.risk_tier = RiskTier::Isolated;
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.config.risk_tier = RiskTier::Collateral;
+
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.config.oracle_keys[0] = reconciled.same_asset.oracle_key;
 
         bank.mint = Pubkey::new_unique();
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_requires_matching_feed_family() {
+    fn get_asset_weight_requires_matching_feed_family() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2506,10 +2475,6 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
@@ -2518,40 +2483,25 @@ mod test {
 
         // Integration setups in the same feed family qualify (kToken collateral vs native debt).
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48!(0.99)
         );
 
         bank.config.oracle_setup = OracleSetup::SwitchboardPull;
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
 
         bank.config.oracle_setup = OracleSetup::Fixed;
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_disabled_when_reconciled_family_missing() {
+    fn get_asset_weight_disabled_when_reconciled_family_missing() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
@@ -2561,33 +2511,55 @@ mod test {
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
     }
 
     #[test]
-    fn same_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
+    fn get_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
         bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
+            I80F48!(0.99)
+        );
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Equity, &reconciled),
+            I80F48::ONE
+        );
+    }
+
+    #[test]
+    fn paused_bank_assets_confer_no_initial_borrowing_power() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Paused;
         bank.config.oracle_setup = OracleSetup::PythPushOracle;
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
@@ -2603,32 +2575,23 @@ mod test {
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Initial,
-                &reconciled,
-            ),
-            None
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
         );
         assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Maintenance,
-                &reconciled,
-            ),
-            Some(I80F48!(0.99))
+            bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
+            I80F48!(0.99)
         );
-        assert_eq!(
-            get_same_asset_weight_for_balance(
-                &balance,
-                &bank,
-                RequirementType::Equity,
-                &ReconciledEmodeConfig::default(),
-            ),
-            None
-        );
+
+        let (asset_value, price) = calc_weighted_asset_value_cached_standalone(
+            &balance,
+            &bank,
+            RequirementType::Initial,
+            &reconciled,
+        )
+        .unwrap();
+        assert_eq!(asset_value, I80F48::ZERO);
+        assert_eq!(price, I80F48::ZERO);
     }
 
     #[test]

@@ -255,3 +255,33 @@ pub fn convert_decimals(n: I80F48, from_dec: u8, to_dec: u8) -> Option<I80F48> {
 
     Some(out)
 }
+
+#[inline]
+pub fn calc_value(
+    amount: I80F48,
+    price: I80F48,
+    mint_decimals: u8,
+    weight: Option<I80F48>,
+) -> Option<I80F48> {
+    if amount == I80F48::ZERO {
+        return Some(I80F48::ZERO);
+    }
+
+    let scaling_factor = *EXP_10_I80F48.get(mint_decimals as usize)?;
+
+    let weighted_amount = match weight {
+        Some(weight) => amount.checked_mul(weight)?,
+        None => amount,
+    };
+
+    weighted_amount
+        .checked_mul(price)?
+        .checked_div(scaling_factor)
+}
+
+#[inline]
+pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> Option<I80F48> {
+    let scaling_factor = *EXP_10_I80F48.get(mint_decimals as usize)?;
+
+    value.checked_mul(scaling_factor)?.checked_div(price)
+}

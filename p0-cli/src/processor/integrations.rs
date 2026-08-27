@@ -1,3 +1,4 @@
+use marginfi_type_crate::pdas::derive_bank_vault_authority;
 use {
     super::load_all_banks,
     crate::{
@@ -5,16 +6,16 @@ use {
         profile::Profile,
         utils::{
             build_kamino_refresh_obligation_ix, build_kamino_refresh_reserve_ix,
-            derive_juplend_cpi_accounts, find_bank_vault_authority_pda, find_fee_state_pda,
-            get_oracle_setup, load_kamino_reserve, load_observation_account_metas,
-            load_observation_account_metas_close_last, send_tx, EXP_10_I80F48,
+            derive_juplend_cpi_accounts, find_fee_state_pda, get_oracle_setup, load_kamino_reserve,
+            load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
+            EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::Result,
     fixed::types::I80F48,
     kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
-    marginfi::state::bank::BankVaultType,
+    marginfi_type_crate::types::BankVaultType,
     marginfi_type_crate::{
         pdas::{DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID},
         types::{Bank, MarginfiAccount},
@@ -109,7 +110,7 @@ fn build_kamino_init_obligation_ix(
     token_program: Pubkey,
 ) -> Result<Instruction> {
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     Ok(Instruction {
         program_id: config.program_id,
@@ -157,7 +158,7 @@ fn build_drift_init_user_ix(
     token_program: Pubkey,
 ) -> Result<Instruction> {
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     Ok(Instruction {
         program_id: config.program_id,
@@ -196,7 +197,7 @@ fn build_juplend_init_position_ix(
     token_program: Pubkey,
 ) -> Result<Instruction> {
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     Ok(Instruction {
         program_id: config.program_id,
@@ -319,7 +320,7 @@ pub fn kamino_deposit(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let bank_mint_account = rpc_client.get_account(&bank.mint)?;
     let token_program = bank_mint_account.owner;
@@ -414,7 +415,7 @@ pub fn kamino_withdraw(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let bank_mint_account = rpc_client.get_account(&bank.mint)?;
     let token_program = bank_mint_account.owner;
@@ -501,7 +502,7 @@ pub fn kamino_harvest_reward(
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let (fee_state, _) = find_fee_state_pda(&config.program_id);
 
     let reward_mint_account = rpc_client.get_account(&reward_mint)?;
@@ -626,7 +627,7 @@ pub fn drift_deposit(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let bank_mint_account = rpc_client.get_account(&bank.mint)?;
     let token_program = bank_mint_account.owner;
@@ -707,7 +708,7 @@ pub fn drift_withdraw(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let bank_mint_account = rpc_client.get_account(&bank.mint)?;
     let token_program = bank_mint_account.owner;
@@ -784,7 +785,7 @@ pub fn drift_harvest_reward(
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let (fee_state, _) = find_fee_state_pda(&config.program_id);
 
     let reward_mint_account = rpc_client.get_account(&reward_mint)?;
@@ -854,7 +855,7 @@ pub fn juplend_init_position(
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let jl = derive_juplend_cpi_accounts(&rpc_client, &bank, &liquidity_vault_authority)?;
 
@@ -921,7 +922,7 @@ pub fn juplend_deposit(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let jl = derive_juplend_cpi_accounts(&rpc_client, &bank, &liquidity_vault_authority)?;
 
@@ -999,7 +1000,7 @@ pub fn juplend_withdraw(
         .to_num::<u64>();
 
     let (liquidity_vault_authority, _) =
-        find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
+        derive_bank_vault_authority(&bank_pk, BankVaultType::Liquidity, &config.program_id);
 
     let jl = derive_juplend_cpi_accounts(&rpc_client, &bank, &liquidity_vault_authority)?;
 

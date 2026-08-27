@@ -7,7 +7,7 @@ use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         emode::{
             DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
         },
@@ -21,8 +21,8 @@ use marginfi_type_crate::{
     },
     types::{
         make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
-        INTEREST_CURVE_SEVEN_POINT,
+        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
+        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;

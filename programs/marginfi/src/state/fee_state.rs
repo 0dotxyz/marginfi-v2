@@ -18,7 +18,6 @@ impl FeeStateImpl for FeeState {
 mod tests {
     use crate::utils::hex_to_bytes;
 
-    use super::*;
     use anchor_lang::{
         pubkey,
         solana_program::{account_info::AccountInfo, pubkey::Pubkey},
@@ -26,6 +25,7 @@ mod tests {
     use fixed::types::I80F48;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::constants::discriminators;
+    use marginfi_type_crate::types::FeeState;
 
     #[test]
     fn fee_state_regression() {

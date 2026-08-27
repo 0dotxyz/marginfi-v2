@@ -18,29 +18,25 @@ use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
-use marginfi::{
-    state::{
-        bank::{BankImpl, BankVaultType},
-        drift::DriftConfigCompact,
-        juplend::JuplendConfigCompact,
-        kamino::KaminoConfigCompact,
-    },
-    utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
+use marginfi::state::{
+    bank::BankImpl, drift::DriftConfigCompact, juplend::JuplendConfigCompact,
+    kamino::KaminoConfigCompact,
 };
 use marginfi_type_crate::pdas::{
-    derive_drift_insurance_fund_vault, derive_drift_signer, derive_drift_spot_market,
-    derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
-    derive_juplend_auth_list, derive_juplend_borrow_position, derive_juplend_claim_account,
-    derive_juplend_f_token_mint, derive_juplend_f_token_vault, derive_juplend_lending,
-    derive_juplend_lending_admin, derive_juplend_liquidity, derive_juplend_rate_model,
-    derive_juplend_rewards_admin, derive_juplend_rewards_rate_model,
-    derive_juplend_supply_position, derive_juplend_token_reserve, derive_kamino_base_obligation,
+    derive_bank_vault, derive_bank_vault_authority, derive_drift_insurance_fund_vault,
+    derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault,
+    derive_drift_state, derive_drift_user, derive_drift_user_stats, derive_juplend_auth_list,
+    derive_juplend_borrow_position, derive_juplend_claim_account, derive_juplend_f_token_mint,
+    derive_juplend_f_token_vault, derive_juplend_lending, derive_juplend_lending_admin,
+    derive_juplend_liquidity, derive_juplend_rate_model, derive_juplend_rewards_admin,
+    derive_juplend_rewards_rate_model, derive_juplend_supply_position,
+    derive_juplend_token_reserve, derive_kamino_base_obligation,
     derive_kamino_lending_market_authority, derive_kamino_user_metadata,
 };
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
     types::{
-        centi_to_u32, make_points, milli_to_u32, BankConfig, BankOperationalState,
+        centi_to_u32, make_points, milli_to_u32, BankConfig, BankOperationalState, BankVaultType,
         InterestRateConfig, OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
     },
 };
@@ -1384,7 +1380,7 @@ impl TestFixture {
         );
 
         let liquidity_vault_authority =
-            find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
+            derive_bank_vault_authority(&bank_key, BankVaultType::Liquidity, &marginfi::ID).0;
         let obligation =
             derive_kamino_base_obligation(&liquidity_vault_authority, &lending_market).0;
         create_system_account_if_missing(test_f.context.clone(), obligation).await;
@@ -1412,15 +1408,23 @@ impl TestFixture {
             integration_acc_1: reserve_key,
             integration_acc_2: obligation,
             liquidity_vault_authority,
-            liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
-            insurance_vault_authority: find_bank_vault_authority_pda(
+            liquidity_vault: derive_bank_vault(&bank_key, BankVaultType::Liquidity, &marginfi::ID)
+                .0,
+            insurance_vault_authority: derive_bank_vault_authority(
                 &bank_key,
                 BankVaultType::Insurance,
+                &marginfi::ID,
             )
             .0,
-            insurance_vault: find_bank_vault_pda(&bank_key, BankVaultType::Insurance).0,
-            fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
-            fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
+            insurance_vault: derive_bank_vault(&bank_key, BankVaultType::Insurance, &marginfi::ID)
+                .0,
+            fee_vault_authority: derive_bank_vault_authority(
+                &bank_key,
+                BankVaultType::Fee,
+                &marginfi::ID,
+            )
+            .0,
+            fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: reserve_mint.token_program,
             system_program: system_program::ID,
         };
@@ -1454,7 +1458,12 @@ impl TestFixture {
                 bank: bank_key,
                 signer_token_account: init_source.key,
                 liquidity_vault_authority,
-                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                liquidity_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
+                )
+                .0,
                 integration_acc_2: obligation,
                 user_metadata,
                 lending_market,
@@ -1607,7 +1616,7 @@ impl TestFixture {
         let bank_f = BankFixture::new(self.context.clone(), bank_key, mint, None);
 
         let liquidity_vault_authority =
-            find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
+            derive_bank_vault_authority(&bank_key, BankVaultType::Liquidity, &marginfi::ID).0;
         let drift_user = derive_drift_user(&liquidity_vault_authority, 0).0;
         let drift_user_stats = derive_drift_user_stats(&liquidity_vault_authority).0;
         create_system_account_if_missing(self.context.clone(), drift_user).await;
@@ -1637,16 +1646,24 @@ impl TestFixture {
             integration_acc_2: drift_user,
             integration_acc_3: drift_user_stats,
             liquidity_vault_authority,
-            liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
-            insurance_vault_authority: find_bank_vault_authority_pda(
+            liquidity_vault: derive_bank_vault(&bank_key, BankVaultType::Liquidity, &marginfi::ID)
+                .0,
+            insurance_vault_authority: derive_bank_vault_authority(
                 &bank_key,
                 BankVaultType::Insurance,
+                &marginfi::ID,
             )
             .0,
-            insurance_vault: find_bank_vault_pda(&bank_key, BankVaultType::Insurance).0,
-            fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
-            fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
-            token_program: mint.token_program,
+            insurance_vault: derive_bank_vault(&bank_key, BankVaultType::Insurance, &marginfi::ID)
+                .0,
+            fee_vault_authority: derive_bank_vault_authority(
+                &bank_key,
+                BankVaultType::Fee,
+                &marginfi::ID,
+            )
+            .0,
+            fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
+            token_program: spl_token::ID,
             system_program: system_program::ID,
         };
         let mut add_bank_ix = Instruction {
@@ -1676,7 +1693,12 @@ impl TestFixture {
                 signer_token_account: init_source.key,
                 bank: bank_key,
                 liquidity_vault_authority,
-                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                liquidity_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
+                )
+                .0,
                 mint: mint.key,
                 integration_acc_3: drift_user_stats,
                 integration_acc_2: drift_user,
@@ -2059,7 +2081,7 @@ impl TestFixture {
         let bank_f = BankFixture::new(test_f.context.clone(), bank_key, mint_f, None);
 
         let liquidity_vault_authority =
-            find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
+            derive_bank_vault_authority(&bank_key, BankVaultType::Liquidity, &marginfi::ID).0;
 
         let bank_config = JuplendConfigCompact::new(
             PYTH_USDC_FEED,
@@ -2084,15 +2106,31 @@ impl TestFixture {
                 bank: bank_key,
                 integration_acc_1: lending,
                 liquidity_vault_authority,
-                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
-                insurance_vault_authority: find_bank_vault_authority_pda(
+                liquidity_vault: derive_bank_vault(
                     &bank_key,
-                    BankVaultType::Insurance,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
                 )
                 .0,
-                insurance_vault: find_bank_vault_pda(&bank_key, BankVaultType::Insurance).0,
-                fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
-                fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
+                insurance_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
+                .0,
+                insurance_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Fee,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
                 f_token_mint,
                 integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
@@ -2155,7 +2193,12 @@ impl TestFixture {
                 signer_token_account: init_source.key,
                 bank: bank_key,
                 liquidity_vault_authority,
-                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                liquidity_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
+                )
+                .0,
                 mint,
                 integration_acc_1: lending,
                 f_token_mint,

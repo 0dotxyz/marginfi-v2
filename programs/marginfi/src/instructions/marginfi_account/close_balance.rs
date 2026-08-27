@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 
 use crate::{
@@ -13,7 +14,6 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
     },
-    utils::is_marginfi_asset_tag,
 };
 
 pub fn lending_account_close_balance(ctx: Context<LendingAccountCloseBalance>) -> MarginfiResult {
