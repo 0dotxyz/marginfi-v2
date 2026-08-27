@@ -1,7 +1,7 @@
 use anchor_lang::{prelude::*, solana_program::instruction::Instruction, InstructionData};
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
-use marginfi::{errors::MarginfiError, state::marginfi_account::MarginfiAccountImpl};
+use marginfi::errors::MarginfiError;
 use marginfi_type_crate::{
     constants::{
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDATION_RECORD_SEED,

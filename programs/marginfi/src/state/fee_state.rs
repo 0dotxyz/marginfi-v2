@@ -18,7 +18,6 @@ impl FeeStateImpl for FeeState {
 mod tests {
     use crate::utils::hex_to_bytes;
 
-    use super::*;
     use anchor_lang::{
         pubkey,
         solana_program::{account_info::AccountInfo, pubkey::Pubkey},
@@ -26,6 +25,7 @@ mod tests {
     use fixed::types::I80F48;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::constants::discriminators;
+    use marginfi_type_crate::types::FeeState;
 
     #[test]
     fn fee_state_regression() {
@@ -97,5 +97,20 @@ mod tests {
         // 4) Remaining reserved and flat fields
         assert_eq!(fee_state.placeholder1, 0);
         assert_eq!(fee_state.liquidation_flat_sol_fee, 0);
+    }
+
+    /// The premium wallet must occupy exactly the first 32 bytes of the region past `V1_LEN`
+    /// (offset 256), so a v1-sized account grown by `resize_global_fee_state` (zero-filled)
+    /// reads as unset premium config.
+    #[test]
+    fn fee_state_premium_field_layout() {
+        use std::mem::offset_of;
+
+        assert_eq!(offset_of!(FeeState, premium_wallet), FeeState::V1_LEN);
+        assert_eq!(offset_of!(FeeState, _reserved0), FeeState::V1_LEN + 32);
+
+        // Zeroed region == premium unset (wallet default => sweeping disabled)
+        let fee_state: FeeState = bytemuck::Zeroable::zeroed();
+        assert_eq!(fee_state.premium_wallet, Pubkey::default());
     }
 }

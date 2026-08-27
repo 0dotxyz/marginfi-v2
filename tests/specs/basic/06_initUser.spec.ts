@@ -51,7 +51,7 @@ describe("Initialize user account", () => {
       assertKeyDefault(balances[i].bankPk);
       assertI80F48Equal(balances[i].assetShares, 0);
       assertI80F48Equal(balances[i].liabilityShares, 0);
-      assertI80F48Equal(balances[i].emissionsOutstanding, 0);
+      assertI80F48Equal(balances[i].premiumOutstanding, 0);
       assertBNEqual(balances[i].lastUpdate, 0);
     }
     assertBNEqual(userAcc.accountFlags, 0);

@@ -714,6 +714,26 @@ async fn tag_allowed_while_cb_halted() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A frozen account's authority cannot repay or withdraw, so it cannot be tagged either.
+#[tokio::test]
+async fn tag_rejected_while_frozen() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    liquidatee.try_set_freeze(true).await?;
+    let res = send_tag(&test_f, &liquidatee, 0).await;
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::UnexpectedLiquidationState);
+    assert_eq!(load_tag(&liquidatee).await, 0);
+
+    liquidatee.try_set_freeze(false).await?;
+    send_tag(&test_f, &liquidatee, 1).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+    Ok(())
+}
+
 // The health check bounds the loss by the premium taken, so a premium grown past what a 0.96
 // maintenance weight would fund is still reachable.
 #[tokio::test]

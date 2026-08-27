@@ -9,15 +9,12 @@ use anchor_lang::{
     InstructionData, ToAccountMetas,
 };
 use fixed::types::I80F48;
-use marginfi::{
-    bank_authority_seed,
-    state::{
-        bank::BankVaultType,
-        price::{OraclePriceFeedAdapter, PriceAdapter},
-    },
-    utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
+use marginfi::state::price::{OraclePriceFeedAdapter, PriceAdapter};
+use marginfi_type_crate::bank_authority_seed;
+use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
+use marginfi_type_crate::types::{
+    Bank, BankConfigOpt, BankVaultType, OraclePriceType, OracleSetup,
 };
-use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
 use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
@@ -52,11 +49,11 @@ impl BankFixture {
     }
 
     pub fn get_vault(&self, vault_type: BankVaultType) -> (Pubkey, u8) {
-        find_bank_vault_pda(&self.key, vault_type)
+        derive_bank_vault(&self.key, vault_type, &marginfi::ID)
     }
 
     pub fn get_vault_authority(&self, vault_type: BankVaultType) -> (Pubkey, u8) {
-        find_bank_vault_authority_pda(&self.key, vault_type)
+        derive_bank_vault_authority(&self.key, vault_type, &marginfi::ID)
     }
 
     pub async fn get_price(&self) -> f64 {

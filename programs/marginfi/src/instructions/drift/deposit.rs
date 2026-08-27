@@ -2,7 +2,7 @@ use crate::{
     bank_signer,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
             BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
@@ -31,7 +31,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
 };
 
 /// Deposit into a Drift spot market through a marginfi account
@@ -159,7 +159,7 @@ pub struct DriftDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

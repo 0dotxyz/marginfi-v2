@@ -5,10 +5,7 @@ use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
-use marginfi::{
-    constants::LIQUIDATION_FLAT_FEE_DEFAULT, prelude::*,
-    state::marginfi_account::MarginfiAccountImpl,
-};
+use marginfi::{constants::LIQUIDATION_FLAT_FEE_DEFAULT, prelude::*};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},

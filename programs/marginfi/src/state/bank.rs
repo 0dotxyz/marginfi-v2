@@ -30,9 +30,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
-        DEFAULT_LIQUIDATION_FEE, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, FREEZE_SETTINGS,
-        GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, MAX_LIQUIDATION_FEE_U32,
+        DEFAULT_LIQUIDATION_FEE, FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -352,6 +350,9 @@ impl BankImpl for Bank {
             liquidation_liquidator_fee: 0,
             liquidation_insurance_fee: 0,
             _padding_0: [0; 8],
+            premium_tag: 0,
+            _pad3: [0; 6],
+            premium_activated_at: 0,
             integration_acc_1: Pubkey::default(),
             integration_acc_2: Pubkey::default(),
             bank_seed,
@@ -401,15 +402,11 @@ impl BankImpl for Bank {
     }
 
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48> {
-        Ok(shares
-            .checked_mul(self.liability_share_value.into())
-            .ok_or_else(math_error!())?)
+        Ok(self.liability_amount(shares).ok_or_else(math_error!())?)
     }
 
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48> {
-        Ok(shares
-            .checked_mul(self.asset_share_value.into())
-            .ok_or_else(math_error!())?)
+        Ok(self.asset_amount(shares).ok_or_else(math_error!())?)
     }
 
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48> {
@@ -1573,31 +1570,6 @@ impl BankImpl for Bank {
                     current_timestamp: now,
                 });
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum BankVaultType {
-    Liquidity,
-    Insurance,
-    Fee,
-}
-
-impl BankVaultType {
-    pub fn get_seed(self) -> &'static [u8] {
-        match self {
-            BankVaultType::Liquidity => LIQUIDITY_VAULT_SEED.as_bytes(),
-            BankVaultType::Insurance => INSURANCE_VAULT_SEED.as_bytes(),
-            BankVaultType::Fee => FEE_VAULT_SEED.as_bytes(),
-        }
-    }
-
-    pub fn get_authority_seed(self) -> &'static [u8] {
-        match self {
-            BankVaultType::Liquidity => LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
-            BankVaultType::Insurance => INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(),
-            BankVaultType::Fee => FEE_VAULT_AUTHORITY_SEED.as_bytes(),
         }
     }
 }

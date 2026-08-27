@@ -54,6 +54,9 @@ cfg_if::cfg_if! {
     }
 }
 
+/// Minimum share supply before a bank accepts a permissionless same-mint emissions donation.
+pub const MIN_EMISSIONS_SHARE_SUPPLY: I80F48 = I80F48!(1_048_576); // 2^20
+
 pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111111111111111");
 pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
@@ -75,9 +78,8 @@ pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
 /// of liquidation bonus, etc) if it has net assets worth less than this amount in dollars. This
 /// roughly covers the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
-/// Margin above the health-neutral discount (`asset weight / liability weight`) that
-/// `lending_account_liquidate` credits the liquidatee, so a fee-capped liquidation still improves
-/// health by more than rounding.
+/// Headroom `fees_fit_leverage` adds to the liquidation cuts, keeping a config off the exact
+/// fee-versus-leverage boundary where a liquidation would improve health only by rounding.
 pub const LIQUIDATION_HEALTH_GAIN_MARGIN: I80F48 = I80F48!(0.0001);
 /// Time after an account is tagged before the allowed liquidation premium starts to grow.
 pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour

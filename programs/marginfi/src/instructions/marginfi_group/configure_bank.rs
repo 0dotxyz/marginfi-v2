@@ -1,3 +1,4 @@
+use crate::constants::MIN_EMISSIONS_SHARE_SUPPLY;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -5,7 +6,6 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
 use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
@@ -14,7 +14,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    types::{is_marginfi_asset_tag, Bank, BankConfigOpt, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(
@@ -133,10 +133,13 @@ pub fn lending_pool_emissions_deposit(
         MarginfiError::InvalidTransfer
     );
 
+    // Emissions raise the share value by `amount / total_asset_shares`, so a floor on the supply
+    // bounds how far any caller can move it. See `MIN_EMISSIONS_SHARE_SUPPLY`.
     let total_asset_shares = I80F48::from(bank.total_asset_shares);
     check!(
-        total_asset_shares > I80F48::ZERO,
-        MarginfiError::EmissionsUpdateError
+        total_asset_shares >= MIN_EMISSIONS_SHARE_SUPPLY,
+        MarginfiError::EmissionsUpdateError,
+        "Bank share supply is too small to accept emissions"
     );
 
     bank.accrue_interest(

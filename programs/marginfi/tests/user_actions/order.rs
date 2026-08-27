@@ -1761,10 +1761,12 @@ async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Resul
         blockhash,
     );
     let result = {
-        let mut ctx = test_f.context.borrow_mut();
+        let ctx = test_f.context.borrow_mut();
         ctx.banks_client.process_transaction(tx).await
     };
 
     assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    // The rejected execution leaves the order intact rather than consuming it.
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }

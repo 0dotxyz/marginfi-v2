@@ -1,7 +1,6 @@
 use crate::{
     check,
     ix_utils::{get_discrim_hash, Hashable},
-    state::marginfi_account::MarginfiAccountImpl,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
