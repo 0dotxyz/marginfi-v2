@@ -3,8 +3,8 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_anchor_error, assert_custom_error, assert_eq_noise, native, prelude::*};
+use marginfi::prelude::*;
 use marginfi::state::bank::BankImpl;
-use marginfi::{prelude::*, state::marginfi_account::MarginfiAccountImpl};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},

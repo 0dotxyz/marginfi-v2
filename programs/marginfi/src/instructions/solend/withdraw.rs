@@ -3,13 +3,14 @@ use crate::{
     constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
             MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -28,7 +29,8 @@ use anchor_spl::token_interface::{
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -259,13 +261,26 @@ pub fn solend_withdraw<'info>(
         if !in_receivership {
             // Check account health, if below threshold fail transaction
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
+            let mut premium_scratch = PremiumScratch::default();
             check_account_init_health_and_clear_tag(
                 &mut marginfi_account,
                 &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
+                &mut Some(&mut premium_scratch),
             )?;
             health_cache.program_version = PROGRAM_VERSION;
+
+            // Claim premium at the old rates and refresh every liability's premium rate
+            // snapshot with the post-withdraw collateral mix.
+            {
+                let group = ctx.accounts.group.load()?;
+                marginfi_account.update_premium_snapshots(
+                    &group,
+                    &premium_scratch,
+                    Clock::get()?.unix_timestamp as u64,
+                )?;
+            }
 
             let bank_loader = &ctx.accounts.bank;
             let mut bank = bank_loader.load_mut()?;
@@ -332,7 +347,7 @@ pub struct SolendWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, false)
+            is_signer_authorized(&a, g.admin, authority.key(), true, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

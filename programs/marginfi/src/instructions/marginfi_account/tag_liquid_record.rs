@@ -3,9 +3,7 @@ use crate::{
     events::LiquidationTagEvent,
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
-    state::marginfi_account::{
-        check_pre_liquidation_condition_and_get_account_health, MarginfiAccountImpl,
-    },
+    state::marginfi_account::check_pre_liquidation_condition_and_get_account_health,
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
