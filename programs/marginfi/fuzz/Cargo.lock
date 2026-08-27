@@ -3157,6 +3157,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bytemuck",
+ "fixed",
 ]
 
 [[package]]
@@ -3459,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -3526,7 +3527,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anchor-lang",
  "bs58",

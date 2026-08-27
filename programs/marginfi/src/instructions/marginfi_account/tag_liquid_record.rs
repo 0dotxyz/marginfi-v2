@@ -8,8 +8,8 @@ use crate::{
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
 };
 
 /// (Permissionless) Tags an unhealthy account, letting the allowed liquidation premium grow over
@@ -62,14 +62,9 @@ pub struct TagLiquidationRecord<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        constraint = {
-            let acc = marginfi_account.load()?;
-            !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
-                && !acc.get_flag(ACCOUNT_IN_FLASHLOAN)
-                && !acc.get_flag(ACCOUNT_DISABLED)
-                && !acc.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
-        } @MarginfiError::UnexpectedLiquidationState
+        constraint = !marginfi_account.load()?.get_flag(
+            ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+        ) @ MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
