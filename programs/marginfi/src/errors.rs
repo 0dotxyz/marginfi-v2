@@ -503,7 +503,7 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
-    // ************** END AUTO-REBALANCE ERRORS
+                                 // ************** END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
