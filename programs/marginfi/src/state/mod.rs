@@ -13,6 +13,8 @@ pub mod marginfi_group;
 pub mod order;
 pub mod panic_state;
 pub mod price;
+pub mod rate;
 pub mod rate_limiter;
+pub mod rebalance;
 pub mod solend;
 pub mod staked_settings;

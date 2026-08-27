@@ -366,10 +366,10 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
 
     assert!(res1.is_ok());
 
-    // Second transaction with same parameters should fail. (Warp a slot first: this transaction is
-    // byte-identical to the first, and with the same blockhash it would be signature-deduped by
-    // BanksClient into that cached success.)
-    test_f.context.borrow_mut().warp_to_slot(100).unwrap();
+    // Second transaction with same parameters should fail. Warp a slot first: it is byte-identical
+    // to the first, so on the same blockhash BanksClient dedupes it into that cached success.
+    let next_slot = test_f.get_clock().await.slot + 1;
+    test_f.context.borrow_mut().warp_to_slot(next_slot).unwrap();
     let tx2 = Transaction::new_signed_with_payer(
         &[init_marginfi_account_pda_ix],
         Some(&test_f.payer()),

@@ -167,8 +167,7 @@ pub fn lending_account_liquidate<'info>(
     {
         let group = marginfi_group_loader.load()?;
 
-        // During a CB halt direct liquidation is admin-only; otherwise the standard liquidator
-        // ownership check applies.
+        // A CB halt restricts direct liquidation to the admins on top of the ownership check.
         let signer = ctx.accounts.authority.key();
         if cb_admin_liquidation {
             require!(
@@ -180,16 +179,6 @@ pub fn lending_account_liquidate<'info>(
             // `update_cache_price` trips the breaker without reverting, so a breach must
             // revert here first. Admins liquidate through a breach via the branch above.
             run_cb_price_gate(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
-            require!(
-                is_signer_authorized(
-                    &liquidator_marginfi_account,
-                    group.admin,
-                    signer,
-                    false,
-                    false
-                ),
-                MarginfiError::Unauthorized
-            );
         }
 
         // Liquidators must repay debts in allowed asset types. A SOL debt can be repaid in any
@@ -602,8 +591,10 @@ pub struct LendingAccountLiquidate<'info> {
             let a = liquidator_marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
-        // Signer authorization moved to the handler so the CB-halt admin path can accept
-        // group.admin / risk_admin without requiring them to own the liquidator account.
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            is_signer_authorized(&a, group.load()?.admin, authority.key(), false, false, false)
+        } @ MarginfiError::Unauthorized,
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

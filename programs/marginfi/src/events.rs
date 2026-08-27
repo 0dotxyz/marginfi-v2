@@ -264,6 +264,80 @@ pub struct SetKeeperCloseFlagsEvent {
 }
 
 #[event]
+pub struct MarginfiAccountPlaceRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub mint: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountUpdateRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct KeeperCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct RebalanceFeePoolTopUpEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceFeePoolWithdrawEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceExecutedEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    pub bank_count: u8,
+    pub value_moved: WrappedI80F48,
+    /// Lamports escrowed into the rebalance record, released later by `settle_rebalance_tip`.
+    pub tip_escrowed: u64,
+}
+
+#[event]
+pub struct RebalanceTipSettledEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    /// Whether every move's destination out-yielded its source over the settlement window.
+    pub realized: bool,
+    /// Lamports the executor received. Nonzero without `realized` when the escrow was forfeited
+    /// because the fee pool had been drained below its rent-exempt reserve.
+    pub tip_paid: u64,
+}
+
+#[event]
 pub struct AdminCloseAccountEvent {
     pub header: AccountEventHeader,
     pub global_fee_wallet: Pubkey,
