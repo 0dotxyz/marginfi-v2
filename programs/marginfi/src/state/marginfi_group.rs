@@ -5,7 +5,7 @@ use crate::state::emode::{
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{basis_to_u32, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY};
+use marginfi_type_crate::types::{basis_to_u32, MAX_PREMIUM_ENTRIES};
 use marginfi_type_crate::{
     constants::DAILY_RESET_INTERVAL,
     types::{MarginfiGroup, PROGRAM_FEES_ENABLED},
@@ -38,7 +38,6 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
-    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -258,23 +257,6 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
-
-    /// Look up the variable-borrow premium rate (milli-u32 encoding) for a (collateral tag,
-    /// liability tag) pair. Missing pairs and untagged (0) banks pay no premium.
-    /// * The SOLE accessor for `premium_entries`. Entries are stored sorted by
-    ///   (collateral_tag, liability_tag) — every config path preserves this.
-    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32 {
-        if collateral_tag == PREMIUM_TAG_EMPTY || liability_tag == PREMIUM_TAG_EMPTY {
-            return 0;
-        }
-        let n = (self.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);
-        self.premium_entries[..n]
-            .binary_search_by_key(&(collateral_tag, liability_tag), |e| {
-                (e.collateral_tag, e.liability_tag)
-            })
-            .map(|i| self.premium_entries[i].rate)
-            .unwrap_or(0)
-    }
 }
 
 trait MarginfiGroupDeleverageLimitExt {
@@ -390,50 +372,5 @@ mod tests {
         assert_eq!(offset_of!(Balance, premium_rate_snapshot), 36);
         assert_eq!(offset_of!(Balance, premium_outstanding), 72);
         assert_eq!(offset_of!(Balance, last_update), 88);
-    }
-
-    fn group_with_entries(entries: &[(u16, u16, u32)]) -> MarginfiGroup {
-        let mut group = MarginfiGroup::zeroed();
-        for (i, (c, l, r)) in entries.iter().enumerate() {
-            group.premium_entries[i] = PremiumEntry {
-                collateral_tag: *c,
-                liability_tag: *l,
-                rate: *r,
-            };
-        }
-        group.premium_settings.entry_count = entries.len() as u16;
-        group
-    }
-
-    #[test]
-    fn find_premium_rate_hit_and_miss() {
-        let group = group_with_entries(&[(100, 200, 7), (100, 300, 9), (150, 200, 11)]);
-        assert_eq!(group.find_premium_rate(100, 200), 7);
-        assert_eq!(group.find_premium_rate(100, 300), 9);
-        assert_eq!(group.find_premium_rate(150, 200), 11);
-        // Missing pair defaults to 0
-        assert_eq!(group.find_premium_rate(150, 300), 0);
-        assert_eq!(group.find_premium_rate(999, 999), 0);
-    }
-
-    #[test]
-    fn find_premium_rate_tag_zero_never_matches() {
-        // A pathological entry with tag 0 (rejected by config validation, but belt-and-braces)
-        let group = group_with_entries(&[(0, 200, 7), (100, 0, 9)]);
-        assert_eq!(group.find_premium_rate(0, 200), 0);
-        assert_eq!(group.find_premium_rate(100, 0), 0);
-        assert_eq!(group.find_premium_rate(0, 0), 0);
-    }
-
-    #[test]
-    fn find_premium_rate_respects_count() {
-        let mut group = group_with_entries(&[(100, 200, 7), (100, 300, 9)]);
-        // Entries past entry_count are ignored
-        group.premium_settings.entry_count = 1;
-        assert_eq!(group.find_premium_rate(100, 300), 0);
-        assert_eq!(group.find_premium_rate(100, 200), 7);
-        // count 0 => matrix off => everything is 0
-        group.premium_settings.entry_count = 0;
-        assert_eq!(group.find_premium_rate(100, 200), 0);
     }
 }
