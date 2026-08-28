@@ -163,6 +163,98 @@ async fn same_asset_emode_regular_same_mint_position_is_healthy_then_turns_unhea
     Ok(())
 }
 
+// Verification repro for external report MFI-MED-23 (same-asset e-mode unliquidatable leverage).
+// With the default total liquidation fee f = 2.5% + 2.5% = 5%, a pure same-asset position's
+// post-liquidation maintenance-health delta is q * p * w_liab * (1/L_maint - f), which is
+// non-positive for any seize amount once L_maint >= 1/f = 20. At L_maint = 62 the account is
+// genuinely maintenance-unhealthy, yet every classic liquidation attempt must fail the strict
+// improvement gate with WorseHealthPostLiquidation.
+#[tokio::test]
+async fn same_asset_emode_high_leverage_position_cannot_be_classically_liquidated(
+) -> anyhow::Result<()> {
+    let deposit_ui = FixedI80F48::from_num(13.4);
+    let healthy_init_leverage = 63;
+    let healthy_maint_leverage = 65;
+    let tightened_init_leverage = 60;
+    let tightened_maint_leverage = 62;
+    let sol_price = FixedI80F48::from_num(10);
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    let sol_bank_a = test_f.get_bank(&BankMint::Sol).clone();
+    let sol_bank_b =
+        add_same_asset_regular_bank(&test_f, BankMint::Sol, SAME_ASSET_BANK_SEED).await?;
+    configure_same_asset_pair(
+        &test_f,
+        &sol_bank_a,
+        &sol_bank_b,
+        0.5,
+        0.5,
+        healthy_init_leverage,
+        healthy_maint_leverage,
+    )
+    .await?;
+
+    // The liquidator's deposit also provides the liquidity the borrower draws from.
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f.sol_mint.create_token_account_and_mint_to(24.0).await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, &sol_bank_b, 24.0, None)
+        .await?;
+
+    let user = test_f.create_marginfi_account().await;
+    let user_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(deposit_ui.to_num::<f64>())
+        .await;
+    user.try_bank_deposit(user_sol.key, &sol_bank_a, deposit_ui.to_num::<f64>(), None)
+        .await?;
+
+    // Same borrow sizing as the leverage-tightening test above: healthy at 63/65,
+    // maintenance-unhealthy after the tighten to 60/62.
+    let deposit_value = deposit_ui * sol_price;
+    let healthy_init_limit = deposit_value
+        * compute_same_asset_emode_weight(
+            FixedI80F48::from_num(healthy_init_leverage),
+            FixedI80F48::ONE,
+        );
+    let tightened_maint_limit = deposit_value
+        * compute_same_asset_emode_weight(
+            FixedI80F48::from_num(tightened_maint_leverage),
+            FixedI80F48::ONE,
+        );
+    let borrow_ui =
+        (midpoint(healthy_init_limit, tightened_maint_limit) / sol_price).to_num::<f64>();
+
+    let borrow_destination = test_f.sol_mint.create_empty_token_account().await;
+    user.try_bank_borrow(borrow_destination.key, &sol_bank_b, borrow_ui)
+        .await?;
+
+    reconfigure_same_asset_leverage(&test_f, tightened_init_leverage, tightened_maint_leverage)
+        .await?;
+
+    for seize_ui in [1.0_f64, 5.0, 10.0] {
+        let res = liquidator
+            .try_liquidate(&user, &sol_bank_a, seize_ui, &sol_bank_b)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostLiquidation);
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn same_asset_emode_regular_same_value_borrow_fails_once_the_liability_mint_changes(
 ) -> anyhow::Result<()> {
