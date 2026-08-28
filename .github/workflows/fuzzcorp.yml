@@ -1,0 +1,249 @@
+name: FuzzCorp bundle
+
+# Builds the marginfi program FROM SOURCE, compiles the crucible invariant harness
+# against it, and submits the bundle to FuzzCorp. Every change to the program is
+# therefore compiled and fuzzed — no prebuilt/static program binary is shipped.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   FUZZ_API_KEY    - FuzzCorp dashboard API key (service account). The ONLY secret
+#                     needed: crucible is public, so cargo resolves its git
+#                     dependencies anonymously.
+# Optional repo variables (defaults below):
+#   FUZZ_ORGANIZATION (project-0), FUZZ_PROJECT (marginfi)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+
+concurrency:
+  group: fuzzcorp-bundle
+  cancel-in-progress: true
+
+env:
+  # These MUST match the repo's own Anchor.toml [toolchain] pin, which is the
+  # authority here -- it declares anchor_version = "1.0.2", solana_version =
+  # "3.1.13", and even carries a comment telling you a mismatch panics in
+  # cli/src/lib.rs. Pinning 0.31.1/2.1.20 instead broke this two different ways:
+  #   * the repo's scripts/build-workspace.sh runs `anchor build --ignore-keys`,
+  #     a flag 0.31.1 does not accept ("unexpected argument '--ignore-keys'");
+  #   * `anchor build` then reads Anchor.toml, finds 1.0.2 is not installed, tries
+  #     to avm-install it mid-build and dies with "No such file or directory".
+  # Matching the declared toolchain fixes both, and the newer build-sbf also
+  # bundles a cargo that can parse the edition2024 crates in the lock.
+  # Keep these equal to the repo's own test.yaml / release-program.yaml, which track
+  # rust-toolchain.toml (now 1.90.0). They were pinned at 1.79.0 when this workflow was
+  # written; the program no longer builds on it.
+  RUST_TOOLCHAIN: 1.90.0
+  SOLANA_CLI_VERSION: 3.1.13
+  ANCHOR_CLI_VERSION: 1.0.2
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # marginfi's own toolchain (rust 1.79 + solana + anchor).
+      - uses: ./.github/actions/base-setup/
+        with:
+          include-anchor: "true"
+
+      # Deliberately NOT `./.github/actions/build-workspace/`. That runs the repo's
+      # own scripts/build-workspace.sh, which invokes
+      # `anchor build --no-idl --ignore-keys`; anchor 0.31.1 rejects `--ignore-keys`
+      # ("error: unexpected argument '--ignore-keys' found") and the job died there
+      # before building anything. That script belongs to the repo and is not ours to
+      # change, so route around it: the next step already builds the program from
+      # this commit's source -- and with the debug info coverage needs -- which made
+      # build-workspace redundant here anyway.
+
+      # An unstripped build of the SAME source. Source-level coverage is derived
+      # from this DWARF; without it FuzzCorp reports coverage against program
+      # counters instead of source lines, which makes a regression unreadable.
+      # Program counters must match, so it is the same crate at the same commit.
+      # Built through `anchor build -p marginfi`, exactly as the repo's own
+      # scripts/build-program.sh does -- NOT `cargo build-sbf --manifest-path`.
+      # Building the single crate directly resolves its dependency graph in
+      # isolation and reaches crates that now require edition2024 (constant_time_eq
+      # 0.4.2 via the committed lock), which the SBF platform tools' cargo 1.79
+      # cannot parse: the job dies with "feature `edition2024` is required" on a
+      # lockfile upstream's own CI builds green. The workspace build unifies
+      # features the way upstream does and stays inside what cargo 1.79 can read.
+      - name: Build unstripped program for coverage symbols
+        run: |
+          set -euo pipefail
+          CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=none \
+            anchor build -p marginfi 2>&1 | tee /tmp/symbols.log
+          # solend_mocks is a workspace crate here, not a checked-in fixture, and
+          # the harness registers it at the real Solend id to exercise the deposit
+          # CPI. Built separately so `anchor build -p marginfi` above stays the
+          # single source of the program under test.
+          # cargo build-sbf, NOT `anchor build -p`: anchor resolves -p against the
+          # programs registered in Anchor.toml and solend-mocks is not one of them
+          # ("Error: solend_mocks is not part of the workspace"), so the SBF artifact
+          # was never produced and staging then failed on the missing fixture.
+          cargo build-sbf --manifest-path programs/solend-mocks/Cargo.toml 2>&1 | tail -5 || \
+            echo "::warning::solend_mocks build failed; staging will fall back to a fixture"
+
+      # `cargo build-sbf` reports frame-size violations on stdout while exiting 0.
+      # A binary built past the limit faults where the real program does not, so
+      # whole instruction families read as unreachable and any crash on an affected
+      # path is an artefact. Fail here instead.
+      - name: Reject a build with SBF stack-frame violations
+        run: |
+          if grep -qE 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log; then
+            echo "::error::SBF stack-frame violation -- the harness would fuzz a binary"
+            echo "::error::that faults where the real program does not."
+            grep -E 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log
+            exit 1
+          fi
+
+      # The harness resolves every program CWD-relative from its own programs/ dir:
+      # the target program, its unstripped twin, and the fixture programs it CPIs
+      # into (drift, kamino, solend) which live in the repo's tests/fixtures.
+      - name: Stage program artifacts into the harness
+        run: |
+          set -euo pipefail
+          test -f target/deploy/marginfi.so
+          mkdir -p fuzz/crucible/programs
+          cp target/deploy/marginfi.so fuzz/crucible/programs/marginfi_program.so
+          # The unstripped artifact lives in the workspace target dir, not deploy/ --
+          # a cp from the wrong path silently ships no debug symbols.
+          # GLOB the target-triple dir; do not enumerate it. v1.51 alone ships
+          # sbf-, sbpf- and sbpfv1..v4-solana-solana, and which one build-sbf
+          # writes depends on the CLI driving it -- a fixed two-entry list found
+          # NOTHING on CI while working locally, and a missing symbols file is
+          # silent: the campaign runs and renders no source coverage.
+          sym=""
+          for cand in $(ls -t target/*/release/marginfi.so 2>/dev/null); do
+            sym="$cand"; break
+          done
+          if [ -n "$sym" ]; then
+            cp "$sym" fuzz/crucible/programs/marginfi_symbols.so
+            echo "  staged marginfi_symbols.so <- $sym"
+          else
+            echo "::error::no unstripped marginfi.so under target/*/release -- coverage"
+            echo "::error::would render EMPTY. Found:"
+            find target -name 'marginfi.so' -not -path '*/deps/*' | sed 's/^/    /'
+            exit 1
+          fi
+          # Fixture programs the harness CPIs into. The name the harness opens does
+          # not always match the name in this repo -- drift ships as drift.so here,
+          # and solend_mocks is a workspace CRATE (programs/solend-mocks) rather
+          # than a checked-in fixture, so it comes out of target/deploy after the
+          # build. Resolve each by trying both, and fail loudly naming the missing
+          # one: a silently absent fixture turns into a setup() panic on the worker
+          # ("No such file or directory") that kills the whole task.
+          stage() {
+            want="$1"; shift
+            for src in "$@"; do
+              if [ -f "$src" ]; then
+                cp "$src" "fuzz/crucible/programs/$want"
+                echo "  staged $want <- $src"
+                return 0
+              fi
+            done
+            echo "::error::no source found for $want (tried: $*)"
+            return 1
+          }
+          stage drift_v2.so             tests/fixtures/drift_v2.so tests/fixtures/drift.so
+          stage kamino_farms.so         tests/fixtures/kamino_farms.so
+          stage kamino_lending_nocpi.so tests/fixtures/kamino_lending_nocpi.so
+          stage solend.so               tests/fixtures/solend.so
+          stage solend_mocks.so         tests/fixtures/solend_mocks.so \
+                                        target/deploy/solend_mocks.so
+
+      # Refresh the IDL from THIS build. declare_fuzz_program! reads the IDL at COMPILE
+      # time, so a stale one gives the harness wrong discriminators and account lists --
+      # and the failure is not a mismatch error, it is setup() aborting the whole task.
+      # The committed idls/marginfi_program.json is generated from this program and is
+      # kept in sync deliberately: it is what `cargo build` uses locally, and a drift
+      # between it and lib.rs is a harness bug, not something this step papers over.
+      - name: Stage the freshly-built IDL into the harness
+        run: |
+          set -euo pipefail
+          idl=""
+          for c in target/idl/marginfi.json target/idl/marginfi_program.json; do
+            [ -f "$c" ] && { idl="$c"; break; }
+          done
+          if [ -z "$idl" ]; then
+            echo "::warning::no freshly-built IDL found; keeping the committed one"
+            find target -name '*.json' -path '*idl*' | head -5
+            exit 0
+          fi
+          # NOT a plain `cp`. anchor's build emits the IDL without a top-level `address`,
+          # and declare_fuzz_program! feeds that straight to Pubkey::new_from_array -- so an
+          # absent id is not a missing field, it is a zero-length array literal and a type
+          # error from inside the macro expansion ("expected an array with a size of 32,
+          # found one with a size of 0"). Carry the committed program id across: it is the
+          # id this build's .so declares, and the harness resolves every PDA against it.
+          python3 - "$idl" fuzz/crucible/idls/marginfi_program.json <<'PY'
+          import json, sys
+          fresh_path, target_path = sys.argv[1], sys.argv[2]
+          fresh = json.load(open(fresh_path))
+          address = fresh.get("address") or json.load(open(target_path)).get("address")
+          if not address:
+              sys.exit("::error::neither the built nor the committed IDL carries a program address")
+          fresh["address"] = address
+          with open(target_path, "w") as fh:
+              json.dump(fresh, fh, indent=2)
+          print("  staged IDL from {} ({} instructions, address {})".format(
+              fresh_path, len(fresh.get("instructions", [])), address))
+          PY
+
+      # llvm-dwarfdump lets build-bundle.sh read the symbols' DW_AT_comp_dir and
+      # derive SourcesOriginalPath from it. A wrong prefix does not error -- it
+      # silently renders EMPTY coverage.
+      - name: Install llvm-dwarfdump (coverage path derivation)
+        run: sudo apt-get update && sudo apt-get install -y llvm
+
+      # Harness build uses rustup 'stable' (via fuzz/crucible/rust-toolchain.toml),
+      # independent of the program's 1.79 toolchain.
+      - name: Install Rust (stable) for the harness
+        uses: dtolnay/rust-toolchain@stable
+
+      # crucible is public, so cargo resolves its git deps anonymously -- no token.
+      - name: Build harness (crucible main)
+        working-directory: fuzz/crucible
+        run: cargo build --release --features invariant_test
+
+      - name: Assemble FuzzCorp bundle
+        working-directory: fuzz/crucible
+        env:
+          FUZZ_REVISION: ${{ github.sha }}
+        run: ./build-bundle.sh
+
+      # Fail-closed pre-upload checks. Everything this catches is otherwise SILENT:
+      # the bundle validates, uploads, runs and quietly produces nothing. It also
+      # stages any first-party source root the DWARF references but the bundle is
+      # missing (a program spanning programs/ + libraries/ loses the second one).
+      - name: Bundle guard (pre-upload)
+        run: ./fuzz/crucible/bundle-guard.sh fuzz/crucible/bundle .
+
+      # Without this the job dies inside the upload action with a bare auth error,
+      # which reads like a broken workflow rather than a missing secret. Name the
+      # secret, and do it before the upload rather than during it. (`secrets` is not
+      # available in a step-level `if`, so the test has to happen in the shell.)
+      - name: Require FUZZ_API_KEY
+        env:
+          FUZZ_API_KEY: ${{ secrets.FUZZ_API_KEY }}
+        run: |
+          if [ -z "${FUZZ_API_KEY}" ]; then
+            echo "::error::FUZZ_API_KEY is not set. Add it under Settings > Secrets and"
+            echo "::error::variables > Actions. It is the only secret this workflow needs."
+            exit 1
+          fi
+
+      - name: Upload bundle to FuzzCorp
+        uses: asymmetric-research/fuzz-upload-action@v2
+        with:
+          upload_type: bundle
+          upload_path: fuzz/crucible/bundle
+        env:
+          FUZZ_ORGANIZATION: ${{ vars.FUZZ_ORGANIZATION || 'project-0' }}
+          FUZZ_PROJECT: ${{ vars.FUZZ_PROJECT || 'marginfi' }}
+          FUZZ_API_KEY: ${{ secrets.FUZZ_API_KEY }}
