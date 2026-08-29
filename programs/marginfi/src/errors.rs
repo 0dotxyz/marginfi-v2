@@ -457,7 +457,7 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6702
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6703
-                     // **************END SCOPE ERRORS
+                                 // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {

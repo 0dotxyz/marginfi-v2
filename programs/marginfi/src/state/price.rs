@@ -1389,9 +1389,7 @@ impl ScopePriceFeed {
         );
 
         let data = ai.data.borrow();
-        let disc = data
-            .get(..8)
-            .ok_or(MarginfiError::ScopeInvalidAccount)?;
+        let disc = data.get(..8).ok_or(MarginfiError::ScopeInvalidAccount)?;
         check!(
             disc == &SCOPE_ORACLE_PRICES_DISCRIMINATOR[..],
             MarginfiError::ScopeInvalidAccount
