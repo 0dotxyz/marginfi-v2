@@ -364,6 +364,33 @@ export const configureBankOracle = (
   return ix;
 };
 
+export type ConfigureBankOracleScopeArgs = {
+  bank: PublicKey;
+  /** The scope feed's OraclePrices account */
+  oracle: PublicKey;
+  /** Which of the 512 entries in that account prices this bank */
+  entryIndex: number;
+};
+
+export const configureBankOracleScope = (
+  program: Program<Marginfi>,
+  args: ConfigureBankOracleScopeArgs,
+) => {
+  const oracleMeta: AccountMeta = {
+    pubkey: args.oracle,
+    isSigner: false,
+    isWritable: false,
+  };
+
+  return program.methods
+    .lendingPoolConfigureBankOracleScope(args.oracle, args.entryIndex)
+    .accounts({
+      bank: args.bank,
+    })
+    .remainingAccounts([oracleMeta])
+    .instruction();
+};
+
 export type EmissionsDepositArgs = {
   bank: PublicKey;
   mint: PublicKey;

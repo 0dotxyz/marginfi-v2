@@ -378,6 +378,7 @@ pub enum OracleSetup {
     JuplendPythPull,        // 15
     JuplendSwitchboardPull, // 16
     FixedJuplend,           // 17
+    Scope,                  // 18
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -403,6 +404,7 @@ impl OracleSetup {
             15 => Some(Self::JuplendPythPull),
             16 => Some(Self::JuplendSwitchboardPull),
             17 => Some(Self::FixedJuplend),
+            18 => Some(Self::Scope),
             _ => None,
         }
     }
@@ -440,7 +442,10 @@ impl OracleSetup {
             | Self::Fixed
             | Self::FixedKamino
             | Self::FixedDrift
-            | Self::FixedJuplend => None,
+            | Self::FixedJuplend
+            // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
+            // covers `oracle_keys[0]` cannot express that, so Scope banks never pair.
+            | Self::Scope => None,
         }
     }
 }

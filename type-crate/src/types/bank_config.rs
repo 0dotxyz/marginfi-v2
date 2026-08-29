@@ -103,8 +103,10 @@ pub struct BankConfig {
     /// Time window in seconds for the oracle price feed to be considered live.
     pub oracle_max_age: u16,
 
-    // pad to next 4-byte alignment to meet u32's requirements.
-    pub _padding0: [u8; 2],
+    /// Entry index into the Scope `OraclePrices` price list. Only read when
+    /// `oracle_setup == OracleSetup::Scope`; ignored (and zero) for every other setup.
+    /// Occupies what was previously `_padding0`, so the layout is unchanged.
+    pub scope_entry_index: u16,
 
     /// A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
     ///
@@ -155,7 +157,7 @@ impl Default for BankConfig {
             cb_window_seconds: 0,
             total_asset_value_init_limit: TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
             oracle_max_age: 0,
-            _padding0: [0; 2],
+            scope_entry_index: 0,
             oracle_max_confidence: 0,
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],
@@ -347,7 +349,7 @@ impl From<BankConfigCompact> for BankConfig {
             cb_window_seconds: 0,
             total_asset_value_init_limit: config.total_asset_value_init_limit,
             oracle_max_age: config.oracle_max_age,
-            _padding0: [0; 2],
+            scope_entry_index: 0,
             oracle_max_confidence: config.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],

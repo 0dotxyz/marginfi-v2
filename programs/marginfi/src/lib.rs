@@ -200,6 +200,17 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_oracle(ctx, setup, oracle)
     }
 
+    /// (admin only) Point a bank at a Scope feed entry.
+    /// * oracle - the feed's `OraclePrices` account
+    /// * entry_index - which of the 512 entries in that account prices this bank
+    pub fn lending_pool_configure_bank_oracle_scope(
+        ctx: Context<LendingPoolConfigureBankOracle>,
+        oracle: Pubkey,
+        entry_index: u16,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_bank_oracle_scope(ctx, oracle, entry_index)
+    }
+
     /// (admin only)
     pub fn lending_pool_set_fixed_oracle_price(
         ctx: Context<LendingPoolSetFixedOraclePrice>,

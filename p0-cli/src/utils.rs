@@ -411,7 +411,8 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         OracleSetup::PythLegacy
         | OracleSetup::SwitchboardV2
         | OracleSetup::PythPushOracle
-        | OracleSetup::SwitchboardPull => vec![keys[0]],
+        | OracleSetup::SwitchboardPull
+        | OracleSetup::Scope => vec![keys[0]],
         OracleSetup::KaminoPythPush
         | OracleSetup::KaminoSwitchboardPull
         | OracleSetup::DriftPythPull

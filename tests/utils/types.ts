@@ -72,6 +72,7 @@ export const ORACLE_SETUP_FIXED = 8;
 export const ORACLE_SETUP_FIXED_KAMINO = 13;
 export const ORACLE_SETUP_FIXED_DRIFT = 14;
 export const ORACLE_SETUP_FIXED_JUPLEND = 17;
+export const ORACLE_SETUP_SCOPE = 18;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;
