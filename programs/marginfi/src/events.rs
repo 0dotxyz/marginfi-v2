@@ -354,3 +354,13 @@ pub struct CircuitBreakerAutoBrokenEvent {
     pub consecutive_tier3_trips: u8,
     pub current_timestamp: i64,
 }
+
+#[event]
+pub struct QueryMaxBorrowWithdrawEvent {
+    pub marginfi_account: Pubkey,
+    pub marginfi_group: Pubkey,
+    pub bank: Pubkey,
+    pub query_type: u8,
+    pub max_amount: u64,
+    pub is_all: bool,
+}
