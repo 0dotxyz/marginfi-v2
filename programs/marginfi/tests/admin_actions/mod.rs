@@ -9,6 +9,7 @@ mod deleverage_withdraw_limit;
 mod freeze;
 mod group_resize;
 mod interest_accrual;
+mod monitor_archive;
 mod on_ramp_transition;
 mod panic_mode;
 mod premium_config;
