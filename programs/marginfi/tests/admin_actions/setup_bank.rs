@@ -7,7 +7,7 @@ use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         emode::{
             DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
         },
@@ -21,8 +21,8 @@ use marginfi_type_crate::{
     },
     types::{
         make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
-        INTEREST_CURVE_SEVEN_POINT,
+        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
+        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -191,7 +191,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
-            _padding_1,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -233,7 +236,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 2] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -348,7 +354,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
-            _padding_1,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -390,7 +399,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 2] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 

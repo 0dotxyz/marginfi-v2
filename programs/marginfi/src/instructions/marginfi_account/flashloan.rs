@@ -6,7 +6,10 @@ use crate::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar, Hashable,
     },
     prelude::*,
-    state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
+    state::marginfi_account::{
+        check_account_init_health, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+    },
+    state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -120,7 +123,32 @@ pub fn lending_account_end_flashloan<'info>(
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
     let group = ctx.accounts.group.load()?;
-    check_account_init_health(&marginfi_account, &group, ctx.remaining_accounts, &mut None)?;
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health(
+        &marginfi_account,
+        &group,
+        ctx.remaining_accounts,
+        &mut None,
+        &mut Some(&mut premium_scratch),
+    )?;
+
+    // Enforce borrow's deferred gate: revert if new premium debt can't be priced here.
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+
+    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+    // the post-flashloan balances.
+    marginfi_account.update_premium_snapshots(
+        &group,
+        &premium_scratch,
+        Clock::get()?.unix_timestamp as u64,
+    )?;
+
+    if marginfi_account.lending_account.has_liabilities() {
+        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    }
 
     Ok(())
 }
@@ -143,6 +171,8 @@ pub struct LendingAccountEndFlashloan<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
+    /// Needed for the same-asset emode checks and the premium snapshot recompute; validated by
+    /// the `has_one = group` on `marginfi_account`.
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub authority: Signer<'info>,

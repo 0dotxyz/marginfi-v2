@@ -6,16 +6,13 @@ use crate::{
     math_error,
     prelude::MarginfiError,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{
             check_account_bankrupt, run_cb_price_gate, BankAccountWrapper, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{
-        self, fetch_unbiased_price_for_bank_cache, is_marginfi_asset_tag, validate_bank_state,
-        InstructionKind,
-    },
+    utils::{self, fetch_unbiased_price_for_bank_cache, validate_bank_state, InstructionKind},
     MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -28,8 +25,9 @@ use marginfi_type_crate::{
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        Bank, BankOperationalState, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, Bank, BankOperationalState, BankVaultType, HealthCache,
+        MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::cmp::{max, min};
@@ -204,12 +202,23 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
     // Settle bad debt.
     // The liabilities of this account and global total liabilities are reduced by `bad_debt`
-    BankAccountWrapper::find(
+    let mut bank_account = BankAccountWrapper::find(
         &bank_loader.key(),
         &mut bank,
         &mut marginfi_account.lending_account,
-    )?
-    .repay(bad_debt)?;
+    )?;
+    // The premium receivable is uncollectable: write it off WITHOUT crediting the bank's
+    // swept-premium counter (it was never backed by tokens, is not lender money, and is not
+    // covered by insurance or socialization).
+    bank_account.claim_premium()?;
+    let premium_written_off = bank_account.write_off_premium()?;
+    if premium_written_off > I80F48::ZERO {
+        msg!(
+            "bankruptcy: wrote off premium receivable {}",
+            premium_written_off.to_num::<f64>()
+        );
+    }
+    bank_account.repay(bad_debt)?;
 
     // Update bank cache after all manipulations (interest accrual, loss socialization, repay)
     bank.update_bank_cache(group)?;
@@ -235,6 +244,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         bad_debt: bad_debt.to_num::<f64>(),
         covered_amount: covered_by_insurance.to_num::<f64>(),
         socialized_amount: socialized_loss.to_num::<f64>(),
+        premium_written_off: premium_written_off.to_num::<f64>(),
     });
 
     Ok(())

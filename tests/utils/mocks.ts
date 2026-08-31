@@ -158,6 +158,8 @@ export const USER_ACCOUNT_K: string = "gk_acc";
 export const USER_ACCOUNT_D: string = "gd_acc";
 /** in mockUser.accounts, key used to get/set the users's account for the solend group */
 export const USER_ACCOUNT_SL: string = "sl_acc";
+/** in mockUser.accounts, key used to get/set the users's account for the premium (vb*) group */
+export const USER_ACCOUNT_VB: string = "vb_acc";
 
 /** in mockUser.accounts, key used to get/set the users's LST ATA for validator 0 */
 export const LST_ATA = "v0_lstAta";

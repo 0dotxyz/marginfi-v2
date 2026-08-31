@@ -3,10 +3,12 @@ use std::cmp::max;
 use crate::{
     assert_struct_align, assert_struct_size,
     constants::{
-        discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED,
-        STAKED_ORACLE_PRICE_USES_ONRAMP,
+        discriminators, ASSET_TAG_DRIFT, BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
     },
-    types::{BalanceSide, BankCache, BankConfig, EmodeConfig, RequirementType},
+    types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
 };
 
 #[cfg(feature = "anchor")]
@@ -114,6 +116,8 @@ pub struct Bank {
     ///   single-pool on-ramp account in NAV.
     /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
     /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
+    /// - Bit 13 (8192): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
+    ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -184,7 +188,10 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16], // 16B
+    /// Realized variable-borrow premium sitting in the liquidity vault, pending sweep to the
+    /// protocol premium wallet's canonical ATA for `mint`. Only incremented when premium tokens
+    /// are actually received (repay); never by mere accrual.
+    pub collected_premium_outstanding: WrappedI80F48, // 16B
 
     /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
     ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
@@ -226,12 +233,33 @@ pub struct Bank {
     /// a paused pulse; the next accrual excludes these on top of the current halt. Zero normally.
     pub cb_frozen_seconds_pending: u64,
 
-    pub _padding_1: [u64; 2],
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    #[inline]
+    pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {
+        shares.checked_mul(self.asset_share_value.into())
+    }
+
+    #[inline]
+    pub fn liability_amount(&self, shares: I80F48) -> Option<I80F48> {
+        shares.checked_mul(self.liability_share_value.into())
+    }
 
     pub fn get_balance_decimals(&self) -> u8 {
         if self.config.asset_tag == ASSET_TAG_DRIFT {
@@ -241,25 +269,42 @@ impl Bank {
         }
     }
 
+    /// Taking the most favorable asset weight of:
+    /// - the bank's configured weight,
+    /// - cross-asset e-mode weight for its tag,
+    /// - same-asset e-mode weight (if applicable).
     pub fn get_asset_weight(
         &self,
         requirement_type: RequirementType,
-        emode_config: &EmodeConfig,
+        reconciled_emode_config: &ReconciledEmodeConfig,
     ) -> I80F48 {
-        if let Some(emode_entry) = emode_config.find_with_tag(self.emode.emode_tag) {
-            let bank_weight = self
-                .config
-                .get_weight(requirement_type, BalanceSide::Assets);
-            let emode_weight = match requirement_type {
-                RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                RequirementType::Equity => I80F48::ONE,
-            };
-            max(bank_weight, emode_weight)
-        } else {
-            self.config
-                .get_weight(requirement_type, BalanceSide::Assets)
+        let mut asset_weight = self
+            .config
+            .get_weight(requirement_type, BalanceSide::Assets);
+
+        if let Some(emode_entry) = reconciled_emode_config.find_with_tag(self.emode.emode_tag) {
+            asset_weight = max(asset_weight, emode_entry.asset_weight);
         }
+
+        let same_asset = &reconciled_emode_config.same_asset;
+        if same_asset.is_enabled()
+            && self.mint == same_asset.mint
+            && self.config.oracle_keys[0] == same_asset.oracle_key
+            && self.config.oracle_setup.feed_family() == same_asset.feed_family
+            && self.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE != 0
+            && matches!(self.config.risk_tier, RiskTier::Collateral)
+            && !matches!(
+                (self.config.operational_state, requirement_type),
+                (
+                    BankOperationalState::Paused | BankOperationalState::ReduceOnly,
+                    RequirementType::Initial
+                )
+            )
+        {
+            asset_weight = max(asset_weight, same_asset.asset_weight);
+        }
+
+        asset_weight
     }
 
     // To be removed once SVSP update is rolled out (likely in 1.10)
@@ -465,6 +510,31 @@ mod feed_family_tests {
             OracleSetup::FixedJuplend,
         ] {
             assert_eq!(setup.feed_family(), None);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BankVaultType {
+    Liquidity,
+    Insurance,
+    Fee,
+}
+
+impl BankVaultType {
+    pub fn get_seed(self) -> &'static [u8] {
+        match self {
+            BankVaultType::Liquidity => LIQUIDITY_VAULT_SEED.as_bytes(),
+            BankVaultType::Insurance => INSURANCE_VAULT_SEED.as_bytes(),
+            BankVaultType::Fee => FEE_VAULT_SEED.as_bytes(),
+        }
+    }
+
+    pub fn get_authority_seed(self) -> &'static [u8] {
+        match self {
+            BankVaultType::Liquidity => LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
+            BankVaultType::Insurance => INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(),
+            BankVaultType::Fee => FEE_VAULT_AUTHORITY_SEED.as_bytes(),
         }
     }
 }

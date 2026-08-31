@@ -13,8 +13,8 @@ use anchor_spl::token_2022::spl_token_2022::{
     state::Mint,
 };
 use bumpalo::Bump;
-use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::constants::FEE_STATE_SEED;
+use marginfi_type_crate::types::BankVaultType;
 use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
 use safe_transmute::transmute_to_bytes_mut;
 use solana_program::{

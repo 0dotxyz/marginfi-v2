@@ -12,6 +12,7 @@ mod interest_accrual;
 mod monitor_archive;
 mod on_ramp_transition;
 mod panic_mode;
+mod premium_config;
 mod rate_limiter;
 mod setup_bank;
 mod super_deposit_withdraw;

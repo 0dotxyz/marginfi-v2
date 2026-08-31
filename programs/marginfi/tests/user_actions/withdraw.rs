@@ -3,11 +3,8 @@ use anchor_spl::token_2022::spl_token_2022::extension::{
 };
 use fixed::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*, ui_to_native};
-use marginfi::{
-    assert_eq_with_tolerance,
-    prelude::*,
-    state::bank::{BankImpl, BankVaultType},
-};
+use marginfi::{assert_eq_with_tolerance, prelude::*, state::bank::BankImpl};
+use marginfi_type_crate::types::BankVaultType;
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::clock::Clock;

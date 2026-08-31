@@ -12,9 +12,11 @@ pub mod liquidation_record;
 pub mod monitor_snapshot;
 pub mod order;
 pub mod panic_state_cache;
+pub mod premium;
 pub mod price;
 pub mod pubkey;
 pub mod rate_limiter;
+pub mod rebalance;
 pub mod same_asset_emode_registry;
 pub mod staked_settings;
 pub mod user_account;
@@ -34,9 +36,11 @@ pub use liquidation_record::*;
 pub use monitor_snapshot::*;
 pub use order::*;
 pub use panic_state_cache::*;
+pub use premium::*;
 pub use price::*;
 pub use pubkey::*;
 pub use rate_limiter::*;
+pub use rebalance::*;
 pub use same_asset_emode_registry::*;
 pub use staked_settings::*;
 pub use user_account::*;
@@ -74,6 +78,13 @@ impl RequirementType {
             RequirementType::Maintenance => OraclePriceType::RealTime,
         }
     }
+}
+
+pub fn is_marginfi_asset_tag(asset_tag: u8) -> bool {
+    matches!(
+        asset_tag,
+        ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED
+    )
 }
 
 /// Validate that after a deposit to Bank, the users's account contains either all Default/SOL
