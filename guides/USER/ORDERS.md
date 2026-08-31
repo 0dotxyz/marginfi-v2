@@ -40,7 +40,7 @@ A user lends $1,000 USDC earning 5% and borrows $900 PYUSD costing 3%, keeping t
 Two things make this more than "exit when the spread goes negative".
 
 **A blip is not a signal.** Rates are measured as the growth of each bank's share value across a
-window you choose (`window_seconds`, minimum 1 hour, 24 hours by default), which is the average
+window you choose (`window_seconds`, 6 hours to 1 year, 24 hours by default), which is the average
 rate actually realized over that window. A spike lasting an hour barely moves a 24-hour
 measurement, so a rate has to genuinely persist to arm an exit.
 

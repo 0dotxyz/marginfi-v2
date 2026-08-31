@@ -119,6 +119,10 @@ pub const INTEREST_MIN_WINDOW_SECONDS: u32 = 21_600; // 6 hours
 /// evaluate so a neglected order cannot fire on a rate regime that has ended.
 pub const INTEREST_ANCHOR_MAX_AGE_WINDOWS: u32 = 2;
 
+/// Longest measurement span an order may configure. Beyond this an anchor could never mature
+/// inside a year, so the order would be permanently unfillable.
+pub const INTEREST_MAX_WINDOW_SECONDS: u32 = 31_536_000; // 1 year
+
 /// Default span of carry loss an interest-trigger order will spend to exit: the realized unwind
 /// cost must not exceed what the position would lose to interest over this long.
 pub const INTEREST_DEFAULT_PATIENCE_SECONDS: u32 = 1_209_600; // 14 days

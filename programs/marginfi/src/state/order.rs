@@ -9,7 +9,8 @@ use marginfi_type_crate::{
     constants::{
         INTEREST_ANCHOR_MAX_AGE_WINDOWS, INTEREST_DEFAULT_PATIENCE_SECONDS,
         INTEREST_DEFAULT_WINDOW_SECONDS, INTEREST_MAX_PATIENCE_SECONDS,
-        INTEREST_MIN_WINDOW_SECONDS, ORDER_ACTIVE_TAGS, SECONDS_PER_YEAR,
+        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS, ORDER_ACTIVE_TAGS,
+        SECONDS_PER_YEAR,
     },
     types::{
         u32_to_milli, BalanceSide, ExecuteOrderBalanceRecord, ExecuteOrderRecord,
@@ -140,7 +141,7 @@ impl OrderImpl for Order {
                 .patience_seconds
                 .unwrap_or(INTEREST_DEFAULT_PATIENCE_SECONDS);
             check!(
-                window >= INTEREST_MIN_WINDOW_SECONDS,
+                (INTEREST_MIN_WINDOW_SECONDS..=INTEREST_MAX_WINDOW_SECONDS).contains(&window),
                 MarginfiError::OrderInterestInvalidConfig
             );
             check!(
@@ -467,7 +468,7 @@ mod interest_trigger {
     use marginfi_type_crate::constants::{
         INTEREST_ANCHOR_MAX_AGE_WINDOWS, INTEREST_DEFAULT_PATIENCE_SECONDS,
         INTEREST_DEFAULT_WINDOW_SECONDS, INTEREST_MAX_PATIENCE_SECONDS,
-        INTEREST_MIN_WINDOW_SECONDS,
+        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
     };
     use marginfi_type_crate::types::{
         milli_to_u32, u32_to_milli, InterestTriggerConfig, Order, OrderTrigger,
@@ -667,6 +668,8 @@ mod interest_trigger {
         assert!(!placed(None).unwrap().interest_trigger_enabled());
 
         assert!(placed(Some(config(Some(INTEREST_MIN_WINDOW_SECONDS - 1), None))).is_err());
+        assert!(placed(Some(config(Some(INTEREST_MAX_WINDOW_SECONDS + 1), None))).is_err());
+        assert!(placed(Some(config(Some(INTEREST_MAX_WINDOW_SECONDS), None))).is_ok());
         assert!(placed(Some(config(None, Some(0)))).is_err());
         assert!(placed(Some(config(None, Some(INTEREST_MAX_PATIENCE_SECONDS + 1)))).is_err());
     }
