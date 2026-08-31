@@ -1,6 +1,6 @@
 use crate::events::{
     AccountEventHeader, KeeperCloseOrderEvent, MarginfiAccountCloseOrderEvent,
-    MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
+    MarginfiAccountPlaceOrderEvent, OrderInterestArmedEvent, SetKeeperCloseFlagsEvent,
 };
 use crate::instructions::marginfi_account::liquidate_start::validate_instructions;
 use crate::ix_utils::{
@@ -11,11 +11,16 @@ use crate::state::marginfi_account::{
     is_signer_authorized, run_cb_price_gate,
 };
 use crate::state::premium::{MarginfiAccountPremiumImpl, PremiumScratch};
+use crate::state::rate::{debt_index_of, venue_multiplier, yield_index_of};
+use crate::utils::is_integration_asset_tag;
 use crate::{
     check,
     prelude::*,
     state::{
-        marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
+        bank::BankImpl,
+        marginfi_account::{
+            get_remaining_accounts_per_bank, LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
         order::{ExecuteOrderRecordImpl, OrderImpl},
     },
@@ -29,10 +34,11 @@ use marginfi_type_crate::{
         ix_discriminators, EXECUTE_ORDER_SEED, FEE_STATE_SEED, ORDER_ACTIVE_TAGS, ORDER_SEED,
     },
     types::{
-        BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode, MarginfiAccount,
-        MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_DISABLED,
-        ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_milli, BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache,
+        HealthPriceMode, InterestTriggerConfig, MarginfiAccount, MarginfiGroup, Order,
+        OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ORDER_BLOCKING_FLAGS,
     },
 };
 
@@ -40,6 +46,7 @@ pub fn place_order(
     ctx: Context<PlaceOrder>,
     bank_keys: Vec<Pubkey>,
     trigger: OrderTrigger,
+    interest: Option<InterestTriggerConfig>,
 ) -> MarginfiResult {
     let PlaceOrder {
         marginfi_account: marginfi_account_loader,
@@ -110,6 +117,7 @@ pub fn place_order(
     order.initialize(
         marginfi_account_key,
         trigger,
+        interest,
         tags,
         order_bump,
         Clock::get()?.unix_timestamp,
@@ -138,6 +146,9 @@ pub fn place_order(
         stop_loss: order.stop_loss,
         take_profit: order.take_profit,
         tags,
+        interest_window_seconds: order.interest_window_seconds,
+        interest_patience_seconds: order.interest_patience_seconds,
+        interest_min_negative_apr: order.interest_min_negative_apr,
     });
 
     Ok(())
@@ -275,6 +286,179 @@ pub fn set_keeper_close_flags(
     Ok(())
 }
 
+/// Both legs of an interest-triggered order, read once their banks are current.
+struct OrderLegs {
+    asset_index: I80F48,
+    debt_index: I80F48,
+    premium_apr: I80F48,
+}
+
+/// Accrue the order's two banks and read their share indices out of the health observation stream.
+/// A stale asset leg understates its rate and fires the trigger early, so the accrual is required.
+fn read_order_legs<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+    order_tags: &[u16; ORDER_ACTIVE_TAGS],
+    group: &MarginfiGroup,
+    clock: &Clock,
+) -> MarginfiResult<OrderLegs> {
+    let mut asset_index: Option<I80F48> = None;
+    let mut debt: Option<(I80F48, I80F48)> = None;
+    let mut account_index = 0usize;
+
+    for balance in marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+        let num_accounts = {
+            let bank = bank_al.load()?;
+            get_remaining_accounts_per_bank(&bank)?
+        };
+
+        if !order_tags.contains(&balance.tag) {
+            account_index += num_accounts;
+            continue;
+        }
+
+        let end_idx = account_index + num_accounts;
+        require_gte!(
+            remaining_ais.len(),
+            end_idx,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        let oracle_ais = &remaining_ais[account_index + 1..end_idx];
+
+        check!(
+            bank_ai.is_writable,
+            MarginfiError::OrderInterestBankNotWritable
+        );
+        let side = balance
+            .get_side()
+            .ok_or_else(|| error!(MarginfiError::IllegalBalanceState))?;
+
+        {
+            let mut bank = bank_al.load_mut()?;
+            if !is_integration_asset_tag(bank.config.asset_tag) {
+                bank.accrue_interest(
+                    clock.unix_timestamp,
+                    group,
+                    #[cfg(not(feature = "client"))]
+                    *bank_ai.key,
+                )?;
+                bank.update_bank_cache(group)?;
+            }
+        }
+
+        let bank = bank_al.load()?;
+        let multiplier = venue_multiplier(&bank, oracle_ais, clock)?;
+        match side {
+            BalanceSide::Assets => {
+                asset_index = Some(yield_index_of(&bank, multiplier)?);
+            }
+            BalanceSide::Liabilities => {
+                debt = Some((
+                    debt_index_of(&bank, multiplier)?,
+                    u32_to_milli(balance.premium_rate_snapshot),
+                ));
+            }
+        }
+        account_index += num_accounts;
+    }
+
+    let asset_index = asset_index.ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
+    let (debt_index, premium_apr) = debt.ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
+    Ok(OrderLegs {
+        asset_index,
+        debt_index,
+        premium_apr,
+    })
+}
+
+pub fn arm_order_interest<'info>(ctx: Context<'info, ArmOrderInterest<'info>>) -> MarginfiResult {
+    let clock = Clock::get()?;
+    let marginfi_account = ctx.accounts.marginfi_account.load()?;
+    let mut order = ctx.accounts.order.load_mut()?;
+
+    check!(
+        order.interest_trigger_enabled(),
+        MarginfiError::OrderInterestNotConfigured
+    );
+    // An anchor may only be replaced once its own span is itself a valid measurement, which lets a
+    // keeper shift where the measured window sits but never shorten it below the configured length.
+    let previous_span_seconds = match order.interest_anchor_age(clock.unix_timestamp) {
+        Some(age) => {
+            check!(
+                order.interest_window_elapsed(clock.unix_timestamp),
+                MarginfiError::OrderInterestWindowTooShort
+            );
+            age
+        }
+        None => 0,
+    };
+
+    // Every other order entrypoint gates on the breaker before reading oracles; arming does too.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+
+    let legs = {
+        let group = ctx.accounts.group.load()?;
+        read_order_legs(
+            &marginfi_account,
+            ctx.remaining_accounts,
+            &order.tags,
+            &group,
+            &clock,
+        )?
+    };
+    order.set_interest_anchor(legs.asset_index, legs.debt_index, clock.unix_timestamp);
+
+    emit!(OrderInterestArmedEvent {
+        header: AccountEventHeader {
+            signer: None,
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: marginfi_account.authority,
+            marginfi_group: marginfi_account.group,
+        },
+        order: ctx.accounts.order.key(),
+        asset_index: legs.asset_index.into(),
+        debt_index: legs.debt_index.into(),
+        previous_span_seconds,
+        timestamp: clock.unix_timestamp,
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct ArmOrderInterest<'info> {
+    #[account(
+        constraint = (!group.load()?.is_protocol_paused()) @ MarginfiError::ProtocolPaused
+    )]
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
+    #[account(
+        has_one = group @ MarginfiError::InvalidGroup,
+        constraint = !marginfi_account.load()?.get_flag(
+            ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+        ) @ MarginfiError::UnexpectedOrderExecutionState
+    )]
+    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+
+    #[account(mut, has_one = marginfi_account)]
+    pub order: AccountLoader<'info, Order>,
+    // The order's banks follow in remaining_accounts as part of the health observation set, both
+    // writable: [bank, oracles..] per active balance.
+}
+
 pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>) -> MarginfiResult {
     let StartExecuteOrder {
         marginfi_account: marginfi_account_loader,
@@ -286,10 +470,42 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         ..
     } = &ctx.accounts;
 
+    let clock = Clock::get()?;
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let mut order = order_loader.load_mut()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
+
+    // No usable anchor means no measurement, so the carry condition simply does not arm; it never
+    // blocks a price trigger that did, and costs no accrual.
+    let anchor = order
+        .interest_trigger_enabled()
+        .then(|| order.interest_anchor(clock.unix_timestamp))
+        .flatten();
+
+    // Bring both legs current first, so the equity below and the realized rates share one accrued
+    // state. An unreadable leg leaves the condition unarmed, keeping its reason for the error path.
+    let mut leg_error: Option<Error> = None;
+    let legs = match anchor {
+        Some(_) => {
+            let group = ctx.accounts.group.load()?;
+            match read_order_legs(
+                &marginfi_account,
+                ctx.remaining_accounts,
+                &order.tags,
+                &group,
+                &clock,
+            ) {
+                Ok(legs) => Some(legs),
+                Err(err) => {
+                    leg_error = Some(err);
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
@@ -312,24 +528,70 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         .checked_sub(order_liabs_in_equity)
         .ok_or_else(math_error!())?;
 
-    // Check trigger condition
-    match order.trigger {
-        OrderTriggerType::StopLoss => {
-            let sl: I80F48 = order.stop_loss.into();
-            check!(net <= sl, MarginfiError::OrderTriggerNotMet);
-            order.stop_loss = net.into();
-        }
-        OrderTriggerType::TakeProfit => {
-            let tp: I80F48 = order.take_profit.into();
-            check!(net >= tp, MarginfiError::OrderTriggerNotMet);
-        }
+    // The price and carry conditions are independent: either can arm the execution, and the record
+    // remembers which did because each carries its own end-side cost bound.
+    let price_met = match order.trigger {
+        OrderTriggerType::StopLoss => net <= I80F48::from(order.stop_loss),
+        OrderTriggerType::TakeProfit => net >= I80F48::from(order.take_profit),
         OrderTriggerType::Both => {
-            let sl: I80F48 = order.stop_loss.into();
-            let tp: I80F48 = order.take_profit.into();
-            check!(net <= sl || net >= tp, MarginfiError::OrderTriggerNotMet);
-            // This is only used if the stop loss was hit.
-            order.stop_loss = net.into();
+            net <= I80F48::from(order.stop_loss) || net >= I80F48::from(order.take_profit)
         }
+    };
+
+    let (interest_met, interest_carry) = match (anchor, legs) {
+        (Some(anchor), Some(legs)) => {
+            let carry = order.realized_carry(
+                anchor,
+                legs.asset_index,
+                legs.debt_index,
+                order_assets_in_equity,
+                order_liabs_in_equity,
+                legs.premium_apr,
+            )?;
+            (
+                order.interest_condition_met(carry, order_assets_in_equity)?,
+                carry,
+            )
+        }
+        _ => (false, I80F48::ZERO),
+    };
+
+    // Name which condition fell short: never armed, aged out, unreadable leg, or carry that simply
+    // has not turned.
+    if !(price_met || interest_met) {
+        if let Some(err) = leg_error {
+            return Err(err);
+        }
+        return Err(error!(if !order.interest_trigger_enabled() {
+            MarginfiError::OrderTriggerNotMet
+        } else if order.interest_anchor_timestamp == 0 {
+            MarginfiError::OrderInterestNotArmed
+        } else if anchor.is_some() {
+            MarginfiError::OrderInterestNotNegative
+        } else if order.interest_window_elapsed(clock.unix_timestamp) {
+            MarginfiError::OrderInterestAnchorStale
+        } else {
+            MarginfiError::OrderInterestWindowTooShort
+        }));
+    }
+
+    // Records where the pair stood when the price condition fired; an execution armed only by
+    // carry leaves the user's configured level untouched.
+    if price_met
+        && matches!(
+            order.trigger,
+            OrderTriggerType::StopLoss | OrderTriggerType::Both
+        )
+    {
+        order.stop_loss = net.into();
+    }
+
+    let mut met_conditions = 0u8;
+    if price_met {
+        met_conditions |= ExecuteOrderRecord::MET_PRICE;
+    }
+    if interest_met {
+        met_conditions |= ExecuteOrderRecord::MET_INTEREST;
     }
 
     // Create execution record
@@ -342,6 +604,8 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         &marginfi_account,
         &order.tags,
         &net,
+        met_conditions,
+        interest_carry,
     )?;
 
     validate_instructions(
@@ -439,58 +703,64 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         I80F48::ONE.checked_sub(max_fee).ok_or_else(math_error!())?
     };
 
-    let start_health = || -> I80F48 { execute_record.order_start_health.into() };
+    let start_health: I80F48 = execute_record.order_start_health.into();
 
-    match order.trigger {
-        OrderTriggerType::StopLoss => {
-            let sl: I80F48 = order.stop_loss.into();
-            let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
-
-            check!(
-                net >= allowed_sl,
-                MarginfiError::OrderExecutionOverWithdrawal
-            );
-        }
-        OrderTriggerType::TakeProfit => {
-            let tp: I80F48 = order.take_profit.into();
-            let allowed_tp = tp.checked_mul(slippage_frac).ok_or_else(math_error!())?;
-
-            let allowed_diff = (start_health)()
-                .checked_mul(max_fee_frac)
-                .ok_or_else(math_error!())?;
-
-            check!(
-                net >= allowed_diff && net >= allowed_tp,
-                MarginfiError::OrderExecutionOverWithdrawal
-            );
-        }
-        OrderTriggerType::Both => {
-            let sl: I80F48 = order.stop_loss.into();
-            let tp: I80F48 = order.take_profit.into();
-            let start_health = start_health();
-
-            // This check relies on sl being < tp, which is enforced in the code to tell them apart
-            if start_health >= tp {
+    // Each armed condition brings its own cost bound and the keeper needs one to hold. One that did
+    // not arm is not evaluated: its threshold says nothing about an execution it did not authorize.
+    let price_ok = execute_record.met_price()
+        && match order.trigger {
+            OrderTriggerType::StopLoss => {
+                let sl: I80F48 = order.stop_loss.into();
+                net >= sl.checked_mul(slippage_frac).ok_or_else(math_error!())?
+            }
+            OrderTriggerType::TakeProfit => {
+                let tp: I80F48 = order.take_profit.into();
                 let allowed_tp = tp.checked_mul(slippage_frac).ok_or_else(math_error!())?;
-
                 let allowed_diff = start_health
                     .checked_mul(max_fee_frac)
                     .ok_or_else(math_error!())?;
-
-                check!(
-                    net >= allowed_diff && net >= allowed_tp,
-                    MarginfiError::OrderExecutionOverWithdrawal
-                );
-            } else {
-                let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
-
-                check!(
-                    net >= allowed_sl,
-                    MarginfiError::OrderExecutionOverWithdrawal
-                );
+                net >= allowed_diff && net >= allowed_tp
             }
+            OrderTriggerType::Both => {
+                // This branch relies on sl being < tp, which is enforced in the code to tell them apart
+                let tp: I80F48 = order.take_profit.into();
+                if start_health >= tp {
+                    let allowed_tp = tp.checked_mul(slippage_frac).ok_or_else(math_error!())?;
+                    let allowed_diff = start_health
+                        .checked_mul(max_fee_frac)
+                        .ok_or_else(math_error!())?;
+                    net >= allowed_diff && net >= allowed_tp
+                } else {
+                    let sl: I80F48 = order.stop_loss.into();
+                    net >= sl.checked_mul(slippage_frac).ok_or_else(math_error!())?
+                }
+            }
+        };
+
+    // The carry bound: at most what the pair loses to interest over the patience span. The user's
+    // slippage ceiling binds on top, so patience never widens the exit past what they configured.
+    let (interest_ok, over_carry_budget) = if execute_record.met_interest() {
+        let carry: I80F48 = execute_record.interest_carry.into();
+        let realized_cost = start_health.checked_sub(net).ok_or_else(math_error!())?;
+        let ceiling = start_health
+            .checked_mul(slippage_frac)
+            .ok_or_else(math_error!())?;
+        let within_budget = realized_cost <= order.interest_allowed_cost(carry)?;
+        (within_budget && net >= ceiling, !within_budget)
+    } else {
+        (false, false)
+    };
+
+    // A carry-only execution names whichever of its two bounds it blew; everything else reports the
+    // shared over-withdrawal error.
+    check!(
+        price_ok || interest_ok,
+        if execute_record.met_interest() && !execute_record.met_price() && over_carry_budget {
+            MarginfiError::OrderInterestCostExceedsCarry
+        } else {
+            MarginfiError::OrderExecutionOverWithdrawal
         }
-    }
+    );
 
     // Only one asset and liab are currently involved in a balance, with the single liability being
     // closed.

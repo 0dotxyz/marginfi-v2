@@ -290,6 +290,21 @@ pub struct MarginfiAccountPlaceOrderEvent {
     pub stop_loss: WrappedI80F48,
     pub take_profit: WrappedI80F48,
     pub tags: [u16; ORDER_ACTIVE_TAGS],
+    /// Zero when the order carries no interest trigger.
+    pub interest_window_seconds: u32,
+    pub interest_patience_seconds: u32,
+    pub interest_min_negative_apr: u32,
+}
+
+#[event]
+pub struct OrderInterestArmedEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub asset_index: WrappedI80F48,
+    pub debt_index: WrappedI80F48,
+    /// Span the replaced anchor had accumulated, zero on the first arming.
+    pub previous_span_seconds: i64,
+    pub timestamp: i64,
 }
 
 #[event]

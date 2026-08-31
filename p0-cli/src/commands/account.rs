@@ -4,7 +4,7 @@ use fixed::types::I80F48;
 use solana_sdk::pubkey::Pubkey;
 use std::path::PathBuf;
 
-use marginfi_type_crate::types::{centi_to_u32, OrderTrigger};
+use marginfi_type_crate::types::{centi_to_u32, milli_to_u32, InterestTriggerConfig, OrderTrigger};
 
 use crate::config::GlobalOptions;
 use crate::processor;
@@ -165,6 +165,31 @@ pub enum AccountCommand {
         take_profit: Option<f64>,
         #[clap(long, help = "Max slippage in basis points")]
         max_slippage_bps: u32,
+        #[clap(
+            long,
+            help = "Also exit when the position's carry turns negative. Arm it afterwards with arm-order-interest"
+        )]
+        interest: bool,
+        #[clap(
+            long,
+            help = "Seconds the realized rates are measured over (default 24h, min 1h)"
+        )]
+        interest_window_seconds: Option<u32>,
+        #[clap(
+            long,
+            help = "Seconds of carry loss the exit may cost (default 14 days)"
+        )]
+        interest_patience_seconds: Option<u32>,
+        #[clap(
+            long,
+            help = "Annual loss against the lend leg required to arm, in basis points (default: any)"
+        )]
+        interest_min_negative_apr_bps: Option<u32>,
+    },
+    /// Anchor an interest trigger's rate measurement (permissionless; re-runnable once a window passes)
+    ArmOrderInterest {
+        #[clap(long)]
+        order: Pubkey,
     },
     /// Close an existing order and reclaim lamports
     CloseOrder {
@@ -313,14 +338,27 @@ pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Resul
             stop_loss,
             take_profit,
             max_slippage_bps,
+            interest,
+            interest_window_seconds,
+            interest_patience_seconds,
+            interest_min_negative_apr_bps,
         } => {
             let bank_1_pk = super::resolve_bank_for_group(&bank_1, profile.marginfi_group)?;
             let bank_2_pk = super::resolve_bank_for_group(&bank_2, profile.marginfi_group)?;
             let trigger =
                 trigger_type.into_order_trigger(stop_loss, take_profit, max_slippage_bps)?;
+            let interest = interest.then(|| InterestTriggerConfig {
+                window_seconds: interest_window_seconds,
+                patience_seconds: interest_patience_seconds,
+                min_negative_apr: interest_min_negative_apr_bps
+                    .map(|bps| milli_to_u32(I80F48::from_num(bps as f64 / 10_000.0))),
+            });
             processor::marginfi_account_place_order(
-                &profile, &config, bank_1_pk, bank_2_pk, trigger,
+                &profile, &config, bank_1_pk, bank_2_pk, trigger, interest,
             )
+        }
+        AccountCommand::ArmOrderInterest { order } => {
+            processor::marginfi_account_arm_order_interest(&config, order)
         }
         AccountCommand::CloseOrder {
             order,

@@ -828,14 +828,45 @@ export type OrderTriggerArgs =
       };
     };
 
+export type InterestTriggerArgs = {
+  windowSeconds: number | null;
+  patienceSeconds: number | null;
+  minNegativeApr: number | null;
+};
+
 export type PlaceOrderArgs = {
   marginfiAccount: PublicKey;
   authority: PublicKey;
   feePayer: PublicKey;
   bankKeys: PublicKey[];
   trigger: OrderTriggerArgs;
+  /** Optional carry-exit policy, evaluated alongside the price trigger. */
+  interest?: InterestTriggerArgs | null;
   feeState?: PublicKey;
   globalFeeWallet?: PublicKey;
+};
+
+export type ArmOrderInterestArgs = {
+  marginfiAccount: PublicKey;
+  group: PublicKey;
+  order: PublicKey;
+  /** The order's two legs, writable: arming accrues them before reading their share indices. */
+  remaining: AccountMeta[];
+};
+
+export const armOrderInterestIx = async (
+  program: Program<Marginfi>,
+  args: ArmOrderInterestArgs,
+) => {
+  return program.methods
+    .marginfiAccountArmOrderInterest()
+    .accounts({
+      group: args.group,
+      marginfiAccount: args.marginfiAccount,
+      order: args.order,
+    })
+    .remainingAccounts(args.remaining)
+    .instruction();
 };
 
 export const placeOrderIx = async (
@@ -863,7 +894,7 @@ export const placeOrderIx = async (
   };
 
   return program.methods
-    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger)
+    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger, args.interest ?? null)
     .accounts(accounts)
     .instruction();
 };
@@ -942,6 +973,11 @@ export type StartExecuteOrderArgs = {
   executor: PublicKey;
   order: PublicKey;
   remaining: PublicKey[];
+  /**
+   * The order's two legs, if it carries an interest trigger, which accrues them before reading
+   * their share indices. Only those banks need the write lock, and only on `start`.
+   */
+  bankWritable?: PublicKey[];
 };
 
 export const startExecuteOrderIx = (
@@ -950,10 +986,11 @@ export const startExecuteOrderIx = (
 ) => {
   const [executeRecord] = deriveExecuteOrderPda(program.programId, args.order);
 
+  const writable = args.bankWritable ?? [];
   const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
     pubkey,
     isSigner: false,
-    isWritable: false,
+    isWritable: writable.some((bank) => bank.equals(pubkey)),
   }));
 
   const accounts: any = {

@@ -11,6 +11,7 @@ mod drift;
 mod emissions;
 mod flash_loan;
 mod indexer_flags;
+mod interest_order;
 mod juplend;
 mod kamino;
 mod limit_orders;

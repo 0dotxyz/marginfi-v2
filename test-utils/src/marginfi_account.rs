@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger, RebalanceMove,
-    WrappedI80F48,
+    Bank, BankVaultType, FeeState, InterestTriggerConfig, MarginfiAccount, Order, OrderTrigger,
+    RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -2322,6 +2322,16 @@ impl MarginfiAccountFixture {
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
     ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.try_place_order_with_interest(bank_keys, trigger, None)
+            .await
+    }
+
+    pub async fn try_place_order_with_interest(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: Option<InterestTriggerConfig>,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
         let marginfi_account = self.load().await;
         // Compute fee_state PDA and fetch the global_fee_wallet from it so we can pass both
         // accounts to the PlaceOrder instruction.
@@ -2360,7 +2370,12 @@ impl MarginfiAccountFixture {
                 system_program: system_program::ID,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+            data: marginfi::instruction::MarginfiAccountPlaceOrder {
+                bank_keys,
+                trigger,
+                interest,
+            }
+            .data(),
         };
 
         let tx = Transaction::new_signed_with_payer(
@@ -2487,6 +2502,44 @@ impl MarginfiAccountFixture {
 
     pub async fn load_order(&self, order: Pubkey) -> Order {
         load_and_deserialize::<Order>(self.ctx.clone(), &order).await
+    }
+
+    /// Anchor an interest-trigger order's realized-rate measurement. Banks go in writable because
+    /// the instruction accrues both legs before reading their indices.
+    pub async fn try_arm_order_interest(
+        &self,
+        order: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
+        let observation_metas = self
+            .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+            .await;
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ArmOrderInterest {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                order,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountArmOrderInterest {}.data(),
+        };
+        ix.accounts.extend_from_slice(&observation_metas);
+
+        let ctx = self.ctx.borrow();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
     }
 
     pub async fn make_start_execute_ix(

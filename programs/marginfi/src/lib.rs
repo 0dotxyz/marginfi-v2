@@ -14,8 +14,8 @@ pub mod utils;
 use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
-    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
+    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, InterestTriggerConfig,
+    OrderTrigger, RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -345,17 +345,28 @@ pub mod marginfi {
     ///   users's Balances for which the order is being placed
     /// * trigger - the type of order (stop loss, take profit, or both), and the threshold at which
     ///   to trigger the order, in dollars
+    /// * interest - optional carry-exit policy, evaluated alongside the price trigger. The order
+    ///   is inert until armed by `marginfi_account_arm_order_interest`.
     pub fn marginfi_account_place_order(
         ctx: Context<PlaceOrder>,
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
+        interest: Option<InterestTriggerConfig>,
     ) -> MarginfiResult {
-        marginfi_account::place_order(ctx, bank_keys, trigger)
+        marginfi_account::place_order(ctx, bank_keys, trigger, interest)
     }
 
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
+    }
+
+    /// (permissionless) Anchor an interest-trigger order's realized-rate measurement, admitted once
+    /// the standing anchor is a window old. Both order banks must be writable; interest accrues here.
+    pub fn marginfi_account_arm_order_interest<'info>(
+        ctx: Context<'info, ArmOrderInterest<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::arm_order_interest(ctx)
     }
 
     /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield

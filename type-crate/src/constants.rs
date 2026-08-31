@@ -107,6 +107,26 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
 pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
 
+/// Default span an interest-trigger order measures its realized rates over. The rates are read as
+/// share-index growth across the span, so this is also how long a rate move must persist to count.
+pub const INTEREST_DEFAULT_WINDOW_SECONDS: u32 = 86_400; // 24 hours
+
+/// Shortest measurement span an order may configure, and so the floor on how briefly a rate can be
+/// pushed to arm an exit.
+pub const INTEREST_MIN_WINDOW_SECONDS: u32 = 21_600; // 6 hours
+
+/// How many windows old an anchor may be before it stops counting, bounding the span a trigger can
+/// evaluate so a neglected order cannot fire on a rate regime that has ended.
+pub const INTEREST_ANCHOR_MAX_AGE_WINDOWS: u32 = 2;
+
+/// Default span of carry loss an interest-trigger order will spend to exit: the realized unwind
+/// cost must not exceed what the position would lose to interest over this long.
+pub const INTEREST_DEFAULT_PATIENCE_SECONDS: u32 = 1_209_600; // 14 days
+
+/// Longest exit budget an interest-trigger order may configure. Bounds how far patience can widen
+/// the cost allowance before `MAX_ORDER_SLIPPAGE` is the only remaining bound.
+pub const INTEREST_MAX_PATIENCE_SECONDS: u32 = 31_536_000; // 1 year
+
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;
 pub const PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG: u64 = 1 << 2;

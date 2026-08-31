@@ -503,7 +503,24 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
-                                 // ************** END AUTO-REBALANCE ERRORS
+    // ************** END AUTO-REBALANCE ERRORS
+    // Interest trigger errors (6800 block)
+    #[msg("Interest trigger anchor is younger than the order's measurement window")]
+    OrderInterestWindowTooShort = 800, // 6800
+    #[msg("Interest trigger has no anchor; arm the order before executing it")]
+    OrderInterestNotArmed, // 6801
+    #[msg("Realized carry does not meet the order's negative-rate margin")]
+    OrderInterestNotNegative, // 6802
+    #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
+    OrderInterestCostExceedsCarry, // 6803
+    #[msg("Interest trigger window or patience is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6804
+    #[msg("Interest trigger requires both order banks writable so their indices can be accrued")]
+    OrderInterestBankNotWritable, // 6805
+    #[msg("Interest trigger anchor has aged out; re-arm the order to measure a current span")]
+    OrderInterestAnchorStale, // 6806
+    #[msg("Order does not carry an interest trigger")]
+    OrderInterestNotConfigured, // 6807
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -774,6 +791,16 @@ impl From<u32> for MarginfiError {
             6613 => MarginfiError::PremiumWalletNotSet,
             6614 => MarginfiError::PremiumEntryNotFound,
             6615 => MarginfiError::PremiumSnapshotUnavailable,
+
+            // Interest trigger errors (starting at 6800)
+            6800 => MarginfiError::OrderInterestWindowTooShort,
+            6801 => MarginfiError::OrderInterestNotArmed,
+            6802 => MarginfiError::OrderInterestNotNegative,
+            6803 => MarginfiError::OrderInterestCostExceedsCarry,
+            6804 => MarginfiError::OrderInterestInvalidConfig,
+            6805 => MarginfiError::OrderInterestBankNotWritable,
+            6806 => MarginfiError::OrderInterestAnchorStale,
+            6807 => MarginfiError::OrderInterestNotConfigured,
 
             _ => MarginfiError::InternalLogicError,
         }
