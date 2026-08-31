@@ -6,7 +6,7 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, ALLOW_REBALANCE,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -168,7 +168,7 @@ pub struct LendingAccountDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, true)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_REBALANCE)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

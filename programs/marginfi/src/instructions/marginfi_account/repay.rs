@@ -7,7 +7,7 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            LendingAccountImpl, MarginfiAccountImpl, ALLOW_ORDER_EXECUTION, ALLOW_RECEIVERSHIP,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -228,7 +228,7 @@ pub struct LendingAccountRepay<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true, false)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

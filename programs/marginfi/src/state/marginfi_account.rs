@@ -81,35 +81,39 @@ pub trait MarginfiAccountImpl {
 
 /// Checks if a signer is authorized to perform actions on a marginfi account.
 ///
+/// Sandwich contexts a non-authority signer may act under, passed to [`is_signer_authorized`] as a
+/// mask. Opt-in per instruction, so a flag can never authorize one that did not consider it.
+pub const ALLOW_RECEIVERSHIP: u8 = 1 << 0;
+pub const ALLOW_ORDER_EXECUTION: u8 = 1 << 1;
+pub const ALLOW_REBALANCE: u8 = 1 << 2;
+
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
-/// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
-/// 3. If `allow_order_execution` is true and the account is in order execution → `true`
+/// 1. If `ALLOW_REBALANCE` is set and the account is in a rebalance → `true`
+/// 2. If `ALLOW_RECEIVERSHIP` is set and the (NOT signer's) account is in receivership → `true`
+/// 3. If `ALLOW_ORDER_EXECUTION` is set and the account is in order execution → `true`
 /// 4. If the account is frozen → `true` only if signer is the group admin
 /// 5. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
     group_admin: Pubkey,
     signer: Pubkey,
-    allow_receivership: bool,
-    allow_order_execution: bool,
-    allow_rebalance: bool,
+    allow: u8,
 ) -> bool {
     // Within a rebalance sandwich, any keeper may drive the withdraw/deposit legs between the user's
     // same-mint banks. Opt-in per caller (only the withdraw/deposit legs pass `true`) so the flag
     // cannot authorize unrelated instructions; bounded by the rebalance start/end value-conservation
     // checks and the exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
-    if allow_rebalance && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
+    if allow & ALLOW_REBALANCE != 0 && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
         return true;
     }
 
-    if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+    if allow & ALLOW_RECEIVERSHIP != 0 && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
         return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
 
-    if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
+    if allow & ALLOW_ORDER_EXECUTION != 0 && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
         return true;
     }
 
