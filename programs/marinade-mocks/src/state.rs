@@ -27,10 +27,10 @@ pub struct MinimalMarinadeState {
     pub _padding10: [u8; 64],
     pub _padding11: [u8; 32],
     pub _padding12: [u8; 16],
-    pub available_reserve_balance: u64, // 488
-    pub msol_supply: u64,               // 496
-    pub msol_price: u64,                // 504 (cached; unused by pricing)
-    pub _padding13: [u8; 8],            // circulating_ticket_count @512
+    pub available_reserve_balance: u64,  // 488
+    pub msol_supply: u64,                // 496
+    pub msol_price: u64,                 // 504 (cached; unused by pricing)
+    pub _padding13: [u8; 8],             // circulating_ticket_count @512
     pub circulating_ticket_balance: u64, // 520
     pub _padding14: [u8; 32],
     pub emergency_cooling_down: u64, // 560
