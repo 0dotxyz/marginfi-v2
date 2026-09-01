@@ -1188,8 +1188,9 @@ impl OraclePriceFeedAdapter {
                 })
             }
             OracleSetup::PTFixed => {
-                // (0) Exponent vault only. hyUSD ~= $1, so the PT linear rate is the USD price
-                // directly (a time-varying fixed feed), with no base oracle to multiply.
+                // (0) Exponent vault only.
+                // Should only be used for the assets where the approximation of the underlying asset's price being ~= $1 is acceptable.
+                // So the PT linear rate is the USD price directly (a time-varying fixed feed), with no base oracle to multiply.
                 check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
 
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
@@ -2486,26 +2487,38 @@ mod tests {
     #[test]
     fn marinade_msol_multiplier_matches_expected() {
         use bytemuck::Zeroable;
-        // Live mainnet value observed on-chain (State 8szGkuLT...): msol_price = 5_992_546_810.
+        // Live mainnet balances (State 8szGkuLT...).
         let mut state = MinimalMarinadeState::zeroed();
-        state.msol_price = 5_992_546_810;
+        state.total_active_balance = 2_298_268_116_607_469;
+        state.available_reserve_balance = 54_120_945_998_366;
+        state.circulating_ticket_balance = 30_878_958_632_086;
+        state.msol_supply = 1_653_825_758_746_933;
+        state.msol_price = 6_028_935_980; // cross-check reference
 
         let rate = marinade_price_multiplier(&state).unwrap();
-        let expected = I80F48::from_num(5_992_546_810u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
-        assert_eq!(rate, expected);
-        // Sanity: mSOL/SOL ~= 1.39524853, i.e. within a plausible band.
-        assert!(rate > I80F48::from_num(1.39) && rate < I80F48::from_num(1.40));
+        // Canonical rate matches the cached msol_price to well under a bp.
+        let cached = I80F48::from_num(6_028_935_980u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
+        assert!((rate - cached).abs() / cached < I80F48::from_num(0.00001));
+        assert!(rate > I80F48::from_num(1.40) && rate < I80F48::from_num(1.41));
     }
 
     #[test]
-    fn marinade_state_msol_price_offset_is_512() {
-        // With the 8-byte Anchor discriminator stripped, msol_price must sit at struct offset 504
-        // (absolute offset 512). Round-trip raw bytes to prove the padding math.
+    fn marinade_state_field_offsets_round_trip() {
+        // Round-trip the balance offsets (validated against the live account) to prove the padding.
         let mut raw = [0u8; core::mem::size_of::<MinimalMarinadeState>()];
-        assert_eq!(raw.len(), 512);
-        raw[504..512].copy_from_slice(&5_992_546_810u64.to_le_bytes());
-        let parsed: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
-        assert_eq!(parsed.msol_price(), 5_992_546_810);
+        assert_eq!(raw.len(), 568);
+        raw[218..226].copy_from_slice(&11u64.to_le_bytes()); // delayed_unstake_cooling_down
+        raw[368..376].copy_from_slice(&22u64.to_le_bytes()); // total_active_balance
+        raw[488..496].copy_from_slice(&33u64.to_le_bytes()); // available_reserve_balance
+        raw[496..504].copy_from_slice(&44u64.to_le_bytes()); // msol_supply
+        raw[504..512].copy_from_slice(&55u64.to_le_bytes()); // msol_price
+        raw[520..528].copy_from_slice(&66u64.to_le_bytes()); // circulating_ticket_balance
+        raw[560..568].copy_from_slice(&77u64.to_le_bytes()); // emergency_cooling_down
+        let s: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
+        assert_eq!(s.msol_price(), 55);
+        assert_eq!(s.msol_supply(), 44);
+        // total_virtual_staked = active(22) + delayed(11) + emergency(77) + reserve(33) - tickets(66)
+        assert_eq!(s.total_virtual_staked_lamports(), Some(77));
     }
 
     /// Fake SPL StakePool: account_type @0, total_lamports @258, supply @266, epoch @274.

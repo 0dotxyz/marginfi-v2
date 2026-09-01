@@ -10,7 +10,7 @@ use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
 use fixed::types::I80F48;
 use marginfi_type_crate::pdas::derive_staked_onramp_from_vote;
 use marginfi_type_crate::types::{Bank, BankConfig};
-use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
+use marinade_mocks::state::MinimalMarinadeState;
 use solana_borsh::v1::try_from_slice_unchecked;
 use solana_stake_interface::state::StakeStateV2;
 
@@ -19,9 +19,9 @@ use crate::constants::{
 };
 
 /// Sanity ceiling for an LST/mSOL SOL-denominated exchange rate. Guards against a bad byte-slice
-/// yielding an absurd multiplier: real rates sit near 1.0, so 200 leaves ample headroom while
-/// still catching garbage (e.g. a misaligned read).
-const MAX_LST_SOL_RATE: i128 = 200;
+/// yielding an absurd multiplier: real rates sit near 1.0-1.4 and appreciate only with staking
+/// yield, so 3 leaves over a decade of headroom while tightly bounding a garbage read.
+const MAX_LST_SOL_RATE: i128 = 3;
 /// Upper bound (~5 years) on how far in the future a PT vault may mature, a sanity check on the
 /// timestamps decoded from the Exponent vault.
 const PT_MAX_MATURITY_HORIZON: i64 = 5 * 365 * 24 * 60 * 60;
@@ -91,10 +91,20 @@ pub(crate) fn load_marinade_state<'info>(
     Ok(state_loader)
 }
 
-/// mSOL/SOL exchange rate = `msol_price / 2^32` (Marinade's cached rate).
+/// mSOL/SOL exchange rate, computed from Marinade's live balances the way its own `msol_to_sol`
+/// does (`total_virtual_staked_lamports / msol_supply`):
+/// https://github.com/marinade-finance/liquid-staking-program/blob/b8fe3f8f9a2bb0978fb40ba5bb1c2855dd12940f/programs/marinade-finance/src/state/mod.rs#L245
 pub(crate) fn marinade_price_multiplier(state: &MinimalMarinadeState) -> MarginfiResult<I80F48> {
-    let rate = I80F48::from_num(state.msol_price())
-        .checked_div(I80F48::from_num(MSOL_PRICE_PRECISION))
+    let msol_supply = state.msol_supply();
+    check!(
+        msol_supply > 0,
+        MarginfiError::MarinadeStateValidationFailed
+    );
+    let staked_lamports = state
+        .total_virtual_staked_lamports()
+        .ok_or_else(math_error!())?;
+    let rate = I80F48::from_num(staked_lamports)
+        .checked_div(I80F48::from_num(msol_supply))
         .ok_or_else(math_error!())?;
     check!(
         rate > I80F48::ZERO && rate < I80F48::from_num(MAX_LST_SOL_RATE),

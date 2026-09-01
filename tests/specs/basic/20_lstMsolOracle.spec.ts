@@ -46,7 +46,6 @@ const SANCTUM_SPL_POOL = new PublicKey(
 const JUPSOL_POOL = new PublicKey(
   "8VpRhuxa7sUUepdY3kQiTmX9rS5vx4WgaXiAnXq4KCtr",
 );
-const MSOL_PRICE_PRECISION = 2 ** 32;
 
 // Mirrors `MinimalStakePool` in price.rs
 const decodeStakePool = (data: Uint8Array) => {
@@ -57,10 +56,15 @@ const decodeStakePool = (data: Uint8Array) => {
   };
 };
 
-// Mirrors `MinimalMarinadeState` in marinade-mocks
-const decodeMarinadeState = (data: Uint8Array) => ({
-  msolPrice: Buffer.from(data).readBigUInt64LE(512),
-});
+// Canonical SOL/mSOL rate from Marinade's balances, matching `marinade_price_multiplier`:
+// total_virtual_staked_lamports / msol_supply. Byte offsets match `MinimalMarinadeState`.
+const decodeMarinadeRate = (data: Uint8Array): number => {
+  const b = Buffer.from(data);
+  const u = (o: number) => b.readBigUInt64LE(o);
+  const underControl = u(376) + u(226) + u(568) + u(496); // active + delayed + emergency + reserve
+  const tvsl = underControl - u(528); // - circulating_ticket_balance
+  return Number(tvsl) / Number(u(504)); // / msol_supply
+};
 
 const lstGroup = Keypair.generate();
 const lstBank = Keypair.generate();
@@ -141,9 +145,7 @@ describe("LST / mSOL internal oracle setups", () => {
 
   const marinadeRate = async (state: PublicKey) => {
     const acc = await banksClient.getAccount(state);
-    return (
-      Number(decodeMarinadeState(acc!.data).msolPrice) / MSOL_PRICE_PRECISION
-    );
+    return decodeMarinadeRate(acc!.data);
   };
 
   const setOracle = async (type: number, remaining: PublicKey[]) => {

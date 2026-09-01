@@ -275,6 +275,7 @@ impl Bank {
             && self.mint == same_asset.mint
             && self.config.oracle_keys[0] == same_asset.oracle_key
             && self.config.oracle_setup.feed_family() == same_asset.feed_family
+            && I80F48::from(self.config.fixed_price) == same_asset.fixed_price
             && self.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE != 0
             && matches!(self.config.risk_tier, RiskTier::Collateral)
             && !matches!(
