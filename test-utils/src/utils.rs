@@ -43,7 +43,10 @@ pub async fn load_and_deserialize<T: AccountDeserialize>(
     let banks_client = ctx.borrow().banks_client.clone();
     let ai = banks_client.get_account(*address).await.unwrap().unwrap();
 
-    T::try_deserialize(&mut ai.data.as_slice()).unwrap()
+    // Trim a reserve tail the way `AccountLoader` does on-chain, slicing to exactly
+    // `size_of::<T>()`; `bytemuck` rejects an inexact slice.
+    let end = (8 + std::mem::size_of::<T>()).min(ai.data.len());
+    T::try_deserialize(&mut &ai.data[..end]).unwrap()
 }
 
 pub async fn latest_blockhash(ctx: &Rc<RefCell<ProgramTestContext>>) -> Hash {
