@@ -1,3 +1,4 @@
+use crate::types::Bank;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 
@@ -106,6 +107,20 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 /// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.
 pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
 pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
+
+/// Bytes held on a bank account beyond the current `Bank` struct, for fields added by later
+/// releases. Deliberately far smaller than the group's 8KB reserve: there are hundreds of banks
+/// and only one group, so every byte here is paid for hundreds of times over.
+pub const BANK_RESERVED_BYTES: usize = 1024;
+
+/// Byte length `lending_pool_resize_bank_account` grows a bank account to, discriminator included.
+///
+/// This is deliberately NOT `8 + Bank::LEN`. Banks are resized ahead of any struct growth so that
+/// growth needs no migration and causes no downtime: a program whose `Bank` is smaller than the
+/// account simply ignores the tail, whereas a program whose `Bank` is LARGER than the account
+/// fails every instruction that loads a bank. Growing the struct and resizing in one release would
+/// take the protocol down for as long as the migration takes.
+pub const BANK_ACCOUNT_LEN: usize = 8 + Bank::V1_LEN + BANK_RESERVED_BYTES;
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;

@@ -250,6 +250,11 @@ pub struct Bank {
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+    /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
+    /// `lending_pool_resize_bank_account` existed, and a byte-identical prefix of any later
+    /// layout. `BANK_ACCOUNT_LEN` is measured from here so the resize target never moves when
+    /// the struct grows into the reserve.
+    pub const V1_LEN: usize = 1856;
 
     #[inline]
     pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {
