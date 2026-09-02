@@ -4,7 +4,7 @@ use marginfi::{
     assert_eq_with_tolerance, constants::MIN_EMISSIONS_SHARE_SUPPLY, prelude::MarginfiError,
     state::bank::BankImpl,
 };
-use marginfi_type_crate::types::{BalanceSide, BankConfigOpt, BankOperationalState};
+use marginfi_type_crate::types::{BankConfigOpt, BankOperationalState};
 use solana_program_test::*;
 
 #[tokio::test]
