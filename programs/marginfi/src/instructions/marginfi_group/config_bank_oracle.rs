@@ -3,6 +3,7 @@ use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
+use fixed::types::I80F48;
 use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
@@ -40,6 +41,7 @@ pub fn lending_pool_configure_bank_oracle(
 
         bank.config.oracle_setup = setup_type;
         bank.config.oracle_keys[0] = oracle;
+        bank.config.fixed_price = I80F48::ZERO.into();
 
         // mSOL / LST setups carry multiplier oracle key (Marinade State / SPL StakePool) beyond the primary feed, populated here from
         // remaining_accounts (validated immediately below):

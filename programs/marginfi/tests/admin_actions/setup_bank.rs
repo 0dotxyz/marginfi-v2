@@ -797,6 +797,69 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
 }
 
 #[tokio::test]
+async fn configure_bank_oracle_clears_a_stale_fixed_price() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let process_ix = |ix: Instruction| {
+        let ctx = test_f.context.clone();
+        async move {
+            let ctx = ctx.borrow_mut();
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            );
+            ctx.banks_client.process_transaction(tx).await
+        }
+    };
+
+    // Park the bank on a fixed price, which stamps `fixed_price`.
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
+    process_ix(set_fixed_ix).await?;
+    let after_fixed = usdc_bank.load().await;
+    assert_eq!(after_fixed.config.oracle_setup, OracleSetup::Fixed);
+    assert_eq!(I80F48::from(after_fixed.config.fixed_price), I80F48!(1));
+
+    // Switching back to a live feed must not leave the fixed price behind: same-asset e-mode
+    // compares it as part of a bank's identity, so a leftover would silently stop this bank
+    // pairing with an otherwise identical peer that was never fixed.
+    let restore_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::PythPushOracle as u8,
+            PYTH_USDC_FEED,
+            None,
+        );
+    process_ix(restore_ix).await?;
+
+    let after_restore = usdc_bank.load().await;
+    assert_eq!(
+        after_restore.config.oracle_setup,
+        OracleSetup::PythPushOracle
+    );
+    assert_eq!(after_restore.config.oracle_keys[0], PYTH_USDC_FEED);
+    assert_eq!(
+        I80F48::from(after_restore.config.fixed_price),
+        I80F48::ZERO,
+        "stale fixed_price must be cleared when leaving a fixed/PT setup"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn configure_bank_oracle_pinned_while_same_asset_eligible() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![TestBankSetting {
