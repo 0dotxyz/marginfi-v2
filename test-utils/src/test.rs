@@ -1244,19 +1244,6 @@ impl TestFixture {
             .unwrap()
     }
 
-    /// Refresh the cached blockhash in the test context.
-    /// Call this in long-running tests to prevent BlockhashNotFound errors.
-    pub async fn refresh_blockhash(&self) {
-        let blockhash = self
-            .context
-            .borrow_mut()
-            .banks_client
-            .get_latest_blockhash()
-            .await
-            .unwrap();
-        self.context.borrow_mut().last_blockhash = blockhash;
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1506,8 +1493,6 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-
-        test_f.refresh_blockhash().await;
 
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await

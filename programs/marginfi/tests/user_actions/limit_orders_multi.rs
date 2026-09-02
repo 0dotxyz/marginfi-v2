@@ -75,7 +75,6 @@ async fn execute_order_with_withdraw(
         )
         .await;
 
-    test_f.refresh_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, withdraw_ix, repay_ix, end_ix],
@@ -130,7 +129,6 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
         )
         .await?;
 
-    test_f.refresh_blockhash().await;
     // Order on A/D
     let order_ad = borrower
         .try_place_order(
@@ -200,7 +198,6 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
     assert_eq!(marginfi_account.active_orders, 1);
 
     // Keeper cannot close A/D yet because both tags are still live (SOL not closed yet).
-    test_f.refresh_blockhash().await;
     let result = borrower
         .try_keeper_close_order(order_ad, &keeper, keeper.pubkey())
         .await;
@@ -212,13 +209,11 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
     assert_eq!(marginfi_account.active_orders, 1);
 
     // Now close A outside of order execution.
-    test_f.refresh_blockhash().await;
     let sol_destination = sol_bank.mint.create_empty_token_account().await;
     borrower
         .try_bank_withdraw(sol_destination.key, sol_bank, 0.0, Some(true))
         .await?;
 
-    test_f.refresh_blockhash().await;
     // A is closed, so start on A/D should fail
     let (start_ix, _execute_record) = borrower
         .make_start_execute_ix(order_ad, keeper.pubkey())
@@ -428,14 +423,12 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
     assert_eq!(marginfi_account.active_orders, 1);
 
     // Close SOL outside order execution.
-    test_f.refresh_blockhash().await;
     let sol_destination = sol_bank.mint.create_empty_token_account().await;
     borrower
         .try_bank_withdraw(sol_destination.key, sol_bank, 0.0, Some(true))
         .await?;
 
     // Reopen SOL with a new deposit (new tag, old order tag is now orphaned).
-    test_f.refresh_blockhash().await;
     let sol_deposit = sol_bank.mint.create_token_account_and_mint_to(1.0).await;
     borrower
         .try_bank_deposit(sol_deposit.key, sol_bank, 1.0, None)
@@ -455,7 +448,6 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
         "reopened SOL balance should not reuse the old order tag"
     );
 
-    test_f.refresh_blockhash().await;
     let (start_ix, _execute_record) = borrower
         .make_start_execute_ix(order_ad, keeper.pubkey())
         .await;
@@ -508,7 +500,6 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
         )
         .await?;
 
-    test_f.refresh_blockhash().await;
     // Order on A/D with zero slippage (no profit allowed)
     let order_ad = borrower
         .try_place_order(
@@ -560,7 +551,6 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
 
     // At this point there is 6 SOL left ($60) and a debt of $50 PyUSD
 
-    test_f.refresh_blockhash().await;
     // Execute A/D, but withdraw slightly too much from remaining A (end should fail)
     let result = execute_order_with_withdraw(
         &test_f,
@@ -653,7 +643,6 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
             let liab_price = get_mint_price(liab_mint.clone());
             let withdraw_amount = (liab_amount * liab_price) / asset_price;
 
-            test_f.refresh_blockhash().await;
             let order = borrower
                 .try_place_order(
                     vec![asset_bank.key, liab_bank.key],

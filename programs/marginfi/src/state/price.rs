@@ -2174,6 +2174,7 @@ impl PythPushOraclePriceFeed {
         Ok(Self {
             price: Box::new(price),
             ema_price: Box::new(ema_price),
+            has_borrow_power: true,
         })
     }
 
