@@ -610,9 +610,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_resize_group_account(ctx)
     }
 
-    /// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`, adding reserve space for
-    /// fields later releases will claim; `payer` funds the added rent. Must be run across every
-    /// bank before a `Bank` struct that occupies the reserve is released.
+    /// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`.
     pub fn lending_pool_resize_bank_account(
         ctx: Context<LendingPoolResizeBankAccount>,
     ) -> MarginfiResult {
