@@ -7,10 +7,9 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        INTEREST_ANCHOR_MAX_AGE_WINDOWS, INTEREST_DEFAULT_PATIENCE_SECONDS,
-        INTEREST_DEFAULT_WINDOW_SECONDS, INTEREST_MAX_PATIENCE_SECONDS,
-        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS, ORDER_ACTIVE_TAGS,
-        SECONDS_PER_YEAR,
+        INTEREST_DEFAULT_EXIT_BUDGET_SECONDS, INTEREST_DEFAULT_WINDOW_SECONDS,
+        INTEREST_MAX_EXIT_BUDGET_SECONDS, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        ORDER_ACTIVE_TAGS, SECONDS_PER_YEAR,
     },
     types::{
         u32_to_milli, BalanceSide, ExecuteOrderBalanceRecord, ExecuteOrderRecord,
@@ -18,6 +17,20 @@ use marginfi_type_crate::{
         WrappedI80F48, MAX_EXECUTE_RECORD_BALANCES,
     },
 };
+
+/// One leg's share index at the bank reading it is measured from and now, `elapsed` seconds later.
+pub struct LegSpan {
+    pub start: I80F48,
+    pub end: I80F48,
+    pub elapsed: i64,
+}
+
+impl LegSpan {
+    /// The time-weighted rate realized over the span.
+    pub fn apr(&self) -> MarginfiResult<I80F48> {
+        realized_apr(self.start, self.end, self.elapsed)
+    }
+}
 
 pub trait OrderImpl {
     fn initialize(
@@ -30,37 +43,22 @@ pub trait OrderImpl {
         current_timestamp: i64,
     ) -> MarginfiResult;
 
-    /// Rotate a new anchor in, displacing the current one. Both indices must come from banks
-    /// accrued in this instruction, or the span they later measure starts before `now`.
-    fn set_interest_anchor(&mut self, asset_index: I80F48, debt_index: I80F48, now: i64);
-
-    /// Seconds since the current anchor was taken. `None` when the order was never armed.
-    fn interest_anchor_age(&self, now: i64) -> Option<i64>;
-
-    /// Whether the current anchor is old enough to be rotated out.
-    fn interest_window_elapsed(&self, now: i64) -> bool;
-
-    /// `(asset_index, debt_index, elapsed)` from the OLDER anchor aged between one and
-    /// `INTEREST_ANCHOR_MAX_AGE_WINDOWS` windows, so an arm cannot displace a matured measurement.
-    fn interest_anchor(&self, now: i64) -> Option<(I80F48, I80F48, i64)>;
-
     /// Net carry for the pair in USD per year, negative when interest is a net cost. `liabs` carries
     /// the accrued premium receivable, which then also pays the borrow rate (accepted overstatement).
     fn realized_carry(
         &self,
-        anchor: (I80F48, I80F48, i64),
-        asset_index: I80F48,
-        debt_index: I80F48,
+        asset: &LegSpan,
+        debt: &LegSpan,
         assets: I80F48,
         liabs: I80F48,
         premium_apr: I80F48,
     ) -> MarginfiResult<I80F48>;
 
-    /// Whether `carry` clears the arming margin: an annualized loss of at least
+    /// Whether `carry` clears the trigger margin: an annualized loss of at least
     /// `interest_min_negative_apr` measured against the lend leg.
     fn interest_condition_met(&self, carry: I80F48, assets: I80F48) -> MarginfiResult<bool>;
 
-    /// USD the unwind may cost: what the pair loses to `carry` over `interest_patience_seconds`.
+    /// USD the unwind may cost: what the pair loses to `carry` over `interest_exit_budget_seconds`.
     fn interest_allowed_cost(&self, carry: I80F48) -> MarginfiResult<I80F48>;
 }
 
@@ -137,19 +135,19 @@ impl OrderImpl for Order {
             let window = config
                 .window_seconds
                 .unwrap_or(INTEREST_DEFAULT_WINDOW_SECONDS);
-            let patience = config
-                .patience_seconds
-                .unwrap_or(INTEREST_DEFAULT_PATIENCE_SECONDS);
+            let exit_budget = config
+                .exit_budget_seconds
+                .unwrap_or(INTEREST_DEFAULT_EXIT_BUDGET_SECONDS);
             check!(
                 (INTEREST_MIN_WINDOW_SECONDS..=INTEREST_MAX_WINDOW_SECONDS).contains(&window),
                 MarginfiError::OrderInterestInvalidConfig
             );
             check!(
-                (1..=INTEREST_MAX_PATIENCE_SECONDS).contains(&patience),
+                (1..=INTEREST_MAX_EXIT_BUDGET_SECONDS).contains(&exit_budget),
                 MarginfiError::OrderInterestInvalidConfig
             );
             self.interest_window_seconds = window;
-            self.interest_patience_seconds = patience;
+            self.interest_exit_budget_seconds = exit_budget;
             self.interest_min_negative_apr = config.min_negative_apr.unwrap_or(0);
             self.interest_flags = Order::INTEREST_TRIGGER_ENABLED;
         }
@@ -161,63 +159,17 @@ impl OrderImpl for Order {
         Ok(())
     }
 
-    fn set_interest_anchor(&mut self, asset_index: I80F48, debt_index: I80F48, now: i64) {
-        self.interest_prev_asset_index = self.interest_anchor_asset_index;
-        self.interest_prev_debt_index = self.interest_anchor_debt_index;
-        self.interest_prev_timestamp = self.interest_anchor_timestamp;
-        self.interest_anchor_asset_index = asset_index.into();
-        self.interest_anchor_debt_index = debt_index.into();
-        self.interest_anchor_timestamp = now;
-    }
-
-    fn interest_anchor_age(&self, now: i64) -> Option<i64> {
-        if self.interest_anchor_timestamp <= 0 {
-            return None;
-        }
-        now.checked_sub(self.interest_anchor_timestamp)
-    }
-
-    fn interest_window_elapsed(&self, now: i64) -> bool {
-        self.interest_anchor_age(now)
-            .is_some_and(|age| age >= i64::from(self.interest_window_seconds))
-    }
-
-    fn interest_anchor(&self, now: i64) -> Option<(I80F48, I80F48, i64)> {
-        let window = i64::from(self.interest_window_seconds);
-        let max_age = window.checked_mul(i64::from(INTEREST_ANCHOR_MAX_AGE_WINDOWS))?;
-        let usable = |timestamp: i64, asset: WrappedI80F48, debt: WrappedI80F48| {
-            if timestamp <= 0 {
-                return None;
-            }
-            let age = now.checked_sub(timestamp)?;
-            (age >= window && age <= max_age).then(|| (asset.into(), debt.into(), age))
-        };
-        usable(
-            self.interest_prev_timestamp,
-            self.interest_prev_asset_index,
-            self.interest_prev_debt_index,
-        )
-        .or_else(|| {
-            usable(
-                self.interest_anchor_timestamp,
-                self.interest_anchor_asset_index,
-                self.interest_anchor_debt_index,
-            )
-        })
-    }
-
     fn realized_carry(
         &self,
-        anchor: (I80F48, I80F48, i64),
-        asset_index: I80F48,
-        debt_index: I80F48,
+        asset: &LegSpan,
+        debt: &LegSpan,
         assets: I80F48,
         liabs: I80F48,
         premium_apr: I80F48,
     ) -> MarginfiResult<I80F48> {
-        let (anchor_asset, anchor_debt, elapsed) = anchor;
-        let supply_apr = realized_apr(anchor_asset, asset_index, elapsed)?;
-        let borrow_apr = realized_apr(anchor_debt, debt_index, elapsed)?
+        let supply_apr = asset.apr()?;
+        let borrow_apr = debt
+            .apr()?
             .checked_add(premium_apr)
             .ok_or_else(math_error!())?;
         let earned = assets.checked_mul(supply_apr).ok_or_else(math_error!())?;
@@ -241,7 +193,7 @@ impl OrderImpl for Order {
         }
         carry
             .checked_neg()
-            .and_then(|loss| loss.checked_mul(I80F48::from_num(self.interest_patience_seconds)))
+            .and_then(|loss| loss.checked_mul(I80F48::from_num(self.interest_exit_budget_seconds)))
             .and_then(|budget| budget.checked_div(SECONDS_PER_YEAR))
             .ok_or_else(math_error!())
             .map_err(Into::into)
@@ -457,45 +409,48 @@ mod tests {
     }
 }
 
-/// The carry trigger's arithmetic: what the pair earns net of what it pays, the margin that arms
-/// an exit, and the budget patience buys.
 #[cfg(test)]
 mod interest_trigger {
-    use super::OrderImpl;
+    use super::{LegSpan, OrderImpl};
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
     use marginfi_type_crate::constants::{
-        INTEREST_ANCHOR_MAX_AGE_WINDOWS, INTEREST_DEFAULT_PATIENCE_SECONDS,
-        INTEREST_DEFAULT_WINDOW_SECONDS, INTEREST_MAX_PATIENCE_SECONDS,
-        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        INTEREST_DEFAULT_EXIT_BUDGET_SECONDS, INTEREST_DEFAULT_WINDOW_SECONDS,
+        INTEREST_MAX_EXIT_BUDGET_SECONDS, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
     };
     use marginfi_type_crate::types::{
         milli_to_u32, u32_to_milli, InterestTriggerConfig, Order, OrderTrigger,
     };
 
     const YEAR: i64 = 31_536_000;
-    const ANCHORED_AT: i64 = 1;
 
     fn f(v: f64) -> I80F48 {
         I80F48::from_num(v)
     }
 
-    /// An order anchored at both indices == 1, so a later index reads directly as its growth.
-    fn armed(patience_seconds: u32, min_negative_apr: u32) -> Order {
+    /// A leg whose index grew from 1 to `end` over `elapsed`, so at a year `end - 1` is its rate.
+    fn grew(end: f64, elapsed: i64) -> LegSpan {
+        LegSpan {
+            start: I80F48::ONE,
+            end: f(end),
+            elapsed,
+        }
+    }
+
+    fn order(exit_budget_seconds: u32, min_negative_apr: u32) -> Order {
         let mut order = Order::zeroed();
         order.interest_flags = Order::INTEREST_TRIGGER_ENABLED;
         order.interest_window_seconds = INTEREST_DEFAULT_WINDOW_SECONDS;
-        order.interest_patience_seconds = patience_seconds;
+        order.interest_exit_budget_seconds = exit_budget_seconds;
         order.interest_min_negative_apr = min_negative_apr;
-        order.set_interest_anchor(I80F48::ONE, I80F48::ONE, ANCHORED_AT);
         order
     }
 
-    fn config(window: Option<u32>, patience: Option<u32>) -> InterestTriggerConfig {
+    fn config(window: Option<u32>, exit_budget: Option<u32>) -> InterestTriggerConfig {
         InterestTriggerConfig {
             window_seconds: window,
-            patience_seconds: patience,
+            exit_budget_seconds: exit_budget,
             min_negative_apr: None,
         }
     }
@@ -516,18 +471,34 @@ mod interest_trigger {
         Ok(order)
     }
 
-    /// A full year of span makes each leg's index growth its own annual rate: 6.25% earned on a
-    /// 1000 lend against 12.5% paid on a 900 borrow is 62.5 - 112.5.
     #[test]
     fn carry_is_the_pair_rate_difference_and_the_premium_is_a_cost() {
-        let order = armed(YEAR as u32, 0);
-        let anchor = (I80F48::ONE, I80F48::ONE, YEAR);
+        let order = order(YEAR as u32, 0);
+        let (asset, debt) = (grew(1.0625, YEAR), grew(1.125, YEAR));
+        // 6.25% earned on a 1000 lend against 12.5% paid on a 900 borrow: 62.5 - 112.5.
         assert_eq!(
             order
+                .realized_carry(&asset, &debt, f(1000.0), f(900.0), I80F48::ZERO)
+                .unwrap(),
+            f(-50.0)
+        );
+        // A 3.125% variable-borrow premium lands on the borrow leg: 900 * 15.625% = 140.625.
+        assert_eq!(
+            order
+                .realized_carry(&asset, &debt, f(1000.0), f(900.0), f(0.03125))
+                .unwrap(),
+            f(-78.125)
+        );
+    }
+
+    #[test]
+    fn each_leg_annualizes_over_its_own_span() {
+        // The same 6.25% growth over half a year is a 12.5% rate: 62.5 - 112.5.
+        assert_eq!(
+            order(YEAR as u32, 0)
                 .realized_carry(
-                    anchor,
-                    f(1.0625),
-                    f(1.125),
+                    &grew(1.0625, YEAR),
+                    &grew(1.0625, YEAR / 2),
                     f(1000.0),
                     f(900.0),
                     I80F48::ZERO
@@ -535,23 +506,15 @@ mod interest_trigger {
                 .unwrap(),
             f(-50.0)
         );
-        // A 3.125% variable-borrow premium lands on the borrow leg: 900 * 15.625% = 140.625.
-        assert_eq!(
-            order
-                .realized_carry(anchor, f(1.0625), f(1.125), f(1000.0), f(900.0), f(0.03125))
-                .unwrap(),
-            f(-78.125)
-        );
     }
 
     #[test]
-    fn a_profitable_pair_neither_arms_nor_earns_an_exit_budget() {
-        let order = armed(YEAR as u32, 0);
+    fn a_profitable_pair_neither_fires_nor_earns_an_exit_budget() {
+        let order = order(YEAR as u32, 0);
         let carry = order
             .realized_carry(
-                (I80F48::ONE, I80F48::ONE, YEAR),
-                f(1.25),
-                f(1.0625),
+                &grew(1.25, YEAR),
+                &grew(1.0625, YEAR),
                 f(1000.0),
                 f(900.0),
                 I80F48::ZERO,
@@ -562,30 +525,26 @@ mod interest_trigger {
         assert_eq!(order.interest_allowed_cost(carry).unwrap(), I80F48::ZERO);
     }
 
-    /// The budget is the loss the pair would take over the patience span, in USD, which is what the
-    /// realized unwind cost is measured against.
     #[test]
-    fn patience_converts_the_annual_loss_into_a_usd_exit_budget() {
+    fn the_budget_span_converts_the_annual_loss_into_usd() {
         assert_eq!(
-            armed(YEAR as u32, 0)
+            order(YEAR as u32, 0)
                 .interest_allowed_cost(f(-50.0))
                 .unwrap(),
             f(50.0)
         );
         assert_eq!(
-            armed(YEAR as u32 / 4, 0)
+            order(YEAR as u32 / 4, 0)
                 .interest_allowed_cost(f(-50.0))
                 .unwrap(),
             f(12.5)
         );
     }
 
-    /// The margin is measured against the lend leg and is strict, so a pair losing exactly the
-    /// configured rate does not arm.
     #[test]
-    fn the_arming_margin_is_strict_and_scales_with_the_lend_leg() {
+    fn the_trigger_margin_is_strict_and_scales_with_the_lend_leg() {
         let stored = milli_to_u32(f(0.0625));
-        let order = armed(YEAR as u32, stored);
+        let order = order(YEAR as u32, stored);
         let assets = f(1000.0);
         // The margin round-trips through the u32 encoding, so compare against the stored value.
         let margin = assets * u32_to_milli(stored);
@@ -594,60 +553,13 @@ mod interest_trigger {
             .interest_condition_met(-margin - I80F48::DELTA, assets)
             .unwrap());
 
-        let no_margin = armed(YEAR as u32, 0);
+        let no_margin = self::order(YEAR as u32, 0);
         assert!(no_margin
             .interest_condition_met(-I80F48::DELTA, assets)
             .unwrap());
         assert!(!no_margin
             .interest_condition_met(I80F48::ZERO, assets)
             .unwrap());
-    }
-
-    #[test]
-    fn the_window_must_elapse_before_the_anchor_is_a_measurement() {
-        let order = armed(YEAR as u32, 0);
-        let window = i64::from(INTEREST_DEFAULT_WINDOW_SECONDS);
-        assert!(order.interest_anchor(ANCHORED_AT + window - 1).is_none());
-        assert!(order.interest_anchor(ANCHORED_AT + window).is_some());
-
-        let mut unarmed = order;
-        unarmed.interest_anchor_timestamp = 0;
-        assert_eq!(unarmed.interest_anchor_age(ANCHORED_AT + window), None);
-        assert!(unarmed.interest_anchor(ANCHORED_AT + window).is_none());
-    }
-
-    /// An anchor that has outlived `INTEREST_ANCHOR_MAX_AGE_WINDOWS` stops counting, so a
-    /// neglected order cannot fire on a rate regime that has since ended.
-    #[test]
-    fn an_anchor_past_the_maximum_age_stops_counting() {
-        let order = armed(YEAR as u32, 0);
-        let window = i64::from(INTEREST_DEFAULT_WINDOW_SECONDS);
-        let max_age = window * i64::from(INTEREST_ANCHOR_MAX_AGE_WINDOWS);
-        assert!(order.interest_anchor(ANCHORED_AT + max_age).is_some());
-        assert!(order.interest_anchor(ANCHORED_AT + max_age + 1).is_none());
-    }
-
-    /// Arming rotates and evaluation reads the older anchor, so a re-arm at the very moment an order
-    /// came of age cannot reset it.
-    #[test]
-    fn re_arming_rotates_and_cannot_erase_a_matured_measurement() {
-        let mut order = armed(YEAR as u32, 0);
-        let window = i64::from(INTEREST_DEFAULT_WINDOW_SECONDS);
-        let matured = ANCHORED_AT + window;
-
-        // A griefer arms the instant the standing anchor comes of age.
-        order.set_interest_anchor(f(9.0), f(9.0), matured);
-
-        // The displaced anchor still measures, with its own full-window span.
-        let (asset, debt, elapsed) = order.interest_anchor(matured).unwrap();
-        assert_eq!(asset, I80F48::ONE);
-        assert_eq!(debt, I80F48::ONE);
-        assert_eq!(elapsed, window);
-
-        // And the fresh one alone is not yet a measurement.
-        let mut only_fresh = order;
-        only_fresh.interest_prev_timestamp = 0;
-        assert!(only_fresh.interest_anchor(matured).is_none());
     }
 
     #[test]
@@ -659,11 +571,9 @@ mod interest_trigger {
             INTEREST_DEFAULT_WINDOW_SECONDS
         );
         assert_eq!(
-            order.interest_patience_seconds,
-            INTEREST_DEFAULT_PATIENCE_SECONDS
+            order.interest_exit_budget_seconds,
+            INTEREST_DEFAULT_EXIT_BUDGET_SECONDS
         );
-        // An unarmed order has no anchor, so it cannot execute until one is written.
-        assert_eq!(order.interest_anchor_timestamp, 0);
 
         assert!(!placed(None).unwrap().interest_trigger_enabled());
 
@@ -671,6 +581,10 @@ mod interest_trigger {
         assert!(placed(Some(config(Some(INTEREST_MAX_WINDOW_SECONDS + 1), None))).is_err());
         assert!(placed(Some(config(Some(INTEREST_MAX_WINDOW_SECONDS), None))).is_ok());
         assert!(placed(Some(config(None, Some(0)))).is_err());
-        assert!(placed(Some(config(None, Some(INTEREST_MAX_PATIENCE_SECONDS + 1)))).is_err());
+        assert!(placed(Some(config(
+            None,
+            Some(INTEREST_MAX_EXIT_BUDGET_SECONDS + 1)
+        )))
+        .is_err());
     }
 }

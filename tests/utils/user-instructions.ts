@@ -371,7 +371,7 @@ export const closeLiquidationRecordIx = (
         },
       ],
       data: CLOSE_LIQ_RECORD_DISCRIMINATOR,
-    })
+    }),
   );
 };
 
@@ -412,7 +412,7 @@ export const startLiquidationIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   return program.methods
     .startLiquidation()
@@ -441,7 +441,7 @@ export const endLiquidationIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   const liquidationReceiver = program.provider.publicKey;
   return program.methods
@@ -472,7 +472,7 @@ export const startDeleverageIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   return program.methods
     .startDeleverage()
@@ -497,7 +497,7 @@ export const endDeleverageIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   const riskAdmin = program.provider.publicKey;
   return program.methods
@@ -830,7 +830,7 @@ export type OrderTriggerArgs =
 
 export type InterestTriggerArgs = {
   windowSeconds: number | null;
-  patienceSeconds: number | null;
+  exitBudgetSeconds: number | null;
   minNegativeApr: number | null;
 };
 
@@ -840,33 +840,12 @@ export type PlaceOrderArgs = {
   feePayer: PublicKey;
   bankKeys: PublicKey[];
   trigger: OrderTriggerArgs;
-  /** Optional carry-exit policy, evaluated alongside the price trigger. */
-  interest?: InterestTriggerArgs | null;
   feeState?: PublicKey;
   globalFeeWallet?: PublicKey;
 };
 
-export type ArmOrderInterestArgs = {
-  marginfiAccount: PublicKey;
-  group: PublicKey;
-  order: PublicKey;
-  /** The order's two legs, writable: arming accrues them before reading their share indices. */
-  remaining: AccountMeta[];
-};
-
-export const armOrderInterestIx = async (
-  program: Program<Marginfi>,
-  args: ArmOrderInterestArgs,
-) => {
-  return program.methods
-    .marginfiAccountArmOrderInterest()
-    .accounts({
-      group: args.group,
-      marginfiAccount: args.marginfiAccount,
-      order: args.order,
-    })
-    .remainingAccounts(args.remaining)
-    .instruction();
+export type PlaceInterestOrderArgs = PlaceOrderArgs & {
+  interest: InterestTriggerArgs;
 };
 
 export const placeOrderIx = async (
@@ -894,8 +873,41 @@ export const placeOrderIx = async (
   };
 
   return program.methods
-    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger, args.interest ?? null)
+    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger)
     .accounts(accounts)
+    .instruction();
+};
+
+/** Places an order that also exits on negative carry. Same accounts as `placeOrderIx`. */
+export const placeInterestOrderIx = async (
+  program: Program<Marginfi>,
+  args: PlaceInterestOrderArgs,
+) => {
+  const [orderPda] = deriveOrderPda(
+    program.programId,
+    args.marginfiAccount,
+    args.bankKeys,
+  );
+
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const globalFeeWallet =
+    args.globalFeeWallet ??
+    (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+
+  return program.methods
+    .marginfiAccountPlaceInterestOrder(
+      args.bankKeys,
+      args.trigger,
+      args.interest,
+    )
+    .accounts({
+      authority: args.authority,
+      marginfiAccount: args.marginfiAccount,
+      feePayer: args.feePayer,
+      order: orderPda,
+      feeState,
+      globalFeeWallet,
+    })
     .instruction();
 };
 

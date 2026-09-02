@@ -3,10 +3,11 @@ use std::cmp::max;
 use crate::{
     assert_struct_align, assert_struct_size,
     constants::{
-        discriminators, ASSET_TAG_DRIFT, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
-        LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
+        discriminators, ASSET_TAG_DRIFT, BANK_RATE_READINGS, BANK_RATE_READING_SPACING_SECONDS,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE, DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED,
+        FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED,
+        STAKED_ORACLE_PRICE_USES_ONRAMP,
     },
     types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
 };
@@ -19,9 +20,9 @@ use fixed::types::I80F48;
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
+use super::{BankRateLimiter, EmodeSettings, OnRampTransition, RateReading, WrappedI80F48};
 
-assert_struct_size!(Bank, 1856);
+assert_struct_size!(Bank, 2880);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -245,6 +246,13 @@ pub struct Bank {
     /// can never charge for (or health-project) the deactivated window.
     /// * 0 on banks that never activated premium.
     pub premium_activated_at: i64,
+
+    /// Share-index history, one reading per `BANK_RATE_READING_SPACING_SECONDS` at most, written by
+    /// every instruction that prices the bank, oldest overwritten first. Interest triggers read it.
+    pub rate_readings: [RateReading; BANK_RATE_READINGS],
+
+    /// Remainder of the space `lending_pool_resize_bank_account` reserves, for later releases.
+    pub _reserved0: [[u64; 7]; 11],
 }
 
 impl Bank {
@@ -310,6 +318,42 @@ impl Bank {
         }
 
         asset_weight
+    }
+
+    /// Readings that have been written, in slot order.
+    pub fn recorded_rate_readings(&self) -> impl Iterator<Item = &RateReading> {
+        self.rate_readings.iter().filter(|r| r.timestamp > 0)
+    }
+
+    /// The newest rate reading, `None` until the first is taken.
+    pub fn newest_rate_reading(&self) -> Option<&RateReading> {
+        self.recorded_rate_readings().max_by_key(|r| r.timestamp)
+    }
+
+    /// The youngest rate reading at least `min_age` seconds old at `now`: the tightest span that
+    /// still covers a window of `min_age`. `None` while the history is shorter than that.
+    pub fn rate_reading_at_least(&self, min_age: i64, now: i64) -> Option<&RateReading> {
+        self.recorded_rate_readings()
+            .filter(|r| now.saturating_sub(r.timestamp) >= min_age)
+            .max_by_key(|r| r.timestamp)
+    }
+
+    /// Store `reading` over the oldest slot, unless the newest reading is under
+    /// `BANK_RATE_READING_SPACING_SECONDS` old.
+    pub fn record_rate_reading(&mut self, reading: RateReading) {
+        if reading.timestamp <= 0 {
+            return;
+        }
+        if let Some(newest) = self.newest_rate_reading() {
+            if reading.timestamp.saturating_sub(newest.timestamp)
+                < BANK_RATE_READING_SPACING_SECONDS
+            {
+                return;
+            }
+        }
+        if let Some(oldest) = self.rate_readings.iter_mut().min_by_key(|r| r.timestamp) {
+            *oldest = reading;
+        }
     }
 
     // To be removed once SVSP update is rolled out (likely in 1.10)
@@ -541,5 +585,101 @@ impl BankVaultType {
             BankVaultType::Insurance => INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(),
             BankVaultType::Fee => FEE_VAULT_AUTHORITY_SEED.as_bytes(),
         }
+    }
+}
+
+#[cfg(test)]
+mod rate_reading_tests {
+    use super::*;
+    use crate::constants::INTEREST_MAX_WINDOW_SECONDS;
+
+    const SPACING: i64 = BANK_RATE_READING_SPACING_SECONDS;
+
+    fn reading(timestamp: i64) -> RateReading {
+        RateReading::new(I80F48::ONE, I80F48::ONE, timestamp).unwrap()
+    }
+
+    #[test]
+    fn readings_fill_empty_slots_then_overwrite_the_oldest() {
+        let mut bank = Bank::zeroed();
+        let mut now = 1;
+        for _ in 0..BANK_RATE_READINGS {
+            bank.record_rate_reading(reading(now));
+            now += SPACING;
+        }
+        assert_eq!(bank.recorded_rate_readings().count(), BANK_RATE_READINGS);
+
+        // One more displaces the very first.
+        bank.record_rate_reading(reading(now));
+        let mut timestamps: Vec<i64> = bank.recorded_rate_readings().map(|r| r.timestamp).collect();
+        timestamps.sort_unstable();
+        let expected: Vec<i64> = (1..=BANK_RATE_READINGS as i64)
+            .map(|i| 1 + i * SPACING)
+            .collect();
+        assert_eq!(timestamps, expected);
+    }
+
+    #[test]
+    fn a_reading_inside_the_spacing_or_with_no_clock_is_dropped() {
+        let mut bank = Bank::zeroed();
+        bank.record_rate_reading(reading(1_000));
+        bank.record_rate_reading(reading(1_000 + SPACING - 1));
+        assert_eq!(bank.newest_rate_reading().unwrap().timestamp, 1_000);
+
+        bank.record_rate_reading(reading(1_000 + SPACING));
+        assert_eq!(
+            bank.newest_rate_reading().unwrap().timestamp,
+            1_000 + SPACING
+        );
+
+        bank.record_rate_reading(reading(0));
+        assert_eq!(bank.recorded_rate_readings().count(), 2);
+    }
+
+    #[test]
+    fn the_youngest_reading_old_enough_is_chosen() {
+        let mut bank = Bank::zeroed();
+        for timestamp in [1_000, 1_000 + SPACING, 1_000 + 2 * SPACING] {
+            bank.record_rate_reading(reading(timestamp));
+        }
+        let now = 1_000 + 2 * SPACING + 100;
+
+        assert_eq!(
+            bank.rate_reading_at_least(0, now).unwrap().timestamp,
+            now - 100
+        );
+        // An age exactly equal to the window qualifies.
+        assert_eq!(
+            bank.rate_reading_at_least(SPACING + 100, now)
+                .unwrap()
+                .timestamp,
+            1_000 + SPACING
+        );
+        assert_eq!(
+            bank.rate_reading_at_least(SPACING + 101, now)
+                .unwrap()
+                .timestamp,
+            1_000
+        );
+        assert!(bank.rate_reading_at_least(2 * SPACING + 101, now).is_none());
+        assert!(Bank::zeroed().rate_reading_at_least(0, now).is_none());
+    }
+
+    #[test]
+    fn a_bank_priced_constantly_still_holds_the_longest_window() {
+        let mut bank = Bank::zeroed();
+        let mut now = 1;
+        for _ in 0..3 * BANK_RATE_READINGS {
+            bank.record_rate_reading(reading(now));
+            now += SPACING;
+        }
+        let newest = bank.newest_rate_reading().unwrap().timestamp;
+        let window = i64::from(INTEREST_MAX_WINDOW_SECONDS);
+        assert_eq!(
+            bank.rate_reading_at_least(window, newest)
+                .unwrap()
+                .timestamp,
+            newest - window
+        );
     }
 }

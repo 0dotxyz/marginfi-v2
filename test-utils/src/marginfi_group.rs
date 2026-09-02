@@ -1,4 +1,7 @@
-use super::{bank::BankFixture, marginfi_account::MarginfiAccountFixture};
+use super::{
+    bank::BankFixture,
+    marginfi_account::{should_include_integration_observation_meta, MarginfiAccountFixture},
+};
 use crate::kamino::KaminoFixture;
 use crate::prelude::{get_oracle_id_from_feed_id, MintFixture};
 use crate::ui_to_native;
@@ -25,7 +28,7 @@ use marginfi_type_crate::constants::{
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
-    BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
+    Bank, BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
     InterestRateConfigOpt, MarginfiGroup, OracleSetup, PremiumEntry, StakedSettings,
     MAX_EMODE_ENTRIES,
 };
@@ -1041,6 +1044,12 @@ impl MarginfiGroupFixture {
             let oracle_key = bank_state.config.oracle_keys[0];
             accounts.push(AccountMeta::new_readonly(oracle_key, false));
         }
+        if should_include_integration_observation_meta(&bank_state) {
+            accounts.push(AccountMeta::new_readonly(
+                bank_state.integration_acc_1,
+                false,
+            ));
+        }
 
         let mut ctx = self.ctx.borrow_mut();
 
@@ -1606,6 +1615,12 @@ impl MarginfiGroupFixture {
     /// created before groups were allocated at the v2 size.
     pub async fn truncate_group_account_to_v1(&self) {
         Self::truncate_account_to(&self.ctx, self.key, 8 + MarginfiGroup::V1_LEN).await
+    }
+
+    /// Shrink a bank account to the v1 (8 + struct) size, simulating a mainnet bank as it exists
+    /// before `lending_pool_resize_bank_account` has run against it.
+    pub async fn truncate_bank_account_to_v1(&self, bank: Pubkey) {
+        Self::truncate_account_to(&self.ctx, bank, 8 + Bank::V1_LEN).await
     }
 
     /// Shrink the fee-state account to the v1 (8 + struct) size, simulating the mainnet

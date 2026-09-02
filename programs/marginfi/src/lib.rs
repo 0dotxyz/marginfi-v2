@@ -345,28 +345,29 @@ pub mod marginfi {
     ///   users's Balances for which the order is being placed
     /// * trigger - the type of order (stop loss, take profit, or both), and the threshold at which
     ///   to trigger the order, in dollars
-    /// * interest - optional carry-exit policy, evaluated alongside the price trigger. The order
-    ///   is inert until armed by `marginfi_account_arm_order_interest`.
     pub fn marginfi_account_place_order(
         ctx: Context<PlaceOrder>,
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
-        interest: Option<InterestTriggerConfig>,
     ) -> MarginfiResult {
-        marginfi_account::place_order(ctx, bank_keys, trigger, interest)
+        marginfi_account::place_order(ctx, bank_keys, trigger)
+    }
+
+    /// (user) Place an order that also unwinds the pair when its carry turns negative. The rates
+    /// are measured from the banks' own reading history, so the order is live from placement.
+    /// * interest - the carry-exit policy; `None` fields take the `INTEREST_DEFAULT_*` constants
+    pub fn marginfi_account_place_interest_order(
+        ctx: Context<PlaceOrder>,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> MarginfiResult {
+        marginfi_account::place_interest_order(ctx, bank_keys, trigger, interest)
     }
 
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
-    }
-
-    /// (permissionless) Anchor an interest-trigger order's realized-rate measurement, admitted once
-    /// the standing anchor is a window old. Both order banks must be writable; interest accrues here.
-    pub fn marginfi_account_arm_order_interest<'info>(
-        ctx: Context<'info, ArmOrderInterest<'info>>,
-    ) -> MarginfiResult {
-        marginfi_account::arm_order_interest(ctx)
     }
 
     /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield
@@ -766,7 +767,7 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
-    /// (Permissionless) Refresh the cached oracle price for a bank.
+    /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

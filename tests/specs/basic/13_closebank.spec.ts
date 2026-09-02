@@ -29,7 +29,10 @@ import {
 } from "../../utils/user-instructions";
 import { deriveBankWithSeed } from "../../utils/pdas";
 import { assert } from "chai";
-import { assertBNEqual, expectFailedTxWithError } from "../../utils/genericTests";
+import {
+  assertBNEqual,
+  expectFailedTxWithError,
+} from "../../utils/genericTests";
 import { closeBank } from "../../utils/group-instructions";
 import { USER_ACCOUNT } from "../../utils/mocks";
 import { dumpAccBalances } from "../../utils/tools";
@@ -49,7 +52,7 @@ describe("Close bank", () => {
       program.programId,
       marginfiGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -63,7 +66,7 @@ describe("Close bank", () => {
         await program.methods
           .lendingPoolConfigureBankOracle(
             ORACLE_SETUP_PYTH_PUSH,
-            oracles.tokenAOracle.publicKey
+            oracles.tokenAOracle.publicKey,
           )
           .accountsPartial({
             group: marginfiGroup.publicKey,
@@ -77,8 +80,8 @@ describe("Close bank", () => {
               isWritable: false,
             } as AccountMeta,
           ])
-          .instruction()
-      )
+          .instruction(),
+      ),
     );
 
     const bank = await program.account.bank.fetch(bankKey);
@@ -96,8 +99,8 @@ describe("Close bank", () => {
           tokenAccount: users[0].tokenAAccount,
           amount: amount,
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
 
     const bankAfterDeposit = await program.account.bank.fetch(bankKey);
@@ -109,19 +112,19 @@ describe("Close bank", () => {
           new Transaction().add(
             await closeBank(groupAdmin.mrgnProgram, {
               bank: bankKey,
-            })
-          )
+            }),
+          ),
         );
       },
       "BankCannotClose",
-      6081
+      6081,
     );
   });
 
   it("bank can be closed after the last user withdraws", async () => {
     const userAcc = users[0].accounts.get(USER_ACCOUNT);
     const acc = await users[0].mrgnProgram.account.marginfiAccount.fetch(
-      userAcc
+      userAcc,
     );
     dumpAccBalances(acc);
 
@@ -131,7 +134,7 @@ describe("Close bank", () => {
         [bankKey, oracles.tokenAOracle.publicKey],
         [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
         [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(bankKey))
+      ].filter((group) => !group[0].equals(bankKey)),
     );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -142,25 +145,25 @@ describe("Close bank", () => {
           remaining,
           amount: new BN(0),
           withdrawAll: true,
-        })
-      )
+        }),
+      ),
     );
 
     const bankAfterWithdraw = await program.account.bank.fetch(bankKey);
     assert.equal(bankAfterWithdraw.lendingPositionCount, 0);
 
     const groupBefore = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await closeBank(groupAdmin.mrgnProgram, {
           bank: bankKey,
-        })
-      )
+        }),
+      ),
     );
     const groupAfter = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assert.equal(groupAfter.banks, groupBefore.banks - 1);
 
@@ -174,22 +177,30 @@ describe("Close bank", () => {
   // re-pointed to the test group (whose admin is `groupAdmin`) during fixture prep.
   describe("force_close", () => {
     const FORCE_BANK = new PublicKey(
-      "Hco1P3dGRXz3ZGFvMkbDgghZQy47Tp7vp7koSYRvP6nm"
+      "Hco1P3dGRXz3ZGFvMkbDgghZQy47Tp7vp7koSYRvP6nm",
     );
 
     before(() => {
       const fixture = JSON.parse(
         fs.readFileSync(
-          path.resolve(__dirname, "../../fixtures/mainnet_force_close_bank.json"),
-          "utf8"
-        )
+          path.resolve(
+            __dirname,
+            "../../fixtures/mainnet_force_close_bank.json",
+          ),
+          "utf8",
+        ),
       );
       bankrunContext.setAccount(new PublicKey(fixture.pubkey), {
         lamports: Number(fixture.account.lamports),
         owner: new PublicKey(fixture.account.owner),
         executable: fixture.account.executable,
         rentEpoch: Number(fixture.account.rentEpoch ?? 0),
-        data: Buffer.from(fixture.account.data[0], "base64"),
+        // Captured pre-resize; zero-padding matches `lending_pool_resize_bank_account`, which
+        // every bank must have been through before this program is deployed.
+        data: Buffer.concat([
+          Buffer.from(fixture.account.data[0], "base64"),
+          Buffer.alloc(8 + 2880 - 1864),
+        ]),
       });
     });
 
@@ -201,12 +212,12 @@ describe("Close bank", () => {
         async () => {
           await groupAdmin.mrgnProgram.provider.sendAndConfirm(
             new Transaction().add(
-              await closeBank(groupAdmin.mrgnProgram, { bank: FORCE_BANK })
-            )
+              await closeBank(groupAdmin.mrgnProgram, { bank: FORCE_BANK }),
+            ),
           );
         },
         "BankCannotClose",
-        6081
+        6081,
       );
 
       assert.isNotNull(await provider.connection.getAccountInfo(FORCE_BANK));
@@ -214,18 +225,18 @@ describe("Close bank", () => {
 
     it("closes with force_close = true", async () => {
       const groupBefore = await program.account.marginfiGroup.fetch(
-        marginfiGroup.publicKey
+        marginfiGroup.publicKey,
       );
       await groupAdmin.mrgnProgram.provider.sendAndConfirm(
         new Transaction().add(
           await closeBank(groupAdmin.mrgnProgram, {
             bank: FORCE_BANK,
             forceClose: true,
-          })
-        )
+          }),
+        ),
       );
       const groupAfter = await program.account.marginfiGroup.fetch(
-        marginfiGroup.publicKey
+        marginfiGroup.publicKey,
       );
       assert.equal(groupAfter.banks, groupBefore.banks - 1);
       assert.isNull(await provider.connection.getAccountInfo(FORCE_BANK));

@@ -24,11 +24,18 @@ async fn bank_resize_grows_to_the_reserved_length() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc = test_f.get_bank(&BankMint::Usdc);
 
-    // Banks are created at the struct size; the reserve only arrives via the resize.
-    assert_eq!(account_len(&test_f, usdc.key).await, 8 + Bank::LEN);
+    // New banks are already born at the resized length; the struct now fills it.
+    assert_eq!(account_len(&test_f, usdc.key).await, BANK_ACCOUNT_LEN);
     assert_eq!(BANK_ACCOUNT_LEN, 8 + Bank::V1_LEN + BANK_RESERVED_BYTES);
 
     let before = usdc.load().await;
+
+    // Simulate a mainnet bank as it exists before the migration has reached it.
+    test_f
+        .marginfi_group
+        .truncate_bank_account_to_v1(usdc.key)
+        .await;
+    assert_eq!(account_len(&test_f, usdc.key).await, 8 + Bank::V1_LEN);
 
     test_f
         .marginfi_group
@@ -47,7 +54,7 @@ async fn bank_resize_grows_to_the_reserved_length() -> anyhow::Result<()> {
 
     let banks_client = test_f.context.borrow().banks_client.clone();
     let data = banks_client.get_account(usdc.key).await?.unwrap().data;
-    assert!(data[8 + Bank::LEN..].iter().all(|b| *b == 0));
+    assert!(data[8 + Bank::V1_LEN..].iter().all(|b| *b == 0));
 
     Ok(())
 }
@@ -60,14 +67,13 @@ async fn a_resized_bank_still_lends_and_borrows() -> anyhow::Result<()> {
     let usdc = test_f.get_bank(&BankMint::Usdc);
     let sol = test_f.get_bank(&BankMint::Sol);
 
-    test_f
-        .marginfi_group
-        .try_resize_bank_account(usdc.key)
-        .await?;
-    test_f
-        .marginfi_group
-        .try_resize_bank_account(sol.key)
-        .await?;
+    for bank in [usdc.key, sol.key] {
+        test_f
+            .marginfi_group
+            .truncate_bank_account_to_v1(bank)
+            .await;
+        test_f.marginfi_group.try_resize_bank_account(bank).await?;
+    }
 
     let lender = test_f.create_marginfi_account().await;
     let lender_sol = sol.mint.create_token_account_and_mint_to(100.0).await;
@@ -103,6 +109,10 @@ async fn resizing_a_bank_already_at_the_target_is_rejected() -> anyhow::Result<(
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc = test_f.get_bank(&BankMint::Usdc);
 
+    test_f
+        .marginfi_group
+        .truncate_bank_account_to_v1(usdc.key)
+        .await;
     test_f
         .marginfi_group
         .try_resize_bank_account(usdc.key)

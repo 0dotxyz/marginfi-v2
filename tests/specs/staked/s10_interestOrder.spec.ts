@@ -15,27 +15,32 @@ import {
 } from "../../rootHooks";
 import {
   accountInit,
-  armOrderInterestIx,
   borrowIx,
   composeRemainingAccounts,
   depositIx,
-  placeOrderIx,
+  placeInterestOrderIx,
+  pulseBankPrice,
 } from "../../utils/user-instructions";
 import { deriveOrderPda } from "../../utils/pdas";
 import { LST_ATA, USER_ACCOUNT } from "../../utils/mocks";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import { getBankrunBlockhash } from "../../utils/tools";
-import { I80F48_SCALE, mulI80, toI80Scaled } from "../../utils/bn-utils";
+import { advanceBankrunClock, getBankrunBlockhash } from "../../utils/tools";
+import {
+  bnToBigIntSafe,
+  I80F48_SCALE,
+  mulI80,
+  toI80Scaled,
+} from "../../utils/bn-utils";
 
 const I80F48_ONE = I80F48_SCALE;
+/** Matches `BANK_RATE_READING_SPACING_SECONDS`. */
+const READING_SPACING = 10_800;
 
 /**
- * The leveraged staking loop the orders guide leads with: lend an LST, borrow SOL. Staked is the
- * only non-integration asset tag with a multiplier that is not 1, and `validate_asset_tags` lets it
- * pair with nothing but SOL, so this is the one shape that exercises a staked lend leg at all.
- *
- * Nothing here moves the clock. A first arming has no age gate, and the anchor it writes is the
- * whole point: it must carry the pool's NAV-per-LST, not the bank share value alone.
+ * Staked is the only non-integration asset tag whose multiplier is not 1, and `validate_asset_tags`
+ * pairs it with nothing but SOL, so an LST lend against a SOL borrow is the one shape that
+ * exercises a staked lend leg. Placing the order needs no history; the one clock step here is the
+ * reading spacing the last test has to clear.
  */
 describe("Interest trigger on a staked lend leg", () => {
   const solBank = stakedBankKeypairSol.publicKey;
@@ -59,8 +64,8 @@ describe("Interest trigger on a staked lend leg", () => {
     user = users[3];
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
-    // A fresh account rather than whatever s01-s09 left on this user, so the health check here
-    // depends only on the LST position this spec opens.
+    // A fresh account, so the health check here depends only on the LST position this spec opens
+    // and not on what s01-s09 left on this user.
     const kp = Keypair.generate();
     userAccount = kp.publicKey;
     const initTx = new Transaction().add(
@@ -106,20 +111,20 @@ describe("Interest trigger on a staked lend leg", () => {
     await banksClient.processTransaction(borrowTx);
   });
 
-  it("anchors the staked lend leg on the pool's NAV per LST, not the share value", async () => {
+  it("places an interest order on the staked pair with no accounts beyond a plain order", async () => {
     const bankKeys = [validators[0].bank, solBank];
     const placeTx = new Transaction().add(
-      await placeOrderIx(bankrunProgram, {
+      await placeInterestOrderIx(bankrunProgram, {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
         bankKeys,
         trigger: {
-          stopLoss: { threshold: bigNumberToWrappedI80F48(0.01), maxSlippage },
+          stopLoss: { threshold: bigNumberToWrappedI80F48(1), maxSlippage: 0 },
         },
         interest: {
           windowSeconds: null,
-          patienceSeconds: null,
+          exitBudgetSeconds: null,
           minNegativeApr: null,
         },
       }),
@@ -133,47 +138,44 @@ describe("Interest trigger on a staked lend leg", () => {
       userAccount,
       bankKeys,
     );
+    const fetched = await bankrunProgram.account.order.fetch(order);
+    assert.equal(fetched.interestFlags, 1);
+  });
 
-    // Both legs go in writable: arming accrues them before reading their share indices.
-    const remaining = composeRemainingAccounts([
-      stakedLegAccounts(),
-      [solBank, oracles.wsolOracle.publicKey],
-    ]).map((pubkey) => ({
-      pubkey,
-      isSigner: false,
-      isWritable: pubkey.equals(validators[0].bank) || pubkey.equals(solBank),
-    }));
+  it("reads the staked lend leg at the pool's NAV per LST, not the share value", async () => {
+    // Earlier specs priced this bank at the current clock, and a bank records at most one reading
+    // per spacing, so step past it and republish the oracles at the new time.
+    await advanceBankrunClock(bankrunContext, READING_SPACING);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
-    const armTx = new Transaction().add(
-      await armOrderInterestIx(bankrunProgram, {
-        marginfiAccount: userAccount,
-        group: stakedMarginfiGroup.publicKey,
-        order,
-        remaining,
+    // Pricing the bank takes its reading; the staked leg prices off its pool accounts too.
+    const pulseTx = new Transaction().add(
+      await pulseBankPrice(bankrunProgram, {
+        bank: validators[0].bank,
+        remaining: stakedLegAccounts().slice(1),
       }),
     );
-    armTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    armTx.sign(user.wallet);
-    await banksClient.processTransaction(armTx);
+    pulseTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    pulseTx.sign(user.wallet);
+    await banksClient.processTransaction(pulseTx);
 
-    const fetched = await bankrunProgram.account.order.fetch(order);
     const stakedBank = await bankrunProgram.account.bank.fetch(
       validators[0].bank,
     );
-    // The anchor is the bank's share value scaled by the pool's NAV per LST, which the bank cached
-    // the last time an instruction priced it.
     const multiplier = toI80Scaled(stakedBank.cache.priceMultiplier);
     assert.notEqual(multiplier, I80F48_ONE, "a staked pool prices away from 1");
-    assert.equal(
-      toI80Scaled(fetched.interestAnchorAssetIndex),
-      mulI80(toI80Scaled(stakedBank.assetShareValue), multiplier),
+    const newest = stakedBank.rateReadings.reduce((a: any, b: any) =>
+      b.timestamp.gt(a.timestamp) ? b : a,
     );
-
-    // The SOL borrow leg is native, so its anchor is exactly that bank's liability share value.
-    const sol = await bankrunProgram.account.bank.fetch(solBank);
+    // A reading keeps an index's I80F48 bits above the lowest 16.
+    const encoded = (scaled: bigint) => scaled >> 16n;
     assert.equal(
-      toI80Scaled(fetched.interestAnchorDebtIndex),
-      toI80Scaled(sol.liabilityShareValue),
+      bnToBigIntSafe(newest.assetIndex),
+      encoded(mulI80(toI80Scaled(stakedBank.assetShareValue), multiplier)),
+    );
+    assert.equal(
+      bnToBigIntSafe(newest.debtIndex),
+      encoded(mulI80(toI80Scaled(stakedBank.liabilityShareValue), multiplier)),
     );
   });
 });

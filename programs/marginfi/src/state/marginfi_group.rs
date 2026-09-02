@@ -315,6 +315,7 @@ pub struct GroupBankConfig {
 mod tests {
     use super::*;
     use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::BANK_ACCOUNT_LEN;
     use marginfi_type_crate::types::{Balance, Bank, PremiumEntry, PremiumSettings};
     use std::mem::{offset_of, size_of};
 
@@ -365,9 +366,11 @@ mod tests {
     /// `premium_activated_at` take its remaining 16 bytes. The liquidation-fee fields own the
     /// former `_padding_0` after `borrowing_position_count`, while `bank_seed` and the rest of
     /// the circuit-breaker block stay at their 0.1.10 positions.
+    /// The rate readings and the reserve are appended past `premium_activated_at`, so every offset
+    /// here is unchanged and the struct lands exactly on the resized account length.
     #[test]
     fn bank_premium_field_layout() {
-        assert_eq!(size_of::<Bank>(), 1856);
+        assert_eq!(size_of::<Bank>(), 2880);
         assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
         assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
         assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
@@ -377,6 +380,11 @@ mod tests {
         assert_eq!(offset_of!(Bank, premium_tag), 1840);
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
+        assert_eq!(offset_of!(Bank, rate_readings), 1856);
+        assert_eq!(offset_of!(Bank, _reserved0), 2264);
+        // Banks resized by the previous release are exactly this long, so the struct must not
+        // overrun them.
+        assert_eq!(BANK_ACCOUNT_LEN, 8 + size_of::<Bank>());
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

@@ -1,5 +1,5 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { createMintToInstruction } from "@solana/spl-token";
 import { assert } from "chai";
@@ -15,14 +15,15 @@ import {
 } from "../../rootHooks";
 import {
   accountInit,
-  armOrderInterestIx,
   borrowIx,
   closeOrderIx,
   composeRemainingAccounts,
   depositIx,
   endExecuteOrderIx,
   InterestTriggerArgs,
+  placeInterestOrderIx,
   placeOrderIx,
+  pulseBankPrice,
   repayIx,
   startExecuteOrderIx,
   withdrawIx,
@@ -44,13 +45,14 @@ import { toI80Scaled } from "../../utils/bn-utils";
 
 /** Matches `INTEREST_MIN_WINDOW_SECONDS`. */
 const MIN_WINDOW = 21_600;
-/** Matches `INTEREST_DEFAULT_PATIENCE_SECONDS`. */
-const DEFAULT_PATIENCE = 1_209_600;
+/** Matches `INTEREST_MAX_WINDOW_SECONDS`. */
+const MAX_WINDOW = 172_800;
+/** Matches `INTEREST_DEFAULT_EXIT_BUDGET_SECONDS`. */
+const DEFAULT_EXIT_BUDGET = 1_209_600;
 
 /**
- * This spec advances the shared clock past an interest window, so it lives in the orders mocha
- * process (see the `all-tests` note in Anchor.toml) and stands up its own group and banks rather
- * than perturbing the ecosystem the earlier specs share.
+ * Advances the shared clock past an interest window, so this spec runs in the orders mocha process
+ * (see the `all-tests` note in Anchor.toml) on its own group and banks.
  */
 describe("Interest trigger orders", () => {
   let program: Program<Marginfi>;
@@ -79,10 +81,10 @@ describe("Interest trigger orders", () => {
 
   const interest = (
     windowSeconds: number | null,
-    patienceSeconds: number | null,
+    exitBudgetSeconds: number | null,
   ): InterestTriggerArgs => ({
     windowSeconds,
-    patienceSeconds,
+    exitBudgetSeconds,
     minNegativeApr: null,
   });
 
@@ -106,16 +108,6 @@ describe("Interest trigger orders", () => {
     return composeRemainingAccounts(pairs);
   };
 
-  /** The same set as metas, banks writable: arming accrues both legs before reading their indices. */
-  const remainingMetas = async (): Promise<AccountMeta[]> => {
-    const banks = [solBank, usdcBank];
-    return (await remainingKeys(ownerAcc)).map((pubkey) => ({
-      pubkey,
-      isSigner: false,
-      isWritable: banks.some((bank) => bank.equals(pubkey)),
-    }));
-  };
-
   /** Move the clock on. The banks below carry an oracle window wider than the span stepped over
    *  here, so no republish is needed. */
   const advance = async (seconds: number) => {
@@ -132,26 +124,65 @@ describe("Interest trigger orders", () => {
   };
 
   const place = async (cfg: InterestTriggerArgs | null): Promise<PublicKey> => {
-    const ix = await placeOrderIx(program, {
+    const common = {
       marginfiAccount: ownerAcc,
       authority: owner.wallet.publicKey,
       feePayer: owner.wallet.publicKey,
       bankKeys: bankKeys(),
       trigger: { stopLoss: { threshold: stopLossThreshold, maxSlippage } },
-      interest: cfg,
-    });
+    };
+    const ix = cfg
+      ? await placeInterestOrderIx(program, { ...common, interest: cfg })
+      : await placeOrderIx(program, common);
     await owner.mrgnProgram.provider.sendAndConfirm(new Transaction().add(ix));
     return deriveOrderPda(program.programId, ownerAcc, bankKeys())[0];
   };
 
-  const arm = async () => {
-    const ix = await armOrderInterestIx(program, {
-      marginfiAccount: ownerAcc,
+  /** The keeper's execution: start, repay the USDC borrow, take SOL to cover it, end. */
+  const sandwich = async () => {
+    const [executeRecord] = deriveExecuteOrderPda(program.programId, order);
+    const start = await startExecuteOrderIx(program, {
       group,
+      marginfiAccount: ownerAcc,
+      feePayer: keeper.wallet.publicKey,
+      executor: keeper.wallet.publicKey,
       order,
-      remaining: await remainingMetas(),
+      remaining: await remainingKeys(ownerAcc),
+      bankWritable: [solBank, usdcBank],
     });
-    await owner.mrgnProgram.provider.sendAndConfirm(new Transaction().add(ix));
+    const repay = await repayIx(keeper.mrgnProgram, {
+      marginfiAccount: ownerAcc,
+      bank: usdcBank,
+      tokenAccount: keeper.usdcAccount,
+      amount: new BN(0),
+      repayAll: true,
+      remaining: [],
+    });
+    const withdraw = await withdrawIx(keeper.mrgnProgram, {
+      marginfiAccount: ownerAcc,
+      bank: solBank,
+      tokenAccount: keeper.wsolAccount,
+      // Just under what the ~100 USDC liability is worth at the SOL oracle, so the keeper covers
+      // the repayment out of its own pocket and skims nothing from the position.
+      amount: new BN(0.6 * 10 ** ecosystem.wsolDecimals),
+      withdrawAll: false,
+      // The borrow leg is closed by the repay above, so only the lend leg remains observable.
+      remaining: composeRemainingAccounts([
+        [solBank, oracles.wsolOracle.publicKey],
+      ]),
+    });
+    const end = await endExecuteOrderIx(program, {
+      group,
+      marginfiAccount: ownerAcc,
+      executor: keeper.wallet.publicKey,
+      order,
+      executeRecord,
+      feeRecipient: keeper.wallet.publicKey,
+      remaining: composeRemainingAccounts([
+        [solBank, oracles.wsolOracle.publicKey],
+      ]),
+    });
+    return new Transaction().add(start, repay, withdraw, end);
   };
 
   before(async () => {
@@ -293,6 +324,17 @@ describe("Interest trigger orders", () => {
         }),
       ),
     );
+
+    // The borrow priced the USDC bank, which took its first rate reading. The SOL lend leg has
+    // only been deposited into, which prices nothing, so pulse it for its own.
+    await owner.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await pulseBankPrice(program, {
+          bank: solBank,
+          remaining: [oracles.wsolOracle.publicKey],
+        }),
+      ),
+    );
   });
 
   it("rejects a window under the floor - OrderInterestInvalidConfig", async () => {
@@ -301,17 +343,27 @@ describe("Interest trigger orders", () => {
         await place(interest(MIN_WINDOW - 1, null));
       },
       "OrderInterestInvalidConfig",
-      6804,
+      6803,
     );
   });
 
-  it("rejects zero patience - OrderInterestInvalidConfig", async () => {
+  it("rejects a window over the ceiling - OrderInterestInvalidConfig", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await place(interest(MAX_WINDOW + 1, null));
+      },
+      "OrderInterestInvalidConfig",
+      6803,
+    );
+  });
+
+  it("rejects a zero exit budget - OrderInterestInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
         await place(interest(null, 0));
       },
       "OrderInterestInvalidConfig",
-      6804,
+      6803,
     );
   });
 
@@ -320,7 +372,7 @@ describe("Interest trigger orders", () => {
     const fetched = await program.account.order.fetch(plain);
     assert.equal(fetched.interestFlags, 0);
     assert.equal(fetched.interestWindowSeconds, 0);
-    assert.equal(fetched.interestPatienceSeconds, 0);
+    assert.equal(fetched.interestExitBudgetSeconds, 0);
 
     // Freed so the pair can carry the interest-bearing order below: one Order per bank pair.
     await owner.mrgnProgram.provider.sendAndConfirm(
@@ -335,46 +387,17 @@ describe("Interest trigger orders", () => {
     );
   });
 
-  it("carries the interest policy onto the order, unarmed", async () => {
+  it("carries the interest policy with no accounts beyond a plain order", async () => {
     order = await place(interest(MIN_WINDOW, null));
     const fetched = await program.account.order.fetch(order);
 
     assert.equal(fetched.interestFlags, 1);
     assert.equal(fetched.interestWindowSeconds, MIN_WINDOW);
-    assert.equal(fetched.interestPatienceSeconds, DEFAULT_PATIENCE);
+    assert.equal(fetched.interestExitBudgetSeconds, DEFAULT_EXIT_BUDGET);
     assert.equal(fetched.interestMinNegativeApr, 0);
-    // No anchor yet: the order cannot execute on carry until it is armed.
-    assert.isTrue(new BN(fetched.interestAnchorTimestamp).isZero());
-    assert.equal(toI80Scaled(fetched.interestAnchorAssetIndex), 0n);
-    assert.equal(toI80Scaled(fetched.interestAnchorDebtIndex), 0n);
-  });
-
-  it("arms the trigger, writing both anchor indices", async () => {
-    await arm();
-
-    const fetched = await program.account.order.fetch(order);
-    assert.isTrue(new BN(fetched.interestAnchorTimestamp).gt(new BN(0)));
-    // Both banks are native, so their multiplier is 1 and each anchor is exactly the bank's own
-    // share value at the moment of arming.
-    const sol = await program.account.bank.fetch(solBank);
-    const usdc = await program.account.bank.fetch(usdcBank);
-    assert.equal(
-      toI80Scaled(fetched.interestAnchorAssetIndex),
-      toI80Scaled(sol.assetShareValue),
-    );
-    assert.equal(
-      toI80Scaled(fetched.interestAnchorDebtIndex),
-      toI80Scaled(usdc.liabilityShareValue),
-    );
-  });
-
-  it("rejects re-arming inside the window - OrderInterestWindowTooShort", async () => {
-    await advance(MIN_WINDOW - 60);
-    await expectFailedTxWithError(arm, "OrderInterestWindowTooShort", 6800);
   });
 
   it("carries a live stop-loss and the carry trigger on one order", async () => {
-    // One Order per bank pair, so an order that could not hold both would force the user to choose.
     const fetched = await program.account.order.fetch(order);
     assert.equal(fetched.interestFlags, 1);
     assert.equal(
@@ -385,75 +408,22 @@ describe("Interest trigger orders", () => {
     assert.equal(fetched.maxSlippage, maxSlippage);
   });
 
-  it("re-arms once a full window has passed", async () => {
-    const before = await program.account.order.fetch(order);
-    await advance(120);
-    await arm();
-
-    const after = await program.account.order.fetch(order);
-    assert.isTrue(
-      new BN(after.interestAnchorTimestamp).gt(
-        new BN(before.interestAnchorTimestamp),
-      ),
-      "the anchor should have advanced past the replaced one",
+  it("cannot execute before the banks hold a window of history - OrderInterestHistoryTooShort", async () => {
+    await advance(MIN_WINDOW - 60);
+    await expectFailedTxWithError(
+      async () => {
+        await keeper.mrgnProgram.provider.sendAndConfirm!(await sandwich());
+      },
+      "OrderInterestHistoryTooShort",
+      6800,
     );
   });
 
   it("unwinds the pair through the keeper sandwich", async () => {
-    // One more window past the re-arm above. The borrow leg charges over it while the idle lend
-    // leg earns nothing, so the measured carry is negative and any negative carry arms this order.
-    await advance(MIN_WINDOW + 60);
-
-    const [executeRecord] = deriveExecuteOrderPda(program.programId, order);
-    const remaining = await remainingKeys(ownerAcc);
-
-    const start = await startExecuteOrderIx(program, {
-      group,
-      marginfiAccount: ownerAcc,
-      feePayer: keeper.wallet.publicKey,
-      executor: keeper.wallet.publicKey,
-      order,
-      remaining,
-      // The trigger accrues both legs, so they cannot arrive read-only.
-      bankWritable: [solBank, usdcBank],
-    });
-    const repay = await repayIx(keeper.mrgnProgram, {
-      marginfiAccount: ownerAcc,
-      bank: usdcBank,
-      tokenAccount: keeper.usdcAccount,
-      amount: new BN(0),
-      repayAll: true,
-      remaining: [],
-    });
-    const withdraw = await withdrawIx(keeper.mrgnProgram, {
-      marginfiAccount: ownerAcc,
-      bank: solBank,
-      tokenAccount: keeper.wsolAccount,
-      // Just under what the ~100 USDC liability is worth at the SOL oracle, so the keeper covers
-      // the repayment out of its own pocket rather than skimming the position.
-      amount: new BN(0.6 * 10 ** ecosystem.wsolDecimals),
-      withdrawAll: false,
-      // The borrow leg is closed by the repay above, so only the lend leg remains observable.
-      remaining: composeRemainingAccounts([
-        [solBank, oracles.wsolOracle.publicKey],
-      ]),
-    });
-    const end = await endExecuteOrderIx(program, {
-      group,
-      marginfiAccount: ownerAcc,
-      executor: keeper.wallet.publicKey,
-      order,
-      executeRecord,
-      feeRecipient: keeper.wallet.publicKey,
-      // The closed borrow leg drops out of the observation set entirely, oracle included.
-      remaining: composeRemainingAccounts([
-        [solBank, oracles.wsolOracle.publicKey],
-      ]),
-    });
-
-    await keeper.mrgnProgram.provider.sendAndConfirm!(
-      new Transaction().add(start, repay, withdraw, end),
-    );
+    // A full window since both banks' first readings. The borrow leg charged over it while the
+    // idle lend leg earned nothing, so the measured carry is negative and any negative carry fires.
+    await advance(120);
+    await keeper.mrgnProgram.provider.sendAndConfirm!(await sandwich());
 
     assert.isNull(
       await program.account.order.fetchNullable(order),

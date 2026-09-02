@@ -34,15 +34,28 @@ describe("03a: Bank resize (reserve space for later layouts)", () => {
     return banksClient.tryProcessTransaction(tx);
   };
 
-  it("banks are created at the v1 size, before any reserve", async () => {
+  /** Shrink a bank to the v1 size, standing in for a mainnet bank the migration has not reached. */
+  const truncateToV1 = async (bank: typeof bankKeypairUsdc) => {
+    const account = await banksClient.getAccount(bank.publicKey);
+    bankrunContext.setAccount(bank.publicKey, {
+      lamports: Number(account.lamports),
+      owner: account.owner,
+      executable: account.executable,
+      rentEpoch: Number(account.rentEpoch ?? 0),
+      data: Buffer.from(account.data).subarray(0, BANK_V1_ACCOUNT_LEN),
+    });
+  };
+
+  it("new banks are born at the resized length", async () => {
     const bank = await banksClient.getAccount(bankKeypairUsdc.publicKey);
-    assert.equal(bank.data.length, BANK_V1_ACCOUNT_LEN);
+    assert.equal(bank.data.length, BANK_ACCOUNT_LEN);
   });
 
   it("the permissionless resize grows a bank and zero-fills the reserve", async () => {
     const before = await bankrunProgram.account.bank.fetch(
       bankKeypairUsdc.publicKey,
     );
+    await truncateToV1(bankKeypairUsdc);
 
     const result = await resize(bankKeypairUsdc);
     assert.isNull(result.result);
@@ -79,6 +92,7 @@ describe("03a: Bank resize (reserve space for later layouts)", () => {
   it("an oversized bank stays fully operable", async () => {
     // The whole point of resizing ahead of the struct: nothing may break between this release and
     // the one that claims the reserve.
+    await truncateToV1(bankKeypairSol);
     const result = await resize(bankKeypairSol);
     assert.isNull(result.result);
 

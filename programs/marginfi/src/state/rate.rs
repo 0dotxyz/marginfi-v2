@@ -167,11 +167,8 @@ pub fn venue_multiplier<'info>(
 }
 
 /// Monotonic per-share supply index for `bank`: `asset_share_value` times the venue exchange-rate
-/// multiplier, excluding the oracle spot price. Native banks accrue via `asset_share_value`
-/// (multiplier 1); integration banks accrue via the venue multiplier (Kamino cToken rate, Drift
-/// cumulative interest, JupLend exchange price), all monotonic. Growth of this index over a window
-/// is the realized supply yield a depositor earned. Because it is an accrued integral, not a spot
-/// rate, a single-tx rate spike cannot move it.
+/// multiplier, excluding the oracle spot price. Growth over a window is the realized supply yield a
+/// depositor earned; being an accrued integral, a single-tx rate spike cannot move it.
 pub fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     I80F48::from(bank.asset_share_value)
         .checked_mul(multiplier)

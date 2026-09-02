@@ -40,39 +40,45 @@ A user lends $1,000 USDC earning 5% and borrows $900 PYUSD costing 3%, keeping t
 Two things make this more than "exit when the spread goes negative".
 
 **A blip is not a signal.** Rates are measured as the growth of each bank's share value across a
-window you choose (`window_seconds`, 6 hours to 1 year, 24 hours by default), which is the average
+window you choose (`window_seconds`, 6 to 48 hours, 24 hours by default), which is the average
 rate actually realized over that window. A spike lasting an hour barely moves a 24-hour
-measurement, so a rate has to genuinely persist to arm an exit.
+measurement, so a rate has to genuinely persist to trigger an exit.
 
 **Leaving costs money.** Losing 1% a year does not justify paying 1% slippage today to escape. You
-set `patience_seconds` (14 days by default), and a Keeper may only execute when the unwind costs
-less than what the position would lose to interest over that span. If a Keeper finds a route with
+set `exit_budget_seconds` (14 days by default), and a Keeper may only execute when the unwind
+costs less than what the position would lose to interest over that span. It is a spending limit
+priced in days of loss, not a delay: nothing waits for it. If a Keeper finds a route with
 no slippage they can exit the moment carry turns; on an expensive route they must wait for the rate
 to worsen or find a better route. Your `max_slippage` still caps the exit regardless.
 
 `min_negative_apr` optionally requires the loss to reach a given annual rate, measured against your
-lend leg, before the trigger arms at all. Left unset, any negative carry qualifies.
+lend leg, before the trigger fires at all. Left unset, any negative carry qualifies.
 
 The variable-borrow premium you pay counts toward the cost side, since it is a real charge that
 pushes the spread negative.
 
-### Arming
+### How the Measurement Stays Honest
 
-An interest trigger is inert until it is **armed**, which anchors the measurement. Arming is
-permissionless, so a Keeper will normally do it, and you can do it yourself. An order cannot execute
-until a full window has passed since its anchor.
+Every bank keeps its own rolling history of where its share value stood, written by the protocol's
+ordinary pricing activity (borrows, withdrawals, liquidations, and a permissionless pulse anyone can
+run), at least three hours apart and reaching back at least 48 hours once the bank has been live
+that long. Your Order records nothing of its own. When a Keeper tries to execute it, each leg's rate
+is read from its bank's history, from the reading closest to your window that is at least a window
+old.
 
-Anyone may re-arm, but only once the standing anchor is itself a full window old, and arming
-**rotates** rather than replaces: the anchor it displaces stays usable. So a Keeper can never reset
-an order that had already come of age, whether by deliberate front-running or by running a routine
-"keep anchors fresh" job at the wrong moment. A Keeper can move where the measured window sits, but
-never shorten it below what you configured, and never take away a measurement you already had.
+Three things follow.
 
-Measurements also **expire**. An anchor older than twice your window stops counting, and an order
-whose anchors have all expired cannot execute until someone re-arms it and waits a window. This is
-not just tidiness: a very old span can contain a rate regime that has since ended, which would make
-the order *easier* to fire long after conditions returned to normal. Bounding the span is what keeps
-the trigger measuring the present.
+- **It works from the moment you place it.** If the banks already hold a window of history, the
+  Order can execute right away. There is no priming step, and nothing for you or a Keeper to keep
+  alive.
+- **Nobody can move your measurement.** The history belongs to the bank and is shared by every
+  Order on it. A Keeper cannot shorten your window, reset it, or pick a flattering starting point.
+- **The measurement is exact.** It reads accrued share value, not a rate at an instant, so no single
+  transaction can spike or hide anything. Whatever the bank actually charged or paid over the window
+  is what the Order sees.
+
+If a bank has been quiet for longer than your window, the nearest older reading is used, so the
+measured span can be longer than you asked for, never shorter.
 
 ### Interest and Price Triggers Together
 
@@ -82,7 +88,7 @@ you face a depeg (a price problem, wanting a Stop Loss) and a borrow rate climbi
 staking yield (a carry problem, wanting this trigger). Either condition can execute the Order, and
 each is bound by its own cost rule.
 
-If your carry trigger is not yet armed, your Stop Loss still works normally.
+Before the banks hold a full window of history, your Stop Loss still works normally.
 
 ### Fees, and Who Keeps the Keepers
 
@@ -159,10 +165,9 @@ sure they do not close out positions involved with their Orders without updating
 ## Instructions
 
 - `PlaceOrder` (user) - Place a new Stop Loss, Take Profit, or Both type Order on a pair of balances
-  the user currently holds. Optionally carries an `InterestTriggerConfig`.
-- `ArmOrderInterest` (anyone) - Anchor an interest trigger's rate measurement at the current share
-  indices. Required once before the order can execute, and re-armable once a window has elapsed.
-  Both order banks are passed writable, since their interest is accrued before the indices are read.
+  the user currently holds.
+- `PlaceInterestOrder` (user) - The same, carrying an `InterestTriggerConfig`. Takes the same
+  accounts; the rates are read from the banks' own history, so the order is live from placement.
 - `StartExecuteOrder` (Keeper) - Keepers run this to begin the execution of an Order. Must be at the
   start of the tx. Withdraw/Repay of the involved balances typically follows this ix.
   Requires a risk check of just the balances involved in the Order.

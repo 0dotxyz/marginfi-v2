@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")] // 6054
+    OrderInterestBankNotWritable,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -504,23 +504,14 @@ pub enum MarginfiError {
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
     // ************** END AUTO-REBALANCE ERRORS
-    // Interest trigger errors (6800 block)
-    #[msg("Interest trigger anchor is younger than the order's measurement window")]
-    OrderInterestWindowTooShort = 800, // 6800
-    #[msg("Interest trigger has no anchor; arm the order before executing it")]
-    OrderInterestNotArmed, // 6801
+    #[msg("An order bank has no rate reading as old as the order's measurement window yet")]
+    OrderInterestHistoryTooShort = 800, // 6800
     #[msg("Realized carry does not meet the order's negative-rate margin")]
-    OrderInterestNotNegative, // 6802
+    OrderInterestNotNegative, // 6801
     #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
-    OrderInterestCostExceedsCarry, // 6803
-    #[msg("Interest trigger window or patience is outside the permitted range")]
-    OrderInterestInvalidConfig, // 6804
-    #[msg("Interest trigger requires both order banks writable so their indices can be accrued")]
-    OrderInterestBankNotWritable, // 6805
-    #[msg("Interest trigger anchor has aged out; re-arm the order to measure a current span")]
-    OrderInterestAnchorStale, // 6806
-    #[msg("Order does not carry an interest trigger")]
-    OrderInterestNotConfigured, // 6807
+    OrderInterestCostExceedsCarry, // 6802
+    #[msg("Interest trigger window or exit budget is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6803
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -598,7 +589,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::OrderInterestBankNotWritable,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -792,15 +783,10 @@ impl From<u32> for MarginfiError {
             6614 => MarginfiError::PremiumEntryNotFound,
             6615 => MarginfiError::PremiumSnapshotUnavailable,
 
-            // Interest trigger errors (starting at 6800)
-            6800 => MarginfiError::OrderInterestWindowTooShort,
-            6801 => MarginfiError::OrderInterestNotArmed,
-            6802 => MarginfiError::OrderInterestNotNegative,
-            6803 => MarginfiError::OrderInterestCostExceedsCarry,
-            6804 => MarginfiError::OrderInterestInvalidConfig,
-            6805 => MarginfiError::OrderInterestBankNotWritable,
-            6806 => MarginfiError::OrderInterestAnchorStale,
-            6807 => MarginfiError::OrderInterestNotConfigured,
+            6800 => MarginfiError::OrderInterestHistoryTooShort,
+            6801 => MarginfiError::OrderInterestNotNegative,
+            6802 => MarginfiError::OrderInterestCostExceedsCarry,
+            6803 => MarginfiError::OrderInterestInvalidConfig,
 
             _ => MarginfiError::InternalLogicError,
         }

@@ -103,7 +103,7 @@ fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
     )
 }
 
-fn should_include_integration_observation_meta(bank: &Bank) -> bool {
+pub(crate) fn should_include_integration_observation_meta(bank: &Bank) -> bool {
     matches!(
         bank.config.oracle_setup,
         OracleSetup::KaminoPythPush
@@ -2322,11 +2322,21 @@ impl MarginfiAccountFixture {
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
     ) -> std::result::Result<Pubkey, BanksClientError> {
-        self.try_place_order_with_interest(bank_keys, trigger, None)
+        self.place_order_inner(bank_keys, trigger, None).await
+    }
+
+    /// Place an order that also exits on negative carry. Same accounts as a plain order.
+    pub async fn try_place_interest_order(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.place_order_inner(bank_keys, trigger, Some(interest))
             .await
     }
 
-    pub async fn try_place_order_with_interest(
+    async fn place_order_inner(
         &self,
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
@@ -2357,25 +2367,32 @@ impl MarginfiAccountFixture {
 
         let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::PlaceOrder {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                fee_payer: ctx.payer.pubkey(),
-                authority: ctx.payer.pubkey(),
-                order: order_pda,
-                fee_state: fee_state_key,
-                global_fee_wallet,
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder {
+        let accounts = marginfi::accounts::PlaceOrder {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            fee_payer: ctx.payer.pubkey(),
+            authority: ctx.payer.pubkey(),
+            order: order_pda,
+            fee_state: fee_state_key,
+            global_fee_wallet,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+
+        let data = match interest {
+            Some(interest) => marginfi::instruction::MarginfiAccountPlaceInterestOrder {
                 bank_keys,
                 trigger,
                 interest,
             }
             .data(),
+            None => marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        };
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data,
         };
 
         let tx = Transaction::new_signed_with_payer(
@@ -2502,44 +2519,6 @@ impl MarginfiAccountFixture {
 
     pub async fn load_order(&self, order: Pubkey) -> Order {
         load_and_deserialize::<Order>(self.ctx.clone(), &order).await
-    }
-
-    /// Anchor an interest-trigger order's realized-rate measurement. Banks go in writable because
-    /// the instruction accrues both legs before reading their indices.
-    pub async fn try_arm_order_interest(
-        &self,
-        order: Pubkey,
-    ) -> std::result::Result<(), BanksClientError> {
-        let marginfi_account = self.load().await;
-        let observation_metas = self
-            .load_observation_account_metas_with_flags(vec![], vec![], true, false)
-            .await;
-
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::ArmOrderInterest {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                order,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountArmOrderInterest {}.data(),
-        };
-        ix.accounts.extend_from_slice(&observation_metas);
-
-        let ctx = self.ctx.borrow();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
-        );
-        drop(ctx);
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
-            .await
     }
 
     pub async fn make_start_execute_ix(
