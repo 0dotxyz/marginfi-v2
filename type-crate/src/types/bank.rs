@@ -379,14 +379,15 @@ pub enum OracleSetup {
     JuplendPythPull,        // 15
     JuplendSwitchboardPull, // 16
     FixedJuplend,           // 17
-    PythMSOL,               // 18
-    KaminoMSOL,             // 19
-    JuplendMSOL,            // 20
-    PythLST,                // 21
-    KaminoLST,              // 22
-    JuplendLST,             // 23
-    PTPyth,                 // 24
-    PTFixed,                // 25
+    Scope,                  // 18
+    PythMSOL,               // 19
+    KaminoMSOL,             // 20
+    JuplendMSOL,            // 21
+    PythLST,                // 22
+    KaminoLST,              // 23
+    JuplendLST,             // 24
+    PTPyth,                 // 25
+    PTFixed,                // 26
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -412,14 +413,14 @@ impl OracleSetup {
             15 => Some(Self::JuplendPythPull),
             16 => Some(Self::JuplendSwitchboardPull),
             17 => Some(Self::FixedJuplend),
-            18 => Some(Self::PythMSOL),
-            19 => Some(Self::KaminoMSOL),
-            20 => Some(Self::JuplendMSOL),
-            21 => Some(Self::PythLST),
-            22 => Some(Self::KaminoLST),
-            23 => Some(Self::JuplendLST),
-            24 => Some(Self::PTPyth),
-            25 => Some(Self::PTFixed),
+            19 => Some(Self::PythMSOL),
+            20 => Some(Self::KaminoMSOL),
+            21 => Some(Self::JuplendMSOL),
+            22 => Some(Self::PythLST),
+            23 => Some(Self::KaminoLST),
+            24 => Some(Self::JuplendLST),
+            25 => Some(Self::PTPyth),
+            26 => Some(Self::PTFixed),
             _ => None,
         }
     }
@@ -467,6 +468,7 @@ impl OracleSetup {
             | Self::FixedKamino
             | Self::FixedDrift
             | Self::FixedJuplend
+            | Self::Scope
             | Self::PTFixed => None,
         }
     }

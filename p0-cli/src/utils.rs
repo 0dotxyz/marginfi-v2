@@ -394,7 +394,7 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
     let keys = &bank.config.oracle_keys;
 
     let mut out = match bank.config.oracle_setup {
-        OracleSetup::None | OracleSetup::Fixed => vec![],
+        OracleSetup::None | OracleSetup::Fixed | OracleSetup::Scope => vec![],
         OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
             vec![keys[1]]
         }
