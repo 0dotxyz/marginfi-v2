@@ -379,7 +379,7 @@ pub enum OracleSetup {
     JuplendPythPull,        // 15
     JuplendSwitchboardPull, // 16
     FixedJuplend,           // 17
-    Scope,                  // 18
+    Reserved,               // 18
     PythMSOL,               // 19
     KaminoMSOL,             // 20
     JuplendMSOL,            // 21
@@ -468,7 +468,7 @@ impl OracleSetup {
             | Self::FixedKamino
             | Self::FixedDrift
             | Self::FixedJuplend
-            | Self::Scope
+            | Self::Reserved
             | Self::PTFixed => None,
         }
     }

@@ -297,7 +297,7 @@ impl OraclePriceFeedAdapter {
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
-            OracleSetup::None | OracleSetup::Scope => Err(MarginfiError::OracleNotSetup.into()),
+            OracleSetup::None | OracleSetup::Reserved => Err(MarginfiError::OracleNotSetup.into()),
             OracleSetup::PythLegacy => {
                 panic!("pyth legacy is deprecated");
             }
@@ -1270,7 +1270,7 @@ impl OraclePriceFeedAdapter {
         sol_pool: Option<Pubkey>,
     ) -> MarginfiResult {
         match bank_config.oracle_setup {
-            OracleSetup::None | OracleSetup::Scope => Err(MarginfiError::OracleNotSetup.into()),
+            OracleSetup::None | OracleSetup::Reserved => Err(MarginfiError::OracleNotSetup.into()),
             OracleSetup::KaminoPythPush => {
                 check_eq!(
                     bank_config.asset_tag,

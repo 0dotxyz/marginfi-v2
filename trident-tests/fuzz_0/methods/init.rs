@@ -467,7 +467,7 @@ impl FuzzTest {
             OracleSetup::None
             | OracleSetup::PythLegacy
             | OracleSetup::SwitchboardV2
-            | OracleSetup::Scope => {
+            | OracleSetup::Reserved => {
                 vec![bank.config.oracle_keys[0]]
             }
 
