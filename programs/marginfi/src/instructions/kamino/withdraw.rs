@@ -12,6 +12,7 @@ use crate::{
             MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -45,7 +46,7 @@ use marginfi_type_crate::{
     pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -141,8 +142,8 @@ pub fn kamino_withdraw<'info>(
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
 
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let in_receivership_or_order_execution = marginfi_account
+            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
         // Fetch oracle price for rate limiting and deleverage tracking. When group rate limiting is
         // enabled, this must happen after any reserve refresh so wrapped-bank prices use the same
         // exchange rate as the actual redemption.
@@ -244,22 +245,29 @@ pub fn kamino_withdraw<'info>(
     marginfi_account.lending_account.sort_balances();
     marginfi_account.sync_indexer_flags();
 
-    let in_receivership_or_order_execution =
-        marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-
-    // Note: during liquidation/deleverage or order execution, we skip health checks until the end
-    // of the transaction, but we still update the price cache.
-    if !in_receivership_or_order_execution {
+    // Note: during liquidation/deleverage, order execution, or rebalance, we skip health checks
+    // until the end of the transaction, but we still update the price cache.
+    if !marginfi_account.defers_health_to_end_instruction() {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         let group = ctx.accounts.group.load()?;
+        let mut premium_scratch = PremiumScratch::default();
         check_account_init_health(
             &marginfi_account,
             &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
+            &mut Some(&mut premium_scratch),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
+
+        // Claim premium at the old rates and refresh every liability's premium rate snapshot
+        // with the post-withdraw collateral mix.
+        marginfi_account.update_premium_snapshots(
+            &group,
+            &premium_scratch,
+            clock.unix_timestamp as u64,
+        )?;
 
         {
             let bank_loader = &ctx.accounts.bank;
@@ -321,7 +329,7 @@ pub struct KaminoWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    WrappedI80F48, MAX_EMODE_ENTRIES,
+    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -238,6 +238,31 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
+    /// (emode_admin only) Set one pair of the group's variable-borrow premium matrix:
+    /// `rate > 0` inserts or updates the pair, `rate == 0` removes it.
+    pub fn lending_pool_configure_group_premium(
+        ctx: Context<LendingPoolConfigureGroupPremium>,
+        collateral_tag: u16,
+        liability_tag: u16,
+        rate: u32,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_group_premium(
+            ctx,
+            collateral_tag,
+            liability_tag,
+            rate,
+        )
+    }
+
+    /// (emode_admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
+    pub fn lending_pool_configure_bank_premium(
+        ctx: Context<LendingPoolConfigureBankPremium>,
+        premium_tag: u16,
+        active: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_bank_premium(ctx, premium_tag, active)
+    }
+
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
     /// depositors' value via `asset_share_value`.
     pub fn lending_pool_emissions_deposit(
@@ -331,6 +356,102 @@ pub mod marginfi {
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
+    }
+
+    /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield
+    /// bank among `allowed_banks`. Persists until cancelled.
+    pub fn marginfi_account_place_rebalance_order(
+        ctx: Context<PlaceRebalanceOrder>,
+        allowed_banks: Vec<Pubkey>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::place_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+            keeper_tip,
+        )
+    }
+
+    /// (user) Update an existing auto-rebalance order's allowlist and/or policy in place; `None`
+    /// fields are left unchanged.
+    pub fn marginfi_account_update_rebalance_order(
+        ctx: Context<UpdateRebalanceOrder>,
+        allowed_banks: Option<Vec<Pubkey>>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::update_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+            keeper_tip,
+        )
+    }
+
+    /// (permissionless) Fund an account's rebalance fee pool with SOL, used to pay keeper tips.
+    pub fn marginfi_account_top_up_rebalance_fee_pool(
+        ctx: Context<TopUpRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::top_up_rebalance_fee_pool(ctx, amount)
+    }
+
+    /// (user) Withdraw SOL from an account's rebalance fee pool back to the authority.
+    pub fn marginfi_account_withdraw_rebalance_fee_pool(
+        ctx: Context<WithdrawRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::withdraw_rebalance_fee_pool(ctx, amount)
+    }
+
+    /// Close an auto-rebalance order. The authority may cancel their own order at any time; anyone
+    /// may permissionlessly close a stale order once the account was closed or it no longer holds a
+    /// position in any allowed venue. Rent goes to `fee_recipient`.
+    pub fn marginfi_account_close_rebalance_order(
+        ctx: Context<CloseRebalanceOrder>,
+    ) -> MarginfiResult {
+        marginfi_account::close_rebalance_order(ctx)
+    }
+
+    /// (permissionless keeper) Begin an auto-rebalance. `moves` declares each value relocation as
+    /// `(src_index, dst_index, amount)` over the banks passed in remaining_accounts; validates
+    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
+    /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
+    pub fn marginfi_account_start_rebalance<'info>(
+        ctx: Context<'info, StartRebalance<'info>>,
+        moves: Vec<RebalanceMove>,
+        execution_seq: u64,
+    ) -> MarginfiResult {
+        marginfi_account::start_rebalance(ctx, moves, execution_seq)
+    }
+
+    /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value
+    /// conservation, untouched balances, and health; the order persists. The keeper tip is escrowed
+    /// into the record and paid later via `settle_rebalance_tip`.
+    pub fn marginfi_account_end_rebalance<'info>(
+        ctx: Context<'info, EndRebalance<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_rebalance(ctx)
+    }
+
+    /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
+    /// recorded keeper only if the destinations realized more yield than the sources over the window
+    /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
+    /// record, returning its rent to the recorded keeper.
+    pub fn marginfi_account_settle_rebalance_tip<'info>(
+        ctx: Context<'info, SettleRebalanceTip<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::settle_rebalance_tip(ctx)
     }
 
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
@@ -503,6 +624,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_collect_bank_fees(ctx)
     }
 
+    /// (permissionless) Sweep realized variable-borrow premium from the liquidity vault to the
+    /// canonical ATA of `FeeState.premium_wallet` for the bank's mint.
+    pub fn lending_pool_collect_bank_premium_fees<'info>(
+        ctx: Context<'info, LendingPoolCollectBankPremiumFees<'info>>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_collect_bank_premium_fees(ctx)
+    }
+
     /// (admin only) Withdraw collected group fees from the fee vault.
     pub fn lending_pool_withdraw_fees<'info>(
         ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
@@ -650,6 +779,14 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
         )
+    }
+
+    /// (global fee admin only) Adjust the variable-borrow premium wallet on the fee state.
+    pub fn edit_fee_state_premium(
+        ctx: Context<EditFeeStatePremium>,
+        premium_wallet: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::edit_fee_state_premium(ctx, premium_wallet)
     }
 
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin

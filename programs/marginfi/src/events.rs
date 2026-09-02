@@ -110,6 +110,35 @@ pub struct LendingPoolBankCollectFeesEvent {
 }
 
 #[event]
+pub struct LendingPoolGroupPremiumConfigureEvent {
+    pub header: GroupEventHeader,
+    pub collateral_tag: u16,
+    pub liability_tag: u16,
+    pub old_rate: u32,
+    pub new_rate: u32,
+}
+
+#[event]
+pub struct LendingPoolBankPremiumConfigureEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub premium_tag: u16,
+    pub active: bool,
+}
+
+#[event]
+pub struct LendingPoolPremiumFeesCollectedEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Realized premium swept from the liquidity vault to the premium wallet ATA this call.
+    pub premium_collected: f64,
+    /// Realized premium still awaiting sweep after this call.
+    pub premium_outstanding: f64,
+}
+
+#[event]
 pub struct LendingPoolBankHandleBankruptcyEvent {
     pub header: AccountEventHeader,
     pub bank: Pubkey,
@@ -117,6 +146,9 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub bad_debt: f64,
     pub covered_amount: f64,
     pub socialized_amount: f64,
+    /// Uncollectable premium receivable written off with the bad debt (never socialized,
+    /// never covered by insurance, never credited to the bank).
+    pub premium_written_off: f64,
 }
 
 #[event]
@@ -176,6 +208,21 @@ pub struct LendingAccountRepayEvent {
     pub amount: u64,
     pub close_balance: bool,
     pub share_amount: WrappedI80F48,
+}
+
+#[event]
+pub struct LendingAccountPremiumSettledEvent {
+    pub header: AccountEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Premium moved into `bank.collected_premium_outstanding` with this repayment (tokens
+    /// arrived in the liquidity vault), in native token units.
+    pub premium_settled: f64,
+    /// Premium receivable written off with no tokens (tokenless risk-admin repayment), in
+    /// native token units.
+    pub premium_written_off: f64,
+    /// Premium receivable still outstanding on the balance after this repayment.
+    pub premium_outstanding_remaining: f64,
 }
 
 #[event]
@@ -261,6 +308,80 @@ pub struct KeeperCloseOrderEvent {
 pub struct SetKeeperCloseFlagsEvent {
     pub header: AccountEventHeader,
     pub bank_keys: Option<Vec<Pubkey>>,
+}
+
+#[event]
+pub struct MarginfiAccountPlaceRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub mint: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountUpdateRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct KeeperCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct RebalanceFeePoolTopUpEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceFeePoolWithdrawEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceExecutedEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    pub bank_count: u8,
+    pub value_moved: WrappedI80F48,
+    /// Lamports escrowed into the rebalance record, released later by `settle_rebalance_tip`.
+    pub tip_escrowed: u64,
+}
+
+#[event]
+pub struct RebalanceTipSettledEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    /// Whether every move's destination out-yielded its source over the settlement window.
+    pub realized: bool,
+    /// Lamports the executor received. Nonzero without `realized` when the escrow was forfeited
+    /// because the fee pool had been drained below its rent-exempt reserve.
+    pub tip_paid: u64,
 }
 
 #[event]
