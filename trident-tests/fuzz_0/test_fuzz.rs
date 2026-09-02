@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use fixed::types::I80F48;
 use fuzz_accounts::*;
 use trident_fuzz::fuzzing::*;
 
-use crate::invariants::{AccountDataSnapshot, BankBaseline};
+use crate::invariants::AccountDataSnapshot;
+use crate::invariants::BankBaseline;
 
 use crate::bank::Currency;
 use crate::bank::FuzzTestBank;
@@ -59,6 +61,16 @@ struct FuzzTest {
     users: Vec<User>,
     // ================================================================================================
     // Kamino integration accounts
+    // Fork-time Unix timestamp captured once in `new()`. Trident's per-
+    // iteration reset restores accounts but NOT the Clock sysvar, so the
+    // `forward_in_time` drift from `flow9` (100..100_000 s per call) and
+    // `#[end]` (3_600 s) accumulates across every iteration a worker thread
+    // runs. After ~19K iterations the virtual clock passes `u32::MAX`
+    // (~Feb 2106) and Kamino's `LastUpdate::update` panics
+    // ("time too far into the future") in `refresh_reserves_batch`, so
+    // every `KaminoInitObligation` in `#[init]` fails for the rest of the
+    // campaign. `#[init]` warps back to this base each iteration.
+    base_timestamp: i64,
     kamino_main_lending_market: Pubkey,
     kamino_usdc_reserve_liquidity_supply: Pubkey,
     kamino_usdc_reserve_collateral_mint: Pubkey,
@@ -305,9 +317,11 @@ impl FuzzTest {
         // Mainnet Slot
         let slot = utils::get_slot();
         trident.warp_to_slot(slot);
+        let base_timestamp = trident.get_current_timestamp();
 
         Self {
             trident,
+            base_timestamp,
             payer,
             liquidator,
             seeder,
@@ -351,6 +365,10 @@ impl FuzzTest {
 
     #[init]
     fn start(&mut self) {
+        // Bound the virtual clock: see `base_timestamp`. Accounts were
+        // just reset to fork state, so rewinding the Clock is consistent.
+        self.trident.warp_to_timestamp(self.base_timestamp);
+
         // ================================================================================================
         // Initialization
         self.init_foundation();
@@ -593,9 +611,7 @@ impl FuzzTest {
         let _ = self.lending_flashloan(
             &user,
             vec![borrow_eth, borrow_btc, repay_btc, repay_eth],
-            Some(
-                format!("Multi-bank flashloan (ETH+BTC) for {}", user.name).as_str(),
-            ),
+            Some(format!("Multi-bank flashloan (ETH+BTC) for {}", user.name).as_str()),
             Some(vec![self.eth_bank.address, self.btc_bank.address]),
         );
     }
@@ -1052,7 +1068,10 @@ impl FuzzTest {
             .users
             .iter()
             .map(|u| u.marginfi_account)
-            .chain([self.seeder.marginfi_account, self.liquidator.marginfi_account])
+            .chain([
+                self.seeder.marginfi_account,
+                self.liquidator.marginfi_account,
+            ])
             .collect();
         invariants::assert_bank_position_counts(&mut self.trident, &banks, &marginfi_accounts);
 
