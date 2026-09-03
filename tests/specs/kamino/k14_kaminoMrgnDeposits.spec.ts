@@ -712,8 +712,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         false // dumpLogOnFail=false
       );
 
-      // Assert that we get the expected ReserveStale error (same error as Solend)
-      assertBankrunTxFailed(result, 6009);
+      // Kamino's ObligationStale (6017), not marginfi's BankReduceOnly which shares that code
+      assertBankrunTxFailed(result, 6017);
     });
 
     it("Verify reserve refresh is required for withdrawals after time advancement", async () => {

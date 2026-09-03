@@ -3,6 +3,7 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   SYSVAR_RENT_PUBKEY,
   Transaction,
 } from "@solana/web3.js";
@@ -370,6 +371,7 @@ const ensureKaminoSetup = async () => {
         farmsVaultAuthority: farmVaultsAuthority,
         rent: SYSVAR_RENT_PUBKEY,
         systemProgram: SystemProgram.programId,
+        instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .instruction(),
   );

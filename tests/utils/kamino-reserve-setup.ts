@@ -4,6 +4,7 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   SYSVAR_RENT_PUBKEY,
   Transaction,
   TransactionInstruction,
@@ -89,6 +90,7 @@ export async function createKaminoMarket(
         lendingMarketAuthority,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
+        instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .instruction(),
   );
@@ -167,6 +169,7 @@ export async function createReserve(
         reserveCollateralSupply,
         initialLiquiditySource: liquiditySource,
         rent: SYSVAR_RENT_PUBKEY,
+        instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         liquidityTokenProgram: TOKEN_PROGRAM_ID,
         collateralTokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,

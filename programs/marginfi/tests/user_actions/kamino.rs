@@ -346,3 +346,49 @@ async fn kamino_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resul
     assert_eq!(seeded_ref, raw_price * multiplier);
     Ok(())
 }
+
+/// Kamino blocks its own instructions in emergency mode, but us lending against that collateral
+/// needs no CPI, so nothing upstream stops it. We stop valuing it for Initial margin, and keep
+/// Maintenance value so the position stays priced for repay and liquidation.
+#[tokio::test]
+async fn kamino_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    // Sanity: a healthy reserve carries real Initial value.
+    user.try_lending_account_pulse_health().await?;
+    let healthy_cache = user.load().await.health_cache;
+    assert!(I80F48::from(healthy_cache.asset_value) > I80F48::ZERO);
+
+    setup.set_reserve_emergency_mode().await;
+
+    user.try_lending_account_pulse_health().await?;
+    let emergency_cache = user.load().await.health_cache;
+    assert_eq!(
+        I80F48::from(emergency_cache.asset_value),
+        I80F48::ZERO,
+        "emergency-mode collateral must back no new borrowing"
+    );
+    assert!(
+        I80F48::from(emergency_cache.asset_value_maint) > I80F48::ZERO,
+        "Maintenance value must survive"
+    );
+
+    // Kamino also refuses to move the collateral, so our withdraw fails inside the CPI.
+    let res = setup
+        .test_f
+        .run_kamino_withdraw(&setup.bank_f, &user, user_token.key, 0, Some(true))
+        .await;
+    // Kamino's `ReserveEmergencyMode` (6175), not one of ours.
+    let err = format!("{:?}", res.unwrap_err());
+    assert!(
+        err.contains("Custom(6175)"),
+        "expected Kamino ReserveEmergencyMode, got: {err}"
+    );
+
+    Ok(())
+}

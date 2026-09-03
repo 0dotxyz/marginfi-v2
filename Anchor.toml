@@ -161,15 +161,15 @@ program = "tests/fixtures/solend.so"
 
 [[test.genesis]]
 address = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
-program = "tests/fixtures/juplend_lending.so"
+program = "tests/fixtures/juplend_earn.so"
 
 [[test.genesis]]
 address = "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
-program = "tests/fixtures/juplend_liquidity.so"
+program = "tests/fixtures/liquidity.so"
 
 [[test.genesis]]
 address = "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"
-program = "tests/fixtures/juplend_rewards_rate_model.so"
+program = "tests/fixtures/lending_reward_rate_model.so"
 
 [[test.genesis]]
 address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"

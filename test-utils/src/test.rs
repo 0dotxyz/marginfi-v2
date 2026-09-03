@@ -307,6 +307,23 @@ impl KaminoBankSetup {
             .await
     }
 
+    /// Put the reserve into emergency mode, in the state a later `refresh_reserve` leaves it:
+    /// current slot, not stale, price status cleared.
+    pub async fn set_reserve_emergency_mode(&self) {
+        let slot = self.test_f.get_clock().await.slot;
+        let reserve_key = self.bank_f.load().await.integration_acc_1;
+        let mut account = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut account.data[8..]);
+        reserve.emergency_mode = 1;
+        reserve.slot = slot;
+        reserve.stale = 0;
+        reserve.price_status = 0;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
     pub async fn load_user_accounted_collateral(
         &self,
         user: &MarginfiAccountFixture,
@@ -727,10 +744,10 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift", drift_mocks::drift::ID, None);
-            program.add_program("juplend_lending", juplend_mocks::ID, None);
-            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program("juplend_earn", juplend_mocks::ID, None);
+            program.add_program("liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
-                "juplend_rewards_rate_model",
+                "lending_reward_rate_model",
                 juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
@@ -1227,19 +1244,6 @@ impl TestFixture {
             .unwrap()
     }
 
-    /// Refresh the cached blockhash in the test context.
-    /// Call this in long-running tests to prevent BlockhashNotFound errors.
-    pub async fn refresh_blockhash(&self) {
-        let blockhash = self
-            .context
-            .borrow_mut()
-            .banks_client
-            .get_latest_blockhash()
-            .await
-            .unwrap();
-        self.context.borrow_mut().last_blockhash = blockhash;
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1489,8 +1493,6 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-
-        test_f.refresh_blockhash().await;
 
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await

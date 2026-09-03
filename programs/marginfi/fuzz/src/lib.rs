@@ -860,6 +860,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                 // leads to the `liquidatee_liab_bank_account.withdraw_spl_transfer` failing. This
                 // is probably benign but certainly rare-or-nonexistent in prod.
                 ProgramError::Custom(TokenError::InsufficientFunds as u32).into(),
+                MarginfiError::IllegalBalanceState.into(),
             ];
 
             // Log full context on unexpected error
