@@ -2107,6 +2107,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "exponent-mocks"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+ "marginfi-type-crate",
+ "static_assertions",
+]
+
+[[package]]
 name = "fast-math"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3468,6 +3478,7 @@ dependencies = [
  "cfg-if",
  "drift-mocks",
  "enum_dispatch",
+ "exponent-mocks",
  "fixed",
  "fixed-macro",
  "id-crate",
@@ -3475,6 +3486,7 @@ dependencies = [
  "kamino-mocks",
  "lazy_static",
  "marginfi-type-crate",
+ "marinade-mocks",
  "pyth-solana-receiver-sdk 1.2.1 (git+https://github.com/0dotxyz/pyth-crosschain?rev=f170d205e47a6ea34ad30c424d9ec8cc61a1f1fc)",
  "solana-borsh",
  "solana-instructions-sysvar",
@@ -3536,6 +3548,16 @@ dependencies = [
  "id-crate",
  "solana-instruction",
  "spl-associated-token-account",
+ "static_assertions",
+]
+
+[[package]]
+name = "marinade-mocks"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+ "marginfi-type-crate",
  "static_assertions",
 ]
 
