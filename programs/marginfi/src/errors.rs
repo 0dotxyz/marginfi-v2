@@ -266,14 +266,22 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
-    #[msg("Use set_fixed_oracle_price instead")] // 6132
-    UseSetFixedOraclePrice,
+    #[msg("Use set_oracle_price instead")] // 6132
+    UseSetOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
     BankUninitialized,
     #[msg("Max slippage exceeds the allowed cap")] // 6135
     SlippageTooHigh,
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed, // 6136
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed, // 6137
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice, // 6138
+    #[msg("Stake pool balance has not been updated recently enough")]
+    StakePoolStale, // 6139
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -613,9 +621,13 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
-            6132 => MarginfiError::UseSetFixedOraclePrice,
+            6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6136 => MarginfiError::MarinadeStateValidationFailed,
+            6137 => MarginfiError::ExponentVaultValidationFailed,
+            6138 => MarginfiError::InvalidPtStartPrice,
+            6139 => MarginfiError::StakePoolStale,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -743,7 +755,9 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidWindowSize
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
+                | MarginfiError::ExponentVaultValidationFailed
                 // Lending protocol staleness errors - stale exchange rates mean unreliable prices
+                | MarginfiError::StakePoolStale // SPL / Sanctum stake pools
                 | MarginfiError::ReserveStale // Kamino
                 | MarginfiError::SolendReserveStale
                 | MarginfiError::DriftSpotMarketStale

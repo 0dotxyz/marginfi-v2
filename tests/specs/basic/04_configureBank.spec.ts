@@ -207,7 +207,7 @@ describe("Lending pool configure bank", () => {
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
   });
 
-  it("(admin) configure_bank_oracle rejects Fixed setup - use set_fixed_oracle_price", async () => {
+  it("(admin) configure_bank_oracle rejects Fixed setup - use set_oracle_price", async () => {
     const bankKey = bankKeypairUsdc.publicKey;
     await expectFailedTxWithMessage(async () => {
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -219,7 +219,7 @@ describe("Lending pool configure bank", () => {
           })
         )
       );
-    }, "Use set_fixed_oracle_price instead");
+    }, "Use set_oracle_price instead");
   });
 
   it("(admin) update oracle to invalid state - should fail", async () => {

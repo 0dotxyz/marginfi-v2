@@ -166,6 +166,7 @@ pub fn lending_pool_add_bank_permissionless(
     bank.config.oracle_keys[2] = sol_pool;
     bank.config.oracle_keys[3] = exp_onramp;
     bank.config.validate_oracle_setup(
+        lst_mint,
         ctx.remaining_accounts,
         Some(lst_mint),
         Some(stake_pool),
