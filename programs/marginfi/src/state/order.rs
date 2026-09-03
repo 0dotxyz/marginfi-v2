@@ -354,6 +354,71 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
     }
 }
 
+/// Snapshot every active balance whose bank is not `excluded` into `slots`, in account order.
+/// Returns how many were written.
+pub fn snapshot_balances_outside(
+    slots: &mut [ExecuteOrderBalanceRecord],
+    account: &MarginfiAccount,
+    excluded: impl Fn(&Pubkey) -> bool,
+) -> MarginfiResult<u8> {
+    let mut count: u8 = 0;
+    for balance in account.lending_account.balances.iter() {
+        if !balance.is_active() || excluded(&balance.bank_pk) {
+            continue;
+        }
+        let side = balance
+            .get_side()
+            .ok_or(MarginfiError::IllegalBalanceState)?;
+        let slot = slots
+            .get_mut(count as usize)
+            .ok_or(MarginfiError::IllegalBalanceState)?;
+        slot.bank = balance.bank_pk;
+        slot.tag = balance.tag;
+        slot.is_asset = matches!(side, BalanceSide::Assets) as u8;
+        slot.shares = match side {
+            BalanceSide::Assets => balance.asset_shares,
+            BalanceSide::Liabilities => balance.liability_shares,
+        };
+        count = count.saturating_add(1);
+    }
+    Ok(count)
+}
+
+/// Every snapshotted balance still holds its side and shares, and no active balance exists outside
+/// the snapshot and `excluded`; a balance the snapshot cannot see reports `untracked_err`.
+pub fn verify_balances_outside_unchanged(
+    slots: &[ExecuteOrderBalanceRecord],
+    account: &MarginfiAccount,
+    excluded: impl Fn(&Pubkey) -> bool,
+    untracked_err: MarginfiError,
+) -> MarginfiResult {
+    let untracked = account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active() && !excluded(&b.bank_pk))
+        .count();
+    check!(untracked == slots.len(), untracked_err);
+
+    for rec in slots.iter() {
+        let idx = account.lending_account.get_balance_index(&rec.bank)?;
+        let balance = &account.lending_account.balances[idx];
+        let side = balance
+            .get_side()
+            .ok_or(MarginfiError::IllegalBalanceState)?;
+        let shares = match side {
+            BalanceSide::Assets => balance.asset_shares,
+            BalanceSide::Liabilities => balance.liability_shares,
+        };
+        check!(
+            rec.is_asset == matches!(side, BalanceSide::Assets) as u8
+                && I80F48::from(rec.shares) == I80F48::from(shares),
+            MarginfiError::IllegalBalanceState
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::ExecuteOrderRecordImpl;

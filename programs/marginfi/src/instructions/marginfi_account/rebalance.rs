@@ -431,7 +431,7 @@ pub struct UpdateRebalanceOrder<'info> {
 
 /// Transfer `amount` lamports out of a marginfi account's fee-pool PDA, which signs via its seeds.
 /// No-op for a zero amount.
-fn pay_from_fee_pool<'info>(
+pub(crate) fn pay_from_fee_pool<'info>(
     fee_pool: &SystemAccount<'info>,
     to: &AccountInfo<'info>,
     system_program: &Program<'info, System>,

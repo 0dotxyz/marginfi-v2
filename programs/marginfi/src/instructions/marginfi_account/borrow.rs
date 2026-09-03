@@ -9,6 +9,7 @@ use crate::{
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
             run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            ALLOW_BORROW_ORDER,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -30,7 +31,7 @@ use marginfi_type_crate::{
     },
     types::{
         is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
-        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_BORROW_ORDER, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -211,35 +212,40 @@ pub fn lending_account_borrow<'info>(
         marginfi_account.indexer_flags.has_isolated = 1;
     }
 
-    // Check account health, if below threshold fail transaction
-    // Assuming `ctx.remaining_accounts` holds only oracle accounts
-    let mut premium_scratch = PremiumScratch::default();
-    check_account_init_health(
-        &marginfi_account,
-        &group,
-        ctx.remaining_accounts,
-        &mut Some(&mut health_cache),
-        &mut Some(&mut premium_scratch),
-    )?;
-    health_cache.program_version = PROGRAM_VERSION;
+    // Inside a borrow-order fill, `end_borrow_order_open` runs the health, breaker and premium
+    // passes once over the post-fill balances, so a redeployed deposit collateralizes its borrow.
+    let in_borrow_order = marginfi_account.get_flag(ACCOUNT_IN_BORROW_ORDER);
+    if !in_borrow_order {
+        // Check account health, if below threshold fail transaction
+        // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let mut premium_scratch = PremiumScratch::default();
+        check_account_init_health(
+            &marginfi_account,
+            &group,
+            ctx.remaining_accounts,
+            &mut Some(&mut health_cache),
+            &mut Some(&mut premium_scratch),
+        )?;
+        health_cache.program_version = PROGRAM_VERSION;
 
-    // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
-    // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
-    check!(
-        !premium_scratch.refresh_unavailable(),
-        MarginfiError::PremiumSnapshotUnavailable
-    );
+        // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
+        // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
+        check!(
+            !premium_scratch.refresh_unavailable(),
+            MarginfiError::PremiumSnapshotUnavailable
+        );
 
-    // Revert if any involved bank's oracle price has jumped past the breach threshold.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        // Revert if any involved bank's oracle price has jumped past the breach threshold.
+        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
-    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
-    // the post-borrow collateral mix.
-    marginfi_account.update_premium_snapshots(
-        &group,
-        &premium_scratch,
-        clock.unix_timestamp as u64,
-    )?;
+        // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+        // the post-borrow collateral mix.
+        marginfi_account.update_premium_snapshots(
+            &group,
+            &premium_scratch,
+            clock.unix_timestamp as u64,
+        )?;
+    }
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
@@ -268,8 +274,10 @@ pub fn lending_account_borrow<'info>(
     bank.update_bank_cache(&group)?;
     bank.update_cache_price(price_for_cache)?;
 
-    health_cache.set_engine_ok(true);
-    marginfi_account.health_cache = health_cache;
+    if !in_borrow_order {
+        health_cache.set_engine_ok(true);
+        marginfi_account.health_cache = health_cache;
+    }
 
     Ok(())
 }
@@ -293,7 +301,7 @@ pub struct LendingAccountBorrow<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), 0)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_BORROW_ORDER)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

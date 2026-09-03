@@ -325,6 +325,118 @@ pub fn validate_rebalance_instructions(
     validate_not_cpi_by_stack_height()
 }
 
+/// Which side a sandwich serves: an open runs borrow and deposit legs, a close withdraw and repay
+/// legs, all laid out as `(group, marginfi_account, authority, bank, token_account, ...)`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BorrowOrderSide {
+    Open,
+    Close,
+}
+
+/// What a borrow-order sandwich's legs are bound to.
+pub struct BorrowOrderLegBinding {
+    pub side: BorrowOrderSide,
+    pub marginfi_account: Pubkey,
+    /// The order's borrow bank: what borrow legs borrow from and repay legs repay to.
+    pub bank: Pubkey,
+    /// The destination bank; `None` for a wallet order, which admits no deposit legs.
+    pub destination_bank: Option<Pubkey>,
+    /// The authority's token account a wallet order's borrow must deliver to.
+    pub wallet_destination: Option<Pubkey>,
+}
+
+/// Tx-structure sandwich for a borrow-order fill: end last, start top-level, only the side's
+/// start/end pair plus its two legs, each bound per [`BorrowOrderLegBinding`].
+pub fn validate_borrow_order_instructions(
+    sysvar: &AccountInfo,
+    binding: &BorrowOrderLegBinding,
+) -> MarginfiResult {
+    let allowed_programs = [id_crate::ID, COMPUTE_PROGRAM_KEY, ASSOCIATED_TOKEN_KEY];
+    let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
+
+    // (start, end, leg on the borrow bank, leg on the destination bank)
+    let (start, end, bank_leg, destination_leg): ([u8; 8], [u8; 8], [u8; 8], [u8; 8]) =
+        match binding.side {
+            BorrowOrderSide::Open => (
+                ixd::START_BORROW_ORDER_OPEN,
+                ixd::END_BORROW_ORDER_OPEN,
+                ixd::LENDING_ACCOUNT_BORROW,
+                ixd::LENDING_ACCOUNT_DEPOSIT,
+            ),
+            BorrowOrderSide::Close => (
+                ixd::START_BORROW_ORDER_CLOSE,
+                ixd::END_BORROW_ORDER_CLOSE,
+                ixd::LENDING_ACCOUNT_REPAY,
+                ixd::LENDING_ACCOUNT_WITHDRAW,
+            ),
+        };
+    validate_ix_last(&ixes, &id_crate::ID, &end)?;
+
+    const ACCOUNT_META: usize = 1;
+    const BANK_META: usize = 3;
+    const TOKEN_ACCOUNT_META: usize = 4;
+    let meta = |ix: &Instruction, i: usize| -> MarginfiResult<Pubkey> {
+        ix.accounts
+            .get(i)
+            .map(|m| m.pubkey)
+            .ok_or_else(|| error!(MarginfiError::BorrowOrderForeignAccountLeg))
+    };
+    for ix in ixes.iter() {
+        if ix.program_id != id_crate::ID || ix.data.len() < 8 {
+            continue;
+        }
+        let discrim = &ix.data[0..8];
+        let on_bank = discrim == bank_leg;
+        let on_destination = discrim == destination_leg;
+        if !(on_bank || on_destination) {
+            continue;
+        }
+        check!(
+            meta(ix, ACCOUNT_META)? == binding.marginfi_account,
+            MarginfiError::BorrowOrderForeignAccountLeg
+        );
+        if on_bank {
+            check!(
+                meta(ix, BANK_META)? == binding.bank,
+                MarginfiError::BorrowOrderLegBankMismatch
+            );
+            if let Some(wallet) = binding.wallet_destination {
+                check!(
+                    meta(ix, TOKEN_ACCOUNT_META)? == wallet,
+                    MarginfiError::BorrowOrderWrongDestination
+                );
+            }
+        } else {
+            let destination = binding
+                .destination_bank
+                .ok_or_else(|| error!(MarginfiError::BorrowOrderLegBankMismatch))?;
+            check!(
+                meta(ix, BANK_META)? == destination,
+                MarginfiError::BorrowOrderLegBankMismatch
+            );
+        }
+    }
+
+    // A second start would leave another account's flag set past the transaction.
+    let count = |discrim: &[u8]| {
+        ixes.iter()
+            .filter(|ix| {
+                ix.program_id == id_crate::ID && ix.data.len() >= 8 && &ix.data[0..8] == discrim
+            })
+            .count()
+    };
+    check!(
+        count(&start) == 1 && count(&end) == 1,
+        MarginfiError::BorrowOrderMalformedSandwich
+    );
+    validate_ixes_exclusive(
+        &ixes,
+        &id_crate::ID,
+        &[&start, &end, &bank_leg, &destination_leg],
+    )?;
+    validate_not_cpi_by_stack_height()
+}
+
 /// Finds the hash of a slice of keys, sorting them before hashing
 pub fn keys_sha256_hash(keys: &[Pubkey]) -> [u8; 32] {
     let mut slices: Vec<&[u8]> = keys.iter().map(|pk| pk.as_ref()).collect();

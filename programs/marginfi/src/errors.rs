@@ -512,6 +512,45 @@ pub enum MarginfiError {
     OrderInterestCostExceedsCarry, // 6802
     #[msg("Interest trigger window or exit budget is outside the permitted range")]
     OrderInterestInvalidConfig, // 6803
+    // Borrow order errors (6900 block)
+    #[msg("Bank has no rate reading old enough to cover the order's window")]
+    BorrowOrderHistoryTooShort = 900, // 6900
+    #[msg("Borrow order configuration is not actionable")]
+    BorrowOrderInvalidConfig, // 6901
+    #[msg("Fill exceeds what the order has left to borrow, or a close what it owes")]
+    BorrowOrderExceedsRemaining, // 6902
+    #[msg("Realized borrow rate is not under the order's open level")]
+    BorrowOrderRateNotLowEnough, // 6903
+    #[msg("Fill would push the borrow rate past the order's open level")]
+    BorrowOrderFillOvershoots, // 6904
+    #[msg("Borrow order cooldown has not elapsed")]
+    BorrowOrderCooldown, // 6905
+    #[msg("Borrow order has no close side: it needs a close level and a destination bank")]
+    BorrowOrderNoCloseSide, // 6906
+    #[msg("Borrow order sandwich must contain exactly one start and one end instruction")]
+    BorrowOrderMalformedSandwich, // 6907
+    #[msg("Borrow order legs must all act on the account being filled")]
+    BorrowOrderForeignAccountLeg, // 6908
+    #[msg("Borrow order fill did not move the amount it was authorized to")]
+    BorrowOrderFillMismatch, // 6909
+    #[msg("Borrow orders support native banks only, as borrow and destination")]
+    BorrowOrderUnsupportedBank, // 6910
+    #[msg("Borrow order legs may only act on the order's borrow and destination banks")]
+    BorrowOrderLegBankMismatch, // 6911
+    #[msg("Borrow order wallet fills must deliver to the authority's token account")]
+    BorrowOrderWrongDestination, // 6912
+    #[msg("Borrow order fill touched a balance outside the order's banks")]
+    BorrowOrderUntrackedBalance, // 6913
+    #[msg("Realized borrow rate has not risen over the order's close level")]
+    BorrowOrderRateNotHighEnough, // 6914
+    #[msg("Borrow order holds no debt to close")]
+    BorrowOrderNothingToClose, // 6915
+    #[msg("Fill leaves more than a granule of room under the order's level")]
+    BorrowOrderFillNotMaximal, // 6916
+    #[msg("Close repaid less than the destination bank could cover")]
+    BorrowOrderCloseIncomplete, // 6917
+    #[msg("Fill moved less than a granule of the order")]
+    BorrowOrderFillBelowGranule, // 6918
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -787,6 +826,26 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::OrderInterestNotNegative,
             6802 => MarginfiError::OrderInterestCostExceedsCarry,
             6803 => MarginfiError::OrderInterestInvalidConfig,
+            // Borrow order errors (6900 block)
+            6900 => MarginfiError::BorrowOrderHistoryTooShort,
+            6901 => MarginfiError::BorrowOrderInvalidConfig,
+            6902 => MarginfiError::BorrowOrderExceedsRemaining,
+            6903 => MarginfiError::BorrowOrderRateNotLowEnough,
+            6904 => MarginfiError::BorrowOrderFillOvershoots,
+            6905 => MarginfiError::BorrowOrderCooldown,
+            6906 => MarginfiError::BorrowOrderNoCloseSide,
+            6907 => MarginfiError::BorrowOrderMalformedSandwich,
+            6908 => MarginfiError::BorrowOrderForeignAccountLeg,
+            6909 => MarginfiError::BorrowOrderFillMismatch,
+            6910 => MarginfiError::BorrowOrderUnsupportedBank,
+            6911 => MarginfiError::BorrowOrderLegBankMismatch,
+            6912 => MarginfiError::BorrowOrderWrongDestination,
+            6913 => MarginfiError::BorrowOrderUntrackedBalance,
+            6914 => MarginfiError::BorrowOrderRateNotHighEnough,
+            6915 => MarginfiError::BorrowOrderNothingToClose,
+            6916 => MarginfiError::BorrowOrderFillNotMaximal,
+            6917 => MarginfiError::BorrowOrderCloseIncomplete,
+            6918 => MarginfiError::BorrowOrderFillBelowGranule,
 
             _ => MarginfiError::InternalLogicError,
         }

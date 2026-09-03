@@ -22,6 +22,8 @@
 //! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend liquidity-program
 //! `update_exchange_price`, which refreshes the `TokenReserve` the supply rate reads).
 
+use crate::state::bank::BankImpl;
+use crate::state::interest_rate::InterestRateConfigImpl;
 use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,
     OraclePriceFeedAdapter,
@@ -37,7 +39,7 @@ use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED, SECONDS_PER_YEAR,
 };
-use marginfi_type_crate::types::{u32_to_milli, Bank, BankConfig, OraclePriceType};
+use marginfi_type_crate::types::{u32_to_milli, Bank, BankConfig, MarginfiGroup, OraclePriceType};
 
 /// Accounts a venue needs beyond its rate-bearing account to price its reward emissions, each bound
 /// to the bank's own venue state. Callers that need only the base rate pass the default.
@@ -197,6 +199,30 @@ pub fn realized_apr(anchor: I80F48, current: I80F48, elapsed: i64) -> MarginfiRe
         .and_then(|annual| annual.checked_div(I80F48::from_num(elapsed)))
         .ok_or_else(math_error!())
         .map_err(Into::into)
+}
+
+/// The bank's borrow APR at the utilization `extra_native` more of borrowing would produce. Pass
+/// `0` for the current rate. Native banks only, which is every borrowable bank.
+pub fn borrow_rate_at(
+    bank: &Bank,
+    group: &MarginfiGroup,
+    extra_native: u64,
+) -> MarginfiResult<I80F48> {
+    let total_assets = bank.get_asset_amount(bank.total_asset_shares.into())?;
+    check!(total_assets > I80F48::ZERO, MarginfiError::MathError);
+    let total_liabilities = bank
+        .get_liability_amount(bank.total_liability_shares.into())?
+        .checked_add(I80F48::from_num(extra_native))
+        .ok_or_else(math_error!())?;
+    let utilization = total_liabilities
+        .checked_div(total_assets)
+        .ok_or_else(math_error!())?;
+    Ok(bank
+        .config
+        .interest_rate_config
+        .create_interest_rate_calculator(group)
+        .calc_interest_rate(utilization)?
+        .borrowing_rate_apr)
 }
 
 /// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`

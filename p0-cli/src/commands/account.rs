@@ -184,6 +184,75 @@ pub enum AccountCommand {
         interest_min_negative_apr_bps: Option<u32>,
     },
 
+    /// Place a persistent order to borrow while a bank's realized rate sits under a level
+    PlaceBorrowOrder {
+        #[clap(long, help = "Bank to borrow from")]
+        bank: String,
+        #[clap(long, help = "Total to borrow across all fills, in UI units")]
+        amount: f64,
+        #[clap(long, help = "Borrow APR a fill may open under, in basis points")]
+        open_below_apr_bps: u32,
+        #[clap(
+            long,
+            help = "Borrow APR over which the position is repaid from the destination bank, in basis points; omit to open only"
+        )]
+        close_above_apr_bps: Option<u32>,
+        #[clap(
+            long,
+            help = "Seconds the realized rate is measured over (default 24h, 6h to 48h)"
+        )]
+        window_seconds: Option<u32>,
+        #[clap(long, help = "Seconds between fills (default 1h)")]
+        cooldown_seconds: Option<u32>,
+        #[clap(
+            long,
+            help = "Lamports paid to the keeper from the account's fee pool per open and per close"
+        )]
+        keeper_tip: Option<u64>,
+        #[clap(
+            long,
+            help = "Same-mint native bank the borrowed funds are deposited into; omit for the wallet"
+        )]
+        destination_bank: Option<String>,
+    },
+    /// Modify a live borrow order; omitted fields are left unchanged
+    UpdateBorrowOrder {
+        #[clap(long)]
+        order: Pubkey,
+        #[clap(
+            long,
+            help = "New total to borrow, in UI units (not below what is already filled)"
+        )]
+        amount: Option<f64>,
+        #[clap(long)]
+        open_below_apr_bps: Option<u32>,
+        #[clap(long, help = "Zero removes the close side")]
+        close_above_apr_bps: Option<u32>,
+        #[clap(long)]
+        window_seconds: Option<u32>,
+        #[clap(long)]
+        cooldown_seconds: Option<u32>,
+        #[clap(long)]
+        keeper_tip: Option<u64>,
+    },
+    /// Cancel a borrow order and reclaim lamports; any borrow it opened stays on the account
+    CancelBorrowOrder {
+        #[clap(long)]
+        order: Pubkey,
+        #[clap(long, help = "Recipient of returned rent (defaults to signer)")]
+        fee_recipient: Option<Pubkey>,
+    },
+    /// Keeper: open (fill) a borrow order in one transaction, borrowing what fits under its level
+    FillBorrowOrder {
+        #[clap(long)]
+        order: Pubkey,
+    },
+    /// Keeper: close a borrow-order position, repaying the borrow bank with all the destination bank
+    /// can cover
+    CloseBorrowOrder {
+        #[clap(long)]
+        order: Pubkey,
+    },
     /// Close an existing order and reclaim lamports
     CloseOrder {
         order: Pubkey,
@@ -215,6 +284,11 @@ pub enum AccountCommand {
     },
     /// Refresh the cached health for an account (permissionless)
     PulseHealth { account: Option<Pubkey> },
+}
+
+/// Basis points to the `milli_to_u32` encoding an APR level is stored in.
+fn bps_to_milli(bps: u32) -> u32 {
+    milli_to_u32(I80F48::from_num(bps as f64 / 10_000.0))
 }
 
 pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Result<()> {
@@ -349,14 +423,71 @@ pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Resul
             let interest = interest.then(|| InterestTriggerConfig {
                 window_seconds: interest_window_seconds,
                 exit_budget_seconds,
-                min_negative_apr: interest_min_negative_apr_bps
-                    .map(|bps| milli_to_u32(I80F48::from_num(bps as f64 / 10_000.0))),
+                min_negative_apr: interest_min_negative_apr_bps.map(bps_to_milli),
             });
             processor::marginfi_account_place_order(
                 &profile, &config, bank_1_pk, bank_2_pk, trigger, interest,
             )
         }
 
+        AccountCommand::PlaceBorrowOrder {
+            bank,
+            amount,
+            open_below_apr_bps,
+            close_above_apr_bps,
+            window_seconds,
+            cooldown_seconds,
+            keeper_tip,
+            destination_bank,
+        } => {
+            let bank_pk = super::resolve_bank_for_group(&bank, profile.marginfi_group)?;
+            let destination_pk = destination_bank
+                .map(|b| super::resolve_bank_for_group(&b, profile.marginfi_group))
+                .transpose()?;
+            processor::marginfi_account_place_borrow_order(
+                &profile,
+                &config,
+                bank_pk,
+                amount,
+                bps_to_milli(open_below_apr_bps),
+                close_above_apr_bps.map(bps_to_milli),
+                window_seconds,
+                cooldown_seconds,
+                keeper_tip,
+                destination_pk,
+            )
+        }
+        AccountCommand::UpdateBorrowOrder {
+            order,
+            amount,
+            open_below_apr_bps,
+            close_above_apr_bps,
+            window_seconds,
+            cooldown_seconds,
+            keeper_tip,
+        } => processor::marginfi_account_update_borrow_order(
+            &profile,
+            &config,
+            order,
+            amount,
+            open_below_apr_bps.map(bps_to_milli),
+            close_above_apr_bps.map(bps_to_milli),
+            window_seconds,
+            cooldown_seconds,
+            keeper_tip,
+        ),
+        AccountCommand::CancelBorrowOrder {
+            order,
+            fee_recipient,
+        } => {
+            processor::marginfi_account_cancel_borrow_order(&profile, &config, order, fee_recipient)
+        }
+        AccountCommand::FillBorrowOrder { order } => {
+            processor::marginfi_account_fill_borrow_order(&config, order)
+        }
+        AccountCommand::CloseBorrowOrder { order } => {
+            processor::marginfi_account_close_borrow_order(&config, order)
+        }
         AccountCommand::CloseOrder {
             order,
             fee_recipient,

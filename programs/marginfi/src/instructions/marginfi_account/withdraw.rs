@@ -9,7 +9,8 @@ use crate::{
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl, ALLOW_ORDER_EXECUTION, ALLOW_REBALANCE, ALLOW_RECEIVERSHIP,
+            MarginfiAccountImpl, ALLOW_BORROW_ORDER, ALLOW_ORDER_EXECUTION, ALLOW_REBALANCE,
+            ALLOW_RECEIVERSHIP,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -33,8 +34,8 @@ use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
         is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
-        ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_DISABLED, ACCOUNT_IN_BORROW_ORDER, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -71,8 +72,12 @@ pub fn lending_account_withdraw<'info>(
             utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
         };
 
-        let in_receivership_or_order_execution = marginfi_account
-            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
+        let in_receivership_or_order_execution = marginfi_account.get_flag(
+            ACCOUNT_IN_RECEIVERSHIP
+                | ACCOUNT_IN_ORDER_EXECUTION
+                | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER,
+        );
         let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         // A withdraw from an account with no liabilities is risk-free, so it stays allowed
@@ -300,7 +305,7 @@ pub struct LendingAccountWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_REBALANCE)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_REBALANCE | ALLOW_BORROW_ORDER)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

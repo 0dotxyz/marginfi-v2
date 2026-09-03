@@ -27,6 +27,8 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 pub const REBALANCE_ORDER_SEED: &str = "rebalance_order";
 pub const REBALANCE_RECORD_SEED: &str = "rebalance_record";
 pub const REBALANCE_FEE_POOL_SEED: &str = "rebalance_fee_pool";
+pub const BORROW_ORDER_SEED: &str = "borrow_order";
+pub const BORROW_ORDER_RECORD_SEED: &str = "borrow_order_record";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -144,6 +146,17 @@ pub const _: () = assert!(
     (BANK_RATE_READINGS as i64 - 1) * BANK_RATE_READING_SPACING_SECONDS
         >= INTEREST_MAX_WINDOW_SECONDS as i64
 );
+
+/// Default seconds between fills on a borrow order, used when the user does not set one.
+pub const BORROW_ORDER_DEFAULT_COOLDOWN_SECONDS: u32 = 3_600; // 1 hour
+
+/// Native units a borrow-order fill's booked debt may differ from the authorized amount plus its
+/// origination fee: the share round-trip rounds by a unit either way.
+pub const BORROW_ORDER_FILL_DUST_ATOMS: u64 = 2;
+
+/// A borrow-order fill's granule, in basis points of the order's `amount`: an open may leave at most
+/// this much room under the level, and a close may stop this short of what the destination covers.
+pub const BORROW_ORDER_FILL_GRANULE_BPS: u64 = 100;
 
 /// Default span of carry loss an interest-trigger order will spend to exit: the realized unwind
 /// cost must not exceed what the position would lose to interest over this long.
@@ -302,6 +315,8 @@ pub mod discriminators {
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
     pub const REBALANCE_ORDER: [u8; 8] = [51, 5, 186, 251, 144, 119, 75, 197];
     pub const REBALANCE_RECORD: [u8; 8] = [190, 69, 228, 114, 34, 217, 70, 102];
+    pub const BORROW_ORDER: [u8; 8] = [42, 155, 26, 16, 5, 172, 213, 173];
+    pub const BORROW_ORDER_RECORD: [u8; 8] = [66, 89, 121, 111, 193, 242, 142, 51];
     pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
     pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
 }
@@ -324,6 +339,11 @@ pub mod ix_discriminators {
     pub const START_REBALANCE: [u8; 8] = [251, 122, 91, 161, 219, 98, 5, 236];
     pub const END_REBALANCE: [u8; 8] = [47, 225, 163, 216, 213, 214, 225, 155];
     pub const LENDING_ACCOUNT_DEPOSIT: [u8; 8] = [171, 94, 235, 103, 82, 64, 212, 140];
+    pub const LENDING_ACCOUNT_BORROW: [u8; 8] = [4, 126, 116, 53, 48, 5, 212, 31];
+    pub const START_BORROW_ORDER_OPEN: [u8; 8] = [77, 122, 186, 1, 2, 151, 191, 109];
+    pub const END_BORROW_ORDER_OPEN: [u8; 8] = [244, 179, 157, 192, 17, 101, 171, 74];
+    pub const START_BORROW_ORDER_CLOSE: [u8; 8] = [129, 150, 75, 38, 92, 123, 16, 111];
+    pub const END_BORROW_ORDER_CLOSE: [u8; 8] = [212, 211, 35, 44, 132, 210, 151, 101];
     pub const KAMINO_DEPOSIT: [u8; 8] = [237, 8, 188, 187, 115, 99, 49, 85];
     pub const DRIFT_DEPOSIT: [u8; 8] = [252, 63, 250, 201, 98, 55, 130, 12];
     pub const JUPLEND_DEPOSIT: [u8; 8] = [114, 11, 218, 81, 183, 165, 143, 255];

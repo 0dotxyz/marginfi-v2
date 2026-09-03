@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, InterestTriggerConfig, MarginfiAccount, Order, OrderTrigger,
-    RebalanceMove, WrappedI80F48,
+    Bank, BankVaultType, BorrowOrder, FeeState, InterestTriggerConfig, MarginfiAccount, Order,
+    OrderTrigger, RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -2515,6 +2515,34 @@ impl MarginfiAccountFixture {
             .banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
+    }
+
+    /// This account's borrow order PDA for `bank`.
+    pub fn borrow_order_pda(&self, bank: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                marginfi_type_crate::constants::BORROW_ORDER_SEED.as_bytes(),
+                self.key.as_ref(),
+                bank.as_ref(),
+            ],
+            &marginfi::ID,
+        )
+        .0
+    }
+
+    pub async fn make_borrow_ix_with_authority<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: Pubkey,
+    ) -> Instruction {
+        self.make_bank_borrow_ix_internal(destination_account, bank, ui_amount, authority)
+            .await
+    }
+
+    pub async fn load_borrow_order(&self, order: Pubkey) -> BorrowOrder {
+        load_and_deserialize::<BorrowOrder>(self.ctx.clone(), &order).await
     }
 
     pub async fn load_order(&self, order: Pubkey) -> Order {

@@ -51,6 +51,7 @@ import {
   deriveBankWithSeed,
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
+  deriveRebalanceFeePool,
   deriveSpotMarketPDA,
 } from "../../utils/pdas";
 import { USER_ACCOUNT } from "../../utils/mocks";
@@ -208,16 +209,6 @@ const lastSeqOf = async (
   program: Program<Marginfi>,
   marginfiAccount: PublicKey,
 ): Promise<bigint> => (await nextSeqOf(program, marginfiAccount)) - 1n;
-
-const REBALANCE_FEE_POOL_SEED = "rebalance_fee_pool";
-const deriveRebalanceFeePool = (
-  programId: PublicKey,
-  marginfiAccount: PublicKey,
-) =>
-  PublicKey.findProgramAddressSync(
-    [Buffer.from(REBALANCE_FEE_POOL_SEED), marginfiAccount.toBuffer()],
-    programId,
-  );
 
 /** A declared N->N move from referenced-bank `srcIndex` to `dstIndex`, of `value` USD (== UI USDC at
  * the $1 test oracle). */

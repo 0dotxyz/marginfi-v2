@@ -8,10 +8,13 @@ import {
 import { Marginfi } from "../../target/types/marginfi";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
+  deriveBorrowOrderRecordPda,
+  deriveBorrowOrderPda,
   deriveExecuteOrderPda,
   deriveGlobalFeeState,
   deriveLiquidationRecord,
   deriveOrderPda,
+  deriveRebalanceFeePool,
 } from "./pdas";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { createHash } from "crypto";
@@ -908,6 +911,226 @@ export const placeInterestOrderIx = async (
       feeState,
       globalFeeWallet,
     })
+    .instruction();
+};
+
+export type PlaceBorrowOrderArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  feePayer: PublicKey;
+  bank: PublicKey;
+  amount: BN;
+  openBelowApr: number;
+  /** Repay from the destination bank once the realized rate rises over this. Omit to open only. */
+  closeAboveApr?: number | null;
+  cooldownSeconds?: number | null;
+  windowSeconds?: number | null;
+  /** Lamports paid to the keeper from the account's fee pool per open and per close. */
+  keeperTip?: BN | null;
+  /** A same-mint native bank the borrowed funds are deposited into. Omit for the wallet. */
+  destinationBank?: PublicKey | null;
+  feeState?: PublicKey;
+  globalFeeWallet?: PublicKey;
+};
+
+export const placeBorrowOrderIx = async (
+  program: Program<Marginfi>,
+  args: PlaceBorrowOrderArgs,
+) => {
+  const [order] = deriveBorrowOrderPda(
+    program.programId,
+    args.marginfiAccount,
+    args.bank,
+  );
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const globalFeeWallet =
+    args.globalFeeWallet ??
+    (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+  return program.methods
+    .marginfiAccountPlaceBorrowOrder(
+      args.amount,
+      args.openBelowApr,
+      args.closeAboveApr ?? null,
+      args.cooldownSeconds ?? null,
+      args.windowSeconds ?? null,
+      args.keeperTip ?? null,
+    )
+    .accounts({
+      group: args.group,
+      marginfiAccount: args.marginfiAccount,
+      authority: args.authority,
+      bank: args.bank,
+      destinationBank: args.destinationBank ?? null,
+      borrowOrder: order,
+      feeState,
+      globalFeeWallet,
+      feePayer: args.feePayer,
+    })
+    .instruction();
+};
+
+export type UpdateBorrowOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  order: PublicKey;
+  amount?: BN | null;
+  openBelowApr?: number | null;
+  /** Zero removes the close side. */
+  closeAboveApr?: number | null;
+  cooldownSeconds?: number | null;
+  windowSeconds?: number | null;
+  keeperTip?: BN | null;
+};
+
+export const updateBorrowOrderIx = (
+  program: Program<Marginfi>,
+  args: UpdateBorrowOrderArgs,
+) => {
+  return program.methods
+    .marginfiAccountUpdateBorrowOrder(
+      args.amount ?? null,
+      args.openBelowApr ?? null,
+      args.closeAboveApr ?? null,
+      args.cooldownSeconds ?? null,
+      args.windowSeconds ?? null,
+      args.keeperTip ?? null,
+    )
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      authority: args.authority,
+      borrowOrder: args.order,
+    })
+    .instruction();
+};
+
+export type CancelBorrowOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  order: PublicKey;
+  feeRecipient: PublicKey;
+};
+
+export const cancelBorrowOrderIx = (
+  program: Program<Marginfi>,
+  args: CancelBorrowOrderArgs,
+) => {
+  return program.methods
+    .marginfiAccountCancelBorrowOrder()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      authority: args.authority,
+      borrowOrder: args.order,
+      feeRecipient: args.feeRecipient,
+    })
+    .instruction();
+};
+
+export type StartBorrowOrderFillArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  order: PublicKey;
+  bank: PublicKey;
+  executor: PublicKey;
+  feePayer: PublicKey;
+};
+
+const startBorrowOrderFillAccounts = (
+  program: Program<Marginfi>,
+  args: StartBorrowOrderFillArgs,
+) => {
+  const [record] = deriveBorrowOrderRecordPda(program.programId, args.order);
+  return {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    borrowOrder: args.order,
+    bank: args.bank,
+    executor: args.executor,
+    borrowOrderRecord: record,
+    feePayer: args.feePayer,
+    instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+  };
+};
+
+/** The legs carry the amounts: an open borrows what fits under the level, a close repays all the
+ * destination can cover, up to the order's debt. */
+export const startBorrowOrderOpenIx = (
+  program: Program<Marginfi>,
+  args: StartBorrowOrderFillArgs,
+) => {
+  return program.methods
+    .marginfiAccountStartBorrowOrderOpen()
+    .accounts(startBorrowOrderFillAccounts(program, args))
+    .instruction();
+};
+
+export const startBorrowOrderCloseIx = (
+  program: Program<Marginfi>,
+  args: StartBorrowOrderFillArgs,
+) => {
+  return program.methods
+    .marginfiAccountStartBorrowOrderClose()
+    .accounts(startBorrowOrderFillAccounts(program, args))
+    .instruction();
+};
+
+export type EndBorrowOrderFillArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  order: PublicKey;
+  bank: PublicKey;
+  /** The order's destination bank; null for a wallet order's open. */
+  destinationBank?: PublicKey | null;
+  executor: PublicKey;
+  /** The post-fill health observation set: [bank, oracle...] per balance the account will hold. */
+  remaining: PublicKey[];
+};
+
+const endBorrowOrderFillAccounts = (
+  program: Program<Marginfi>,
+  args: EndBorrowOrderFillArgs,
+) => {
+  const [record] = deriveBorrowOrderRecordPda(program.programId, args.order);
+  const [feePool] = deriveRebalanceFeePool(
+    program.programId,
+    args.marginfiAccount,
+  );
+  return {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    borrowOrder: args.order,
+    bank: args.bank,
+    destinationBank: args.destinationBank ?? null,
+    executor: args.executor,
+    borrowOrderRecord: record,
+    feePool,
+  };
+};
+
+const endBorrowOrderFillRemaining = (args: EndBorrowOrderFillArgs) =>
+  args.remaining.map(
+    (pubkey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false }),
+  );
+
+export const endBorrowOrderOpenIx = (
+  program: Program<Marginfi>,
+  args: EndBorrowOrderFillArgs,
+) => {
+  return program.methods
+    .marginfiAccountEndBorrowOrderOpen()
+    .accounts(endBorrowOrderFillAccounts(program, args))
+    .remainingAccounts(endBorrowOrderFillRemaining(args))
+    .instruction();
+};
+
+export const endBorrowOrderCloseIx = (
+  program: Program<Marginfi>,
+  args: EndBorrowOrderFillArgs & { destinationBank: PublicKey },
+) => {
+  return program.methods
+    .marginfiAccountEndBorrowOrderClose()
+    .accounts(endBorrowOrderFillAccounts(program, args))
+    .remainingAccounts(endBorrowOrderFillRemaining(args))
     .instruction();
 };
 
