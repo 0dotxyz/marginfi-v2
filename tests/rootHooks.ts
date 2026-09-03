@@ -502,6 +502,11 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_staked_backfill_bank.json"),
     loadJsonFixture("tests/fixtures/mainnet_staked_backfill_vote_blank.json"),
     loadJsonFixture("tests/fixtures/kamino_global_config.json"),
+    loadJsonFixture("tests/fixtures/marinade_msol_state.json"),
+    loadJsonFixture("tests/fixtures/bsol_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/sanctum_spl_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/jupsol_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/exponent_pt_vault.json"),
   ];
 }
 

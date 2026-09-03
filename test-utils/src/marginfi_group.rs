@@ -286,10 +286,7 @@ impl MarginfiGroupFixture {
             let price: I80F48 = fixed_price.unwrap();
             println!("mint: {:?} price {:?}", bank_mint, price);
 
-            self.make_lending_pool_set_fixed_oracle_price_ix(
-                &bank_fixture,
-                fixed_price.unwrap().into(),
-            )
+            self.make_lending_pool_set_oracle_price_ix(&bank_fixture, fixed_price.unwrap().into())
         } else {
             self.make_lending_pool_configure_bank_oracle_ix(
                 &bank_fixture,
@@ -456,12 +453,12 @@ impl MarginfiGroupFixture {
         }
     }
 
-    pub fn make_lending_pool_set_fixed_oracle_price_ix(
+    pub fn make_lending_pool_set_oracle_price_ix(
         &self,
         bank: &BankFixture,
         price: WrappedI80F48,
     ) -> Instruction {
-        let accounts = marginfi::accounts::LendingPoolSetFixedOraclePrice {
+        let accounts = marginfi::accounts::LendingPoolSetOraclePrice {
             group: self.key,
             admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
@@ -471,7 +468,11 @@ impl MarginfiGroupFixture {
         Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: LendingPoolSetFixedOraclePrice { price }.data(),
+            data: LendingPoolSetOraclePrice {
+                price,
+                setup: OracleSetup::Fixed as u8,
+            }
+            .data(),
         }
     }
 

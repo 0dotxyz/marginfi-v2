@@ -3,6 +3,7 @@ use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
+use fixed::types::I80F48;
 use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
@@ -25,8 +26,10 @@ pub fn lending_pool_configure_bank_oracle(
                 | OracleSetup::FixedKamino
                 | OracleSetup::FixedDrift
                 | OracleSetup::FixedJuplend
+                | OracleSetup::PTPyth
+                | OracleSetup::PTFixed
         ) {
-            return err!(MarginfiError::UseSetFixedOraclePrice);
+            return err!(MarginfiError::UseSetOraclePrice);
         }
         check!(
             !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
@@ -38,6 +41,31 @@ pub fn lending_pool_configure_bank_oracle(
 
         bank.config.oracle_setup = setup_type;
         bank.config.oracle_keys[0] = oracle;
+        bank.config.fixed_price = I80F48::ZERO.into();
+
+        // mSOL / LST setups carry multiplier oracle key (Marinade State / SPL StakePool) beyond the primary feed, populated here from
+        // remaining_accounts (validated immediately below):
+        match setup_type {
+            OracleSetup::PythMSOL | OracleSetup::PythLST => {
+                require!(
+                    ctx.remaining_accounts.len() == 2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                bank.config.oracle_keys[1] = ctx.remaining_accounts[1].key();
+            }
+            OracleSetup::KaminoMSOL
+            | OracleSetup::JuplendMSOL
+            | OracleSetup::KaminoLST
+            | OracleSetup::JuplendLST => {
+                require!(
+                    ctx.remaining_accounts.len() == 3,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                // Note: integration oracle is not set here to ensure it's only assigned on the bank creation.
+                bank.config.oracle_keys[2] = ctx.remaining_accounts[2].key();
+            }
+            _ => {}
+        }
 
         msg!(
             "setting oracle to type: {:?} key: {:?}",
@@ -46,7 +74,7 @@ pub fn lending_pool_configure_bank_oracle(
         );
 
         bank.config
-            .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+            .validate_oracle_setup(bank.mint, ctx.remaining_accounts, None, None, None)?;
 
         emit!(LendingPoolBankConfigureOracleEvent {
             header: GroupEventHeader {

@@ -207,7 +207,7 @@ describe("d15: Fixed Drift price bank", () => {
     }
   });
 
-  it("(admin) configure_bank_oracle rejects FixedDrift setup - use set_fixed_oracle_price", async () => {
+  it("(admin) configure_bank_oracle rejects FixedDrift setup - use set_oracle_price", async () => {
     const tx = new Transaction().add(
       await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
         bank: fixedDriftBank,
@@ -221,7 +221,7 @@ describe("d15: Fixed Drift price bank", () => {
       [groupAdmin.wallet],
       true,
     );
-    // UseSetFixedOraclePrice
+    // UseSetOraclePrice
     assertBankrunTxFailed(result, 6132);
   });
 

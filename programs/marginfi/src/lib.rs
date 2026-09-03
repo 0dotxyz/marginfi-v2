@@ -201,11 +201,12 @@ pub mod marginfi {
     }
 
     /// (admin only)
-    pub fn lending_pool_set_fixed_oracle_price(
-        ctx: Context<LendingPoolSetFixedOraclePrice>,
+    pub fn lending_pool_set_oracle_price(
+        ctx: Context<LendingPoolSetOraclePrice>,
         price: WrappedI80F48,
+        setup: u8,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+        marginfi_group::lending_pool_set_oracle_price(ctx, price, setup)
     }
 
     /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.

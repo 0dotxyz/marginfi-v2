@@ -13,6 +13,7 @@ import {
   EmodeEntry,
   I80F48_ZERO,
   MAX_EMODE_ENTRIES,
+  ORACLE_SETUP_FIXED,
   SINGLE_POOL_PROGRAM_ID,
   StakedSettingsConfig,
   StakedSettingsEdit,
@@ -342,24 +343,25 @@ export type ConfigureBankOracleArgs = {
   bank: PublicKey;
   type: number;
   oracle: PublicKey;
+  // Extra oracle accounts appended after the primary feed, e.g. the Marinade State / SPL StakePool
+  // for the mSOL/LST setups. Omit for single-oracle setups.
+  remaining?: PublicKey[];
 };
 
 export const configureBankOracle = (
   program: Program<Marginfi>,
   args: ConfigureBankOracleArgs,
 ) => {
-  const oracleMeta: AccountMeta = {
-    pubkey: args.oracle,
-    isSigner: false,
-    isWritable: false,
-  };
+  const metas: AccountMeta[] = [args.oracle, ...(args.remaining ?? [])].map(
+    (pubkey) => ({ pubkey, isSigner: false, isWritable: false }),
+  );
 
   const ix = program.methods
     .lendingPoolConfigureBankOracle(args.type, args.oracle)
     .accounts({
       bank: args.bank,
     })
-    .remainingAccounts([oracleMeta])
+    .remainingAccounts(metas)
     .instruction();
   return ix;
 };
@@ -1078,6 +1080,7 @@ export const initSameAssetEmodeRegistry = (
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
+  setup?: number;
   remaining?: PublicKey[];
 };
 
@@ -1090,7 +1093,10 @@ export const setFixedPrice = (
   });
 
   const ix = program.methods
-    .lendingPoolSetFixedOraclePrice(bigNumberToWrappedI80F48(args.price))
+    .lendingPoolSetOraclePrice(
+      bigNumberToWrappedI80F48(args.price),
+      args.setup ?? ORACLE_SETUP_FIXED,
+    )
     .accounts({
       // group: // implied from bank
       // admin: // implied from group
