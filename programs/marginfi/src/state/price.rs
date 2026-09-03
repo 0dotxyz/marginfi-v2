@@ -2805,6 +2805,27 @@ mod tests {
     }
 
     #[test]
+    fn pt_linear_multiplier_rejects_emergency_mode() {
+        let start_price = I80F48::from_num(0.5);
+        let at = Clock {
+            unix_timestamp: 1_500,
+            ..Clock::default()
+        };
+
+        // Healthy vault (ATH == last_seen) prices normally.
+        let mut healthy = fully_backed_vault(1_000, 1_000);
+        healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
+        assert!(!healthy.is_in_emergency_mode());
+        assert!(pt_linear_multiplier(&healthy, &at, start_price).is_ok());
+
+        // SY rate below its all-time high -> emergency mode -> refuse to price.
+        let mut depegged = fully_backed_vault(1_000, 1_000);
+        depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
+        assert!(depegged.is_in_emergency_mode());
+        assert!(pt_linear_multiplier(&depegged, &at, start_price).is_err());
+    }
+
+    #[test]
     fn exponent_vault_field_offsets_match_borsh_layout() {
         // Round-trip raw bytes to prove the mirrored fields land on the right struct offsets.
         let mut raw = [0u8; core::mem::size_of::<MinimalExponentVault>()];
@@ -2815,6 +2836,7 @@ mod tests {
         raw[256..260].copy_from_slice(&1_700_000_000u32.to_le_bytes());
         raw[260..264].copy_from_slice(&31_536_000u32.to_le_bytes());
         raw[329..337].copy_from_slice(&(2 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
+        raw[361..369].copy_from_slice(&(3 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
         raw[433..441].copy_from_slice(&500_000_000_000u64.to_le_bytes());
         raw[441..449].copy_from_slice(&1_000_000_000_000u64.to_le_bytes());
 
@@ -2826,6 +2848,8 @@ mod tests {
             parsed.last_seen_sy_exchange_rate_raw(),
             Some(2 * SY_EXCHANGE_RATE_PRECISION as u64)
         );
+        // all_time_high (3x) sits above last_seen (2x) at struct offset 361 -> emergency mode.
+        assert!(parsed.is_in_emergency_mode());
         assert_eq!(parsed.sy_for_pt(), 500_000_000_000);
         assert_eq!(parsed.pt_supply(), 1_000_000_000_000);
     }

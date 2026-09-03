@@ -756,6 +756,7 @@ impl MarginfiError {
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
                 | MarginfiError::ExponentVaultValidationFailed
+                | MarginfiError::MarinadeStateValidationFailed
                 // Lending protocol staleness errors - stale exchange rates mean unreliable prices
                 | MarginfiError::StakePoolStale // SPL / Sanctum stake pools
                 | MarginfiError::ReserveStale // Kamino

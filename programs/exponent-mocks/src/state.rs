@@ -28,7 +28,9 @@ pub struct MinimalExponentVault {
     /// Asset per SY, scaled by `SY_EXCHANGE_RATE_PRECISION`. Exponent stores it as a 256-bit
     /// integer, i.e. four u64 words, least significant first.
     pub last_seen_sy_exchange_rate: [u64; 4],
-    pub _padding_5: [u8; 32],
+    /// Highest `last_seen_sy_exchange_rate` ever recorded; `> last_seen` means the SY rate has
+    /// fallen from its peak (Exponent's "emergency mode").
+    pub all_time_high_sy_exchange_rate: [u64; 4],
     pub _padding_6: [u8; 32],
     pub _padding_7: [u8; 8],
     /// Total SY set aside to back PT holders.
@@ -71,5 +73,19 @@ impl MinimalExponentVault {
     pub fn last_seen_sy_exchange_rate_raw(&self) -> Option<u64> {
         let words = self.last_seen_sy_exchange_rate;
         (words[1] == 0 && words[2] == 0 && words[3] == 0).then_some(words[0])
+    }
+
+    /// True when the current SY rate sits below its all-time high, i.e. the underlying has depegged
+    /// from its peak. Compares the two 256-bit rates most-significant word first.
+    #[inline]
+    pub fn is_in_emergency_mode(&self) -> bool {
+        let ath = self.all_time_high_sy_exchange_rate;
+        let last = self.last_seen_sy_exchange_rate;
+        for i in (0..4).rev() {
+            if ath[i] != last[i] {
+                return ath[i] > last[i];
+            }
+        }
+        false
     }
 }
