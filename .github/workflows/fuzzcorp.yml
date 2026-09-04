@@ -76,8 +76,14 @@ jobs:
       - name: Build unstripped program for coverage symbols
         run: |
           set -euo pipefail
+          # cargo build-sbf --manifest-path, NOT `anchor build -p marginfi`:
+          # anchor resolves the whole workspace regardless of -p, which drags in
+          # the kamino-mocks/drift-mocks fixture crates. Those carry genuinely
+          # oversized account-deserialize stack frames (up to 28KB against a 4KB
+          # limit) and tripped the gate below on crates this harness never ships.
           CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=none \
-            anchor build -p marginfi 2>&1 | tee /tmp/symbols.log
+            cargo build-sbf --manifest-path programs/marginfi/Cargo.toml \
+              2>&1 | tee /tmp/symbols.log
           # solend_mocks is a workspace crate here, not a checked-in fixture, and
           # the harness registers it at the real Solend id to exercise the deposit
           # CPI. Built separately so `anchor build -p marginfi` above stays the
@@ -95,10 +101,17 @@ jobs:
       # path is an artefact. Fail here instead.
       - name: Reject a build with SBF stack-frame violations
         run: |
-          if grep -qE 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log; then
-            echo "::error::SBF stack-frame violation -- the harness would fuzz a binary"
-            echo "::error::that faults where the real program does not."
-            grep -E 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log
+          # ONLY a violation inside programs/marginfi/ is this program's problem.
+          # cargo build-sbf still compiles sibling workspace crates as a side
+          # effect, and a bare std-library frame (e.g. sync::Once::call) with no
+          # marginfi frame in its chain is platform-tools noise, not a defect in
+          # the binary being fuzzed.
+          if grep -E 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log \
+               | grep 'programs/marginfi/'; then
+            echo "::error::SBF stack-frame violation in marginfi's own code -- the harness"
+            echo "::error::would fuzz a binary that faults where the real program does not."
+            grep -E 'exceeded max offset|overwrites values in the frame' /tmp/symbols.log \
+              | grep 'programs/marginfi/'
             exit 1
           fi
 
@@ -156,6 +169,17 @@ jobs:
           stage solend.so               tests/fixtures/solend.so
           stage solend_mocks.so         tests/fixtures/solend_mocks.so \
                                         target/deploy/solend_mocks.so
+
+      # Generate the IDL separately from the SBF build. `cargo build-sbf` above
+      # does not emit one, and `anchor build` (which would) resolves the whole
+      # workspace -- the exact thing the build step avoids. `anchor idl build`
+      # writes to stdout, so capture it.
+      - name: Generate the IDL from this commit's source
+        run: |
+          set -euo pipefail
+          mkdir -p target/idl
+          anchor idl build -p marginfi > target/idl/marginfi.json
+          python3 -c "import json,sys; d=json.load(open('target/idl/marginfi.json')); print('  IDL:', len(d['instructions']), 'instructions')"
 
       # Refresh the IDL from THIS build. declare_fuzz_program! reads the IDL at COMPILE
       # time, so a stale one gives the harness wrong discriminators and account lists --

@@ -95,17 +95,18 @@ cp -R "$REPO/programs/marginfi/src/." "$OUT/srcs/"
 SYMBOLS="$HERE/programs/marginfi_symbols.so"
 COVERAGE_PARAMS=""
 if [ -f "$SYMBOLS" ] && scout_has_dwarf "$SYMBOLS"; then
-  DD=""
-  command -v llvm-dwarfdump >/dev/null 2>&1 && DD=llvm-dwarfdump
-  [ -z "$DD" ] && command -v dwarfdump >/dev/null 2>&1 && DD=dwarfdump
-  COMP_DIR=""
-  if [ -n "$DD" ]; then
-    COMP_DIR="$($DD --debug-info "$SYMBOLS" 2>/dev/null \
-      | grep -o 'DW_AT_comp_dir[[:space:]]*("[^"]*")' \
-      | sed 's/.*("\(.*\)")/\1/' \
-      | grep -vE '\.cargo|/rustc/|toolchain|bpf-tools' | head -1 || true)"
+  # Derive the prefix from the LINE TABLE, not .debug_info. These artifacts
+  # frequently carry NO DW_AT_comp_dir at all, in which case "comp_dir + known
+  # suffix" silently degrades to a bare guess that matches nothing and renders
+  # lines_found: 0 while every CI step stays green. derive-sources-prefix.sh
+  # reads include_directories[] and exits non-zero if nothing matches, so a
+  # broken prefix fails the build here instead of failing silently on the server.
+  if ! SRC_ORIG="$("$HERE/derive-sources-prefix.sh" "$SYMBOLS" 'programs/marginfi/src/')"; then
+    echo "::error::could not derive a SourcesOriginalPath that matches the coverage" >&2
+    echo "::error::profile -- the bundle would render EMPTY source coverage." >&2
+    exit 1
   fi
-  SRC_ORIG="${COMP_DIR:+${COMP_DIR%/}/}programs/marginfi/src/"
+  COMP_DIR="(from line table)"
   COVERAGE_PARAMS=$'\n          "SymbolsPathInBundle":   "harness/programs/marginfi_symbols.so",\n          "SourcesPathInBundle":   "srcs",\n          "SourcesOriginalPath":   "'"$SRC_ORIG"$'",'
   echo "coverage: comp_dir=${COMP_DIR:-<none>}  SourcesOriginalPath=${SRC_ORIG}"
 else
