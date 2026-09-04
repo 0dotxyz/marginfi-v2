@@ -173,6 +173,7 @@ impl BorrowOrderRecord {
 mod tests {
     use super::*;
     use crate::types::milli_to_u32;
+    use bytemuck::Zeroable;
 
     fn order(open_bps: u32, close_bps: Option<u32>) -> BorrowOrder {
         let milli = |bps: u32| milli_to_u32(I80F48::from_num(bps) / I80F48::from_num(10_000));
