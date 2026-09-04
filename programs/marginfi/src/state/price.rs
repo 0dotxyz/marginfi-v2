@@ -1361,8 +1361,6 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::Scope => {
-                // The health path sizes each bank's account group from the asset tag, and only
-                // DEFAULT/SOL yield the single oracle account the Scope adapter reads.
                 check!(
                     bank_config.asset_tag == ASSET_TAG_DEFAULT
                         || bank_config.asset_tag == ASSET_TAG_SOL,
