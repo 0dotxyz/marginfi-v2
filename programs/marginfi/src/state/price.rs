@@ -1361,6 +1361,13 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::Scope => {
+                // The health path sizes each bank's account group from the asset tag, and only
+                // DEFAULT/SOL yield the single oracle account the Scope adapter reads.
+                check!(
+                    bank_config.asset_tag == ASSET_TAG_DEFAULT
+                        || bank_config.asset_tag == ASSET_TAG_SOL,
+                    MarginfiError::InvalidOracleSetup
+                );
                 check!(
                     oracle_ais.len() == 1,
                     MarginfiError::WrongNumberOfOracleAccounts
@@ -1927,7 +1934,14 @@ impl ScopePriceFeed {
     ) -> MarginfiResult<Self> {
         let feed = Self::read_entry(ai, entry_index)?;
 
-        let age = current_timestamp.saturating_sub(feed.last_updated_timestamp as i64);
+        let last_updated = i64::try_from(feed.last_updated_timestamp)
+            .map_err(|_| MarginfiError::ScopeInvalidEntry)?;
+        check!(
+            last_updated <= current_timestamp,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let age = current_timestamp.saturating_sub(last_updated);
         check!(age <= max_age as i64, MarginfiError::ScopeStalePrice);
 
         Ok(feed)
@@ -3238,6 +3252,83 @@ mod tests {
             ScopePriceFeed::load_checked(&ai, 1061, 60, 42).unwrap_err(),
             MarginfiError::ScopeStalePrice.into()
         );
+    }
+
+    #[test]
+    fn scope_rejects_future_timestamps() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        // Published at t=1000, read at t=999: a negative age must not count as fresh.
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 999, 60, 42).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+        // Same second is fine.
+        assert!(ScopePriceFeed::load_checked(&ai, 1000, 60, 42).is_ok());
+
+        // A timestamp that does not fit i64 would wrap negative under a plain cast.
+        let mut data = scope_account_data(42, 10_344_510_800, 8, u64::MAX);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 1000, 60, 42).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+    }
+
+    #[test]
+    fn scope_config_requires_default_or_sol_asset_tag() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let mint = Pubkey::new_unique();
+
+        let mut config = BankConfig {
+            oracle_setup: OracleSetup::Scope,
+            scope_entry_index: 42,
+            ..BankConfig::default()
+        };
+        config.oracle_keys[0] = key;
+
+        for tag in [ASSET_TAG_DEFAULT, ASSET_TAG_SOL] {
+            config.asset_tag = tag;
+            OraclePriceFeedAdapter::validate_bank_config(
+                &config,
+                mint,
+                std::slice::from_ref(&ai),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+
+        // Integration and staked banks carry more oracle accounts than the Scope adapter
+        // accepts, so configuring Scope on them would brick the bank's health checks.
+        for tag in [
+            ASSET_TAG_KAMINO,
+            ASSET_TAG_DRIFT,
+            ASSET_TAG_SOLEND,
+            ASSET_TAG_JUPLEND,
+            ASSET_TAG_STAKED,
+        ] {
+            config.asset_tag = tag;
+            assert_eq!(
+                OraclePriceFeedAdapter::validate_bank_config(
+                    &config,
+                    mint,
+                    std::slice::from_ref(&ai),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap_err(),
+                MarginfiError::InvalidOracleSetup.into()
+            );
+        }
     }
 
     #[test]

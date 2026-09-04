@@ -459,7 +459,7 @@ pub enum MarginfiError {
     // ************** BEGIN SCOPE ERRORS (starting at 6700)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
     ScopeInvalidAccount = 700, // 6700
-    #[msg("Scope entry index is out of range or the entry has never been refreshed")]
+    #[msg("Scope entry is out of range, never refreshed, or dated in the future")]
     ScopeInvalidEntry, // 6701
     #[msg("Scope price is stale")]
     ScopeStalePrice, // 6702
