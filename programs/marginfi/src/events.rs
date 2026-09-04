@@ -290,6 +290,73 @@ pub struct MarginfiAccountPlaceOrderEvent {
     pub stop_loss: WrappedI80F48,
     pub take_profit: WrappedI80F48,
     pub tags: [u16; ORDER_ACTIVE_TAGS],
+    /// Zero when the order carries no interest trigger.
+    pub interest_window_seconds: u32,
+    pub interest_exit_budget_seconds: u32,
+    pub interest_min_negative_apr: u32,
+}
+
+#[event]
+pub struct BorrowOrderPlacedEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub bank: Pubkey,
+    pub amount: u64,
+    pub open_below_apr: u32,
+    pub close_above_apr: u32,
+    pub window_seconds: u32,
+    pub cooldown_seconds: u32,
+    pub keeper_tip: u64,
+    /// Default when the funds go to the authority's wallet.
+    pub destination_bank: Pubkey,
+}
+
+#[event]
+pub struct BorrowOrderUpdatedEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub amount: u64,
+    pub open_below_apr: u32,
+    pub close_above_apr: u32,
+    pub window_seconds: u32,
+    pub cooldown_seconds: u32,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct BorrowOrderFilledEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub bank: Pubkey,
+    pub executor: Pubkey,
+    /// This fill's borrowed amount, and the order's cumulative total after it.
+    pub amount: u64,
+    pub filled: u64,
+    /// Still to borrow after this fill. Zero means the order is fully filled.
+    pub remaining: u64,
+    /// The realized borrow APR that opened the fill, and the spot rate the fill left behind.
+    pub realized_apr: WrappedI80F48,
+    pub spot_apr_after: WrappedI80F48,
+}
+
+#[event]
+pub struct BorrowOrderClosedEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub bank: Pubkey,
+    pub executor: Pubkey,
+    /// What this close paid (principal repaid plus premium settled), and the principal the order
+    /// still holds after it.
+    pub amount: u64,
+    pub filled: u64,
+    pub realized_apr: WrappedI80F48,
+}
+
+#[event]
+pub struct BorrowOrderCancelledEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub filled: u64,
 }
 
 #[event]

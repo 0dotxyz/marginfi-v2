@@ -52,8 +52,7 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
-        price::OraclePriceFeedAdapter,
-        rate::{self, rate_at, rate_of, RewardsAccounts},
+        rate::{self, rate_at, rate_of, venue_multiplier, yield_index_of, RewardsAccounts},
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
     utils::is_integration_asset_tag,
@@ -77,29 +76,11 @@ use marginfi_type_crate::{
         REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        RebalanceMove, RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, RebalanceMove,
+        RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
         ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
-
-/// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
-/// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
-/// accounts. The spot price itself is discarded, but reading it applies the bank's staleness and
-/// confidence gates, so every rebalance step blocks while the oracle is untrustworthy.
-fn venue_multiplier<'info>(
-    bank: &Bank,
-    oracle_ais: &'info [AccountInfo<'info>],
-    clock: &Clock,
-) -> MarginfiResult<I80F48> {
-    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
-        bank,
-        oracle_ais,
-        clock,
-        OraclePriceType::RealTime,
-    )?;
-    Ok(priced.price_multiplier)
-}
 
 /// Underlying-token amount (whole-token UI units) of a raw native token amount in `bank`:
 /// `native × venue_multiplier`, EXCLUDING the oracle price. Every referenced bank holds the SAME mint,
@@ -108,19 +89,6 @@ fn venue_multiplier<'info>(
 /// disagree, because price never enters the count. The oracle price is used only by the health check.
 fn underlying_of(amount_native: I80F48, bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     calc_value(amount_native, multiplier, bank.get_balance_decimals(), None)
-}
-
-/// Monotonic per-share yield index for `bank`: `asset_share_value` times the venue exchange-rate
-/// multiplier, excluding the oracle spot price. Native banks accrue via `asset_share_value`
-/// (multiplier 1); integration banks accrue via the venue multiplier (Kamino cToken rate, Drift
-/// cumulative interest, JupLend exchange price), all monotonic. The growth of this index over a
-/// window is the realized supply yield a depositor earned, which `settle_rebalance_tip` compares
-/// across banks. Because it is an accrued integral, not a spot rate, a single-tx rate spike cannot
-/// move it.
-fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
-    Ok(I80F48::from(bank.asset_share_value)
-        .checked_mul(multiplier)
-        .ok_or_else(math_error!())?)
 }
 
 /// Tokens a rebalance may still deliver into `bank`, in whole-token UI units (the units of
@@ -463,7 +431,7 @@ pub struct UpdateRebalanceOrder<'info> {
 
 /// Transfer `amount` lamports out of a marginfi account's fee-pool PDA, which signs via its seeds.
 /// No-op for a zero amount.
-fn pay_from_fee_pool<'info>(
+pub(crate) fn pay_from_fee_pool<'info>(
     fee_pool: &SystemAccount<'info>,
     to: &AccountInfo<'info>,
     system_program: &Program<'info, System>,

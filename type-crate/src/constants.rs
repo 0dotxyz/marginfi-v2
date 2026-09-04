@@ -1,3 +1,4 @@
+use crate::types::Bank;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 
@@ -26,6 +27,8 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 pub const REBALANCE_ORDER_SEED: &str = "rebalance_order";
 pub const REBALANCE_RECORD_SEED: &str = "rebalance_record";
 pub const REBALANCE_FEE_POOL_SEED: &str = "rebalance_fee_pool";
+pub const BORROW_ORDER_SEED: &str = "borrow_order";
+pub const BORROW_ORDER_RECORD_SEED: &str = "borrow_order_record";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -106,6 +109,62 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 /// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.
 pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
 pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
+
+/// Bytes held on a bank account beyond the current `Bank` struct, for fields added by later
+/// releases. Deliberately far smaller than the group's 8KB reserve: there are hundreds of banks
+/// and only one group, so every byte here is paid for hundreds of times over.
+pub const BANK_RESERVED_BYTES: usize = 1024;
+
+/// Byte length `lending_pool_resize_bank_account` grows a bank account to, discriminator included.
+///
+/// This is deliberately NOT `8 + Bank::LEN`. Banks are resized ahead of any struct growth so that
+/// growth needs no migration and causes no downtime: a program whose `Bank` is smaller than the
+/// account simply ignores the tail, whereas a program whose `Bank` is LARGER than the account
+/// fails every instruction that loads a bank. Growing the struct and resizing in one release would
+/// take the protocol down for as long as the migration takes.
+pub const BANK_ACCOUNT_LEN: usize = 8 + Bank::V1_LEN + BANK_RESERVED_BYTES;
+
+/// Default span an interest-trigger order measures its realized rates over. The rates are read as
+/// share-index growth across the span, so this is also how long a rate move must persist to count.
+pub const INTEREST_DEFAULT_WINDOW_SECONDS: u32 = 86_400; // 24 hours
+
+/// Shortest measurement span an order may configure, and so the floor on how briefly a rate can be
+/// pushed to trigger an exit.
+pub const INTEREST_MIN_WINDOW_SECONDS: u32 = 21_600; // 6 hours
+
+/// Longest measurement span an order may configure: the history a full bank reading ring is
+/// guaranteed to hold.
+pub const INTEREST_MAX_WINDOW_SECONDS: u32 = 172_800; // 48 hours
+
+/// Minimum age of a bank's newest rate reading before another is taken.
+pub const BANK_RATE_READING_SPACING_SECONDS: i64 = 10_800; // 3 hours
+
+/// Rate readings a bank keeps: the spacings in `INTEREST_MAX_WINDOW_SECONDS` plus one, the count at
+/// which a bank priced every spacing still holds a reading a full max window old.
+pub const BANK_RATE_READINGS: usize = 17;
+pub const _: () = assert!(
+    (BANK_RATE_READINGS as i64 - 1) * BANK_RATE_READING_SPACING_SECONDS
+        >= INTEREST_MAX_WINDOW_SECONDS as i64
+);
+
+/// Default seconds between fills on a borrow order, used when the user does not set one.
+pub const BORROW_ORDER_DEFAULT_COOLDOWN_SECONDS: u32 = 3_600; // 1 hour
+
+/// Native units a borrow-order fill's booked debt may differ from the authorized amount plus its
+/// origination fee: the share round-trip rounds by a unit either way.
+pub const BORROW_ORDER_FILL_DUST_ATOMS: u64 = 2;
+
+/// A borrow-order fill's granule, in basis points of the order's `amount`: an open may leave at most
+/// this much room under the level, and a close may stop this short of what the destination covers.
+pub const BORROW_ORDER_FILL_GRANULE_BPS: u64 = 100;
+
+/// Default span of carry loss an interest-trigger order will spend to exit: the realized unwind
+/// cost must not exceed what the position would lose to interest over this long.
+pub const INTEREST_DEFAULT_EXIT_BUDGET_SECONDS: u32 = 1_209_600; // 14 days
+
+/// Longest exit budget an interest-trigger order may configure. Bounds how far the allowance can
+/// widen before `MAX_ORDER_SLIPPAGE` is the only remaining bound.
+pub const INTEREST_MAX_EXIT_BUDGET_SECONDS: u32 = 31_536_000; // 1 year
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;
@@ -256,6 +315,8 @@ pub mod discriminators {
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
     pub const REBALANCE_ORDER: [u8; 8] = [51, 5, 186, 251, 144, 119, 75, 197];
     pub const REBALANCE_RECORD: [u8; 8] = [190, 69, 228, 114, 34, 217, 70, 102];
+    pub const BORROW_ORDER: [u8; 8] = [42, 155, 26, 16, 5, 172, 213, 173];
+    pub const BORROW_ORDER_RECORD: [u8; 8] = [66, 89, 121, 111, 193, 242, 142, 51];
     pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
     pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
 }
@@ -278,6 +339,11 @@ pub mod ix_discriminators {
     pub const START_REBALANCE: [u8; 8] = [251, 122, 91, 161, 219, 98, 5, 236];
     pub const END_REBALANCE: [u8; 8] = [47, 225, 163, 216, 213, 214, 225, 155];
     pub const LENDING_ACCOUNT_DEPOSIT: [u8; 8] = [171, 94, 235, 103, 82, 64, 212, 140];
+    pub const LENDING_ACCOUNT_BORROW: [u8; 8] = [4, 126, 116, 53, 48, 5, 212, 31];
+    pub const START_BORROW_ORDER_OPEN: [u8; 8] = [77, 122, 186, 1, 2, 151, 191, 109];
+    pub const END_BORROW_ORDER_OPEN: [u8; 8] = [244, 179, 157, 192, 17, 101, 171, 74];
+    pub const START_BORROW_ORDER_CLOSE: [u8; 8] = [129, 150, 75, 38, 92, 123, 16, 111];
+    pub const END_BORROW_ORDER_CLOSE: [u8; 8] = [212, 211, 35, 44, 132, 210, 151, 101];
     pub const KAMINO_DEPOSIT: [u8; 8] = [237, 8, 188, 187, 115, 99, 49, 85];
     pub const DRIFT_DEPOSIT: [u8; 8] = [252, 63, 250, 201, 98, 55, 130, 12];
     pub const JUPLEND_DEPOSIT: [u8; 8] = [114, 11, 218, 81, 183, 165, 143, 255];

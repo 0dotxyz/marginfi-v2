@@ -14,8 +14,8 @@ pub mod utils;
 use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
-    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
+    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, InterestTriggerConfig,
+    OrderTrigger, RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -353,6 +353,18 @@ pub mod marginfi {
         marginfi_account::place_order(ctx, bank_keys, trigger)
     }
 
+    /// (user) Place an order that also unwinds the pair when its carry turns negative. The rates
+    /// are measured from the banks' own reading history, so the order is live from placement.
+    /// * interest - the carry-exit policy; `None` fields take the `INTEREST_DEFAULT_*` constants
+    pub fn marginfi_account_place_interest_order(
+        ctx: Context<PlaceOrder>,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> MarginfiResult {
+        marginfi_account::place_interest_order(ctx, bank_keys, trigger, interest)
+    }
+
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
@@ -610,6 +622,110 @@ pub mod marginfi {
         marginfi_group::lending_pool_resize_group_account(ctx)
     }
 
+    /// (user) Place a persistent order to borrow `amount` from a bank while the rate it has
+    /// realized over `window_seconds` sits under `open_below_apr`. Fills what fits under the level
+    /// and stays open for the rest. Charges the flat order-init fee.
+    /// * close_above_apr - repay from the destination bank once the realized rate rises over this;
+    ///   omit or pass zero to open only.
+    /// * keeper_tip - lamports paid to the keeper from the account's fee pool per open and close.
+    /// * `destination_bank` account - a same-mint native bank the funds are deposited into; omit to
+    ///   send them to the authority's wallet.
+    pub fn marginfi_account_place_borrow_order(
+        ctx: Context<PlaceBorrowOrder>,
+        amount: u64,
+        open_below_apr: u32,
+        close_above_apr: Option<u32>,
+        cooldown_seconds: Option<u32>,
+        window_seconds: Option<u32>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::place_borrow_order(
+            ctx,
+            amount,
+            open_below_apr,
+            close_above_apr,
+            cooldown_seconds,
+            window_seconds,
+            keeper_tip,
+        )
+    }
+
+    /// (user) Modify a live borrow order in place; `None` fields are left unchanged.
+    pub fn marginfi_account_update_borrow_order(
+        ctx: Context<UpdateBorrowOrder>,
+        amount: Option<u64>,
+        open_below_apr: Option<u32>,
+        close_above_apr: Option<u32>,
+        cooldown_seconds: Option<u32>,
+        window_seconds: Option<u32>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::update_borrow_order(
+            ctx,
+            amount,
+            open_below_apr,
+            close_above_apr,
+            cooldown_seconds,
+            window_seconds,
+            keeper_tip,
+        )
+    }
+
+    /// (user) Cancel a borrow order, returning rent to `fee_recipient`. Any borrow it opened
+    /// stays on the account.
+    pub fn marginfi_account_cancel_borrow_order(ctx: Context<CancelBorrowOrder>) -> MarginfiResult {
+        marginfi_account::cancel_borrow_order(ctx)
+    }
+
+    /// (permissionless keeper) Begin a borrow-order open. Gates on the bank's realized rate, then
+    /// grants the keeper borrow authority for the rest of the transaction. The borrow leg takes
+    /// what fits under the level to within a granule. `end_borrow_order_open` must be last; CPI is
+    /// forbidden.
+    pub fn marginfi_account_start_borrow_order_open<'info>(
+        ctx: Context<'info, StartBorrowOrderFill<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::start_borrow_order_open(ctx)
+    }
+
+    /// (permissionless keeper) End a borrow-order open. Proves the borrow was at least a granule
+    /// and left the rate under the level with no more than a granule to spare (or exhausted the
+    /// order, the bank's liquidity or a bank limit), that a redeploying order deposited what was
+    /// borrowed, and that the account is still healthy.
+    pub fn marginfi_account_end_borrow_order_open<'info>(
+        ctx: Context<'info, EndBorrowOrderFill<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_borrow_order_open(ctx)
+    }
+
+    /// (permissionless keeper) Begin a borrow-order close. Gates on the bank's realized and
+    /// current rates sitting over the order's close level and on the order holding debt, then
+    /// grants the keeper withdraw and repay authority for the rest of the transaction. The legs
+    /// must repay all the destination bank can cover, up to the debt. `end_borrow_order_close`
+    /// must be last; CPI is forbidden.
+    pub fn marginfi_account_start_borrow_order_close<'info>(
+        ctx: Context<'info, StartBorrowOrderFill<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::start_borrow_order_close(ctx)
+    }
+
+    /// (permissionless keeper) End a borrow-order close. Proves the repay covered what the
+    /// destination could pay and stayed within what the order owes, that the destination withdraw
+    /// took no more than was paid, and that the account is still healthy.
+    pub fn marginfi_account_end_borrow_order_close<'info>(
+        ctx: Context<'info, EndBorrowOrderFill<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_borrow_order_close(ctx)
+    }
+
+    /// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`, adding reserve space for
+    /// fields later releases will claim; `payer` funds the added rent. Must be run across every
+    /// bank before a `Bank` struct that occupies the reserve is released.
+    pub fn lending_pool_resize_bank_account(
+        ctx: Context<LendingPoolResizeBankAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_bank_account(ctx)
+    }
+
     /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
     /// added rent.
     pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
@@ -746,7 +862,7 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
-    /// (Permissionless) Refresh the cached oracle price for a bank.
+    /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

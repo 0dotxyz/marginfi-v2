@@ -24,8 +24,9 @@ use marginfi_type_crate::{
         BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
         OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_BORROW_ORDER,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -81,35 +82,47 @@ pub trait MarginfiAccountImpl {
 
 /// Checks if a signer is authorized to perform actions on a marginfi account.
 ///
+/// Sandwich contexts a non-authority signer may act under, passed to [`is_signer_authorized`] as a
+/// mask. Opt-in per instruction, so a flag can never authorize one that did not consider it.
+pub const ALLOW_RECEIVERSHIP: u8 = 1 << 0;
+pub const ALLOW_ORDER_EXECUTION: u8 = 1 << 1;
+pub const ALLOW_REBALANCE: u8 = 1 << 2;
+pub const ALLOW_BORROW_ORDER: u8 = 1 << 3;
+
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
-/// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
-/// 3. If `allow_order_execution` is true and the account is in order execution → `true`
-/// 4. If the account is frozen → `true` only if signer is the group admin
-/// 5. Otherwise → `true` only if signer is the account authority
+/// 1. If `ALLOW_REBALANCE` is set and the account is in a rebalance → `true`
+/// 2. If `ALLOW_BORROW_ORDER` is set and the account is mid borrow-order fill → `true`
+/// 3. If `ALLOW_RECEIVERSHIP` is set and the (NOT signer's) account is in receivership → `true`
+/// 4. If `ALLOW_ORDER_EXECUTION` is set and the account is in order execution → `true`
+/// 5. If the account is frozen → `true` only if signer is the group admin
+/// 6. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
     group_admin: Pubkey,
     signer: Pubkey,
-    allow_receivership: bool,
-    allow_order_execution: bool,
-    allow_rebalance: bool,
+    allow: u8,
 ) -> bool {
     // Within a rebalance sandwich, any keeper may drive the withdraw/deposit legs between the user's
     // same-mint banks. Opt-in per caller (only the withdraw/deposit legs pass `true`) so the flag
     // cannot authorize unrelated instructions; bounded by the rebalance start/end value-conservation
     // checks and the exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
-    if allow_rebalance && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
+    if allow & ALLOW_REBALANCE != 0 && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
         return true;
     }
 
-    if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+    // Within a borrow-order sandwich, the keeper drives the borrow and the redeploy deposit.
+    // Bounded by the exclusive-ix allowlist and the fill checks in `end_borrow_order`.
+    if allow & ALLOW_BORROW_ORDER != 0 && marginfi_account.get_flag(ACCOUNT_IN_BORROW_ORDER) {
+        return true;
+    }
+
+    if allow & ALLOW_RECEIVERSHIP != 0 && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
         return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
 
-    if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
+    if allow & ALLOW_ORDER_EXECUTION != 0 && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
         return true;
     }
 
@@ -294,9 +307,14 @@ impl MarginfiAccountImpl for MarginfiAccount {
     }
 
     /// True while an outer instruction defers the account's health check to the end of the
-    /// transaction: receivership, order execution, and auto-rebalance.
+    /// transaction: receivership, order execution, auto-rebalance, and a borrow-order fill.
     fn defers_health_to_end_instruction(&self) -> bool {
-        self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
+        self.get_flag(
+            ACCOUNT_IN_RECEIVERSHIP
+                | ACCOUNT_IN_ORDER_EXECUTION
+                | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER,
+        )
     }
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
