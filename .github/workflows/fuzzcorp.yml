@@ -170,17 +170,6 @@ jobs:
           stage solend_mocks.so         tests/fixtures/solend_mocks.so \
                                         target/deploy/solend_mocks.so
 
-      # Generate the IDL separately from the SBF build. `cargo build-sbf` above
-      # does not emit one, and `anchor build` (which would) resolves the whole
-      # workspace -- the exact thing the build step avoids. `anchor idl build`
-      # writes to stdout, so capture it.
-      - name: Generate the IDL from this commit's source
-        run: |
-          set -euo pipefail
-          mkdir -p target/idl
-          anchor idl build -p marginfi > target/idl/marginfi.json
-          python3 -c "import json,sys; d=json.load(open('target/idl/marginfi.json')); print('  IDL:', len(d['instructions']), 'instructions')"
-
       # Refresh the IDL from THIS build. declare_fuzz_program! reads the IDL at COMPILE
       # time, so a stale one gives the harness wrong discriminators and account lists --
       # and the failure is not a mismatch error, it is setup() aborting the whole task.
