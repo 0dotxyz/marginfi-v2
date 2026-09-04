@@ -193,7 +193,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidAccount",
-      6700
+      6800
     );
     setFeed(feed, await freshFeed());
   });
@@ -207,7 +207,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidAccount",
-      6700
+      6800
     );
     setFeed(feed, await freshFeed());
   });
@@ -219,7 +219,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidAccount",
-      6700
+      6800
     );
     setFeed(feed, await freshFeed());
   });
@@ -250,7 +250,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeStalePrice",
-      6702
+      6802
     );
     setFeed(feed, await freshFeed());
   });
@@ -263,7 +263,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidEntry",
-      6701
+      6801
     );
     setFeed(feed, await freshFeed());
   });
@@ -342,7 +342,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeStalePrice",
-      6702
+      6802
     );
     setFeed(feed, await freshFeed());
   });
@@ -355,7 +355,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidEntry",
-      6701
+      6801
     );
     setFeed(feed, await freshFeed());
   });
@@ -367,7 +367,7 @@ describe("Scope oracle", () => {
         await pulse(scopeBank.publicKey);
       },
       "ScopeInvalidEntry",
-      6701
+      6801
     );
     setFeed(feed, await freshFeed());
   });
@@ -387,7 +387,7 @@ describe("Scope oracle", () => {
         );
       },
       "ScopeInvalidEntry",
-      6701
+      6801
     );
   });
 

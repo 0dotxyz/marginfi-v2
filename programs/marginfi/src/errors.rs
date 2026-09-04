@@ -456,15 +456,15 @@ pub enum MarginfiError {
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
 
-    // ************** BEGIN SCOPE ERRORS (starting at 6700)
+    // ************** BEGIN SCOPE ERRORS (starting at 6800)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
-    ScopeInvalidAccount = 700, // 6700
+    ScopeInvalidAccount = 800, // 6800
     #[msg("Scope entry is out of range, never refreshed, or dated in the future")]
-    ScopeInvalidEntry, // 6701
+    ScopeInvalidEntry, // 6801
     #[msg("Scope price is stale")]
-    ScopeStalePrice, // 6702
+    ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
-    UseConfigureBankOracleScope, // 6703
+    UseConfigureBankOracleScope, // 6803
                                  // **************END SCOPE ERRORS
 }
 
@@ -714,10 +714,10 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
-            6700 => MarginfiError::ScopeInvalidAccount,
-            6701 => MarginfiError::ScopeInvalidEntry,
-            6702 => MarginfiError::ScopeStalePrice,
-            6703 => MarginfiError::UseConfigureBankOracleScope,
+            6800 => MarginfiError::ScopeInvalidAccount,
+            6801 => MarginfiError::ScopeInvalidEntry,
+            6802 => MarginfiError::ScopeStalePrice,
+            6803 => MarginfiError::UseConfigureBankOracleScope,
 
             _ => MarginfiError::InternalLogicError,
         }
