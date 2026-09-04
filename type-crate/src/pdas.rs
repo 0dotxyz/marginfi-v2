@@ -13,6 +13,9 @@ pub const JUPLEND_REWARDS_PROGRAM_ID: Pubkey =
     pubkey!("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar");
 pub const SPL_SINGLE_POOL_PROGRAM_ID: Pubkey =
     pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
+/// Kamino's Scope oracle aggregator (mainnet). A Scope-priced bank reads one entry out of a
+/// feed's `OraclePrices` account owned by this program.
+pub const SCOPE_PROGRAM_ID: Pubkey = pubkey!("HFn8GnPADiny6XqUoWE8uRPPxb29ikn4yTuPa9MF2fWJ");
 
 /// Derive the SPL single-pool PDA chain from a validator vote account:
 /// `vote_account -> stake_pool -> (lst_mint, sol_pool, pool_onramp)`.

@@ -99,7 +99,7 @@ pub fn lending_pool_add_bank_drift(
 
     bank.config.validate()?;
     bank.config
-        .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+        .validate_oracle_setup(bank_mint.key(), ctx.remaining_accounts, None, None, None)?;
 
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
