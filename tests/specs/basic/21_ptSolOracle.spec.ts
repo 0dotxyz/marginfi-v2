@@ -54,11 +54,13 @@ const makeVault = (
   opts: {
     mintPt?: PublicKey;
     syRate?: bigint;
+    allTimeHigh?: bigint;
     syForPt?: bigint;
     ptSupply?: bigint;
   } = {},
 ) => {
   const syRate = opts.syRate ?? 2n * SY_RATE_PRECISION;
+  const allTimeHigh = opts.allTimeHigh ?? syRate; // healthy vault: ATH == current rate
   const ptSupply = opts.ptSupply ?? 1_000_000_000_000n;
   const syForPt = opts.syForPt ?? (ptSupply * SY_RATE_PRECISION) / syRate;
 
@@ -68,6 +70,7 @@ const makeVault = (
   data.writeUInt32LE(startTs, 264);
   data.writeUInt32LE(duration, 268);
   data.writeBigUInt64LE(syRate, 337);
+  data.writeBigUInt64LE(allTimeHigh, 369);
   data.writeBigUInt64LE(syForPt, 441);
   data.writeBigUInt64LE(ptSupply, 449);
   return data;
@@ -259,6 +262,27 @@ describe("PT-SOL internal oracle setup", () => {
     const progress = (at - startTs) / duration;
     const expectedMult = startPrice + (1 - startPrice) * progress;
     assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * expectedMult);
+  });
+
+  it("refuses to price a vault in emergency mode (SY below its all-time high)", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(
+      vault,
+      makeVault(now - 5_000, 10_000, {
+        syRate: 2n * SY_RATE_PRECISION,
+        allTimeHigh: 3n * SY_RATE_PRECISION, // rate fell from its peak -> emergency mode
+      }),
+    );
+    await setPtsol(0.9, vault);
+
+    await expectFailedTxWithError(
+      async () => {
+        await pulseCache([vault]);
+      },
+      "ExponentVaultValidationFailed",
+      6137,
+    );
   });
 
   // --- PT-hyUSD: same Exponent lerp, but no base feed (hyUSD ~= $1, so the rate is the price) ---

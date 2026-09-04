@@ -31,6 +31,11 @@ pub fn lending_pool_configure_bank_oracle(
         ) {
             return err!(MarginfiError::UseSetOraclePrice);
         }
+        // Scope banks must go through `lending_pool_configure_bank_oracle_scope`, which takes
+        // the entry index; this instruction has no way to provide it.
+        if matches!(setup_type, OracleSetup::Scope) {
+            return err!(MarginfiError::UseConfigureBankOracleScope);
+        }
         check!(
             !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
                 || (bank.config.oracle_keys[0] == oracle
@@ -86,6 +91,59 @@ pub fn lending_pool_configure_bank_oracle(
             oracle
         });
     }
+
+    Ok(())
+}
+
+/// Configure a bank to price from a Scope feed: sets `OracleSetup::Scope`, the feed's
+/// `OraclePrices` account, and the entry index within it, then validates the feed can be read.
+///
+/// Separate from `lending_pool_configure_bank_oracle` because a Scope bank needs the entry index
+/// alongside the account key - the pair `(oracle_keys[0], scope_entry_index)` is what identifies
+/// the priced asset.
+pub fn lending_pool_configure_bank_oracle_scope(
+    ctx: Context<LendingPoolConfigureBankOracle>,
+    oracle: Pubkey,
+    entry_index: u16,
+) -> MarginfiResult {
+    let mut bank = ctx.accounts.bank.load_mut()?;
+
+    if bank.get_flag(FREEZE_SETTINGS) {
+        panic!("cannot change oracle settings on frozen banks");
+    }
+
+    // A Scope bank's priced asset is determined by the entry index as well as the account key, and
+    // `feed_family` cannot express that, so same-asset e-mode must be disabled first rather than
+    // relying on a family comparison.
+    check!(
+        !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
+        MarginfiError::BadEmodeConfig,
+        "disable same-asset e-mode eligibility before moving a bank to a Scope oracle"
+    );
+
+    bank.config.oracle_setup = OracleSetup::Scope;
+    bank.config.oracle_keys[0] = oracle;
+    bank.config.scope_entry_index = entry_index;
+    bank.config.fixed_price = I80F48::ZERO.into();
+
+    msg!(
+        "setting scope oracle key: {:?} entry: {:?}",
+        oracle,
+        entry_index
+    );
+
+    bank.config
+        .validate_oracle_setup(bank.mint, ctx.remaining_accounts, None, None, None)?;
+
+    emit!(LendingPoolBankConfigureOracleEvent {
+        header: GroupEventHeader {
+            marginfi_group: ctx.accounts.group.key(),
+            signer: Some(*ctx.accounts.admin.key)
+        },
+        bank: ctx.accounts.bank.key(),
+        oracle_setup: OracleSetup::Scope as u8,
+        oracle
+    });
 
     Ok(())
 }

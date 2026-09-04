@@ -454,7 +454,18 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
+
+    // ************** BEGIN SCOPE ERRORS (starting at 6700)
+    #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
+    ScopeInvalidAccount = 700, // 6700
+    #[msg("Scope entry is out of range, never refreshed, or dated in the future")]
+    ScopeInvalidEntry, // 6701
+    #[msg("Scope price is stale")]
+    ScopeStalePrice, // 6702
+    #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
+    UseConfigureBankOracleScope, // 6703
+                                 // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -703,6 +714,10 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6700 => MarginfiError::ScopeInvalidAccount,
+            6701 => MarginfiError::ScopeInvalidEntry,
+            6702 => MarginfiError::ScopeStalePrice,
+            6703 => MarginfiError::UseConfigureBankOracleScope,
 
             _ => MarginfiError::InternalLogicError,
         }
@@ -729,6 +744,9 @@ impl MarginfiError {
                 | MarginfiError::WrongOracleAccountKeys
                 | MarginfiError::PythPushStalePrice
                 | MarginfiError::SwitchboardStalePrice
+                | MarginfiError::ScopeInvalidAccount
+                | MarginfiError::ScopeInvalidEntry
+                | MarginfiError::ScopeStalePrice
                 | MarginfiError::StakePoolValidationFailed
                 | MarginfiError::InvalidBankAccount
                 | MarginfiError::MissingBankAccount
@@ -738,6 +756,7 @@ impl MarginfiError {
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
                 | MarginfiError::ExponentVaultValidationFailed
+                | MarginfiError::MarinadeStateValidationFailed
                 // Lending protocol staleness errors - stale exchange rates mean unreliable prices
                 | MarginfiError::StakePoolStale // SPL / Sanctum stake pools
                 | MarginfiError::ReserveStale // Kamino

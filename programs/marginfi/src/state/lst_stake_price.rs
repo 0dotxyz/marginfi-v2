@@ -292,6 +292,13 @@ pub(crate) fn pt_linear_multiplier(
     clock: &Clock,
     start_price: I80F48,
 ) -> MarginfiResult<I80F48> {
+    // Refuse to price a depegged vault: in Exponent's "emergency mode" (SY rate below its all-time
+    // high) the linear accretion to par no longer holds and the redemption backing is unreliable.
+    check!(
+        !vault.is_in_emergency_mode(),
+        MarginfiError::ExponentVaultValidationFailed
+    );
+
     let start_ts = vault.start_ts() as i64;
     let maturity = start_ts
         .checked_add(vault.duration() as i64)

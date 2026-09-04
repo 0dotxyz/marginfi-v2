@@ -24,7 +24,10 @@ use marginfi_type_crate::constants::{
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
-    constants::{CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, U32_MAX},
+    constants::{
+        CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, MAX_EXP_10_I80F48, U32_MAX,
+    },
+    pdas::SCOPE_PROGRAM_ID,
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
         mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
@@ -35,6 +38,7 @@ use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
+use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
@@ -104,6 +108,7 @@ pub enum OraclePriceFeedAdapter {
     PythPushOracle(PythPushOraclePriceFeed),
     SwitchboardPull(SwitchboardPullPriceFeed),
     Fixed(FixedPriceFeed),
+    Scope(ScopePriceFeed),
 }
 
 /// Checks oracles[0], which is typically the Pyth or Switchboard key.
@@ -297,7 +302,7 @@ impl OraclePriceFeedAdapter {
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
-            OracleSetup::None | OracleSetup::Reserved => Err(MarginfiError::OracleNotSetup.into()),
+            OracleSetup::None => Err(MarginfiError::OracleNotSetup.into()),
             OracleSetup::PythLegacy => {
                 panic!("pyth legacy is deprecated");
             }
@@ -329,6 +334,23 @@ impl OraclePriceFeedAdapter {
                             &ais[0],
                             clock.unix_timestamp,
                             max_age,
+                        )?,
+                    ),
+                    cache_raw_price: None,
+                    cache_multiplier: I80F48::ONE,
+                })
+            }
+            OracleSetup::Scope => {
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &ais[0])?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(
+                        ScopePriceFeed::load_checked(
+                            &ais[0],
+                            clock.unix_timestamp,
+                            max_age,
+                            bank_config.scope_entry_index,
                         )?,
                     ),
                     cache_raw_price: None,
@@ -1270,7 +1292,7 @@ impl OraclePriceFeedAdapter {
         sol_pool: Option<Pubkey>,
     ) -> MarginfiResult {
         match bank_config.oracle_setup {
-            OracleSetup::None | OracleSetup::Reserved => Err(MarginfiError::OracleNotSetup.into()),
+            OracleSetup::None => Err(MarginfiError::OracleNotSetup.into()),
             OracleSetup::KaminoPythPush => {
                 check_eq!(
                     bank_config.asset_tag,
@@ -1336,6 +1358,21 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
+                Ok(())
+            }
+            OracleSetup::Scope => {
+                check!(
+                    bank_config.asset_tag == ASSET_TAG_DEFAULT
+                        || bank_config.asset_tag == ASSET_TAG_SOL,
+                    MarginfiError::InvalidOracleSetup
+                );
+                check!(
+                    oracle_ais.len() == 1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
                 Ok(())
             }
             OracleSetup::SwitchboardPull => {
@@ -1827,6 +1864,114 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
         }
+    }
+}
+
+/// Reads one entry out of a Scope feed's `OraclePrices` account.
+///
+/// Scope stores a fixed array of 512 `DatedPrice` records; a bank names the account in
+/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Scope carries no confidence
+/// interval, so this adapter reports zero confidence and risk is expressed through weights.
+#[derive(Copy, Clone, Debug)]
+pub struct ScopePriceFeed {
+    pub price: I80F48,
+    pub last_updated_timestamp: u64,
+}
+
+impl ScopePriceFeed {
+    /// Validates the account and reads `entry_index`, without a staleness check (used by config
+    /// validation, where the feed may legitimately not have been cranked yet).
+    fn read_entry(ai: &AccountInfo, entry_index: u16) -> MarginfiResult<Self> {
+        check!(
+            ai.owner.eq(&SCOPE_PROGRAM_ID),
+            MarginfiError::ScopeInvalidAccount
+        );
+
+        let data = ai.data.borrow();
+        let disc = data.get(..8).ok_or(MarginfiError::ScopeInvalidAccount)?;
+        check!(
+            disc == &SCOPE_ORACLE_PRICES_DISCRIMINATOR[..],
+            MarginfiError::ScopeInvalidAccount
+        );
+
+        // Exact size and alignment enforced by the cast.
+        let oracle_prices: &ScopeOraclePrices =
+            bytemuck::try_from_bytes(&data[8..]).map_err(|_| MarginfiError::ScopeInvalidAccount)?;
+
+        let entry = oracle_prices
+            .prices
+            .get(entry_index as usize)
+            .ok_or(MarginfiError::ScopeInvalidEntry)?;
+
+        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
+        check!(
+            entry.price.value > 0 && entry.unix_timestamp > 0,
+            MarginfiError::ScopeInvalidEntry
+        );
+        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
+        check!(
+            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let price = I80F48::from_num(entry.price.value)
+            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
+            .ok_or_else(math_error!())?;
+
+        Ok(Self {
+            price,
+            last_updated_timestamp: entry.unix_timestamp,
+        })
+    }
+
+    pub fn load_checked(
+        ai: &AccountInfo,
+        current_timestamp: i64,
+        max_age: u64,
+        entry_index: u16,
+    ) -> MarginfiResult<Self> {
+        let feed = Self::read_entry(ai, entry_index)?;
+
+        let last_updated = i64::try_from(feed.last_updated_timestamp)
+            .map_err(|_| MarginfiError::ScopeInvalidEntry)?;
+        check!(
+            last_updated <= current_timestamp,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let age = current_timestamp.saturating_sub(last_updated);
+        check!(age <= max_age as i64, MarginfiError::ScopeStalePrice);
+
+        Ok(feed)
+    }
+
+    fn check_ais(ai: &AccountInfo, entry_index: u16) -> MarginfiResult {
+        Self::read_entry(ai, entry_index)?;
+        Ok(())
+    }
+}
+
+impl PriceAdapter for ScopePriceFeed {
+    fn get_price_of_type(
+        &self,
+        _oracle_price_type: OraclePriceType,
+        _bias: Option<PriceBias>,
+        _oracle_max_confidence: u32,
+    ) -> MarginfiResult<I80F48> {
+        Ok(self.price)
+    }
+
+    fn get_price_and_confidence_of_type(
+        &self,
+        oracle_price_type: OraclePriceType,
+        oracle_max_confidence: u32,
+    ) -> MarginfiResult<OraclePriceWithConfidence> {
+        Ok(OraclePriceWithConfidence {
+            price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
+            // Scope prices carry no confidence interval.
+            confidence: I80F48::ZERO,
+            source_time: self.last_updated_timestamp as i64,
+        })
     }
 }
 
@@ -2360,6 +2505,7 @@ mod tests {
     use anchor_lang::solana_program::account_info::AccountInfo;
     use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
     use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
+    use scope_mocks::state::{ScopeDatedPrice, ScopePrice};
     use solana_stake_interface::{
         stake_flags::StakeFlags,
         state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
@@ -2671,6 +2817,27 @@ mod tests {
     }
 
     #[test]
+    fn pt_linear_multiplier_rejects_emergency_mode() {
+        let start_price = I80F48::from_num(0.5);
+        let at = Clock {
+            unix_timestamp: 1_500,
+            ..Clock::default()
+        };
+
+        // Healthy vault (ATH == last_seen) prices normally.
+        let mut healthy = fully_backed_vault(1_000, 1_000);
+        healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
+        assert!(!healthy.is_in_emergency_mode());
+        assert!(pt_linear_multiplier(&healthy, &at, start_price).is_ok());
+
+        // SY rate below its all-time high -> emergency mode -> refuse to price.
+        let mut depegged = fully_backed_vault(1_000, 1_000);
+        depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
+        assert!(depegged.is_in_emergency_mode());
+        assert!(pt_linear_multiplier(&depegged, &at, start_price).is_err());
+    }
+
+    #[test]
     fn exponent_vault_field_offsets_match_borsh_layout() {
         // Round-trip raw bytes to prove the mirrored fields land on the right struct offsets.
         let mut raw = [0u8; core::mem::size_of::<MinimalExponentVault>()];
@@ -2681,6 +2848,7 @@ mod tests {
         raw[256..260].copy_from_slice(&1_700_000_000u32.to_le_bytes());
         raw[260..264].copy_from_slice(&31_536_000u32.to_le_bytes());
         raw[329..337].copy_from_slice(&(2 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
+        raw[361..369].copy_from_slice(&(3 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
         raw[433..441].copy_from_slice(&500_000_000_000u64.to_le_bytes());
         raw[441..449].copy_from_slice(&1_000_000_000_000u64.to_le_bytes());
 
@@ -2692,6 +2860,8 @@ mod tests {
             parsed.last_seen_sy_exchange_rate_raw(),
             Some(2 * SY_EXCHANGE_RATE_PRECISION as u64)
         );
+        // all_time_high (3x) sits above last_seen (2x) at struct offset 361 -> emergency mode.
+        assert!(parsed.is_in_emergency_mode());
         assert_eq!(parsed.sy_for_pt(), 500_000_000_000);
         assert_eq!(parsed.pt_supply(), 1_000_000_000_000);
     }
@@ -3026,5 +3196,194 @@ mod tests {
         let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
         let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
         assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+    }
+
+    // ─────────────────────────── Scope oracle ───────────────────────────
+
+    /// Builds a scope `OraclePrices` buffer with one populated entry.
+    fn scope_account_data(index: usize, value: u64, exp: u64, timestamp: u64) -> Vec<u8> {
+        let mut oracle_prices = ScopeOraclePrices {
+            oracle_mappings: Pubkey::default(),
+            prices: [ScopeDatedPrice::default(); 512],
+        };
+        // last_updated_slot left zero (unused by the adapter)
+        oracle_prices.prices[index] = ScopeDatedPrice {
+            price: ScopePrice { value, exp },
+            unix_timestamp: timestamp,
+            ..ScopeDatedPrice::default()
+        };
+        let mut data = SCOPE_ORACLE_PRICES_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(bytemuck::bytes_of(&oracle_prices));
+        data
+    }
+
+    fn scope_ai<'a>(
+        key: &'a Pubkey,
+        owner: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut [u8],
+    ) -> AccountInfo<'a> {
+        AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+
+    #[test]
+    fn scope_reads_the_configured_entry_and_rejects_stale_prices() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        // entry 42 = 103.445108 with exp 8 (scope stores value/10^exp), published at t=1000
+        let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let feed = ScopePriceFeed::load_checked(&ai, 1060, 90, 42).unwrap();
+        // value/10^exp, within I80F48 rounding of the decimal literal
+        assert!((feed.price - I80F48::from_num(103.445108)).abs() < I80F48::from_num(1e-9));
+        assert_eq!(feed.last_updated_timestamp, 1000);
+        // Scope carries no confidence, and bias must not move the price.
+        assert_eq!(
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), u32::MAX)
+                .unwrap(),
+            feed.price
+        );
+
+        // 61s old with a 60s max age -> stale
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 1061, 60, 42).unwrap_err(),
+            MarginfiError::ScopeStalePrice.into()
+        );
+    }
+
+    #[test]
+    fn scope_rejects_future_timestamps() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        // Published at t=1000, read at t=999: a negative age must not count as fresh.
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 999, 60, 42).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+        // Same second is fine.
+        assert!(ScopePriceFeed::load_checked(&ai, 1000, 60, 42).is_ok());
+
+        // A timestamp that does not fit i64 would wrap negative under a plain cast.
+        let mut data = scope_account_data(42, 10_344_510_800, 8, u64::MAX);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 1000, 60, 42).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+    }
+
+    #[test]
+    fn scope_config_requires_default_or_sol_asset_tag() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let mint = Pubkey::new_unique();
+
+        let mut config = BankConfig {
+            oracle_setup: OracleSetup::Scope,
+            scope_entry_index: 42,
+            ..BankConfig::default()
+        };
+        config.oracle_keys[0] = key;
+
+        for tag in [ASSET_TAG_DEFAULT, ASSET_TAG_SOL] {
+            config.asset_tag = tag;
+            OraclePriceFeedAdapter::validate_bank_config(
+                &config,
+                mint,
+                std::slice::from_ref(&ai),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+
+        // Integration and staked banks carry more oracle accounts than the Scope adapter
+        // accepts, so configuring Scope on them would brick the bank's health checks.
+        for tag in [
+            ASSET_TAG_KAMINO,
+            ASSET_TAG_DRIFT,
+            ASSET_TAG_SOLEND,
+            ASSET_TAG_JUPLEND,
+            ASSET_TAG_STAKED,
+        ] {
+            config.asset_tag = tag;
+            assert_eq!(
+                OraclePriceFeedAdapter::validate_bank_config(
+                    &config,
+                    mint,
+                    std::slice::from_ref(&ai),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap_err(),
+                MarginfiError::InvalidOracleSetup.into()
+            );
+        }
+    }
+
+    #[test]
+    fn scope_rejects_foreign_owner_bad_discriminator_and_wrong_size() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+
+        let mut data = scope_account_data(1, 1_000, 2, 500);
+        let not_scope = Pubkey::new_unique();
+        let ai = scope_ai(&key, &not_scope, &mut lamports, &mut data);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
+            MarginfiError::ScopeInvalidAccount.into()
+        );
+
+        let mut bad_disc = scope_account_data(1, 1_000, 2, 500);
+        bad_disc[0] ^= 0xff;
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_disc);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
+            MarginfiError::ScopeInvalidAccount.into()
+        );
+
+        let mut short = scope_account_data(1, 1_000, 2, 500);
+        let full_len = short.len();
+        short.truncate(full_len - 1);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut short);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
+            MarginfiError::ScopeInvalidAccount.into()
+        );
+    }
+
+    #[test]
+    fn scope_rejects_unrefreshed_entries_out_of_range_index_and_bad_exponent() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(7, 1_000, 2, 500);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        // Entry 8 was never written: all zeroes must not read as a price of 0.
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 8).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+        // Index beyond the 512-entry array.
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 512).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
+
+        // Exponent past the power-of-ten table would otherwise panic on indexing.
+        let mut bad_exp = scope_account_data(7, 1_000, MAX_EXP_10_I80F48 as u64, 500);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_exp);
+        assert_eq!(
+            ScopePriceFeed::load_checked(&ai, 500, 90, 7).unwrap_err(),
+            MarginfiError::ScopeInvalidEntry.into()
+        );
     }
 }
