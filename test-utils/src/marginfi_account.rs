@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger, RebalanceMove,
-    WrappedI80F48,
+    Bank, BankVaultType, FeeState, InterestTriggerConfig, MarginfiAccount, Order, OrderTrigger,
+    RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -103,7 +103,7 @@ fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
     )
 }
 
-fn should_include_integration_observation_meta(bank: &Bank) -> bool {
+pub(crate) fn should_include_integration_observation_meta(bank: &Bank) -> bool {
     matches!(
         bank.config.oracle_setup,
         OracleSetup::KaminoPythPush
@@ -2322,6 +2322,26 @@ impl MarginfiAccountFixture {
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
     ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.place_order_inner(bank_keys, trigger, None).await
+    }
+
+    /// Place an order that also exits on negative carry. Same accounts as a plain order.
+    pub async fn try_place_interest_order(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.place_order_inner(bank_keys, trigger, Some(interest))
+            .await
+    }
+
+    async fn place_order_inner(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: Option<InterestTriggerConfig>,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
         let marginfi_account = self.load().await;
         // Compute fee_state PDA and fetch the global_fee_wallet from it so we can pass both
         // accounts to the PlaceOrder instruction.
@@ -2347,20 +2367,32 @@ impl MarginfiAccountFixture {
 
         let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
 
+        let accounts = marginfi::accounts::PlaceOrder {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            fee_payer: ctx.payer.pubkey(),
+            authority: ctx.payer.pubkey(),
+            order: order_pda,
+            fee_state: fee_state_key,
+            global_fee_wallet,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+
+        let data = match interest {
+            Some(interest) => marginfi::instruction::MarginfiAccountPlaceInterestOrder {
+                bank_keys,
+                trigger,
+                interest,
+            }
+            .data(),
+            None => marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        };
+
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::PlaceOrder {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                fee_payer: ctx.payer.pubkey(),
-                authority: ctx.payer.pubkey(),
-                order: order_pda,
-                fee_state: fee_state_key,
-                global_fee_wallet,
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+            accounts,
+            data,
         };
 
         let tx = Transaction::new_signed_with_payer(

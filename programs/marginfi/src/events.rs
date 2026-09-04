@@ -290,6 +290,10 @@ pub struct MarginfiAccountPlaceOrderEvent {
     pub stop_loss: WrappedI80F48,
     pub take_profit: WrappedI80F48,
     pub tags: [u16; ORDER_ACTIVE_TAGS],
+    /// Zero when the order carries no interest trigger.
+    pub interest_window_seconds: u32,
+    pub interest_exit_budget_seconds: u32,
+    pub interest_min_negative_apr: u32,
 }
 
 #[event]

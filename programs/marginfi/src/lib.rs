@@ -14,8 +14,8 @@ pub mod utils;
 use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
-    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
+    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, InterestTriggerConfig,
+    OrderTrigger, RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -353,6 +353,18 @@ pub mod marginfi {
         marginfi_account::place_order(ctx, bank_keys, trigger)
     }
 
+    /// (user) Place an order that also unwinds the pair when its carry turns negative. The rates
+    /// are measured from the banks' own reading history, so the order is live from placement.
+    /// * interest - the carry-exit policy; `None` fields take the `INTEREST_DEFAULT_*` constants
+    pub fn marginfi_account_place_interest_order(
+        ctx: Context<PlaceOrder>,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> MarginfiResult {
+        marginfi_account::place_interest_order(ctx, bank_keys, trigger, interest)
+    }
+
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
@@ -610,6 +622,15 @@ pub mod marginfi {
         marginfi_group::lending_pool_resize_group_account(ctx)
     }
 
+    /// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`, adding reserve space for
+    /// fields later releases will claim; `payer` funds the added rent. Must be run across every
+    /// bank before a `Bank` struct that occupies the reserve is released.
+    pub fn lending_pool_resize_bank_account(
+        ctx: Context<LendingPoolResizeBankAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_bank_account(ctx)
+    }
+
     /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
     /// added rent.
     pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
@@ -746,7 +767,7 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
-    /// (Permissionless) Refresh the cached oracle price for a bank.
+    /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

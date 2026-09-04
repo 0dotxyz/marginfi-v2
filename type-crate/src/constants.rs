@@ -1,3 +1,4 @@
+use crate::types::Bank;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 
@@ -106,6 +107,51 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 /// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.
 pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
 pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
+
+/// Bytes held on a bank account beyond the current `Bank` struct, for fields added by later
+/// releases. Deliberately far smaller than the group's 8KB reserve: there are hundreds of banks
+/// and only one group, so every byte here is paid for hundreds of times over.
+pub const BANK_RESERVED_BYTES: usize = 1024;
+
+/// Byte length `lending_pool_resize_bank_account` grows a bank account to, discriminator included.
+///
+/// This is deliberately NOT `8 + Bank::LEN`. Banks are resized ahead of any struct growth so that
+/// growth needs no migration and causes no downtime: a program whose `Bank` is smaller than the
+/// account simply ignores the tail, whereas a program whose `Bank` is LARGER than the account
+/// fails every instruction that loads a bank. Growing the struct and resizing in one release would
+/// take the protocol down for as long as the migration takes.
+pub const BANK_ACCOUNT_LEN: usize = 8 + Bank::V1_LEN + BANK_RESERVED_BYTES;
+
+/// Default span an interest-trigger order measures its realized rates over. The rates are read as
+/// share-index growth across the span, so this is also how long a rate move must persist to count.
+pub const INTEREST_DEFAULT_WINDOW_SECONDS: u32 = 86_400; // 24 hours
+
+/// Shortest measurement span an order may configure, and so the floor on how briefly a rate can be
+/// pushed to trigger an exit.
+pub const INTEREST_MIN_WINDOW_SECONDS: u32 = 21_600; // 6 hours
+
+/// Longest measurement span an order may configure: the history a full bank reading ring is
+/// guaranteed to hold.
+pub const INTEREST_MAX_WINDOW_SECONDS: u32 = 172_800; // 48 hours
+
+/// Minimum age of a bank's newest rate reading before another is taken.
+pub const BANK_RATE_READING_SPACING_SECONDS: i64 = 10_800; // 3 hours
+
+/// Rate readings a bank keeps: the spacings in `INTEREST_MAX_WINDOW_SECONDS` plus one, the count at
+/// which a bank priced every spacing still holds a reading a full max window old.
+pub const BANK_RATE_READINGS: usize = 17;
+pub const _: () = assert!(
+    (BANK_RATE_READINGS as i64 - 1) * BANK_RATE_READING_SPACING_SECONDS
+        >= INTEREST_MAX_WINDOW_SECONDS as i64
+);
+
+/// Default span of carry loss an interest-trigger order will spend to exit: the realized unwind
+/// cost must not exceed what the position would lose to interest over this long.
+pub const INTEREST_DEFAULT_EXIT_BUDGET_SECONDS: u32 = 1_209_600; // 14 days
+
+/// Longest exit budget an interest-trigger order may configure. Bounds how far the allowance can
+/// widen before `MAX_ORDER_SLIPPAGE` is the only remaining bound.
+pub const INTEREST_MAX_EXIT_BUDGET_SECONDS: u32 = 31_536_000; // 1 year
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;

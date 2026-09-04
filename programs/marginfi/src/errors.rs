@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")] // 6054
+    OrderInterestBankNotWritable,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -503,7 +503,15 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
-                                 // ************** END AUTO-REBALANCE ERRORS
+    // ************** END AUTO-REBALANCE ERRORS
+    #[msg("An order bank has no rate reading as old as the order's measurement window yet")]
+    OrderInterestHistoryTooShort = 800, // 6800
+    #[msg("Realized carry does not meet the order's negative-rate margin")]
+    OrderInterestNotNegative, // 6801
+    #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
+    OrderInterestCostExceedsCarry, // 6802
+    #[msg("Interest trigger window or exit budget is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6803
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -581,7 +589,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::OrderInterestBankNotWritable,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -774,6 +782,11 @@ impl From<u32> for MarginfiError {
             6613 => MarginfiError::PremiumWalletNotSet,
             6614 => MarginfiError::PremiumEntryNotFound,
             6615 => MarginfiError::PremiumSnapshotUnavailable,
+
+            6800 => MarginfiError::OrderInterestHistoryTooShort,
+            6801 => MarginfiError::OrderInterestNotNegative,
+            6802 => MarginfiError::OrderInterestCostExceedsCarry,
+            6803 => MarginfiError::OrderInterestInvalidConfig,
 
             _ => MarginfiError::InternalLogicError,
         }

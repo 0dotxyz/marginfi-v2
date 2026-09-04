@@ -27,6 +27,8 @@ struct FuzzTest {
     trident: Trident,
     fuzz_accounts: AccountAddresses,
     payer: Keypair,
+    /// Clock timestamp captured at fork time; `start` warps each iteration back to it.
+    fork_timestamp: i64,
     // ================================================================================================
     // Banks
     usdc_bank: FuzzTestBank,
@@ -304,10 +306,12 @@ impl FuzzTest {
         // Mainnet Slot
         let slot = utils::get_slot();
         trident.warp_to_slot(slot);
+        let fork_timestamp = trident.get_current_timestamp();
 
         Self {
             trident,
             payer,
+            fork_timestamp,
             liquidator,
             seeder,
             marginfi_group,
@@ -350,6 +354,7 @@ impl FuzzTest {
 
     #[init]
     fn start(&mut self) {
+        self.trident.warp_to_timestamp(self.fork_timestamp);
         // ================================================================================================
         // Initialization
         self.init_foundation();
