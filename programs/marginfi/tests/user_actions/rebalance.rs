@@ -3255,6 +3255,54 @@ async fn rebalance_close_allowed_while_tip_unsettled() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A record outlives its account: after the authority closes the order, withdraws, drains the pool
+/// and closes the account, settlement still pays the recorded keeper the escrow and the rent.
+#[tokio::test]
+async fn rebalance_settle_after_account_closed() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.set_keeper_tip(200_000).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    // Build the settle instruction before the account is closed; the builder reads the account.
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+
+    let close_order = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    f.process_as_payer(&[close_order]).await?;
+    let dest = f.test_f.usdc_mint.create_empty_token_account().await;
+    f.user
+        .try_bank_withdraw(dest.key, &f.dst_bank_f, DEPOSIT_USDC, Some(true))
+        .await?;
+    let drain = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, payer, u64::MAX)
+        .await;
+    f.process_as_payer(&[drain]).await?;
+    f.user.try_close_account(0).await?;
+    assert_eq!(f.lamports_of(f.user.key).await, 0, "account closed");
+
+    f.advance_clock(601).await;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    f.process_as_payer(&[settle]).await?;
+
+    assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed");
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports,
+        "executor receives the escrowed tip plus the record rent"
+    );
+    Ok(())
+}
+
 /// A non-authority may not close an order whose account still holds a position in an allowed venue.
 #[tokio::test]
 async fn rebalance_keeper_close_rejected_while_position_held() -> anyhow::Result<()> {

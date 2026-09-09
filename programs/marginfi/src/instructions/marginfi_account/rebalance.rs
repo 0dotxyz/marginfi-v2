@@ -22,7 +22,8 @@
 //! yield indices and so omits the reward accounts.
 //!
 //! A tipped execution escrows the tip in the record until `settle_rebalance_tip`; an untipped one
-//! closes the record at `end_rebalance`. The record's lifetime is independent of the order's.
+//! closes the record at `end_rebalance`. The record's lifetime is independent of the order's and
+//! the account's.
 //!
 //! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
 //! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
@@ -84,6 +85,7 @@ use marginfi_type_crate::{
         ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
+use std::cell::RefMut;
 
 /// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
 /// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
@@ -283,6 +285,31 @@ pub struct PlaceRebalanceOrder<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Loads the marginfi account at `info` mutably, or returns `None` if the account has been closed
+/// (system-owned and empty). Any other owner or layout is an error.
+fn load_marginfi_account_unless_closed<'a>(
+    info: &'a AccountInfo<'_>,
+) -> MarginfiResult<Option<RefMut<'a, MarginfiAccount>>> {
+    if info.owner.eq(&system_program::ID) && info.data_is_empty() {
+        return Ok(None);
+    }
+    require_keys_eq!(*info.owner, crate::ID, MarginfiError::InternalLogicError);
+    let data = info.try_borrow_mut_data()?;
+    require!(
+        data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
+        MarginfiError::InternalLogicError
+    );
+    let disc = &data[..8];
+    check_eq!(
+        disc,
+        MarginfiAccount::DISCRIMINATOR,
+        MarginfiError::InternalLogicError
+    );
+    Ok(Some(RefMut::map(data, |data| {
+        bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()])
+    })))
+}
+
 /// Close a rebalance order. The account authority may close their own order at any time (except
 /// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act: the
 /// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
@@ -291,58 +318,37 @@ pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResul
     let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
     let signer = ctx.accounts.authority.as_ref().map(|a| a.key());
 
-    // Manual owner check: only deserialize when the account is not already closed.
     let (authority_pk, group_pk, by_authority) =
-        if marginfi_account_info.owner.eq(&system_program::ID)
-            && marginfi_account_info.data_is_empty()
-        {
+        match load_marginfi_account_unless_closed(&marginfi_account_info)? {
             // The account is gone: the order is dead and anyone may reclaim it.
-            (Pubkey::default(), Pubkey::default(), false)
-        } else {
-            require_keys_eq!(
-                *marginfi_account_info.owner,
-                crate::ID,
-                MarginfiError::InternalLogicError
-            );
-            let mut data = marginfi_account_info.try_borrow_mut_data()?;
-            require!(
-                data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
-                MarginfiError::InternalLogicError
-            );
-            let disc = &data[..8];
-            check_eq!(
-                disc,
-                MarginfiAccount::DISCRIMINATOR,
-                MarginfiError::InternalLogicError
-            );
-            let marginfi_account: &mut MarginfiAccount =
-                bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
-
-            // The authority may close their own order anytime; anyone else may close it only once it
-            // holds no position in any allowed venue.
-            let by_authority = signer == Some(marginfi_account.authority);
-            let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
-            let has_allowed_position = marginfi_account
-                .lending_account
-                .balances
-                .iter()
-                .any(|b| b.is_active() && allowed.contains(&b.bank_pk));
-            check!(
-                by_authority || !has_allowed_position,
-                MarginfiError::LiquidatorOrderCloseNotAllowed
-            );
-            if by_authority {
+            None => (Pubkey::default(), Pubkey::default(), false),
+            Some(mut marginfi_account) => {
+                // The authority may close their own order anytime; anyone else may close it only
+                // once it holds no position in any allowed venue.
+                let by_authority = signer == Some(marginfi_account.authority);
+                let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
+                let has_allowed_position = marginfi_account
+                    .lending_account
+                    .balances
+                    .iter()
+                    .any(|b| b.is_active() && allowed.contains(&b.bank_pk));
                 check!(
-                    !marginfi_account.get_flag(ACCOUNT_IN_REBALANCE),
-                    MarginfiError::IllegalAction
+                    by_authority || !has_allowed_position,
+                    MarginfiError::LiquidatorOrderCloseNotAllowed
                 );
+                if by_authority {
+                    check!(
+                        !marginfi_account.get_flag(ACCOUNT_IN_REBALANCE),
+                        MarginfiError::IllegalAction
+                    );
+                }
+                marginfi_account.decrement_active_orders()?;
+                (
+                    marginfi_account.authority,
+                    marginfi_account.group,
+                    by_authority,
+                )
             }
-            marginfi_account.decrement_active_orders()?;
-            (
-                marginfi_account.authority,
-                marginfi_account.group,
-                by_authority,
-            )
         };
 
     let header = AccountEventHeader {
@@ -1300,7 +1306,8 @@ impl<'info> Hashable for EndRebalance<'info> {
 /// destination out-yielded its source; otherwise the tip is refunded to the fee pool, or forfeited to
 /// the executor when the pool was drained below its rent-exempt reserve. Either way the record is
 /// closed and its rent returns to the recorded executor, who fronted it at `start_rebalance`. Anyone
-/// may call it; both the tip and the rent always go to the recorded keeper, not the caller.
+/// may call it; both the tip and the rent always go to the recorded keeper, not the caller. It also
+/// runs after the marginfi account is closed, so a record can never be stranded.
 pub fn settle_rebalance_tip<'info>(
     ctx: Context<'info, SettleRebalanceTip<'info>>,
 ) -> MarginfiResult {
@@ -1398,9 +1405,10 @@ pub fn settle_rebalance_tip<'info>(
             .ok_or_else(math_error!())?;
     }
 
-    let (authority, group) = {
-        let account = ctx.accounts.marginfi_account.load()?;
-        (account.authority, account.group)
+    let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
+    let (authority, group) = match load_marginfi_account_unless_closed(&marginfi_account_info)? {
+        None => (Pubkey::default(), Pubkey::default()),
+        Some(account) => (account.authority, account.group),
     };
     emit!(RebalanceTipSettledEvent {
         header: AccountEventHeader {
@@ -1420,8 +1428,10 @@ pub fn settle_rebalance_tip<'info>(
 #[derive(Accounts)]
 pub struct SettleRebalanceTip<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
-    #[account(has_one = group @ MarginfiError::InvalidGroup)]
-    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+    /// CHECK: unchecked so settlement still works after the marginfi account is closed. The
+    /// record's `has_one` pins this key; `group` is pinned by the recorded banks, which must belong
+    /// to it.
+    pub marginfi_account: UncheckedAccount<'info>,
     #[account(
         mut,
         close = executor,
