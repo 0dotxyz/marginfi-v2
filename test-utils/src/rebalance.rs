@@ -16,7 +16,7 @@ use marginfi_type_crate::pdas::{
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::derive_juplend_token_reserve,
-    types::{RebalanceMove, RebalanceRecord, WrappedI80F48},
+    types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::sysvar;
 use solana_sdk::{
@@ -360,14 +360,7 @@ impl RebalanceFixture {
                 103,
             )
             .await?;
-        let user_usdc = self
-            .test_f
-            .usdc_mint
-            .create_token_account_and_mint_to(deposit)
-            .await;
-        self.user
-            .try_bank_deposit(user_usdc.key, &src2, deposit, None)
-            .await?;
+        self.deposit_usdc(&src2, deposit).await?;
         self.test_f
             .marginfi_group
             .try_accrue_interest(&src2)
@@ -388,6 +381,49 @@ impl RebalanceFixture {
             .await;
         self.process_as_payer(&[update_ix]).await?;
         Ok(src2)
+    }
+
+    /// Deposit `amount` USDC from a fresh token account into `bank`.
+    pub async fn deposit_usdc(&self, bank: &BankFixture, amount: f64) -> anyhow::Result<()> {
+        let user_usdc = self
+            .test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(amount)
+            .await;
+        self.user
+            .try_bank_deposit(user_usdc.key, bank, amount, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Borrow SOL and place a stop-loss over the `bank` deposit and the SOL loan; returns its PDA.
+    pub async fn place_stop_loss_on(&self, bank: &BankFixture) -> anyhow::Result<Pubkey> {
+        let sol_bank = self.test_f.get_bank(&BankMint::Sol);
+        let user_sol = self.test_f.sol_mint.create_empty_token_account().await;
+        self.user
+            .try_bank_borrow(user_sol.key, sol_bank, 10.0)
+            .await?;
+        let order = self
+            .user
+            .try_place_order(
+                vec![bank.key, sol_bank.key],
+                OrderTrigger::StopLoss {
+                    threshold: WrappedI80F48::from(I80F48::ONE),
+                    max_slippage: 0,
+                },
+            )
+            .await?;
+        Ok(order)
+    }
+
+    /// The order tag on the user's balance in `bank`, or `None` without one.
+    pub async fn balance_tag(&self, bank: Pubkey) -> Option<u16> {
+        self.user
+            .load()
+            .await
+            .lending_account
+            .get_balance(&bank)
+            .map(|b| b.tag)
     }
 
     /// The keeper-signed sandwich: start -> withdraw all of `src` -> deposit into `dst` -> end.

@@ -9,11 +9,13 @@
 //! by `min_improvement` before the legs run and still does after they land; no other referenced
 //! bank with deposit capacity, measured as the tighter of the bank's own limit and its venue's,
 //! would pay the move's tokens more, counting that bank's own declared inflow; a bank is either a
-//! source or a destination within one execution; the total tokens moved are capped by the order's
-//! `amount` budget (uncapped when the order is unlimited); token principal is conserved per bank
-//! up to a small dust tolerance; the non-referenced balance set is unchanged, neither altered nor
-//! added to; the account stays healthy at the maintenance requirement if it borrows; and a
-//! per-order cooldown.
+//! source or a destination within one execution; an order-tagged balance moves whole, alone, into
+//! a bank the account holds nothing in, and its tag follows it; the total tokens moved are capped
+//! by the order's `amount` budget (uncapped when the order is unlimited); token principal is
+//! conserved per bank up to a small dust tolerance; every withdraw/deposit leg acts on the
+//! rebalanced account and one of the referenced banks; the non-referenced balance set is
+//! unchanged, neither altered nor added to; the account stays healthy at the maintenance
+//! requirement if it borrows; and a per-order cooldown.
 //!
 //! Supports native, Kamino, Drift, and JupLend legs; Solend banks are rate-visible but have no move
 //! legs and are rejected up front. Referenced banks arrive as a deduped, indexed stream in the
@@ -81,8 +83,9 @@ use marginfi_type_crate::{
     },
     types::{
         BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        RebalanceMove, RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
+        RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+        ORDER_BLOCKING_FLAGS,
     },
 };
 use std::cell::RefMut;
@@ -796,7 +799,7 @@ pub fn start_rebalance<'info>(
     let account = ctx.accounts.marginfi_account.load()?;
     let mut rates: Vec<I80F48> = Vec::with_capacity(banks.len());
     let mut capacity: Vec<I80F48> = Vec::with_capacity(banks.len());
-    let mut ref_banks: Vec<(Pubkey, I80F48)> = Vec::with_capacity(banks.len());
+    let mut ref_banks: Vec<RebalanceRefBank> = Vec::with_capacity(banks.len());
     // Native banks price from their own curve and totals, captured once here and reused below.
     let mut models: Vec<Option<NativeRateModel>> = Vec::with_capacity(banks.len());
     for parsed in banks.iter() {
@@ -839,7 +842,15 @@ pub fn start_rebalance<'info>(
             parsed.oracles,
             &clock,
         )?);
-        ref_banks.push((parsed.key, pre));
+        ref_banks.push(RebalanceRefBank {
+            bank: parsed.key,
+            pre_underlying: pre.into(),
+            tag: account
+                .lending_account
+                .get_balance(&parsed.key)
+                .map_or(0, |b| b.tag),
+            _pad0: [0; 6],
+        });
         models.push(model);
     }
 
@@ -855,6 +866,25 @@ pub fn start_rebalance<'info>(
         inflow[d] = inflow[d]
             .checked_add(I80F48::from(m.amount))
             .ok_or_else(math_error!())?;
+    }
+
+    // An order-tagged balance moves whole, alone, into a bank the account holds nothing in.
+    for m in moves.iter() {
+        let (s, d) = (m.src_index as usize, m.dst_index as usize);
+        check!(
+            ref_banks[d].tag == 0,
+            MarginfiError::RebalanceTaggedBalanceSplit
+        );
+        if ref_banks[s].tag != 0 {
+            // Every move out of `s` targets `d`, and every move into `d` comes from `s`.
+            check!(
+                account.lending_account.get_balance(&banks[d].key).is_none()
+                    && moves
+                        .iter()
+                        .all(|o| (o.src_index == m.src_index) == (o.dst_index == m.dst_index)),
+                MarginfiError::RebalanceTaggedBalanceSplit
+            );
+        }
     }
 
     // Every referenced bank holds the order's mint, so one decimals value scales all of them.
@@ -935,7 +965,6 @@ pub fn start_rebalance<'info>(
     }
 
     drop(account);
-    drop(order);
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.set_flag(ACCOUNT_IN_REBALANCE, false);
@@ -943,6 +972,7 @@ pub fn start_rebalance<'info>(
     validate_rebalance_instructions(
         &ctx.accounts.instruction_sysvar,
         &ctx.accounts.marginfi_account.key(),
+        allowed,
     )?;
     Ok(())
 }
@@ -1118,6 +1148,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         }
 
         record.verify_others_unchanged(&account)?;
+        record.carry_tags(&mut account)?;
 
         // `order.amount` (native) is a per-execution token budget: the move may relocate at most this
         // many underlying tokens across all banks. Unlimited (0) means no cap. All banks share the mint,

@@ -513,6 +513,10 @@ pub enum MarginfiError {
     RebalanceAllowlistLiability, // 6717
     #[msg("Rebalance moves use a bank as both a source and a destination")]
     RebalanceBankSourceAndDestination, // 6718
+    #[msg("Rebalance deposit/withdraw legs must all act on a bank the order allows")]
+    RebalanceForeignBankLeg, // 6719
+    #[msg("Rebalance must move an order-tagged balance whole, alone, into an empty bank")]
+    RebalanceTaggedBalanceSplit, // 6720
     // ************** END AUTO-REBALANCE ERRORS
     // ************** BEGIN SCOPE ERRORS (starting at 6800)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
@@ -791,6 +795,8 @@ impl From<u32> for MarginfiError {
             6716 => MarginfiError::RebalanceStaleExecutionSeq,
             6717 => MarginfiError::RebalanceAllowlistLiability,
             6718 => MarginfiError::RebalanceBankSourceAndDestination,
+            6719 => MarginfiError::RebalanceForeignBankLeg,
+            6720 => MarginfiError::RebalanceTaggedBalanceSplit,
 
             // Premium-specific errors (starting at 6610)
             6610 => MarginfiError::PremiumEntryInvalid,

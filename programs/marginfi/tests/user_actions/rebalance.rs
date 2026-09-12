@@ -1872,8 +1872,7 @@ async fn rebalance_rejects_multi_move_when_one_not_improving() -> anyhow::Result
 
 // N->N coverage: untouched-balance guard, amount budget, tip denominator, dust
 
-/// The only adversarial exercise of `verify_others_unchanged`: a keeper does an honest src->dst move
-/// but also drains the user's UNREFERENCED SOL position to its own account. The snapshot catches it.
+/// A withdraw leg on the user's unreferenced SOL bank is rejected at start.
 #[tokio::test]
 async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
@@ -1927,8 +1926,6 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
             f.keeper.pubkey(),
         )
         .await;
-    // Loot part of the unreferenced SOL position (partial, so SOL stays active and the snapshot
-    // mismatch surfaces at `verify_others_unchanged` rather than the health-obs check).
     let steal_sol = f
         .user
         .make_withdraw_ix_with_authority(keeper_sol, sol_bank, 5.0, None, f.keeper.pubkey())
@@ -1946,13 +1943,11 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
     let res = f
         .process(&[start_ix, withdraw_usdc, deposit_usdc, steal_sol, end_ix])
         .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceForeignBankLeg);
     Ok(())
 }
 
-/// The move is honest, but the keeper also aims a deposit of their own tokens at a bank the
-/// rebalance never referenced, consuming a balance slot and attaching that bank's oracle to every
-/// later maintenance check. Only the untracked-balance count catches this.
+/// A deposit leg into a bank the rebalance never referenced is rejected at start.
 #[tokio::test]
 async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
@@ -2017,7 +2012,242 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
     let res = f
         .process(&[start_ix, withdraw_usdc, deposit_usdc, inject_sol, end_ix])
         .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUntrackedBalance);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceForeignBankLeg);
+    Ok(())
+}
+
+/// A whole move carries the order tag to the destination, and the keeper close of the stop-loss
+/// is still rejected.
+#[tokio::test]
+async fn rebalance_carries_the_order_tag_with_a_whole_move() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    assert_eq!(f.balance_tag(f.src_bank_f.key).await, Some(tag));
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_eq!(f.balance_tag(f.src_bank_f.key).await, None);
+    assert_eq!(f.balance_tag(f.dst_bank_f.key).await, Some(tag));
+    let res = f
+        .user
+        .try_keeper_close_order(order_pda, &f.keeper, f.keeper.pubkey())
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::LiquidatorOrderCloseNotAllowed
+    );
+    Ok(())
+}
+
+/// A partial move of a tagged balance is rejected at end.
+#[tokio::test]
+async fn rebalance_rejects_a_partial_move_of_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let half = DEPOSIT_USDC / 2.0;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            half,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, half, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// Splitting a tagged balance across two destinations is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_splitting_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let half = DEPOSIT_USDC / 2.0;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst1 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, half, None, f.keeper.pubkey())
+        .await;
+    let deposit_dst2 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, half, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_dst1, deposit_dst2, end_ix])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// A move into an order-tagged balance is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_a_move_into_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    f.place_stop_loss_on(&f.dst_bank_f).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// A tagged move into a bank the account already holds a balance in is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_a_tagged_move_into_a_held_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// Cycling an untouched tagged referenced bank through withdraw-all and redeposit clears its tag
+/// and is rejected at end.
+#[tokio::test]
+async fn rebalance_rejects_clearing_the_tag_of_an_untouched_referenced_bank() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let src2 = f.add_second_src(100.0).await?;
+    f.place_stop_loss_on(&src2).await?;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(src2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let cycle_out = f
+        .user
+        .make_withdraw_ix_with_authority(f.keeper_usdc, &src2, 100.0, Some(true), f.keeper.pubkey())
+        .await;
+    let cycle_in = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &src2, 100.0, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[
+            start_ix,
+            withdraw_src,
+            deposit_dst,
+            cycle_out,
+            cycle_in,
+            end_ix,
+        ])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
     Ok(())
 }
 

@@ -72,9 +72,9 @@ impl RebalanceOrder {
     pub const DISCRIMINATOR: [u8; 8] = discriminators::REBALANCE_ORDER;
 }
 
-// A bank referenced by a rebalance execution, with the user's underlying-token amount at start.
-// `end_rebalance` recomputes the post amount and reconciles the delta against the declared moves.
-assert_struct_size!(RebalanceRefBank, 48);
+// A bank referenced by a rebalance execution, with the user's underlying-token amount and order
+// tag (0 if untagged or absent) at start, which `end_rebalance` reconciles and carries forward.
+assert_struct_size!(RebalanceRefBank, 56);
 assert_struct_align!(RebalanceRefBank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
@@ -82,6 +82,8 @@ assert_struct_align!(RebalanceRefBank, 8);
 pub struct RebalanceRefBank {
     pub bank: Pubkey,
     pub pre_underlying: WrappedI80F48,
+    pub tag: u16,
+    pub _pad0: [u8; 6],
 }
 
 // A declared token move from `src_index` to `dst_index` (indices into `RebalanceRecord.ref_banks`),
@@ -106,7 +108,7 @@ pub struct RebalanceMove {
 // start underlying-token amount, the declared moves, a snapshot of every OTHER active balance, and the
 // move-time yield index per bank, so end can reconcile/prove token conservation and settle can pay the
 // tip only if the destinations realized more yield than the sources over the settlement window.
-assert_struct_size!(RebalanceRecord, 1800);
+assert_struct_size!(RebalanceRecord, 1864);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -118,7 +120,8 @@ pub struct RebalanceRecord {
     /// account's fee pool.
     pub marginfi_account: Pubkey,
     pub executor: Pubkey,
-    /// The distinct banks this execution touches (first `ref_bank_count` entries), with start amounts.
+    /// The distinct banks this execution touches (first `ref_bank_count` entries), with start
+    /// amounts and order tags.
     pub ref_banks: [RebalanceRefBank; MAX_REBALANCE_BANKS],
     /// The declared token moves (first `move_count` entries), referencing `ref_banks` by index.
     pub moves: [RebalanceMove; MAX_REBALANCE_MOVES],
