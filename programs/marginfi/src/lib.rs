@@ -610,7 +610,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_resize_group_account(ctx)
     }
 
-    /// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`.
+    /// (permissionless) Resize a v1-sized bank account to the current struct size; `payer`
+    /// funds the added rent.
     pub fn lending_pool_resize_bank_account(
         ctx: Context<LendingPoolResizeBankAccount>,
     ) -> MarginfiResult {

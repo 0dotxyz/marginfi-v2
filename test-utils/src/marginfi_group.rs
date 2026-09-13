@@ -25,7 +25,7 @@ use marginfi_type_crate::constants::{
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
-    BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
+    Bank, BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
     InterestRateConfigOpt, MarginfiGroup, OracleSetup, PremiumEntry, StakedSettings,
     MAX_EMODE_ENTRIES,
 };
@@ -1614,6 +1614,12 @@ impl MarginfiGroupFixture {
         Self::truncate_account_to(&self.ctx, self.fee_state, 8 + FeeState::V1_LEN).await
     }
 
+    /// Shrink a bank account to the v1 (8 + struct) size, simulating a mainnet bank created
+    /// before banks were allocated at the v2 size.
+    pub async fn truncate_bank_account_to_v1(&self, bank: Pubkey) {
+        Self::truncate_account_to(&self.ctx, bank, 8 + Bank::V1_LEN).await
+    }
+
     async fn truncate_account_to(ctx: &Rc<RefCell<ProgramTestContext>>, key: Pubkey, len: usize) {
         let mut ctx = ctx.borrow_mut();
         let mut account = ctx.banks_client.get_account(key).await.unwrap().unwrap();
@@ -1678,7 +1684,6 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    /// Grow a bank account to `BANK_ACCOUNT_LEN`. Permissionless, so the fixture's payer signs.
     pub async fn try_resize_bank_account(&self, bank: Pubkey) -> Result<(), BanksClientError> {
         let payer = clone_keypair(&self.ctx.borrow().payer);
         let ix = Instruction {

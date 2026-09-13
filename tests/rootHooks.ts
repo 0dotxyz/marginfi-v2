@@ -216,6 +216,8 @@ export const STAKED_BACKFILL_VOTE_SAMPLE = new PublicKey(
 export const MAINNET_GROUP = new PublicKey(
   "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8",
 );
+/** Current bank layout size (8-byte discriminator + Bank::LEN) */
+export const BANK_ACCOUNT_LEN = 8 + 3904;
 
 /** Banks in the emode test suite use this seed */
 export const EMODE_SEED = 44;
@@ -433,11 +435,19 @@ async function createSplStakePoolBankrun(
 }
 
 /**
- * Load a JSON fixture file as an AddedAccount for startAnchor genesis.
+ * Load a JSON fixture file as an AddedAccount for startAnchor genesis. `minLen` zero-extends
+ * the account data to that length.
  */
-function loadJsonFixture(filepath: string): AddedAccount {
+export function loadJsonFixture(
+  filepath: string,
+  minLen: number = 0,
+): AddedAccount {
   const fullPath = path.resolve(__dirname, "..", filepath);
   const json = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+  let data = Buffer.from(json.account.data[0], json.account.data[1]);
+  if (data.length < minLen) {
+    data = Buffer.concat([data, Buffer.alloc(minLen - data.length)]);
+  }
   return {
     address: new PublicKey(json.pubkey),
     info: {
@@ -445,7 +455,7 @@ function loadJsonFixture(filepath: string): AddedAccount {
       owner: new PublicKey(json.account.owner),
       executable: json.account.executable,
       rentEpoch: Number(json.account.rentEpoch ?? 0),
-      data: Buffer.from(json.account.data[0], json.account.data[1]),
+      data,
     },
   };
 }
@@ -499,11 +509,11 @@ const extraPrograms: AddedProgram[] = [
  */
 function getGenesisAccounts(): AddedAccount[] {
   return [
-    loadJsonFixture("tests/fixtures/bonk_bank.json"),
-    loadJsonFixture("tests/fixtures/cloud_bank.json"),
-    loadJsonFixture("tests/fixtures/pyusd_bank.json"),
+    loadJsonFixture("tests/fixtures/bonk_bank.json", BANK_ACCOUNT_LEN),
+    loadJsonFixture("tests/fixtures/cloud_bank.json", BANK_ACCOUNT_LEN),
+    loadJsonFixture("tests/fixtures/pyusd_bank.json", BANK_ACCOUNT_LEN),
     loadJsonFixture("tests/fixtures/pyusd_mint.json"),
-    loadJsonFixture("tests/fixtures/corvus.json"),
+    loadJsonFixture("tests/fixtures/corvus.json", BANK_ACCOUNT_LEN),
     loadJsonFixture("tests/fixtures/corvus_mint.json"),
     loadJsonFixture("tests/fixtures/localnet_usdc.json"),
     loadJsonFixture("tests/fixtures/gappy_user3.json"),
@@ -511,7 +521,10 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
-    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_bank.json"),
+    loadJsonFixture(
+      "tests/fixtures/mainnet_staked_backfill_bank.json",
+      BANK_ACCOUNT_LEN,
+    ),
     loadJsonFixture("tests/fixtures/mainnet_staked_backfill_vote_blank.json"),
     loadJsonFixture("tests/fixtures/kamino_global_config.json"),
   ];
