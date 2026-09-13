@@ -415,6 +415,17 @@ async fn rebalance_borrowing_account_passes_health() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `end_rebalance` stamps the health cache it writes with the current clock.
+#[tokio::test]
+async fn rebalance_end_stamps_the_health_cache() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    assert_eq!(f.user.load().await.health_cache.timestamp, 1_000);
+    Ok(())
+}
+
 /// An unlimited order permits a partial fill (e.g. the destination is near its deposit cap): moving
 /// part of the position succeeds, leaves the remainder in the source, and conserves value.
 #[tokio::test]

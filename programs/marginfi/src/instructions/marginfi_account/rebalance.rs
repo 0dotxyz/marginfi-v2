@@ -1065,6 +1065,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     }
 
     let mut health_cache = HealthCache::zeroed();
+    health_cache.timestamp = clock.unix_timestamp;
     let (value_moved, tip_pending, move_yield_indices) = {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
 

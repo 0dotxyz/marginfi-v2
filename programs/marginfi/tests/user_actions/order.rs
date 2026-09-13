@@ -5,6 +5,7 @@ use fixtures::{
     assert_anchor_error, assert_custom_error, bank::BankFixture,
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
+use marginfi::constants::PROGRAM_VERSION;
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
@@ -877,6 +878,10 @@ async fn execute_order_success(
 
     // verify balances: asset still present, liability removed, uninvolved remains
     let mfi_after = borrower_mfi_account_f.load().await;
+    let clock = test_f.get_clock().await;
+    assert_eq!(mfi_after.health_cache.timestamp, clock.unix_timestamp);
+    assert_eq!(mfi_after.health_cache.program_version, PROGRAM_VERSION);
+    assert!(mfi_after.health_cache.is_engine_ok());
     let asset_tag = order_before.tags[0];
     let liab_tag = order_before.tags[1];
 
