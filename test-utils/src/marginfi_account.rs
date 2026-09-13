@@ -2614,6 +2614,7 @@ impl MarginfiAccountFixture {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 global_fee_wallet,
+                rebalance_fee_pool: self.rebalance_fee_pool_pda(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::AdminCloseAccount {}.data(),

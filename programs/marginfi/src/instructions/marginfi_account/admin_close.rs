@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
+use marginfi_type_crate::constants::REBALANCE_FEE_POOL_SEED;
 use marginfi_type_crate::types::{
     MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION,
     SECONDS_PER_DAY,
@@ -38,6 +39,12 @@ pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
         "Account cannot be closed"
     );
 
+    check!(
+        ctx.accounts.rebalance_fee_pool.lamports() == 0,
+        MarginfiError::IllegalAction,
+        "Withdraw rebalance fee pool before closing account"
+    );
+
     emit!(AdminCloseAccountEvent {
         header: AccountEventHeader {
             signer: None,
@@ -69,4 +76,12 @@ pub struct AdminCloseAccount<'info> {
             @ MarginfiError::InvalidGlobalFeeWallet
     )]
     pub global_fee_wallet: UncheckedAccount<'info>,
+
+    /// CHECK: the account's rebalance fee pool PDA; validated by seeds. Must be empty (drained via
+    /// `withdraw_rebalance_fee_pool`) before close so its lamports are not orphaned.
+    #[account(
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub rebalance_fee_pool: SystemAccount<'info>,
 }

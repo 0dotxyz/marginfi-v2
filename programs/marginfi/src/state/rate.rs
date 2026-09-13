@@ -6,19 +6,21 @@
 //! reads and unit-tested there. This module only dispatches by `asset_tag`, loads/staleness-checks
 //! the rate-bearing account, and maps the pure `Option` result to a marginfi error:
 //!
-//! - Native marginfi banks: read the cached `lending_rate` (net by construction; fees fall on
-//!   borrowers). Must be fresh (crank `accrue_bank_interest`/`update_bank_cache` first).
+//! - Native marginfi banks: the bank's own interest curve at its utilization after the deposit (net
+//!   by construction; fees fall on borrowers). The caller accrues the bank first.
 //! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`, rescaled from klend's slot-year
 //!   to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
-//! - JupLend: the liquidity-layer supply rate (rewards APR is layered on OFF-CHAIN by the
-//!   keeper; the on-chain figure is the conservative base gate).
+//! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
+//!   post-deposit utilization (rewards APR is layered on OFF-CHAIN by the keeper).
 //!
 //! Integration reserve/market accounts MUST be refreshed in the same slot by the caller
 //! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend liquidity-program
 //! `update_exchange_price`, which refreshes the `TokenReserve` the supply rate reads).
 
+use crate::state::bank::BankImpl;
+use crate::state::interest_rate::LendingCurve;
 use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,
 };
@@ -27,16 +29,19 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::Mint;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
-use juplend_mocks::state::{LendingRewardsRateModel, TokenReserve, EXCHANGE_PRICES_PRECISION};
+use juplend_mocks::state::{
+    LendingRewardsRateModel, RateModel, TokenReserve, EXCHANGE_PRICES_PRECISION,
+};
 use kamino_mocks::state::{MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
 };
-use marginfi_type_crate::types::{u32_to_milli, Bank, BankConfig};
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
+use marginfi_type_crate::types::{Bank, BankConfig};
 
-/// Accounts a venue needs beyond its rate-bearing account to price its reward emissions, each bound
-/// to the bank's own venue state. Callers that need only the base rate pass the default.
+/// Accounts a venue needs beyond its rate-bearing account to price a deposit and its reward
+/// emissions, each bound to the bank's own venue state; reading the stored rate needs none.
 #[derive(Default, Clone, Copy)]
 pub struct RewardsAccounts<'info> {
     /// Kamino: the reserve's `LendingMarket`, which caps the emission APR.
@@ -45,13 +50,16 @@ pub struct RewardsAccounts<'info> {
     pub rewards_model: Option<&'info AccountInfo<'info>>,
     /// JupLend: the fToken mint, whose supply is the rewards denominator.
     pub ftoken_mint: Option<&'info AccountInfo<'info>>,
+    /// JupLend: the mint's liquidity-layer `RateModel`, which prices the post-deposit borrow rate.
+    pub rate_model: Option<&'info AccountInfo<'info>>,
 }
 
-/// Supply APR (I80F48, 1.0 == 100%) for `bank`, dispatched on `asset_tag` (the canonical integration
-/// identifier, consistent with the `is_*_asset_tag` checks used across deposit/withdraw). `venue` is
-/// the rate-bearing account (`None` for native, which prices from the bank cache); `token_reserve`
-/// is JupLend's `TokenReserve` (`None` otherwise). Unknown tags fail rather than default to
-/// native. The caller refreshes the venue this slot and locates it (see `rate_of`).
+/// Supply APR (I80F48, 1.0 == 100%) for `bank` after `extra_native` more tokens are supplied,
+/// dispatched on `asset_tag` (the canonical integration identifier, consistent with the
+/// `is_*_asset_tag` checks used across deposit/withdraw). `venue` is the rate-bearing account
+/// (`None` for native, which prices from its own totals); `token_reserve` is JupLend's
+/// `TokenReserve` (`None` otherwise). Unknown tags fail rather than default to native. The caller
+/// refreshes the venue this slot and locates it (see `rate_of`).
 pub fn current_supply_apr<'info>(
     bank: &Bank,
     venue: Option<&'info AccountInfo<'info>>,
@@ -62,8 +70,7 @@ pub fn current_supply_apr<'info>(
 ) -> MarginfiResult<I80F48> {
     let tag = bank.config.asset_tag;
     if matches!(tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED) {
-        // Native banks price from the stored cache, so `extra_native` does not change the rate.
-        return Ok(u32_to_milli(bank.cache.lending_rate));
+        return NativeRateModel::new(bank)?.rate_at(extra_native);
     }
     let venue = venue.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     match tag {
@@ -79,6 +86,41 @@ pub fn current_supply_apr<'info>(
             clock,
         ),
         _ => err!(MarginfiError::InvalidOracleSetup),
+    }
+}
+
+/// A native bank's interest curve and current totals, captured once after accrual so the bank can
+/// be priced at any deposit size without re-reading it.
+pub struct NativeRateModel {
+    curve: LendingCurve,
+    assets: I80F48,
+    liabilities: I80F48,
+}
+
+impl NativeRateModel {
+    pub fn new(bank: &Bank) -> MarginfiResult<Self> {
+        Ok(Self {
+            curve: LendingCurve::new(&bank.config.interest_rate_config)?,
+            assets: bank.get_asset_amount(bank.total_asset_shares.into())?,
+            liabilities: bank.get_liability_amount(bank.total_liability_shares.into())?,
+        })
+    }
+
+    /// The lending rate after `extra_native` more tokens are deposited. Zero when the bank has no
+    /// deposits or no borrows, matching `update_bank_cache`.
+    pub fn rate_at(&self, extra_native: u64) -> MarginfiResult<I80F48> {
+        let assets = self
+            .assets
+            .checked_add(I80F48::from_num(extra_native))
+            .ok_or_else(math_error!())?;
+        if assets == I80F48::ZERO || self.liabilities == I80F48::ZERO {
+            return Ok(I80F48::ZERO);
+        }
+        let utilization = self
+            .liabilities
+            .checked_div(assets)
+            .ok_or_else(math_error!())?;
+        self.curve.lending_rate(utilization)
     }
 }
 
@@ -313,8 +355,12 @@ fn juplend_supply_apr<'info>(
         !reserve.is_stale(clock.unix_timestamp),
         MarginfiError::JuplendLendingStale
     );
+    let rate_model = match rewards.rate_model {
+        Some(ai) => Some(load_juplend_rate_model(ai, &{ reserve.mint })?),
+        None => None,
+    };
     let base = reserve
-        .supply_rate_at(extra_native)
+        .supply_rate_at(extra_native, rate_model.as_ref())
         .ok_or_else(math_error!())?;
 
     // The bank holds fTokens, whose price grows by the liquidity-layer return plus the reward
@@ -359,19 +405,40 @@ fn juplend_supply_apr<'info>(
     Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
 }
 
+/// JupLend's `RateModel` for `mint`: the liquidity program keys one per mint, so an account it owns
+/// with the model discriminator and this mint is that one.
+fn load_juplend_rate_model(ai: &AccountInfo, mint: &Pubkey) -> MarginfiResult<RateModel> {
+    require_keys_eq!(
+        *ai.owner,
+        JUPLEND_LIQUIDITY_PROGRAM_ID,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    let model = RateModel::from_account_data(&ai.try_borrow_data()?)
+        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))?;
+    require_keys_eq!(
+        { model.mint },
+        *mint,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    Ok(model)
+}
+
 /// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance
 /// order can rank a native bank's rate directly against any integration bank's rate. For each target
 /// percentage this builds the equivalent per-venue config and asserts every venue reports the SAME
 /// percentage.
 #[cfg(test)]
 mod unit_consistency {
+    use bytemuck::Zeroable;
     use drift_mocks::state::drift_deposit_rate_from_parts;
     use juplend_mocks::state::juplend_supply_rate_from_parts;
     use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND};
-    use marginfi_type_crate::types::{milli_to_u32, u32_to_milli};
+    use marginfi_type_crate::types::{
+        make_points, milli_to_u32, u32_to_milli, InterestRateConfig, INTEREST_CURVE_SEVEN_POINT,
+    };
     use solend_mocks::state::solend_supply_rate_from_parts;
 
-    use super::I80F48;
+    use super::{Bank, NativeRateModel, I80F48};
 
     /// The net supply rate each venue reports for `target_bps` (e.g. `1_000` == 10%), built from an
     /// equivalent per-venue config. Returned as `(native, kamino, drift, solend, juplend)`.
@@ -379,8 +446,20 @@ mod unit_consistency {
         // The target percentage as an I80F48 fraction (1.0 == 100%).
         let pct = I80F48::from_num(target_bps) / I80F48::from_num(10_000u32);
 
-        // Native: the bank cache stores the lending rate as a u32 on a 0..1000% scale.
-        let native = u32_to_milli(milli_to_u32(pct));
+        // Native: a curve flat at `pct`, with the bank fully utilized.
+        let mut bank = Bank::zeroed();
+        bank.config.interest_rate_config = InterestRateConfig {
+            zero_util_rate: milli_to_u32(pct),
+            hundred_util_rate: milli_to_u32(pct),
+            points: make_points(&[]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        };
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = I80F48::from_num(1_000).into();
+        bank.total_liability_shares = I80F48::from_num(1_000).into();
+        let native = NativeRateModel::new(&bank).unwrap().rate_at(0).unwrap();
 
         // Kamino: a flat borrow curve at `target_bps`, evaluated at 100% utilization with no cut,
         // priced at klend's own pacing.
@@ -458,11 +537,53 @@ mod unit_consistency {
             assert_eq!(solend, kamino, "solend != kamino at {target_bps}bps");
             assert_eq!(juplend, kamino, "juplend != kamino at {target_bps}bps");
 
-            // Native stores its rate as a u32 on a 0..1000% scale. Its exact value is that same
-            // quantization round-trip, so assert against the stored-value round-trip, not the input.
+            // Native curve rates are stored as u32 on a 0..1000% scale, so the exact value is that
+            // quantization round-trip; assert against it, not the input.
             let native_quantized = u32_to_milli(milli_to_u32(expected));
             assert_eq!(native, native_quantized, "native at {target_bps}bps");
         }
+    }
+}
+
+/// A native bank is priced on its own curve at the utilization it would have after the deposit.
+#[cfg(test)]
+mod native_dilution {
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::{
+        make_points, milli_to_u32, u32_to_milli, InterestRateConfig, INTEREST_CURVE_SEVEN_POINT,
+    };
+
+    use super::{Bank, NativeRateModel, I80F48};
+
+    #[test]
+    fn the_rate_dilutes_with_the_incoming_deposit() {
+        // A linear curve from 0 to `one`, so the lending rate is `one * util^2`.
+        let one = u32_to_milli(milli_to_u32(I80F48::ONE));
+        let mut bank = Bank::zeroed();
+        bank.config.interest_rate_config = InterestRateConfig {
+            hundred_util_rate: milli_to_u32(I80F48::ONE),
+            points: make_points(&[]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        };
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = I80F48::from_num(1_000).into();
+        bank.total_liability_shares = I80F48::from_num(500).into();
+
+        // Half utilized now; a deposit equal to its current supply leaves it a quarter utilized.
+        let model = NativeRateModel::new(&bank).unwrap();
+        assert_eq!(model.rate_at(0).unwrap(), one * I80F48::from_num(0.25));
+        assert_eq!(
+            model.rate_at(1_000).unwrap(),
+            one * I80F48::from_num(0.0625)
+        );
+
+        bank.total_liability_shares = I80F48::ZERO.into();
+        assert_eq!(
+            NativeRateModel::new(&bank).unwrap().rate_at(1_000).unwrap(),
+            I80F48::ZERO
+        );
     }
 }
 
