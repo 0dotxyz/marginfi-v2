@@ -1694,7 +1694,6 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    /// Grow a bank account to `BANK_ACCOUNT_LEN`. Permissionless, so the fixture's payer signs.
     pub async fn try_resize_bank_account(&self, bank: Pubkey) -> Result<(), BanksClientError> {
         let payer = clone_keypair(&self.ctx.borrow().payer);
         let ix = Instruction {

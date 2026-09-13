@@ -3,7 +3,7 @@ use crate::MarginfiError;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
-    constants::{BANK_ACCOUNT_LEN, FEE_STATE_SEED},
+    constants::FEE_STATE_SEED,
     types::{Bank, FeeState, MarginfiGroup},
 };
 
@@ -31,16 +31,8 @@ pub fn lending_pool_resize_group_account(
     )
 }
 
-/// (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`, which holds the current struct plus
-/// `BANK_RESERVED_BYTES` of reserve. `payer` funds the added rent; new bytes are zero-filled, so a
-/// later struct that claims them reads zero, the same value a freshly created bank would carry.
-///
-/// Run this across every bank BEFORE releasing a `Bank` struct that occupies the reserve. The
-/// program tolerates an account larger than its struct, but not smaller.
-///
-/// Grow-only and re-runnable, matching `lending_pool_resize_group_account`: a call against a bank
-/// already at the target is rejected, but raising `BANK_ACCOUNT_LEN` in a later release makes this
-/// usable again to top every bank up, with no new instruction.
+/// (permissionless) Resize a v1-sized bank account to the current struct size. `payer` funds
+/// the added rent; new bytes are zero-filled.
 pub fn lending_pool_resize_bank_account(
     ctx: Context<LendingPoolResizeBankAccount>,
 ) -> MarginfiResult {
@@ -60,7 +52,7 @@ pub fn lending_pool_resize_bank_account(
 
     grow_account(
         bank_ai,
-        BANK_ACCOUNT_LEN,
+        8 + Bank::LEN,
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
     )
@@ -140,8 +132,8 @@ pub struct LendingPoolResizeGroupAccount<'info> {
 
 #[derive(Accounts)]
 pub struct LendingPoolResizeBankAccount<'info> {
-    /// CHECK: owner + discriminator validated in the handler; not an AccountLoader so a bank can
-    /// still be resized under a future (larger-struct) program that cannot load it yet.
+    /// CHECK: owner + discriminator validated in the handler; not an AccountLoader so an
+    /// undersized bank can still be resized under the future (larger-struct) program.
     #[account(mut)]
     pub bank: UncheckedAccount<'info>,
 

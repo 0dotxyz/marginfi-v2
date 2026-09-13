@@ -259,10 +259,7 @@ export type ResizeBankAccountArgs = {
   payer: PublicKey;
 };
 
-/**
- * (permissionless) Grow a bank account to `BANK_ACCOUNT_LEN`, adding reserve space for fields
- * later releases will claim. Admits only a v1-sized bank, so it runs exactly once per account.
- */
+/** (permissionless) Resize a v1-sized bank account to the current struct size. */
 export const resizeBankAccount = (
   program: Program<Marginfi>,
   args: ResizeBankAccountArgs,
