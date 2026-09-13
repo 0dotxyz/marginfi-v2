@@ -21,9 +21,9 @@ use {
     marginfi_type_crate::{
         constants::{MARGINFI_ACCOUNT_SEED, REBALANCE_FEE_POOL_SEED},
         types::{
-            Bank, FeeState, LiquidationRecord, MarginfiAccount, Order, OrderTrigger,
-            ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-            ACCOUNT_IN_RECEIVERSHIP,
+            Bank, FeeState, InterestTriggerConfig, LiquidationRecord, MarginfiAccount, Order,
+            OrderTrigger, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+            ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
         },
     },
     serde::Deserialize,
@@ -681,6 +681,7 @@ pub fn marginfi_account_place_order(
     bank_1: Pubkey,
     bank_2: Pubkey,
     trigger: OrderTrigger,
+    interest: Option<InterestTriggerConfig>,
 ) -> Result<()> {
     let authority = config.authority();
     let marginfi_account_pk = profile.get_marginfi_account()?;
@@ -719,7 +720,15 @@ pub fn marginfi_account_place_order(
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        data: match interest {
+            Some(interest) => marginfi::instruction::MarginfiAccountPlaceInterestOrder {
+                bank_keys,
+                trigger,
+                interest,
+            }
+            .data(),
+            None => marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        },
     };
 
     let signing_keypairs = config.get_signers(false);
@@ -727,6 +736,30 @@ pub fn marginfi_account_place_order(
     println!("Order placed successfully (sig: {})", sig);
 
     Ok(())
+}
+
+/// Observation metas with the order's two legs promoted to writable, as `start_execute_order` needs
+/// to accrue them. An order with no interest trigger accrues nothing, so nothing is promoted.
+fn observation_metas_accruing_legs(
+    order: &Order,
+    marginfi_account: &MarginfiAccount,
+    banks: &HashMap<Pubkey, Bank>,
+) -> Vec<AccountMeta> {
+    let mut metas = load_observation_account_metas(marginfi_account, banks, vec![], vec![]);
+    if !order.interest_trigger_enabled() {
+        return metas;
+    }
+    let legs: Vec<Pubkey> = marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active() && order.tags.contains(&b.tag))
+        .map(|b| b.bank_pk)
+        .collect();
+    for meta in metas.iter_mut() {
+        meta.is_writable |= legs.contains(&meta.pubkey);
+    }
+    metas
 }
 
 pub fn marginfi_account_close_order(
@@ -890,6 +923,8 @@ pub fn marginfi_account_keeper_execute_order(
 
     let observation_metas =
         load_observation_account_metas(&marginfi_account, &banks, vec![], vec![]);
+    // Only `start` accrues, so only it needs the write locks.
+    let start_metas = observation_metas_accruing_legs(&order, &marginfi_account, &banks);
     let execute_record_pk = find_execute_order_pda(&order_pk, &config.program_id).0;
     let fee_state_pk = find_fee_state_pda(&config.program_id).0;
 
@@ -908,7 +943,7 @@ pub fn marginfi_account_keeper_execute_order(
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountStartExecuteOrder.data(),
     };
-    start_ix.accounts.extend(observation_metas.clone());
+    start_ix.accounts.extend(start_metas);
 
     let mut end_ix = Instruction {
         program_id: config.program_id,

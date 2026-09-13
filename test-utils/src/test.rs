@@ -1192,6 +1192,38 @@ impl TestFixture {
         self.context.borrow_mut().set_sysvar(&clock);
     }
 
+    /// Pin the Clock sysvar's `unix_timestamp` and republish `feeds` at it, so their prices stay
+    /// fresh across the step.
+    pub async fn pin_clock(&self, unix_timestamp: i64, feeds: &[Pubkey]) {
+        let mut clock: Clock = self.banks_client().get_sysvar().await.unwrap();
+        clock.unix_timestamp = unix_timestamp;
+        self.context.borrow_mut().set_sysvar(&clock);
+        for feed in feeds {
+            self.set_pyth_oracle_timestamp(*feed, unix_timestamp).await;
+        }
+    }
+
+    /// Give `keeper` a SOL balance to pay fees and rent from.
+    pub async fn fund_keeper(&self, keeper: &Keypair) -> anyhow::Result<()> {
+        let rent = self.banks_client().get_rent().await?;
+        let account = Account {
+            lamports: rent.minimum_balance(0) + 1_000_000_000,
+            data: vec![],
+            owner: solana_system_interface::program::ID,
+            executable: false,
+            rent_epoch: 0,
+        };
+        self.context
+            .borrow_mut()
+            .set_account(&keeper.pubkey(), &account.into());
+        Ok(())
+    }
+
+    /// A handle on the banks client that holds no borrow of the context across an await.
+    pub fn banks_client(&self) -> BanksClient {
+        self.context.borrow().banks_client.clone()
+    }
+
     pub async fn advance_time(&self, seconds: i64) {
         let mut clock: Clock = self
             .context
