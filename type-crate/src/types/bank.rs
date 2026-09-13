@@ -22,7 +22,7 @@ use fixed::types::I80F48;
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, OnRampTransition, RateReading, WrappedI80F48};
 
-assert_struct_size!(Bank, 2880);
+assert_struct_size!(Bank, 3904);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -251,17 +251,15 @@ pub struct Bank {
     /// every instruction that prices the bank, oldest overwritten first. Interest triggers read it.
     pub rate_readings: [RateReading; BANK_RATE_READINGS],
 
-    /// Remainder of the space `lending_pool_resize_bank_account` reserves, for later releases.
-    pub _reserved0: [[u64; 7]; 11],
+    pub _reserved0: [[u64; 8]; 25],
+    pub _reserved1: [u64; 5],
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
     /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
-    /// `lending_pool_resize_bank_account` existed, and a byte-identical prefix of any later
-    /// layout. `BANK_ACCOUNT_LEN` is measured from here so the resize target never moves when
-    /// the struct grows into the reserve.
+    /// `rate_readings` existed, and a byte-identical prefix of the current layout.
     pub const V1_LEN: usize = 1856;
 
     #[inline]

@@ -216,6 +216,8 @@ export const STAKED_BACKFILL_VOTE_SAMPLE = new PublicKey(
 export const MAINNET_GROUP = new PublicKey(
   "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8",
 );
+/** Current bank layout size (8-byte discriminator + Bank::LEN) */
+export const BANK_ACCOUNT_LEN = 8 + 3904;
 
 /** Banks in the emode test suite use this seed */
 export const EMODE_SEED = 44;
@@ -432,21 +434,19 @@ async function createSplStakePoolBankrun(
   };
 }
 
-/** Length `lending_pool_resize_bank_account` grows a bank account to (8 + Bank::LEN). */
-const BANK_ACCOUNT_LEN = 8 + 2880;
-
 /**
- * Load a JSON fixture file as an AddedAccount for startAnchor genesis.
+ * Load a JSON fixture file as an AddedAccount for startAnchor genesis. `minLen` zero-extends
+ * the account data to that length.
  */
-function loadJsonFixture(filepath: string, padTo?: number): AddedAccount {
+export function loadJsonFixture(
+  filepath: string,
+  minLen: number = 0,
+): AddedAccount {
   const fullPath = path.resolve(__dirname, "..", filepath);
   const json = JSON.parse(fs.readFileSync(fullPath, "utf8"));
   let data = Buffer.from(json.account.data[0], json.account.data[1]);
-  // Bank fixtures were captured before `lending_pool_resize_bank_account` existed. Zero-padding
-  // matches what that instruction does on-chain, and every bank must have been through it before
-  // a program carrying the larger `Bank` is deployed.
-  if (padTo !== undefined && data.length < padTo) {
-    data = Buffer.concat([data, Buffer.alloc(padTo - data.length)]);
+  if (data.length < minLen) {
+    data = Buffer.concat([data, Buffer.alloc(minLen - data.length)]);
   }
   return {
     address: new PublicKey(json.pubkey),
