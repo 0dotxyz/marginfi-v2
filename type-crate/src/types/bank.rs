@@ -21,7 +21,7 @@ use fixed::types::I80F48;
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
 
-assert_struct_size!(Bank, 1856);
+assert_struct_size!(Bank, 3904);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -245,11 +245,16 @@ pub struct Bank {
     /// can never charge for (or health-project) the deactivated window.
     /// * 0 on banks that never activated premium.
     pub premium_activated_at: i64,
+
+    pub _padding_1: [[u64; 8]; 32],
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+    /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
+    /// `_padding_1` existed, and a byte-identical prefix of the current layout.
+    pub const V1_LEN: usize = 1856;
 
     #[inline]
     pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {

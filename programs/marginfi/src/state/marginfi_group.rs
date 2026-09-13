@@ -367,7 +367,7 @@ mod tests {
     /// the circuit-breaker block stay at their 0.1.10 positions.
     #[test]
     fn bank_premium_field_layout() {
-        assert_eq!(size_of::<Bank>(), 1856);
+        assert_eq!(size_of::<Bank>(), 3904);
         assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
         assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
         assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
@@ -377,6 +377,7 @@ mod tests {
         assert_eq!(offset_of!(Bank, premium_tag), 1840);
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
+        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and
