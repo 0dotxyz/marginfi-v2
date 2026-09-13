@@ -144,6 +144,9 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
             if balance.tag != 0 && order_tags.contains(&balance.tag) {
                 continue;
             }
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
 
             check!(
                 idx < self.balance_states.len(),
@@ -157,10 +160,6 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 shares,
                 ..
             } = &mut self.balance_states[idx];
-
-            let side = balance
-                .get_side()
-                .ok_or_else(|| error!(MarginfiError::IllegalBalanceState))?;
 
             *bank = balance.bank_pk;
             *tag = balance.tag;
@@ -299,6 +298,32 @@ mod tests {
             result.is_ok(),
             "initialize should succeed when only non-order balances are recorded"
         );
+    }
+
+    /// An active non-order slot below `EMPTY_BALANCE_THRESHOLD` is left out of the record.
+    #[test]
+    fn execute_order_record_ignores_an_empty_slot() {
+        let mut account = MarginfiAccount::zeroed();
+        let order_tags = [111u16, 222u16];
+        account.lending_account.balances[0] = balance_with_bank_and_tag(1u8, order_tags[0]);
+        let mut empty = balance_with_bank_and_tag(2u8, 0);
+        empty.asset_shares = I80F48::from_num(0.5).into();
+        account.lending_account.balances[1] = empty;
+
+        let mut record = ExecuteOrderRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                &account,
+                &order_tags,
+                &I80F48::ZERO,
+            )
+            .unwrap();
+        assert_eq!(record.active_balance_count, 0);
+        assert!(record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .is_ok());
     }
 
     /// The record pins each non-order balance's tag alongside its side and shares.

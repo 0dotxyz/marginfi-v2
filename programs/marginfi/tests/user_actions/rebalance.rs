@@ -2016,6 +2016,40 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
     Ok(())
 }
 
+/// An unreferenced slot left active below `EMPTY_BALANCE_THRESHOLD` neither blocks the move nor
+/// changes.
+#[tokio::test]
+async fn rebalance_ignores_an_empty_unreferenced_slot() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    let user_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1.0)
+        .await;
+    f.user
+        .try_bank_deposit(user_sol.key, sol_bank, 1.0, None)
+        .await?;
+    let mut account = f.user.load().await;
+    let idx = account
+        .lending_account
+        .balances
+        .iter()
+        .position(|b| b.bank_pk == sol_bank.key)
+        .unwrap();
+    let scrap = I80F48::from_num(0.5);
+    account.lending_account.balances[idx].asset_shares = scrap.into();
+    f.user.set_account(&account).await?;
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src);
+    assert_eq!(f.asset_shares(sol_bank.key).await, scrap);
+    Ok(())
+}
+
 /// A whole move carries the order tag to the destination, and the keeper close of the stop-loss
 /// is still rejected.
 #[tokio::test]

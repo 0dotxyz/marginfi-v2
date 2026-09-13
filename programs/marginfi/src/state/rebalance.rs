@@ -75,10 +75,10 @@ impl RebalanceOrderImpl for RebalanceOrder {
 
 pub trait RebalanceRecordImpl {
     /// Record every referenced bank's start underlying-token amount and order tag + the declared
-    /// moves, and snapshot every active balance NOT in the referenced set, so `end_rebalance` can
-    /// reconcile the moves against real token deltas, prove conservation, and prove untouched
-    /// balances kept side and shares. The referenced set is the order's whole allowlist, so a bank
-    /// no move touches is still recorded and must come back with a zero net delta.
+    /// moves, and snapshot every non-empty active balance NOT in the referenced set, so
+    /// `end_rebalance` can reconcile the moves against real token deltas, prove conservation, and
+    /// prove untouched balances kept side and shares. The referenced set is the order's whole
+    /// allowlist, so a bank no move touches is still recorded and must return a zero net delta.
     fn initialize(
         &mut self,
         order: Pubkey,
@@ -117,8 +117,8 @@ pub trait RebalanceRecordImpl {
     ) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
 
     /// Verify the non-referenced balance set is exactly what it was at start: every snapshotted
-    /// balance still holds its side, order tag, and shares, and no balance outside the referenced
-    /// set was added.
+    /// balance still holds its side, order tag, and shares, and no non-empty balance outside the
+    /// referenced set was added.
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
 
     /// Carry each drained tagged source's order tag onto its destination balance, and verify every
@@ -180,9 +180,9 @@ impl RebalanceRecordImpl for RebalanceRecord {
             if ref_banks.iter().any(|r| r.bank == balance.bank_pk) {
                 continue;
             }
-            let side = balance
-                .get_side()
-                .ok_or(MarginfiError::IllegalBalanceState)?;
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
             let slot = self
                 .balance_states
                 .get_mut(active as usize)
@@ -270,7 +270,11 @@ impl RebalanceRecordImpl for RebalanceRecord {
             .lending_account
             .balances
             .iter()
-            .filter(|b| b.is_active() && !ref_banks.iter().any(|r| r.bank == b.bank_pk))
+            .filter(|b| {
+                b.is_active()
+                    && b.get_side().is_some()
+                    && !ref_banks.iter().any(|r| r.bank == b.bank_pk)
+            })
             .count();
         check!(
             untracked == self.active_balance_count as usize,
@@ -459,6 +463,23 @@ mod tests {
         account.lending_account.balances[0] = balance(dst, 0);
         record.carry_tags(&mut account).unwrap();
         assert_eq!(account.lending_account.balances[0].tag, 7);
+    }
+
+    /// An active slot below `EMPTY_BALANCE_THRESHOLD` is left out of the snapshot on both sides.
+    #[test]
+    fn record_ignores_an_empty_slot() {
+        let src = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 0);
+        let mut empty = balance(Pubkey::new_unique(), 0);
+        empty.asset_shares = I80F48::from_num(0.5).into();
+        account.lending_account.balances[1] = empty;
+        let record = record_for(
+            &account,
+            &[ref_bank(src, 0), ref_bank(Pubkey::new_unique(), 0)],
+        );
+        assert_eq!(record.active_balance_count, 0);
+        assert!(record.verify_others_unchanged(&account).is_ok());
     }
 
     /// A tagged referenced bank no move drains must still hold its tag at end.
