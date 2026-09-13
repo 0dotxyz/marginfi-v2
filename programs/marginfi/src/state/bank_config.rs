@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{MAX_PYTH_ORACLE_AGE, ORACLE_MIN_AGE, TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE},
-    types::{BankConfig, OracleSetup, RequirementType, RiskTier},
+    constants::{ORACLE_MIN_AGE, TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE},
+    types::{BankConfig, RequirementType, RiskTier},
 };
 
 use crate::{
@@ -20,9 +20,10 @@ pub trait BankConfigImpl {
     fn is_deposit_limit_active(&self) -> bool;
     fn is_borrow_limit_active(&self) -> bool;
     fn update_config_flag(&mut self, value: bool, flag: u8);
-    fn validate_oracle_setup(
+    fn validate_oracle_setup<'info>(
         &self,
-        ais: &[AccountInfo<'_>],
+        bank_mint: Pubkey,
+        ais: &'info [AccountInfo<'info>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
@@ -153,14 +154,17 @@ impl BankConfigImpl for BankConfig {
     /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring
     ///   `OracleSetup::StakedWithPythPush` on initial setup. If configuring a staked bank after
     ///   initial setup, can be omitted.
-    fn validate_oracle_setup(
+    fn validate_oracle_setup<'info>(
         &self,
-        ais: &[AccountInfo<'_>],
+        bank_mint: Pubkey,
+        ais: &'info [AccountInfo<'info>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
     ) -> MarginfiResult {
-        OraclePriceFeedAdapter::validate_bank_config(self, ais, lst_mint, stake_pool, sol_pool)?;
+        OraclePriceFeedAdapter::validate_bank_config(
+            self, bank_mint, ais, lst_mint, stake_pool, sol_pool,
+        )?;
         Ok(())
     }
 
@@ -170,9 +174,7 @@ impl BankConfigImpl for BankConfig {
 
     #[inline]
     fn get_oracle_max_age(&self) -> u64 {
-        match (self.oracle_max_age, self.oracle_setup) {
-            (0, OracleSetup::PythPushOracle) => MAX_PYTH_ORACLE_AGE,
-            (n, _) => n as u64,
-        }
+        // `validate()` enforces `oracle_max_age >= ORACLE_MIN_AGE` on every config write path
+        self.oracle_max_age as u64
     }
 }

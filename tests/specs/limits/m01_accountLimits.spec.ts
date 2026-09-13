@@ -23,6 +23,7 @@ import {
   depositIx,
   liquidateIx,
   withdrawIx,
+  closeBalanceIx,
 } from "../../utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
@@ -35,7 +36,12 @@ import {
   refreshPullOraclesBankrun,
   refreshSwitchboardPullOracleBankrun,
 } from "../../utils/bankrun-oracles";
-import { assertI80F48Approx, assertKeyDefault } from "../../utils/genericTests";
+import {
+  assertBankrunTxFailed,
+  assertI80F48Approx,
+  assertKeyDefault,
+  i80ToBn,
+} from "../../utils/genericTests";
 
 const startingSeed: number = 199;
 
@@ -505,6 +511,110 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
         })
       );
       await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    });
+
+    // Draining a balance without `withdraw_all` leaves it active with zero shares, so the slot
+    // stays held. `withdraw_all` can't recover it (it needs a positive asset amount), leaving
+    // `close_balance` as the only way out.
+    //
+    // Runs last, and drains banks[0]: the other banks back user 0's borrows, so emptying them
+    // would trip `IllegalUtilizationRatio`.
+    it("(admin) Withdraws all WITHOUT withdraw_all true - effectively blocks the account: cannot withdraw_all after this, only close_balance recovers the slot", async () => {
+      const user = groupAdmin;
+      const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
+      const before = await bankrunProgram.account.marginfiAccount.fetch(
+        userAccount
+      );
+
+      const remainingAccounts: PublicKey[][] = [];
+      const bankAccs = await Promise.all(
+        banks.map(async (pubkey) => {
+          const account = await bankrunProgram.account.bank.fetch(pubkey);
+          return { pubkey, account };
+        })
+      );
+      for (let i = 0; i < MAX_BALANCES; i++) {
+        if ("fixed" in bankAccs[i].account.config.oracleSetup) {
+          remainingAccounts.push([banks[i]]);
+        } else {
+          remainingAccounts.push([banks[i], oracles.pythPullLst.publicKey]);
+        }
+      }
+      const remaining = composeRemainingAccounts(remainingAccounts);
+
+      assert.equal(
+        before.lendingAccount.balances.filter((b) => b.active !== 0).length,
+        MAX_BALANCES
+      );
+
+      // Drain banks[0] without the withdraw_all flag.
+      const balance = before.lendingAccount.balances.find((b) =>
+        b.bankPk.equals(banks[0])
+      );
+      const bank = await bankrunProgram.account.bank.fetch(banks[0]);
+      const drainTx = new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        await withdrawIx(user.mrgnBankrunProgram, {
+          marginfiAccount: userAccount,
+          bank: banks[0],
+          tokenAccount: user.lstAlphaAccount,
+          remaining,
+          amount: i80ToBn(balance.assetShares).mul(
+            i80ToBn(bank.assetShareValue)
+          ),
+          withdrawAll: false,
+        })
+      );
+      await processBankrunTransaction(bankrunContext, drainTx, [user.wallet]);
+
+      // Emptied, but the slot is still held.
+      const drained = (
+        await bankrunProgram.account.marginfiAccount.fetch(userAccount)
+      ).lendingAccount.balances.find((b) => b.bankPk.equals(banks[0]));
+      assert.notEqual(drained.active, 0, "slot should still be occupied");
+      assert.equal(i80ToBn(drained.assetShares).toString(), "0");
+
+      // withdraw_all can't recover it: there is no asset left to withdraw.
+      const withdrawAllTx = new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        await withdrawIx(user.mrgnBankrunProgram, {
+          marginfiAccount: userAccount,
+          bank: banks[0],
+          tokenAccount: user.lstAlphaAccount,
+          remaining,
+          amount: new BN(0),
+          withdrawAll: true,
+        })
+      );
+      const failed = await processBankrunTransaction(
+        bankrunContext,
+        withdrawAllTx,
+        [user.wallet],
+        true
+      );
+      assertBankrunTxFailed(failed, 6023); // NoAssetFound
+
+      // close_balance is the only way out, and it frees the slot.
+      const closeTx = new Transaction().add(
+        await closeBalanceIx(user.mrgnBankrunProgram, {
+          marginfiAccount: userAccount,
+          bank: banks[0],
+        })
+      );
+      await processBankrunTransaction(bankrunContext, closeTx, [user.wallet]);
+
+      const after = await bankrunProgram.account.marginfiAccount.fetch(
+        userAccount
+      );
+      assert.equal(
+        after.lendingAccount.balances.find((b) => b.bankPk.equals(banks[0])),
+        undefined,
+        "close_balance should have released the slot"
+      );
+      assert.equal(
+        after.lendingAccount.balances.filter((b) => b.active !== 0).length,
+        MAX_BALANCES - 1
+      );
     });
   });
 });

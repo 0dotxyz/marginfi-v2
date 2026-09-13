@@ -246,6 +246,28 @@ export const withdrawIx = (
   return ix;
 };
 
+export type CloseBalanceIxArgs = {
+  marginfiAccount: PublicKey;
+  bank: PublicKey;
+};
+
+/**
+ * Close an empty balance, freeing its slot on the account.
+ * * `authority` - MarginfiAccount's authority must sign
+ */
+export const closeBalanceIx = (
+  program: Program<Marginfi>,
+  args: CloseBalanceIxArgs,
+) => {
+  return program.methods
+    .lendingAccountCloseBalance()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      bank: args.bank,
+    })
+    .instruction();
+};
+
 export type RepayIxArgs = {
   marginfiAccount: PublicKey;
   bank: PublicKey;

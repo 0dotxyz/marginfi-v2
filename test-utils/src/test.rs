@@ -1244,14 +1244,13 @@ impl TestFixture {
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
+        // Never sign with the context's cached `last_blockhash`: it is captured once at startup and
+        // falls out of the bank's recent-blockhash queue as slots advance, which surfaces as
+        // `BlockhashNotFound` on slower machines.
+        let blockhash = ctx.borrow_mut().banks_client.get_latest_blockhash().await?;
         let tx = {
             let c = ctx.borrow();
-            Transaction::new_signed_with_payer(
-                ixs,
-                Some(&c.payer.pubkey()),
-                &[&c.payer],
-                c.last_blockhash,
-            )
+            Transaction::new_signed_with_payer(ixs, Some(&c.payer.pubkey()), &[&c.payer], blockhash)
         };
         ctx.borrow_mut()
             .banks_client

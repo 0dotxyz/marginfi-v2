@@ -200,12 +200,24 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_oracle(ctx, setup, oracle)
     }
 
-    /// (admin only)
-    pub fn lending_pool_set_fixed_oracle_price(
-        ctx: Context<LendingPoolSetFixedOraclePrice>,
-        price: WrappedI80F48,
+    /// (admin only) Point a bank at a Scope feed entry.
+    /// * oracle - the feed's `OraclePrices` account
+    /// * entry_index - which of the 512 entries in that account prices this bank
+    pub fn lending_pool_configure_bank_oracle_scope(
+        ctx: Context<LendingPoolConfigureBankOracle>,
+        oracle: Pubkey,
+        entry_index: u16,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+        marginfi_group::lending_pool_configure_bank_oracle_scope(ctx, oracle, entry_index)
+    }
+
+    /// (admin only)
+    pub fn lending_pool_set_oracle_price(
+        ctx: Context<LendingPoolSetOraclePrice>,
+        price: WrappedI80F48,
+        setup: u8,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_set_oracle_price(ctx, price, setup)
     }
 
     /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.
@@ -236,6 +248,25 @@ pub mod marginfi {
     /// emode settings from e.g. one LST to another.
     pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> MarginfiResult {
         marginfi_group::lending_pool_clone_emode(ctx)
+    }
+
+    /// (snapshot manager only) Initialize the monitor snapshot archive account metadata.
+    pub fn monitor_archive_initialize(
+        ctx: Context<MonitorArchiveInitialize>,
+        snapshot_manager: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::monitor_archive_initialize(ctx, snapshot_manager)
+    }
+
+    /// (snapshot manager only) Upsert a batch of monitor snapshots into the archive account.
+    ///
+    /// Mints are sourced positionally from `remaining_accounts`: `updates[i]` maps to
+    /// `remaining_accounts[i]`.
+    pub fn monitor_archive_upsert_batch(
+        ctx: Context<MonitorArchiveUpsertBatch>,
+        updates: Vec<SnapshotUpdateInput>,
+    ) -> MarginfiResult {
+        marginfi_group::monitor_archive_upsert_batch(ctx, updates)
     }
 
     /// (emode_admin only) Set one pair of the group's variable-borrow premium matrix:
