@@ -12,8 +12,8 @@
 //!   to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
-//! - JupLend: the liquidity-layer supply rate (rewards APR is layered on OFF-CHAIN by the
-//!   keeper; the on-chain figure is the conservative base gate).
+//! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
+//!   post-deposit utilization (rewards APR is layered on OFF-CHAIN by the keeper).
 //!
 //! Integration reserve/market accounts MUST be refreshed in the same slot by the caller
 //! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend liquidity-program
@@ -29,16 +29,19 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::Mint;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
-use juplend_mocks::state::{LendingRewardsRateModel, TokenReserve, EXCHANGE_PRICES_PRECISION};
+use juplend_mocks::state::{
+    LendingRewardsRateModel, RateModel, TokenReserve, EXCHANGE_PRICES_PRECISION,
+};
 use kamino_mocks::state::{MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
 };
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, BankConfig};
 
-/// Accounts a venue needs beyond its rate-bearing account to price its reward emissions, each bound
-/// to the bank's own venue state. Callers that need only the base rate pass the default.
+/// Accounts a venue needs beyond its rate-bearing account to price a deposit and its reward
+/// emissions, each bound to the bank's own venue state; reading the stored rate needs none.
 #[derive(Default, Clone, Copy)]
 pub struct RewardsAccounts<'info> {
     /// Kamino: the reserve's `LendingMarket`, which caps the emission APR.
@@ -47,6 +50,8 @@ pub struct RewardsAccounts<'info> {
     pub rewards_model: Option<&'info AccountInfo<'info>>,
     /// JupLend: the fToken mint, whose supply is the rewards denominator.
     pub ftoken_mint: Option<&'info AccountInfo<'info>>,
+    /// JupLend: the mint's liquidity-layer `RateModel`, which prices the post-deposit borrow rate.
+    pub rate_model: Option<&'info AccountInfo<'info>>,
 }
 
 /// Supply APR (I80F48, 1.0 == 100%) for `bank` after `extra_native` more tokens are supplied,
@@ -350,8 +355,12 @@ fn juplend_supply_apr<'info>(
         !reserve.is_stale(clock.unix_timestamp),
         MarginfiError::JuplendLendingStale
     );
+    let rate_model = match rewards.rate_model {
+        Some(ai) => Some(load_juplend_rate_model(ai, &{ reserve.mint })?),
+        None => None,
+    };
     let base = reserve
-        .supply_rate_at(extra_native)
+        .supply_rate_at(extra_native, rate_model.as_ref())
         .ok_or_else(math_error!())?;
 
     // The bank holds fTokens, whose price grows by the liquidity-layer return plus the reward
@@ -394,6 +403,24 @@ fn juplend_supply_apr<'info>(
         )
         .ok_or_else(math_error!())?;
     Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
+}
+
+/// JupLend's `RateModel` for `mint`: the liquidity program keys one per mint, so an account it owns
+/// with the model discriminator and this mint is that one.
+fn load_juplend_rate_model(ai: &AccountInfo, mint: &Pubkey) -> MarginfiResult<RateModel> {
+    require_keys_eq!(
+        *ai.owner,
+        JUPLEND_LIQUIDITY_PROGRAM_ID,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    let model = RateModel::from_account_data(&ai.try_borrow_data()?)
+        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))?;
+    require_keys_eq!(
+        { model.mint },
+        *mint,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    Ok(model)
 }
 
 /// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance

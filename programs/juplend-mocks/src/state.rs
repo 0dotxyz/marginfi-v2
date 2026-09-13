@@ -8,6 +8,7 @@ pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241
 // Anchor discriminator = sha256("account:TokenReserve")[0..8].
 pub const TOKEN_RESERVE_DISCRIMINATOR: [u8; 8] = [21, 18, 59, 135, 120, 20, 31, 12];
 pub const REWARDS_RATE_MODEL_DISCRIMINATOR: [u8; 8] = [166, 72, 71, 131, 172, 74, 166, 181];
+pub const RATE_MODEL_DISCRIMINATOR: [u8; 8] = [94, 3, 203, 219, 107, 137, 4, 162];
 
 /// Precision used for exchange prices in JupLend (1e12).
 ///
@@ -258,7 +259,7 @@ impl TokenReserve {
     /// `TokenReserve::calculate_exchange_prices`:
     /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L362-L539
     pub fn supply_rate(&self) -> Option<I80F48> {
-        self.supply_rate_at(0)
+        self.supply_rate_at(0, None)
     }
 
     /// Utilization (1e2 scale, 100% == 10_000) after `extra` native tokens are supplied. Both sides
@@ -293,17 +294,21 @@ impl TokenReserve {
             .checked_div(scaled_supply)
     }
 
-    /// [`TokenReserve::supply_rate`] as it would read after `extra` native tokens were supplied.
-    /// Holds the stored `borrow_rate` fixed, modelling only utilization dilution: an upper bound.
-    pub fn supply_rate_at(&self, extra: u64) -> Option<I80F48> {
-        // The stored utilization is authoritative when nothing is added.
-        let utilization = if extra == 0 {
-            u128::from(self.last_utilization)
+    /// [`TokenReserve::supply_rate`] after `extra` native tokens are supplied, the diluted
+    /// utilization priced on `model` as `operate` does. `extra == 0` reads the stored rate.
+    pub fn supply_rate_at(&self, extra: u64, model: Option<&RateModel>) -> Option<I80F48> {
+        let (borrow_rate, utilization) = if extra == 0 {
+            (
+                u128::from(self.borrow_rate),
+                u128::from(self.last_utilization),
+            )
         } else {
-            self.utilization_at(extra)?
+            let utilization = self.utilization_at(extra)?;
+            let borrow_rate = model?.borrow_rate_at(utilization)?;
+            (u128::from(borrow_rate), utilization)
         };
         juplend_supply_rate_from_parts(
-            u128::from(self.borrow_rate),
+            borrow_rate,
             u128::from(self.fee_on_interest),
             utilization,
             u128::from(self.supply_exchange_price),
@@ -319,6 +324,83 @@ impl TokenReserve {
             u128::from(self.total_borrow_interest_free),
         )
     }
+}
+
+const _: () = assert!(core::mem::size_of::<RateModel>() == 45);
+
+/// Minimal mirror of JupLend's liquidity-layer `RateModel`, the per-mint borrow-rate curve that
+/// `operate` re-prices a reserve on after every supply or borrow change.
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/rate_model.rs
+#[zero_copy]
+#[repr(C, packed)]
+pub struct RateModel {
+    pub mint: Pubkey,
+    pub version: u8,
+    pub rate_at_zero: u16,
+    pub kink1_utilization: u16,
+    pub rate_at_kink1: u16,
+    pub rate_at_max: u16,
+    pub kink2_utilization: u16,
+    pub rate_at_kink2: u16,
+}
+
+/// Borrow rates are 1e2-scaled and capped at `u16::MAX`.
+const MAX_RATE: u128 = 65_535;
+const TWELVE_DECIMALS: i128 = 1_000_000_000_000;
+
+impl RateModel {
+    pub fn from_account_data(data: &[u8]) -> Option<Self> {
+        const LEN: usize = core::mem::size_of::<RateModel>();
+        if data.len() < 8 + LEN || data[..8] != RATE_MODEL_DISCRIMINATOR {
+            return None;
+        }
+        bytemuck::try_pod_read_unaligned(&data[8..8 + LEN]).ok()
+    }
+
+    /// Borrow rate (1e2: 100% == 10_000) at `utilization` (1e2) on the curve segment it falls in,
+    /// capped at `MAX_RATE`. `None` for an unsupported version or a negative interpolation.
+    pub fn borrow_rate_at(&self, utilization: u128) -> Option<u16> {
+        let (zero, kink1, at_kink1, max) = (
+            u128::from(self.rate_at_zero),
+            u128::from(self.kink1_utilization),
+            u128::from(self.rate_at_kink1),
+            u128::from(self.rate_at_max),
+        );
+        let (kink2, at_kink2) = (
+            u128::from(self.kink2_utilization),
+            u128::from(self.rate_at_kink2),
+        );
+        let (y1, y2, x1, x2) = match self.version {
+            1 if utilization < kink1 => (zero, at_kink1, 0, kink1),
+            1 => (at_kink1, max, kink1, FOUR_DECIMALS),
+            2 if utilization < kink1 => (zero, at_kink1, 0, kink1),
+            2 if utilization < kink2 => (at_kink1, at_kink2, kink1, kink2),
+            2 => (at_kink2, max, kink2, FOUR_DECIMALS),
+            _ => return None,
+        };
+        let rate = interpolate_rate(y1, y2, x1, x2, utilization)?;
+        u16::try_from(rate.min(MAX_RATE)).ok()
+    }
+}
+
+/// Upstream `get_rate`: the line through `(x1, y1)` and `(x2, y2)` evaluated at `utilization`, with
+/// the slope held at 1e12 precision. `None` on a zero-width segment or a negative result.
+fn interpolate_rate(y1: u128, y2: u128, x1: u128, x2: u128, utilization: u128) -> Option<u128> {
+    let num = i128::try_from(y2)
+        .ok()?
+        .checked_sub(i128::try_from(y1).ok()?)?
+        .checked_mul(TWELVE_DECIMALS)?;
+    let den = i128::try_from(x2.checked_sub(x1)?).ok()?;
+    let slope = num.checked_div(den)?;
+    let constant = i128::try_from(y1)
+        .ok()?
+        .checked_mul(TWELVE_DECIMALS)?
+        .checked_sub(slope.checked_mul(i128::try_from(x1).ok()?)?)?;
+    let rate = slope
+        .checked_mul(i128::try_from(utilization).ok()?)?
+        .checked_add(constant)?
+        .checked_div(TWELVE_DECIMALS)?;
+    u128::try_from(rate).ok()
 }
 
 const _: () = assert!(core::mem::size_of::<LendingRewardsRateModel>() == 81);
@@ -628,5 +710,91 @@ mod rate_tests {
         assert!(TokenReserve::from_account_data(&wrong_discriminator).is_none());
 
         assert!(TokenReserve::from_account_data(&buf[..buf.len() - 1]).is_none());
+    }
+
+    fn rate_model_v1(kink: u16, at_zero: u16, at_kink: u16, at_max: u16) -> RateModel {
+        use bytemuck::Zeroable;
+        let mut m = RateModel::zeroed();
+        m.version = 1;
+        m.kink1_utilization = kink;
+        m.rate_at_zero = at_zero;
+        m.rate_at_kink1 = at_kink;
+        m.rate_at_max = at_max;
+        m
+    }
+
+    /// Upstream's own one-kink vectors: both segments, the kink itself, and the cap.
+    #[test]
+    fn rate_model_v1_matches_upstream_vectors() {
+        let m = rate_model_v1(9_000, 0, 300, 10_000);
+        assert_eq!(m.borrow_rate_at(0).unwrap(), 0);
+        assert_eq!(m.borrow_rate_at(577).unwrap(), 19);
+        assert_eq!(m.borrow_rate_at(4_500).unwrap(), 149);
+        assert_eq!(m.borrow_rate_at(9_000).unwrap(), 300);
+        assert_eq!(m.borrow_rate_at(9_500).unwrap(), 5_150);
+        assert_eq!(m.borrow_rate_at(10_000).unwrap(), 10_000);
+        let capped = rate_model_v1(9_000, 0, 300, u16::MAX);
+        assert_eq!(capped.borrow_rate_at(20_000).unwrap(), u16::MAX);
+    }
+
+    /// Upstream's own two-kink vectors across all three segments, plus the unsupported version.
+    #[test]
+    fn rate_model_v2_matches_upstream_vectors() {
+        use bytemuck::Zeroable;
+        let mut m = RateModel::zeroed();
+        m.version = 2;
+        m.kink1_utilization = 8_500;
+        m.kink2_utilization = 9_300;
+        m.rate_at_zero = 0;
+        m.rate_at_kink1 = 600;
+        m.rate_at_kink2 = 800;
+        m.rate_at_max = 10_000;
+        assert_eq!(m.borrow_rate_at(4_250).unwrap(), 299);
+        assert_eq!(m.borrow_rate_at(8_500).unwrap(), 600);
+        assert_eq!(m.borrow_rate_at(8_900).unwrap(), 700);
+        assert_eq!(m.borrow_rate_at(9_300).unwrap(), 800);
+        assert_eq!(m.borrow_rate_at(9_650).unwrap(), 5_399);
+        assert_eq!(m.borrow_rate_at(10_000).unwrap(), 9_999);
+        m.version = 3;
+        assert!(m.borrow_rate_at(5_000).is_none());
+    }
+
+    /// A deposit is priced at the borrow rate the curve pays at the diluted utilization, while a
+    /// zero deposit reads the stored rate.
+    #[test]
+    fn supply_rate_at_prices_a_deposit_on_the_curve() {
+        use bytemuck::Zeroable;
+        let mut r = TokenReserve::zeroed();
+        r.borrow_rate = 15_000;
+        r.last_utilization = 9_000;
+        r.supply_exchange_price = 1_000_000_000_000;
+        r.borrow_exchange_price = 1_000_000_000_000;
+        r.total_supply_with_interest = 1_000_000_000;
+        r.total_borrow_with_interest = 900_000_000;
+        let m = rate_model_v1(8_000, 400, 1_000, 15_000);
+        let expected = |borrow_rate: u128, utilization: u128, supply: u128| {
+            juplend_supply_rate_from_parts(
+                borrow_rate,
+                0,
+                utilization,
+                1_000_000_000_000,
+                1_000_000_000_000,
+                supply,
+                0,
+                900_000_000,
+                0,
+            )
+        };
+        assert_eq!(
+            r.supply_rate_at(0, None),
+            expected(15_000, 9_000, 1_000_000_000)
+        );
+        // 100_000_000 more lands at 8181 utilization, where the curve pays 2267.
+        assert_eq!(m.borrow_rate_at(8_181).unwrap(), 2_267);
+        assert_eq!(
+            r.supply_rate_at(100_000_000, Some(&m)),
+            expected(2_267, 8_181, 1_100_000_000)
+        );
+        assert!(r.supply_rate_at(100_000_000, None).is_none());
     }
 }

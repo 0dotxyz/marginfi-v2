@@ -15,7 +15,7 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
-    pdas::derive_juplend_token_reserve,
+    pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
     types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::sysvar;
@@ -917,24 +917,34 @@ impl MultiVenueFixture {
             .set_account(&spot_market_key, &AccountSharedData::from(acct));
     }
 
-    /// Stamps the JupLend dst `TokenReserve` rate fields so its supply rate is high
-    /// (`borrow_rate × utilization`, no fee), making JupLend a high-rate destination for the start
-    /// gate. Leaves the supply/borrow totals and exchange prices as the venue seeded them, and stamps
-    /// `last_update_timestamp` to the current (pinned) clock so the reserve reads fresh without
-    /// breaking the deposit leg's `now - last_update` interest math.
+    /// Stamps the JupLend dst `TokenReserve` to a stored 8% supply rate (10% borrow rate at 80%
+    /// utilization, no fee) over tiny totals, a high-rate destination for the start gate.
     pub async fn set_juplend_rate_high(&self) {
+        self.stamp_juplend_reserve(1_000, 8_000, 1_000_000, 1_000_000)
+            .await;
+    }
+
+    /// Stamps the JupLend dst `TokenReserve` rate fields and totals (unit exchange prices, no fee)
+    /// and its `last_update_timestamp` to the pinned clock, so the reserve reads fresh.
+    pub async fn stamp_juplend_reserve(
+        &self,
+        borrow_rate: u16,
+        last_utilization: u16,
+        total_supply: u64,
+        total_borrow: u64,
+    ) {
         let key = derive_juplend_token_reserve(&self.mint.key).0;
         let now = self.test_f.get_clock().await.unix_timestamp as u64;
         let mut acct = self.test_f.try_load(&key).await.unwrap().unwrap();
         let size = std::mem::size_of::<TokenReserve>();
         let tr = bytemuck::from_bytes_mut::<TokenReserve>(&mut acct.data[8..8 + size]);
-        tr.borrow_rate = 1_000; // 10%
-        tr.last_utilization = 8_000; // 80%
+        tr.borrow_rate = borrow_rate;
+        tr.last_utilization = last_utilization;
         tr.fee_on_interest = 0;
         tr.supply_exchange_price = 1_000_000_000_000;
         tr.borrow_exchange_price = 1_000_000_000_000;
-        tr.total_supply_with_interest = 1_000_000;
-        tr.total_borrow_with_interest = 1_000_000;
+        tr.total_supply_with_interest = total_supply;
+        tr.total_borrow_with_interest = total_borrow;
         tr.last_update_timestamp = now;
         self.test_f
             .context
@@ -1038,7 +1048,11 @@ impl MultiVenueFixture {
         let lending_key = self.juplend_bank.load().await.integration_acc_1;
         let lending =
             load_and_deserialize::<Lending>(self.test_f.context.clone(), &lending_key).await;
-        vec![lending.rewards_rate_model, lending.f_token_mint]
+        vec![
+            lending.rewards_rate_model,
+            lending.f_token_mint,
+            derive_juplend_rate_model(&self.mint.key).0,
+        ]
     }
 
     pub async fn process(

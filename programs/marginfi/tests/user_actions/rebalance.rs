@@ -1317,6 +1317,97 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A JupLend destination is priced on its rate curve at the post-deposit utilization, so a stale
+/// stored rate cannot carry a move past the improvement gate.
+#[tokio::test]
+async fn rebalance_prices_a_juplend_destination_on_its_curve() -> anyhow::Result<()> {
+    let f = setup_multi_venue_fixture().await?;
+    let src = f.drift_bank.key;
+    let dst = f.juplend_bank.key;
+
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    // Stored: 150% borrow rate at 90% utilization. The deposit lands at 81.81%, where the
+    // fixture's curve (10% at the 80% kink, 150% at 100%) pays 22.67%, an 18.5% supply rate.
+    f.stamp_juplend_reserve(
+        15_000,
+        9_000,
+        10 * VENUE_DEPOSIT_NATIVE,
+        9 * VENUE_DEPOSIT_NATIVE,
+    )
+    .await;
+
+    let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.5)).await?;
+
+    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+    let drift_crank = f
+        .user
+        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+        .await;
+    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
+    let ref_banks = vec![
+        RebalanceBankMeta::new(src, f.drift_slice().await),
+        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
+            .with_rewards(f.juplend_rewards().await),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_drift_withdraw_ix_with_authority(
+            f.keeper_token,
+            &f.drift_bank,
+            VENUE_DEPOSIT_NATIVE,
+            Some(true),
+            f.keeper.pubkey(),
+            None,
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_juplend_deposit_ix_with_authority(
+            f.keeper_token,
+            &f.juplend_bank,
+            VENUE_DEPOSIT_NATIVE - 1,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[
+            cu_ix,
+            drift_crank,
+            start_ix,
+            withdraw_ix,
+            deposit_ix,
+            end_ix,
+        ])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    Ok(())
+}
+
 /// The conservation tolerance tracks the size of a venue's accounting token: with the Drift source
 /// at a doubled exchange rate the bound is 6 native units, so a 4-unit shortfall that
 /// `rebalance_leak_just_over_dust_rejected` rejects at multiplier 1 is accepted here.

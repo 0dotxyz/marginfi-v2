@@ -658,8 +658,8 @@ fn parse_rebalance_banks<'info>(
                 get_remaining_accounts_per_bank(&b)?.saturating_sub(1),
             )
         };
-        // Venue extras precede the oracles: JupLend's `TokenReserve`, then the reward accounts each
-        // venue needs to price its emissions (omitted for callers that only read yield indices).
+        // Venue extras precede the oracles: JupLend's `TokenReserve`, then the accounts each venue
+        // needs to price a deposit and its emissions (omitted when only yield indices are read).
         let take = |cursor: &mut usize| -> MarginfiResult<&'info AccountInfo<'info>> {
             require_gt!(
                 remaining.len(),
@@ -684,6 +684,7 @@ fn parse_rebalance_banks<'info>(
                 ASSET_TAG_JUPLEND => RewardsAccounts {
                     rewards_model: Some(take(&mut cursor)?),
                     ftoken_mint: Some(take(&mut cursor)?),
+                    rate_model: Some(take(&mut cursor)?),
                     ..Default::default()
                 },
                 _ => RewardsAccounts::default(),
