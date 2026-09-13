@@ -7,6 +7,7 @@ mod circuit_breaker;
 mod create_marginfi_group;
 mod deleverage;
 mod deleverage_withdraw_limit;
+mod durable_nonce;
 mod freeze;
 mod group_resize;
 mod interest_accrual;

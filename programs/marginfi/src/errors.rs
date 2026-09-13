@@ -456,6 +456,11 @@ pub enum MarginfiError {
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
 
+    // ************** BEGIN ADMIN GUARD ERRORS (starting at 6605)
+    #[msg("Durable nonce cannot be used for this instruction")]
+    DurableNonceNotAllowed = 605, // 6605
+    // ************** END ADMIN GUARD ERRORS
+
     // ************** BEGIN PREMIUM ERRORS (starting at 6610)
     #[msg("Premium entry has a zero collateral or liability tag")]
     PremiumEntryInvalid = 610, // 6610
@@ -770,6 +775,7 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::DurableNonceNotAllowed,
             6700 => MarginfiError::RebalanceVenueUnsupported,
             6701 => MarginfiError::RebalanceCooldown,
             6702 => MarginfiError::RebalanceIncompleteMove,

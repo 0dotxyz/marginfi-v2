@@ -74,6 +74,7 @@ impl HandleBankruptcyViaCpi<'_> {
             ctx.accounts.insurance_vault.to_account_info(),
             ctx.accounts.insurance_vault_authority.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.marginfi_program.to_account_info(),
         ];
 
         infos.extend_from_slice(ctx.remaining_accounts);
