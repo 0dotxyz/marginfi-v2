@@ -8,7 +8,7 @@ use crate::{
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            MarginfiAccountImpl, ALLOW_ORDER_EXECUTION, ALLOW_REBALANCE, ALLOW_RECEIVERSHIP,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -365,7 +365,7 @@ pub struct DriftWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true, true)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_REBALANCE)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

@@ -6,24 +6,30 @@ use {
         output,
         profile::Profile,
         utils::{
-            build_wsol_wrap_ixs, find_execute_order_pda, find_fee_state_pda,
-            find_liquidation_record_pda, find_order_pda, load_bank_oracle_account_metas,
+            build_wsol_wrap_ixs, find_borrow_order_pda, find_borrow_order_record_pda,
+            find_execute_order_pda, find_fee_state_pda, find_liquidation_record_pda,
+            find_order_pda, find_rebalance_fee_pool_pda, load_bank_oracle_account_metas,
             load_observation_account_metas, load_observation_account_metas_close_last,
             load_observation_account_metas_with_bank_writable, load_observation_bank_only_metas,
             send_tx, EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
-    anyhow::{anyhow, bail, Context, Result},
+    anyhow::{anyhow, bail, ensure, Context, Result},
     base64::Engine as _,
     fixed::types::I80F48,
+    marginfi::state::{
+        bank::BankImpl,
+        borrow_order::{available_liquidity, remaining_borrow_capacity},
+        rate::borrow_rate_at,
+    },
     marginfi_type_crate::types::BankVaultType,
     marginfi_type_crate::{
-        constants::{MARGINFI_ACCOUNT_SEED, REBALANCE_FEE_POOL_SEED},
+        constants::MARGINFI_ACCOUNT_SEED,
         types::{
-            Bank, FeeState, LiquidationRecord, MarginfiAccount, Order, OrderTrigger,
-            ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-            ACCOUNT_IN_RECEIVERSHIP,
+            Bank, BorrowOrder, FeeState, InterestTriggerConfig, LiquidationRecord, MarginfiAccount,
+            Order, OrderTrigger, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+            ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
         },
     },
     serde::Deserialize,
@@ -650,11 +656,8 @@ pub fn marginfi_account_close(profile: &Profile, config: &Config) -> Result<()> 
             marginfi_account: marginfi_account_pk,
             authority,
             fee_payer: config.explicit_fee_payer(),
-            rebalance_fee_pool: Pubkey::find_program_address(
-                &[
-                    REBALANCE_FEE_POOL_SEED.as_bytes(),
-                    marginfi_account_pk.as_ref(),
-                ],
+            rebalance_fee_pool: find_rebalance_fee_pool_pda(
+                &marginfi_account_pk,
                 &config.program_id,
             )
             .0,
@@ -681,6 +684,7 @@ pub fn marginfi_account_place_order(
     bank_1: Pubkey,
     bank_2: Pubkey,
     trigger: OrderTrigger,
+    interest: Option<InterestTriggerConfig>,
 ) -> Result<()> {
     let authority = config.authority();
     let marginfi_account_pk = profile.get_marginfi_account()?;
@@ -719,13 +723,562 @@ pub fn marginfi_account_place_order(
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        data: match interest {
+            Some(interest) => marginfi::instruction::MarginfiAccountPlaceInterestOrder {
+                bank_keys,
+                trigger,
+                interest,
+            }
+            .data(),
+            None => marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        },
     };
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Order placed successfully (sig: {})", sig);
 
+    Ok(())
+}
+
+/// Observation metas with the order's two legs promoted to writable, as `start_execute_order` needs
+/// to accrue them. An order with no interest trigger accrues nothing, so nothing is promoted.
+fn observation_metas_accruing_legs(
+    order: &Order,
+    marginfi_account: &MarginfiAccount,
+    banks: &HashMap<Pubkey, Bank>,
+) -> Vec<AccountMeta> {
+    let mut metas = load_observation_account_metas(marginfi_account, banks, vec![], vec![]);
+    if !order.interest_trigger_enabled() {
+        return metas;
+    }
+    let legs: Vec<Pubkey> = marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active() && order.tags.contains(&b.tag))
+        .map(|b| b.bank_pk)
+        .collect();
+    for meta in metas.iter_mut() {
+        meta.is_writable |= legs.contains(&meta.pubkey);
+    }
+    metas
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn marginfi_account_place_borrow_order(
+    profile: &Profile,
+    config: &Config,
+    bank_pk: Pubkey,
+    ui_amount: f64,
+    open_below_apr: u32,
+    close_above_apr: Option<u32>,
+    window_seconds: Option<u32>,
+    cooldown_seconds: Option<u32>,
+    keeper_tip: Option<u64>,
+    destination_bank: Option<Pubkey>,
+) -> Result<()> {
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "place-borrow-rate-order")?;
+    let group = marginfi_account.group;
+    let fee_state_pk = find_fee_state_pda(&config.program_id).0;
+    let fee_state: FeeState = config.mfi_program.account(fee_state_pk)?;
+
+    let bank: Bank = config.mfi_program.account(bank_pk)?;
+    let amount = (I80F48::from_num(ui_amount) * EXP_10_I80F48[bank.mint_decimals as usize])
+        .floor()
+        .to_num::<u64>();
+    let order_pk = find_borrow_order_pda(&marginfi_account_pk, &bank_pk, &config.program_id).0;
+
+    println!("Placing borrow order {} on bank {}", order_pk, bank_pk);
+    match destination_bank {
+        Some(dst) => println!("Borrowed funds redeploy into bank {}", dst),
+        None => println!("Borrowed funds go to the authority's wallet"),
+    }
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::PlaceBorrowOrder {
+            group,
+            marginfi_account: marginfi_account_pk,
+            authority,
+            bank: bank_pk,
+            destination_bank,
+            borrow_order: order_pk,
+            fee_state: fee_state_pk,
+            global_fee_wallet: fee_state.global_fee_wallet,
+            fee_payer: config.explicit_fee_payer(),
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountPlaceBorrowOrder {
+            amount,
+            open_below_apr,
+            close_above_apr,
+            cooldown_seconds,
+            window_seconds,
+            keeper_tip,
+        }
+        .data(),
+    };
+
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
+    println!("Borrow order placed (sig: {})", sig);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn marginfi_account_update_borrow_order(
+    profile: &Profile,
+    config: &Config,
+    order_pk: Pubkey,
+    ui_amount: Option<f64>,
+    open_below_apr: Option<u32>,
+    close_above_apr: Option<u32>,
+    window_seconds: Option<u32>,
+    cooldown_seconds: Option<u32>,
+    keeper_tip: Option<u64>,
+) -> Result<()> {
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let order: BorrowOrder = config.mfi_program.account(order_pk)?;
+    let amount = ui_amount
+        .map(|ui| -> Result<u64> {
+            let bank: Bank = config.mfi_program.account(order.bank)?;
+            Ok(
+                (I80F48::from_num(ui) * EXP_10_I80F48[bank.mint_decimals as usize])
+                    .floor()
+                    .to_num::<u64>(),
+            )
+        })
+        .transpose()?;
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::UpdateBorrowOrder {
+            marginfi_account: marginfi_account_pk,
+            authority,
+            borrow_order: order_pk,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountUpdateBorrowOrder {
+            amount,
+            open_below_apr,
+            close_above_apr,
+            cooldown_seconds,
+            window_seconds,
+            keeper_tip,
+        }
+        .data(),
+    };
+
+    println!("Updating borrow order: {}", order_pk);
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
+    println!("Borrow order updated (sig: {})", sig);
+    Ok(())
+}
+
+pub fn marginfi_account_cancel_borrow_order(
+    profile: &Profile,
+    config: &Config,
+    order_pk: Pubkey,
+    fee_recipient: Option<Pubkey>,
+) -> Result<()> {
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let fee_recipient = fee_recipient.unwrap_or(authority);
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::CancelBorrowOrder {
+            marginfi_account: marginfi_account_pk,
+            authority,
+            borrow_order: order_pk,
+            fee_recipient,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountCancelBorrowOrder.data(),
+    };
+
+    println!("Cancelling borrow order: {}", order_pk);
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
+    println!("Borrow order cancelled (sig: {})", sig);
+    Ok(())
+}
+
+/// The largest open that still prices under the order's level.
+fn max_borrow_order_fill(
+    order: &BorrowOrder,
+    bank: &Bank,
+    destination: Option<&Bank>,
+    group: &marginfi_type_crate::types::MarginfiGroup,
+) -> Result<u64> {
+    // The rate is read at the booked debt, origination fee included.
+    let fee_rate: I80F48 = bank
+        .config
+        .interest_rate_config
+        .protocol_origination_fee
+        .into();
+    let fits = |x: u64| -> Result<bool> {
+        let booked = (I80F48::from_num(x) * (I80F48::ONE + fee_rate))
+            .ceil()
+            .to_num::<u64>();
+        Ok(order.opens_at(borrow_rate_at(bank, group, booked)?))
+    };
+    let mut cap = available_liquidity(bank)?
+        .min(remaining_borrow_capacity(bank)?)
+        .floor()
+        .to_num::<u64>();
+    if let Some(destination) = destination {
+        cap = cap.min(destination.get_remaining_deposit_capacity()?);
+    }
+    let (mut lo, mut hi) = (0u64, order.remaining().min(cap));
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        if fits(mid)? {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    Ok(lo)
+}
+
+/// The keeper's open in one transaction: gate, borrow, the redeploy deposit, proof.
+pub fn marginfi_account_fill_borrow_order(config: &Config, order_pk: Pubkey) -> Result<()> {
+    let executor = config.authority();
+    let rpc_client = config.mfi_program.rpc();
+
+    let order: BorrowOrder = config.mfi_program.account(order_pk)?;
+    let marginfi_account_pk = order.marginfi_account;
+    let marginfi_account: MarginfiAccount = config.mfi_program.account(marginfi_account_pk)?;
+    let group = marginfi_account.group;
+    let group_state = config.mfi_program.account(group)?;
+    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
+    let bank = banks.get(&order.bank).context("Order bank not found")?;
+
+    let destination = order
+        .to_bank()
+        .then(|| banks.get(&order.destination_bank))
+        .flatten();
+    let amount = max_borrow_order_fill(&order, bank, destination, &group_state)?;
+    ensure!(amount > 0, "Nothing fits under the order's level");
+    let ui_amount = I80F48::from_num(amount) / EXP_10_I80F48[bank.mint_decimals as usize];
+    let token_program = rpc_client.get_account(&bank.mint)?.owner;
+    let ata_for = |owner: &Pubkey| {
+        anchor_spl::associated_token::get_associated_token_address_with_program_id(
+            owner,
+            &bank.mint,
+            &token_program,
+        )
+    };
+    // A wallet fill delivers to the authority's ATA; a redeploying one flows through the keeper's.
+    let (borrow_destination, ata_owner) = if order.to_bank() {
+        (ata_for(&executor), executor)
+    } else {
+        (
+            ata_for(&marginfi_account.authority),
+            marginfi_account.authority,
+        )
+    };
+    let record_pk = find_borrow_order_record_pda(&order_pk, &config.program_id).0;
+
+    let start_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::StartBorrowOrderFill {
+            group,
+            marginfi_account: marginfi_account_pk,
+            borrow_order: order_pk,
+            bank: order.bank,
+            executor,
+            borrow_order_record: record_pk,
+            fee_payer: config.explicit_fee_payer(),
+            instruction_sysvar: sysvar::instructions::id(),
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountStartBorrowOrderOpen.data(),
+    };
+
+    let mut borrow_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::LendingAccountBorrow {
+            group,
+            marginfi_account: marginfi_account_pk,
+            authority: executor,
+            bank: order.bank,
+            liquidity_vault: bank.liquidity_vault,
+            token_program,
+            destination_token_account: borrow_destination,
+            bank_liquidity_vault_authority: derive_bank_vault_authority(
+                &order.bank,
+                BankVaultType::Liquidity,
+                &config.program_id,
+            )
+            .0,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingAccountBorrow { amount }.data(),
+    };
+    if token_program == anchor_spl::token_2022::ID {
+        borrow_ix
+            .accounts
+            .push(AccountMeta::new_readonly(bank.mint, false));
+    }
+    borrow_ix.accounts.extend(load_observation_account_metas(
+        &marginfi_account,
+        &banks,
+        vec![order.bank],
+        vec![],
+    ));
+
+    let mut ixs = vec![
+        build_authority_ata_ix(config, &ata_owner, &bank.mint, &token_program),
+        start_ix,
+        borrow_ix,
+    ];
+    let mut opened = vec![order.bank];
+    if order.to_bank() {
+        let dst = banks
+            .get(&order.destination_bank)
+            .context("Destination bank not found")?;
+        let mut deposit_ix = Instruction {
+            program_id: config.program_id,
+            accounts: marginfi::accounts::LendingAccountDeposit {
+                group,
+                marginfi_account: marginfi_account_pk,
+                authority: executor,
+                bank: order.destination_bank,
+                signer_token_account: borrow_destination,
+                liquidity_vault: dst.liquidity_vault,
+                token_program,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingAccountDeposit {
+                amount,
+                deposit_up_to_limit: None,
+            }
+            .data(),
+        };
+        if token_program == anchor_spl::token_2022::ID {
+            deposit_ix
+                .accounts
+                .push(AccountMeta::new_readonly(dst.mint, false));
+        }
+        ixs.push(deposit_ix);
+        opened.push(order.destination_bank);
+    }
+
+    let mut end_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::EndBorrowOrderFill {
+            group,
+            marginfi_account: marginfi_account_pk,
+            borrow_order: order_pk,
+            bank: order.bank,
+            destination_bank: order.to_bank().then_some(order.destination_bank),
+            executor,
+            borrow_order_record: record_pk,
+            fee_pool: find_rebalance_fee_pool_pda(&marginfi_account_pk, &config.program_id).0,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountEndBorrowOrderOpen.data(),
+    };
+    end_ix.accounts.extend(load_observation_account_metas(
+        &marginfi_account,
+        &banks,
+        opened,
+        vec![],
+    ));
+    ixs.push(end_ix);
+
+    println!(
+        "Filling borrow order {} for {} UI units",
+        order_pk, ui_amount
+    );
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, ixs, &signing_keypairs)?;
+    println!("Borrow order filled (sig: {})", sig);
+    Ok(())
+}
+
+/// The keeper's close in one transaction: gate, withdraw all the destination can cover, repay, proof.
+pub fn marginfi_account_close_borrow_order(config: &Config, order_pk: Pubkey) -> Result<()> {
+    let executor = config.authority();
+    let rpc_client = config.mfi_program.rpc();
+
+    let order: BorrowOrder = config.mfi_program.account(order_pk)?;
+    ensure!(order.has_close_side(), "The order has no close side");
+    let marginfi_account_pk = order.marginfi_account;
+    let marginfi_account: MarginfiAccount = config.mfi_program.account(marginfi_account_pk)?;
+    let group = marginfi_account.group;
+    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
+    let bank = banks.get(&order.bank).context("Order bank not found")?;
+    let dst = banks
+        .get(&order.destination_bank)
+        .context("Destination bank not found")?;
+
+    // The smallest of the debt as last accrued, what the destination holds, and what it can pay out.
+    let balance_shares = |bank_pk: &Pubkey, liability: bool| {
+        marginfi_account
+            .lending_account
+            .get_balance(bank_pk)
+            .map(|b| {
+                I80F48::from(if liability {
+                    b.liability_shares
+                } else {
+                    b.asset_shares
+                })
+            })
+            .unwrap_or(I80F48::ZERO)
+    };
+    let owed =
+        bank.get_liability_amount(order.closable_shares(balance_shares(&order.bank, true)))?;
+    let held = dst.get_asset_amount(balance_shares(&order.destination_bank, false))?;
+    let reachable = owed.min(held).min(available_liquidity(dst)?);
+    ensure!(reachable > I80F48::ZERO, "Nothing to close");
+    let amount = reachable.floor().to_num::<u64>();
+    // The binding side moves by its own "all" flag.
+    let withdraw_all = (reachable == held).then_some(true);
+    let repay_all = (reachable == owed).then_some(true);
+    let token_program = rpc_client.get_account(&bank.mint)?.owner;
+    let keeper_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        &executor,
+        &bank.mint,
+        &token_program,
+    );
+    let record_pk = find_borrow_order_record_pda(&order_pk, &config.program_id).0;
+
+    let start_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::StartBorrowOrderFill {
+            group,
+            marginfi_account: marginfi_account_pk,
+            borrow_order: order_pk,
+            bank: order.bank,
+            executor,
+            borrow_order_record: record_pk,
+            fee_payer: config.explicit_fee_payer(),
+            instruction_sysvar: sysvar::instructions::id(),
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountStartBorrowOrderClose.data(),
+    };
+
+    let mut withdraw_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::LendingAccountWithdraw {
+            group,
+            marginfi_account: marginfi_account_pk,
+            authority: executor,
+            bank: order.destination_bank,
+            destination_token_account: keeper_ata,
+            bank_liquidity_vault_authority: derive_bank_vault_authority(
+                &order.destination_bank,
+                BankVaultType::Liquidity,
+                &config.program_id,
+            )
+            .0,
+            liquidity_vault: dst.liquidity_vault,
+            token_program,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingAccountWithdraw {
+            amount,
+            withdraw_all,
+        }
+        .data(),
+    };
+    if token_program == anchor_spl::token_2022::ID {
+        withdraw_ix
+            .accounts
+            .push(AccountMeta::new_readonly(dst.mint, false));
+    }
+    withdraw_ix.accounts.extend(load_observation_account_metas(
+        &marginfi_account,
+        &banks,
+        vec![],
+        vec![],
+    ));
+
+    let mut repay_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::LendingAccountRepay {
+            group,
+            marginfi_account: marginfi_account_pk,
+            authority: executor,
+            bank: order.bank,
+            signer_token_account: keeper_ata,
+            liquidity_vault: bank.liquidity_vault,
+            token_program,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingAccountRepay { amount, repay_all }.data(),
+    };
+    if token_program == anchor_spl::token_2022::ID {
+        repay_ix
+            .accounts
+            .push(AccountMeta::new_readonly(bank.mint, false));
+    }
+
+    // Emptied balances are gone by the time `end` reads the health set.
+    let closed = repay_all
+        .map(|_| order.bank)
+        .into_iter()
+        .chain(withdraw_all.map(|_| order.destination_bank))
+        .collect();
+    let mut end_ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::EndBorrowOrderFill {
+            group,
+            marginfi_account: marginfi_account_pk,
+            borrow_order: order_pk,
+            bank: order.bank,
+            destination_bank: Some(order.destination_bank),
+            executor,
+            borrow_order_record: record_pk,
+            fee_pool: find_rebalance_fee_pool_pda(&marginfi_account_pk, &config.program_id).0,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountEndBorrowOrderClose.data(),
+    };
+    end_ix.accounts.extend(load_observation_account_metas(
+        &marginfi_account,
+        &banks,
+        vec![],
+        closed,
+    ));
+
+    let ixs = vec![
+        build_authority_ata_ix(config, &executor, &bank.mint, &token_program),
+        start_ix,
+        withdraw_ix,
+        repay_ix,
+        end_ix,
+    ];
+    println!(
+        "Closing borrow order {}: {} native units{}",
+        order_pk,
+        amount,
+        if repay_all.is_some() {
+            ", the whole debt"
+        } else {
+            ""
+        }
+    );
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, ixs, &signing_keypairs)?;
+    println!("Borrow-order position closed (sig: {})", sig);
     Ok(())
 }
 
@@ -890,6 +1443,8 @@ pub fn marginfi_account_keeper_execute_order(
 
     let observation_metas =
         load_observation_account_metas(&marginfi_account, &banks, vec![], vec![]);
+    // Only `start` accrues, so only it needs the write locks.
+    let start_metas = observation_metas_accruing_legs(&order, &marginfi_account, &banks);
     let execute_record_pk = find_execute_order_pda(&order_pk, &config.program_id).0;
     let fee_state_pk = find_fee_state_pda(&config.program_id).0;
 
@@ -908,7 +1463,7 @@ pub fn marginfi_account_keeper_execute_order(
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountStartExecuteOrder.data(),
     };
-    start_ix.accounts.extend(observation_metas.clone());
+    start_ix.accounts.extend(start_metas);
 
     let mut end_ix = Instruction {
         program_id: config.program_id,

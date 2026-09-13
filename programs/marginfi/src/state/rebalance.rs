@@ -1,13 +1,16 @@
 use crate::{
-    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
-    state::marginfi_account::LendingAccountImpl,
+    check,
+    errors::MarginfiError,
+    math_error,
+    prelude::MarginfiResult,
+    state::order::{snapshot_balances_outside, verify_balances_outside_unchanged},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
 use marginfi_type_crate::types::{
-    Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
-    RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+    MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
+    WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
 
 pub trait RebalanceOrderImpl {
@@ -172,32 +175,10 @@ impl RebalanceRecordImpl for RebalanceRecord {
         self.moves[..moves.len()].copy_from_slice(moves);
         self.move_count = moves.len() as u8;
 
-        let mut active: u8 = 0;
-        for balance in marginfi_account.lending_account.balances.iter() {
-            if !balance.is_active() {
-                continue;
-            }
-            if ref_banks.iter().any(|(b, _)| *b == balance.bank_pk) {
-                continue;
-            }
-            let side = balance
-                .get_side()
-                .ok_or(MarginfiError::IllegalBalanceState)?;
-            let slot = self
-                .balance_states
-                .get_mut(active as usize)
-                .ok_or(MarginfiError::IllegalBalanceState)?;
-            slot.bank = balance.bank_pk;
-            slot.is_asset = matches!(side, BalanceSide::Assets) as u8;
-            slot.tag = balance.tag;
-            slot.shares = if matches!(side, BalanceSide::Assets) {
-                balance.asset_shares
-            } else {
-                balance.liability_shares
-            };
-            active = active.saturating_add(1);
-        }
-        self.active_balance_count = active;
+        self.active_balance_count =
+            snapshot_balances_outside(&mut self.balance_states, marginfi_account, |bank| {
+                ref_banks.iter().any(|(b, _)| b == bank)
+            })?;
         Ok(())
     }
 
@@ -267,44 +248,13 @@ impl RebalanceRecordImpl for RebalanceRecord {
         // A balance added mid-sandwich occupies no snapshot slot, so the loop below cannot see it.
         // Any signer may run the deposit legs, and no leg is bound to a referenced bank.
         let ref_banks = &self.ref_banks[..self.ref_bank_count as usize];
-        let untracked = marginfi_account
-            .lending_account
-            .balances
-            .iter()
-            .filter(|b| b.is_active() && !ref_banks.iter().any(|r| r.bank == b.bank_pk))
-            .count();
-        check!(
-            untracked == self.active_balance_count as usize,
-            MarginfiError::RebalanceUntrackedBalance
-        );
-
-        for rec in self.balance_states[..self.active_balance_count as usize].iter() {
-            let idx = marginfi_account
-                .lending_account
-                .get_balance_index(&rec.bank)?;
-            let balance: &Balance = &marginfi_account.lending_account.balances[idx];
-            let side = balance
-                .get_side()
-                .ok_or(MarginfiError::IllegalBalanceState)?;
-            check_eq_u8(rec.is_asset, matches!(side, BalanceSide::Assets) as u8)?;
-            let now: WrappedI80F48 = if matches!(side, BalanceSide::Assets) {
-                balance.asset_shares
-            } else {
-                balance.liability_shares
-            };
-            check!(
-                I80F48::from(rec.shares) == I80F48::from(now),
-                MarginfiError::IllegalBalanceState
-            );
-        }
-        Ok(())
+        verify_balances_outside_unchanged(
+            &self.balance_states[..self.active_balance_count as usize],
+            marginfi_account,
+            |bank| ref_banks.iter().any(|r| r.bank == *bank),
+            MarginfiError::RebalanceUntrackedBalance,
+        )
     }
-}
-
-#[inline]
-fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
-    check!(a == b, MarginfiError::IllegalBalanceState);
-    Ok(())
 }
 
 #[cfg(test)]

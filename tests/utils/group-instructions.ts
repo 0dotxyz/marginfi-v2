@@ -253,6 +253,27 @@ export const resizeGroupAccount = (
     .instruction();
 };
 
+export type ResizeBankAccountArgs = {
+  bank: PublicKey;
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/** (permissionless) Resize a v1-sized bank account to the current struct size. */
+export const resizeBankAccount = (
+  program: Program<Marginfi>,
+  args: ResizeBankAccountArgs,
+) => {
+  return program.methods
+    .lendingPoolResizeBankAccount()
+    .accounts({
+      bank: args.bank,
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
 export type ResizeGlobalFeeStateArgs = {
   /** Funds the rent for the added account space. */
   payer: PublicKey;
@@ -500,7 +521,7 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
-      args.accountTransferFee ?? null
+      args.accountTransferFee ?? null,
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -996,7 +1017,7 @@ export type ClearCircuitBreakerArgs = {
 
 export const clearCircuitBreaker = async (
   program: Program<Marginfi>,
-  args: ClearCircuitBreakerArgs
+  args: ClearCircuitBreakerArgs,
 ) => {
   return program.methods
     .lendingPoolClearCircuitBreaker(args.reseedReference ?? false)
@@ -1200,7 +1221,7 @@ export const writeBankMetadata = (
   const ix = program.methods
     .writeBankMetadata(
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       // group: implied
@@ -1253,7 +1274,7 @@ export const writeBankMetadataPreInit = (
     .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,

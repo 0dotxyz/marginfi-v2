@@ -44,6 +44,17 @@ pub enum OrderTrigger {
     },
 }
 
+/// Optional carry-exit policy on an `Order`, orthogonal to its price trigger. Each field sets the
+/// `Order` field of the same name; `None` takes the matching `INTEREST_DEFAULT_*` constant.
+#[repr(C)]
+#[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct InterestTriggerConfig {
+    pub window_seconds: Option<u32>,
+    pub exit_budget_seconds: Option<u32>,
+    pub min_negative_apr: Option<u32>,
+}
+
 assert_struct_size!(Order, 256);
 assert_struct_align!(Order, 8);
 #[repr(C)]
@@ -75,12 +86,30 @@ pub struct Order {
     /// Bump to derive this pda
     pub bump: u8,
     pub pad2: [u8; 6],
-    _reserved1: [[u8; 32]; 4],
+
+    /// Shortest span the realized rates are measured over: each leg is read from its bank's
+    /// youngest rate reading at least this old.
+    pub interest_window_seconds: u32,
+    /// The carry loss accrued over this span is the budget the realized unwind cost must fit in.
+    pub interest_exit_budget_seconds: u32,
+    /// Annualized loss, against the lend leg, required to fire the trigger. Encoded like the
+    /// interest-curve points via `milli_to_u32` (0-1000%). Zero fires on any negative carry.
+    pub interest_min_negative_apr: u32,
+    /// Bit 0 (`INTEREST_TRIGGER_ENABLED`) - the carry condition is active on this order.
+    pub interest_flags: u8,
+    pub pad3: [u8; 3],
+
+    _reserved1: [[u8; 16]; 7],
 }
 
 impl Order {
     pub const LEN: usize = core::mem::size_of::<Order>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::ORDER;
+    pub const INTEREST_TRIGGER_ENABLED: u8 = 1 << 0;
+
+    pub fn interest_trigger_enabled(&self) -> bool {
+        self.interest_flags & Self::INTEREST_TRIGGER_ENABLED != 0
+    }
 }
 
 // The execution record does not store order balances and each order
@@ -89,7 +118,7 @@ pub const MAX_EXECUTE_RECORD_BALANCES: usize = MAX_LENDING_ACCOUNT_BALANCES - 2;
 
 // Records key information about the account during order execution.
 // It is closed after the order completes with funds returned to the executor.
-assert_struct_size!(ExecuteOrderRecord, 872);
+assert_struct_size!(ExecuteOrderRecord, 888);
 assert_struct_align!(ExecuteOrderRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -103,8 +132,13 @@ pub struct ExecuteOrderRecord {
     pub balance_states: [ExecuteOrderBalanceRecord; MAX_EXECUTE_RECORD_BALANCES],
     pub active_balance_count: u8,
     pub inactive_balance_count: u8,
-    _reserved0: [u8; 6],
+    /// `MET_*` bit flags: the order conditions satisfied at `start_execute_order`.
+    pub met_conditions: u8,
+    _reserved0: [u8; 5],
     pub order_start_health: WrappedI80F48,
+    /// Net carry in USD per year at start, negative when the pair loses to interest. The end gate
+    /// reads it because the closed liability leg makes it unrecomputable there.
+    pub interest_carry: WrappedI80F48,
 }
 
 // This is used to ensure the balance state after execution stays the same.
@@ -124,4 +158,14 @@ pub struct ExecuteOrderBalanceRecord {
 impl ExecuteOrderRecord {
     pub const LEN: usize = core::mem::size_of::<ExecuteOrderRecord>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::EXECUTE_ORDER_RECORD;
+    pub const MET_PRICE: u8 = 1 << 0;
+    pub const MET_INTEREST: u8 = 1 << 1;
+
+    pub fn met_price(&self) -> bool {
+        self.met_conditions & Self::MET_PRICE != 0
+    }
+
+    pub fn met_interest(&self) -> bool {
+        self.met_conditions & Self::MET_INTEREST != 0
+    }
 }
