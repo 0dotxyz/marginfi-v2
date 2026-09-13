@@ -344,6 +344,7 @@ impl MarginfiAccountFixture {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
@@ -2334,6 +2335,7 @@ impl MarginfiAccountFixture {
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::EndDeleverage {}.data(),

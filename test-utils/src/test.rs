@@ -1458,6 +1458,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: reserve_mint.token_program,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -1696,6 +1697,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: spl_token::ID,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -2166,6 +2168,7 @@ impl TestFixture {
                 integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
                 system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolAddBankJuplend {

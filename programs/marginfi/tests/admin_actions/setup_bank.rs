@@ -75,6 +75,7 @@ fn make_write_bank_metadata_ix(
             bank,
             metadata_admin,
             metadata,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
@@ -702,6 +703,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
@@ -992,6 +994,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
