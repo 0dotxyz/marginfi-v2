@@ -1,5 +1,6 @@
 use crate::check;
 use crate::events::{GroupEventHeader, LendingPoolGroupPremiumConfigureEvent};
+use crate::ix_utils;
 use crate::MarginfiError;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
@@ -20,6 +21,8 @@ pub fn lending_pool_configure_group_premium(
     liability_tag: u16,
     rate: u32,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // Zero (untagged) never matches a lookup, so storing it would create a dead entry.
     check!(
         collateral_tag != PREMIUM_TAG_EMPTY && liability_tag != PREMIUM_TAG_EMPTY,
@@ -107,4 +110,8 @@ pub struct LendingPoolConfigureGroupPremium<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub emode_admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

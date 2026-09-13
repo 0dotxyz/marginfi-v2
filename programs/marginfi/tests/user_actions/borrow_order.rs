@@ -838,6 +838,7 @@ async fn a_close_is_not_counted_against_the_destination_outflow_limit() -> anyho
             group: fx.test_f.marginfi_group.key,
             admin: payer.pubkey(),
             bank: fx.dst().key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::ConfigureBankRateLimits {
