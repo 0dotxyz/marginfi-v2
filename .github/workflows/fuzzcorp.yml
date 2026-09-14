@@ -14,7 +14,9 @@ name: FuzzCorp bundle
 on:
   workflow_dispatch: {}
   push:
-    branches: [main]
+    # TEMP: crucible-fuzz-658-fixes added so the 0.1.12 harness port is verified on
+    # FuzzCorp before merge. Remove it (back to [main]) once the campaign is green.
+    branches: [main, crucible-fuzz-658-fixes]
 
 concurrency:
   group: fuzzcorp-bundle
