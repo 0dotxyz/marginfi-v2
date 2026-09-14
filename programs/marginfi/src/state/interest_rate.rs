@@ -271,37 +271,31 @@ impl InterestRateCalc {
     /// Given two points (start_x, start_y) and (end_x, end_y), and a target x between start_x and
     /// end_x, linearly interpolates y at the given x.
     ///
-    /// * returns start_y if end_x <= start_x or target < start_x
-    /// * returns end_y if target > end_x
+    /// * returns start_y if end_x <= start_x or target <= start_x
+    /// * returns end_y if target >= end_x
     /// * None if end_y < start_y. Note: this means curves where the rate decreases as the
     ///   utilization goes up are unsupported, though there's no reason you would generally want to
     ///   do that anyways.
     #[inline]
-    fn lerp(
+    pub(crate) fn lerp(
         start_x: I80F48,
         start_y: I80F48,
         end_x: I80F48,
         end_y: I80F48,
         target_x: I80F48,
     ) -> Option<I80F48> {
-        if end_x <= start_x {
+        if end_x <= start_x || target_x <= start_x {
             return Some(start_y);
         }
-        if target_x < start_x {
-            return None;
-        }
-        if target_x > end_x {
-            return None;
+        if target_x >= end_x {
+            return Some(end_y);
         }
         if end_y < start_y {
             return None;
         }
 
+        // Safe: start_x < end_x
         let delta_x: I80F48 = end_x - start_x;
-        if delta_x.is_zero() {
-            return Some(start_y);
-        }
-
         // Safe: start_x < target_x
         let offset: I80F48 = target_x - start_x;
         // Safe: delta_x nonzero
@@ -629,6 +623,94 @@ mod tests {
             .calc_interest_rate(I80F48!(0.4))
             .expect("computed rate");
         assert_eq_with_tolerance!(base_rate_apr, I80F48!(0.125), I80F48!(0.0001));
+    }
+
+    /// The auto-rebalance order compares integration supply APRs against native bank rates, so they
+    /// must share a basis. The native lender APR is `base_rate(util) * util`; each integration's is
+    /// `borrow_rate(util) * util * (1 - cut)`. Configure all three with the SAME linear curve
+    /// (slope `m`) and a zero protocol cut: every venue must then yield the same `m * util^2`,
+    /// proving the cross-venue comparison is apples-to-apples. Kamino denominates against a
+    /// slot-year, so its figure carries the wall-clock scalar for the pacing it is priced at.
+    #[test]
+    fn integration_supply_rates_share_basis_with_native_lending_rate() {
+        use drift_mocks::state::drift_deposit_rate_from_parts;
+        use kamino_mocks::state::{
+            kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND,
+        };
+
+        let m = 0.40_f64; // 40% APR at 100% utilization
+        let pace = 2.5_f64;
+        let kamino_scalar = pace / KLEND_SLOTS_PER_SECOND as f64;
+
+        // Native marginfi: linear base-rate curve (0,0)->(100%, m), zero fees.
+        let native = InterestRateConfig {
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(m),
+            points: make_points(&[]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        }
+        .create_interest_rate_calculator(&MarginfiGroup::default());
+
+        // Kamino: linear borrow curve borrow(u) = m*u over 11 evenly spaced points.
+        let m_bps = (m * 10_000.0) as u32;
+        let mut k_points = [CurvePoint {
+            utilization_rate_bps: 0,
+            borrow_rate_bps: 0,
+        }; 11];
+        for (i, p) in k_points.iter_mut().enumerate() {
+            p.utilization_rate_bps = i as u32 * 1000;
+            p.borrow_rate_bps = i as u32 * m_bps / 10;
+        }
+
+        for &u in &[0.1_f64, 0.25, 0.5, 0.75, 0.9] {
+            let expected = m * u * u;
+
+            let native_lending = native
+                .calc_interest_rate(I80F48::from_num(u))
+                .unwrap()
+                .lending_rate_apr
+                .to_num::<f64>();
+
+            // util = borrowed / total_supply = u, zero take rate.
+            let kamino = kamino_supply_apr_from_parts(
+                I80F48::from_num(1000.0),
+                I80F48::from_num(1000.0 * u),
+                &k_points,
+                0,
+                I80F48::from_num(pace),
+            )
+            .unwrap()
+            .to_num::<f64>();
+
+            // optimal_utilization = 100% keeps the curve linear (util <= optimal always);
+            // optimal_borrow_rate = m, zero insurance factor.
+            let drift = drift_deposit_rate_from_parts(
+                1_000_000,
+                (1_000_000.0 * u) as u128,
+                1_000_000,
+                (m * 1_000_000.0) as u128,
+                1_000_000,
+                0,
+                0,
+            )
+            .unwrap()
+            .to_num::<f64>();
+
+            assert!(
+                (native_lending - expected).abs() < 1e-3,
+                "native {native_lending} vs {expected} @ u={u}"
+            );
+            let kamino_expected = expected * kamino_scalar;
+            assert!(
+                (kamino - kamino_expected).abs() < 1e-3,
+                "kamino {kamino} vs {kamino_expected} @ u={u}"
+            );
+            assert!(
+                (drift - expected).abs() < 1e-3,
+                "drift {drift} vs {expected} @ u={u}"
+            );
+        }
     }
 
     #[test]
@@ -1033,8 +1115,8 @@ mod tests {
     }
 
     #[test]
-    fn lerp_none_when_target_before_start() {
-        // target_x < start_x
+    fn lerp_clamps_target_before_start_to_start_y() {
+        // target_x < start_x => clamp to start_y
         let out = InterestRateCalc::lerp(
             I80F48!(0.2),
             I80F48!(1.5),
@@ -1042,12 +1124,12 @@ mod tests {
             I80F48!(3.0),
             I80F48!(0.1),
         );
-        assert!(out.is_none());
+        assert_eq!(out, Some(I80F48!(1.5)));
     }
 
     #[test]
-    fn lerp_none_when_target_after_end() {
-        // target_x > end_x
+    fn lerp_clamps_target_after_end_to_end_y() {
+        // target_x > end_x => clamp to end_y
         let out = InterestRateCalc::lerp(
             I80F48!(0.0),
             I80F48!(0.0),
@@ -1055,7 +1137,7 @@ mod tests {
             I80F48!(4.0),
             I80F48!(1.5),
         );
-        assert!(out.is_none());
+        assert_eq!(out, Some(I80F48!(4.0)));
     }
 
     // NOTE: we don't support decreasing curves because that would be silly for our use-case. There

@@ -116,6 +116,8 @@ pub struct Bank {
     ///   single-pool on-ramp account in NAV.
     /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
     /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
+    /// - Bit 13 (8192): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
+    ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -186,7 +188,10 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16], // 16B
+    /// Realized variable-borrow premium sitting in the liquidity vault, pending sweep to the
+    /// protocol premium wallet's canonical ATA for `mint`. Only incremented when premium tokens
+    /// are actually received (repay); never by mere accrual.
+    pub collected_premium_outstanding: WrappedI80F48, // 16B
 
     /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
     ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
@@ -228,7 +233,18 @@ pub struct Bank {
     /// a paused pulse; the next accrual excludes these on top of the current halt. Zero normally.
     pub cb_frozen_seconds_pending: u64,
 
-    pub _padding_1: [u64; 2],
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
 }
 
 impl Bank {
@@ -275,6 +291,7 @@ impl Bank {
             && self.mint == same_asset.mint
             && self.config.oracle_keys[0] == same_asset.oracle_key
             && self.config.oracle_setup.feed_family() == same_asset.feed_family
+            && I80F48::from(self.config.fixed_price) == same_asset.fixed_price
             && self.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE != 0
             && matches!(self.config.risk_tier, RiskTier::Collateral)
             && !matches!(
@@ -378,6 +395,15 @@ pub enum OracleSetup {
     JuplendPythPull,        // 15
     JuplendSwitchboardPull, // 16
     FixedJuplend,           // 17
+    Scope,                  // 18
+    PythMSOL,               // 19
+    KaminoMSOL,             // 20
+    JuplendMSOL,            // 21
+    PythLST,                // 22
+    KaminoLST,              // 23
+    JuplendLST,             // 24
+    PTPyth,                 // 25
+    PTFixed,                // 26
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -403,6 +429,15 @@ impl OracleSetup {
             15 => Some(Self::JuplendPythPull),
             16 => Some(Self::JuplendSwitchboardPull),
             17 => Some(Self::FixedJuplend),
+            18 => Some(Self::Scope),
+            19 => Some(Self::PythMSOL),
+            20 => Some(Self::KaminoMSOL),
+            21 => Some(Self::JuplendMSOL),
+            22 => Some(Self::PythLST),
+            23 => Some(Self::KaminoLST),
+            24 => Some(Self::JuplendLST),
+            25 => Some(Self::PTPyth),
+            26 => Some(Self::PTFixed),
             _ => None,
         }
     }
@@ -415,8 +450,9 @@ impl OracleSetup {
     }
 
     /// Base feed semantics for `oracle_keys[0]`. Setups in the same family read that key as the
-    /// same kind of feed account (integration setups additionally apply an exchange-rate
-    /// multiplier), so two banks sharing a family and `oracle_keys[0]` price from the same source.
+    /// same kind of feed account *and* derive the mint's price from it the same way, so two banks
+    /// sharing a family and `oracle_keys[0]` price from the same source. Venue integrations
+    /// stay in their base family.
     /// Returns `None` for fixed-price, deprecated, and unset setups.
     pub fn feed_family(self) -> Option<OracleFeedFamily> {
         match self {
@@ -425,10 +461,18 @@ impl OracleSetup {
             | Self::DriftPythPull
             | Self::SolendPythPull
             | Self::JuplendPythPull => Some(OracleFeedFamily::PythPush),
-            // Staked reads `oracle_keys[0]` as a proxy for the pool's underlying asset and derives
-            // the mint's price from the stake-pool multiplier, so it is not price-equivalent to a
-            // setup that reads that same key as the mint's own price.
+            // The setups below read `oracle_keys[0]` as a proxy for some underlying asset and bake
+            // their own multiplier into the price, so they are not price-equivalent to a setup
+            // reading that key directly, nor to each other. Each multiplier kind therefore gets its
+            // own family.
             Self::StakedWithPythPush => Some(OracleFeedFamily::StakedPythPush),
+            Self::PythMSOL | Self::KaminoMSOL | Self::JuplendMSOL => {
+                Some(OracleFeedFamily::MSOLPythPull)
+            }
+            Self::PythLST | Self::KaminoLST | Self::JuplendLST => {
+                Some(OracleFeedFamily::LSTPythPull)
+            }
+            Self::PTPyth => Some(OracleFeedFamily::PtPythPull),
             Self::SwitchboardPull
             | Self::KaminoSwitchboardPull
             | Self::DriftSwitchboardPull
@@ -440,7 +484,11 @@ impl OracleSetup {
             | Self::Fixed
             | Self::FixedKamino
             | Self::FixedDrift
-            | Self::FixedJuplend => None,
+            | Self::FixedJuplend
+            // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
+            // covers `oracle_keys[0]` cannot express that, so Scope banks never pair.
+            | Self::Scope
+            | Self::PTFixed => None,
         }
     }
 }
@@ -451,6 +499,9 @@ pub enum OracleFeedFamily {
     PythPush,
     StakedPythPush,
     SwitchboardPull,
+    MSOLPythPull,
+    LSTPythPull,
+    PtPythPull,
 }
 
 #[cfg(test)]
@@ -492,9 +543,52 @@ mod feed_family_tests {
             OracleSetup::FixedKamino,
             OracleSetup::FixedDrift,
             OracleSetup::FixedJuplend,
+            OracleSetup::PTFixed,
         ] {
             assert_eq!(setup.feed_family(), None);
         }
+    }
+
+    /// If a multiplier setup shared `PythPush`, an admin could migrate a same-asset-e-mode bank
+    /// between them without tripping the `config_bank_oracle` guard (which compares only
+    /// `oracle_keys[0]` and the feed family), re-marking collateral at `base × multiplier` while
+    /// the liability side stayed on the bare base feed.
+    #[test]
+    fn multiplier_setups_are_isolated_from_the_base_feed_and_each_other() {
+        let multiplier_families = [
+            OracleSetup::StakedWithPythPush.feed_family(),
+            OracleSetup::PythMSOL.feed_family(),
+            OracleSetup::PythLST.feed_family(),
+            OracleSetup::PTPyth.feed_family(),
+        ];
+
+        for family in multiplier_families {
+            assert!(family.is_some());
+            assert_ne!(family, OracleSetup::PythPushOracle.feed_family());
+        }
+        for (i, a) in multiplier_families.iter().enumerate() {
+            for b in &multiplier_families[i + 1..] {
+                assert_ne!(a, b, "multiplier kinds must not share a feed family");
+            }
+        }
+
+        // Venue wrappers stay in their base multiplier's family.
+        assert_eq!(
+            OracleSetup::KaminoMSOL.feed_family(),
+            OracleSetup::PythMSOL.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::JuplendMSOL.feed_family(),
+            OracleSetup::PythMSOL.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::KaminoLST.feed_family(),
+            OracleSetup::PythLST.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::JuplendLST.feed_family(),
+            OracleSetup::PythLST.feed_family()
+        );
     }
 }
 

@@ -266,14 +266,22 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
-    #[msg("Use set_fixed_oracle_price instead")] // 6132
-    UseSetFixedOraclePrice,
+    #[msg("Use set_oracle_price instead")] // 6132
+    UseSetOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
     BankUninitialized,
     #[msg("Max slippage exceeds the allowed cap")] // 6135
     SlippageTooHigh,
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed, // 6136
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed, // 6137
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice, // 6138
+    #[msg("Stake pool balance has not been updated recently enough")]
+    StakePoolStale, // 6139
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -446,7 +454,79 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
+
+    // ************** BEGIN ADMIN GUARD ERRORS (starting at 6605)
+    #[msg("Durable nonce cannot be used for this instruction")]
+    DurableNonceNotAllowed = 605, // 6605
+    // ************** END ADMIN GUARD ERRORS
+
+    // ************** BEGIN PREMIUM ERRORS (starting at 6610)
+    #[msg("Premium entry has a zero collateral or liability tag")]
+    PremiumEntryInvalid = 610, // 6610
+    #[msg("Too many premium entries for the group's capacity")]
+    PremiumMatrixFull, // 6611
+    #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
+    InvalidPremiumAta, // 6612
+    #[msg("Premium wallet is not configured on the fee state")]
+    PremiumWalletNotSet, // 6613
+    #[msg("Premium (collateral, liability) pair is not in the matrix")]
+    PremiumEntryNotFound, // 6614
+    #[msg(
+        "Premium rate cannot be computed (a collateral oracle failed); retry with valid oracles"
+    )]
+    PremiumSnapshotUnavailable, // 6615
+
+    // ************** END PREMIUM ERRORS
+
+    // ************** BEGIN AUTO-REBALANCE ERRORS (starting at 6700)
+    #[msg("Rebalance venue not supported for on-chain rate verification")]
+    RebalanceVenueUnsupported = 700, // 6700
+    #[msg("Rebalance cooldown has not elapsed")]
+    RebalanceCooldown, // 6701
+    #[msg("Rebalance moved no value")]
+    RebalanceIncompleteMove, // 6702
+    #[msg("Rebalance destination rate not better than source by the required margin")]
+    RebalanceNotImproving, // 6703
+    #[msg("Rebalance improvement did not survive the move's own market impact")]
+    RebalanceOvershoot, // 6704
+    #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
+    RebalanceValueLeak, // 6705
+    #[msg("Rebalance bank mint does not match the order mint")]
+    RebalanceMintMismatch, // 6706
+    #[msg("Rebalance bank not in the order's allowed venue set")]
+    RebalanceBankNotAllowed, // 6707
+    #[msg("Rebalance min improvement must be non-negative")]
+    RebalanceInvalidMinImprovement, // 6708
+    #[msg("Rebalance moved more than the order's amount")]
+    RebalanceExceedsAmount, // 6709
+    #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
+    RebalanceMalformedSandwich, // 6710
+    #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
+    RebalanceSettleTooEarly, // 6711
+    #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
+    RebalanceForeignAccountLeg, // 6712
+    #[msg("Rebalance order requires a deposit in at least one allowed bank")]
+    RebalanceNoAllowlistPosition, // 6713
+    #[msg("Rebalance opened a balance outside the referenced bank set")]
+    RebalanceUntrackedBalance, // 6714
+    #[msg("Rebalance passed over a higher-rate bank that still has deposit capacity")]
+    RebalanceNotBestVenue, // 6715
+    #[msg("Rebalance execution sequence does not match the account's next value")]
+    RebalanceStaleExecutionSeq, // 6716
+    #[msg("Rebalance allowlist contains a bank the account owes into")]
+    RebalanceAllowlistLiability, // 6717
+    // ************** END AUTO-REBALANCE ERRORS
+    // ************** BEGIN SCOPE ERRORS (starting at 6800)
+    #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
+    ScopeInvalidAccount = 800, // 6800
+    #[msg("Scope entry is out of range, never refreshed, or dated in the future")]
+    ScopeInvalidEntry, // 6801
+    #[msg("Scope price is stale")]
+    ScopeStalePrice, // 6802
+    #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
+    UseConfigureBankOracleScope, // 6803
+                                 // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -602,9 +682,13 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
-            6132 => MarginfiError::UseSetFixedOraclePrice,
+            6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6136 => MarginfiError::MarinadeStateValidationFailed,
+            6137 => MarginfiError::ExponentVaultValidationFailed,
+            6138 => MarginfiError::InvalidPtStartPrice,
+            6139 => MarginfiError::StakePoolStale,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -691,6 +775,39 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::DurableNonceNotAllowed,
+            6700 => MarginfiError::RebalanceVenueUnsupported,
+            6701 => MarginfiError::RebalanceCooldown,
+            6702 => MarginfiError::RebalanceIncompleteMove,
+            6703 => MarginfiError::RebalanceNotImproving,
+            6704 => MarginfiError::RebalanceOvershoot,
+            6705 => MarginfiError::RebalanceValueLeak,
+            6706 => MarginfiError::RebalanceMintMismatch,
+            6707 => MarginfiError::RebalanceBankNotAllowed,
+            6708 => MarginfiError::RebalanceInvalidMinImprovement,
+            6709 => MarginfiError::RebalanceExceedsAmount,
+            6710 => MarginfiError::RebalanceMalformedSandwich,
+            6711 => MarginfiError::RebalanceSettleTooEarly,
+            6712 => MarginfiError::RebalanceForeignAccountLeg,
+            6713 => MarginfiError::RebalanceNoAllowlistPosition,
+            6714 => MarginfiError::RebalanceUntrackedBalance,
+            6715 => MarginfiError::RebalanceNotBestVenue,
+            6716 => MarginfiError::RebalanceStaleExecutionSeq,
+            6717 => MarginfiError::RebalanceAllowlistLiability,
+
+            // Premium-specific errors (starting at 6610)
+            6610 => MarginfiError::PremiumEntryInvalid,
+            6611 => MarginfiError::PremiumMatrixFull,
+            6612 => MarginfiError::InvalidPremiumAta,
+            6613 => MarginfiError::PremiumWalletNotSet,
+            6614 => MarginfiError::PremiumEntryNotFound,
+            6615 => MarginfiError::PremiumSnapshotUnavailable,
+
+            // Scope-Oracle-specific errors (starting at 6610)
+            6800 => MarginfiError::ScopeInvalidAccount,
+            6801 => MarginfiError::ScopeInvalidEntry,
+            6802 => MarginfiError::ScopeStalePrice,
+            6803 => MarginfiError::UseConfigureBankOracleScope,
 
             _ => MarginfiError::InternalLogicError,
         }
@@ -717,6 +834,9 @@ impl MarginfiError {
                 | MarginfiError::WrongOracleAccountKeys
                 | MarginfiError::PythPushStalePrice
                 | MarginfiError::SwitchboardStalePrice
+                | MarginfiError::ScopeInvalidAccount
+                | MarginfiError::ScopeInvalidEntry
+                | MarginfiError::ScopeStalePrice
                 | MarginfiError::StakePoolValidationFailed
                 | MarginfiError::InvalidBankAccount
                 | MarginfiError::MissingBankAccount
@@ -725,7 +845,10 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidWindowSize
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
+                | MarginfiError::ExponentVaultValidationFailed
+                | MarginfiError::MarinadeStateValidationFailed
                 // Lending protocol staleness errors - stale exchange rates mean unreliable prices
+                | MarginfiError::StakePoolStale // SPL / Sanctum stake pools
                 | MarginfiError::ReserveStale // Kamino
                 | MarginfiError::SolendReserveStale
                 | MarginfiError::DriftSpotMarketStale

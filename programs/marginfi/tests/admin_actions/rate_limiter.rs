@@ -32,6 +32,7 @@ async fn configure_group_hourly_limit_as(
         accounts: marginfi::accounts::ConfigureGroupRateLimits {
             marginfi_group: test_f.marginfi_group.key,
             admin: admin.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::ConfigureGroupRateLimits {
@@ -65,6 +66,7 @@ async fn configure_bank_hourly_limit_as(
         accounts: marginfi::accounts::ConfigureBankRateLimits {
             group: test_f.marginfi_group.key,
             admin: admin.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             bank,
         }
         .to_account_metas(Some(true)),
@@ -97,6 +99,7 @@ async fn configure_group_hourly_limit(
         accounts: marginfi::accounts::ConfigureGroupRateLimits {
             marginfi_group: test_f.marginfi_group.key,
             admin: test_f.payer(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::ConfigureGroupRateLimits {
@@ -172,6 +175,7 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_rate_limits() -> an
         accounts: marginfi::accounts::UpdateGroupRateLimiter {
             marginfi_group: test_f.marginfi_group.key,
             delegate_flow_admin: flow_admin.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -224,6 +228,7 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -266,6 +271,7 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -315,6 +321,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -348,6 +355,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -389,6 +397,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -430,6 +439,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -487,6 +497,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -520,6 +531,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -566,6 +578,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: unauthorized.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {

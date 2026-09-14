@@ -4,6 +4,7 @@ members = [
     "programs/marginfi",
     "programs/mocks",
     "programs/kamino-mocks",
+    "programs/scope-mocks",
     "programs/test_transfer_hook",
     "type-crate",
     "id-crate",

@@ -103,6 +103,7 @@ impl BankFixture {
             group: self.load().await.group,
             admin: self.ctx.borrow().payer.pubkey(),
             bank: self.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -122,6 +123,7 @@ impl BankFixture {
                 group: self.load().await.group,
                 admin: self.ctx.borrow().payer.pubkey(),
                 bank: self.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true));
 
@@ -227,6 +229,7 @@ impl BankFixture {
             fee_vault: bank.fee_vault,
             fee_vault_authority,
             dst_token_account: receiving_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -309,6 +312,7 @@ impl BankFixture {
             bank: self.key,
             admin: signer_pk,
             destination_account: destination_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -354,6 +358,7 @@ impl BankFixture {
             insurance_vault: bank.insurance_vault,
             insurance_vault_authority,
             dst_token_account: receiving_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -443,6 +448,7 @@ impl BankFixture {
             group: bank.group,
             authority,
             bank: self.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         Instruction {

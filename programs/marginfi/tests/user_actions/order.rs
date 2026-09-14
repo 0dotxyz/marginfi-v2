@@ -1766,5 +1766,7 @@ async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Resul
     };
 
     assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    // The rejected execution leaves the order intact rather than consuming it.
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }

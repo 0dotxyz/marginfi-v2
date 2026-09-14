@@ -1,6 +1,6 @@
 [package]
 name = "marginfi-type-crate"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 publish = true
 
@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "marginfi_type_crate"
 
 [features]
-default = ["client"]
+default = ["client", "anchor"]
 client = []
 anchor = ["anchor-lang"]
 mainnet-beta = ["id-crate/mainnet-beta"]

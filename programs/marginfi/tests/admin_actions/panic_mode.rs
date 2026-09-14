@@ -121,6 +121,7 @@ async fn test_pause_delegate_admin_cannot_edit_fee_state() -> anyhow::Result<()>
         accounts: marginfi::accounts::EditFeeState {
             global_fee_admin: pause_delegate_admin.pubkey(),
             fee_state: marginfi_group.fee_state,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::EditGlobalFeeState {

@@ -1,5 +1,5 @@
 use crate::{
-    check,
+    check, ix_utils,
     state::rate_limiter::{is_valid_rate_limit_amount, GroupRateLimiterImpl},
     MarginfiError, MarginfiResult,
 };
@@ -24,6 +24,8 @@ pub fn update_group_rate_limiter(
     event_start_slot: u64,
     event_end_slot: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut group = ctx.accounts.marginfi_group.load_mut()?;
     let clock = Clock::get()?;
 
@@ -100,6 +102,10 @@ pub struct UpdateGroupRateLimiter<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub delegate_flow_admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 #[cfg(test)]
