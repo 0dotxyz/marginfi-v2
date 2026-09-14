@@ -343,7 +343,7 @@ const SCOUT_TARGET_PROGRAM_ARTIFACT: &str = "programs/marginfi_program.so";
 // DriftWithdraw.bank = self.scout_prepare_drift_withdraw_bank()
 // DriftWithdraw.amount = 0
 
-// LendingPoolSetFixedOraclePrice.price = marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::from_num(1))
+// LendingPoolSetOraclePrice.price = marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::from_num(1))
 
 // MarginfiAccountUpdateEmissionsDestinationAccount.destination_account = self.global_fee_wallet
 
@@ -481,6 +481,9 @@ const INSURANCE_VAULT_AUTHORITY_SEED: &[u8] = b"insurance_vault_auth";
 const INSURANCE_VAULT_SEED: &[u8] = b"insurance_vault";
 const FEE_VAULT_AUTHORITY_SEED: &[u8] = b"fee_vault_auth";
 const FEE_VAULT_SEED: &[u8] = b"fee_vault";
+// OracleSetup::Fixed as u8 (type-crate OracleSetup discriminants) — the `setup`
+// arg of lending_pool_set_oracle_price, the 0.1.12 successor of set_fixed_oracle_price.
+const SCOUT_ORACLE_SETUP_FIXED: u8 = 8;
 
 fn scout_valid_bank_config(oracle_max_age: u16) -> marginfi::types::BankConfigCompact {
     let zero = || marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ZERO);
@@ -2280,13 +2283,16 @@ const SCOUT_P28_WARP_SLOTS: u64 = 12;
 const SCOUT_P28_FOLLOWUP_DEPOSIT_AMOUNT: u64 = 1_000;
 
 // MarginfiAccount byte layout (size 2304). Balance = active(1) bank_pk(32) bank_asset_tag(1)
-// _pad0(6) asset_shares(16) liability_shares(16) emissions_outstanding(16) last_update(8) _padding(8).
+// tag(2) premium_rate_snapshot(4) asset_shares(16) liability_shares(16) premium_outstanding(16)
+// last_update(8) _padding(8). (0.1.12 renamed emissions_outstanding -> premium_outstanding, same
+// offset; premium_rate_snapshot is carved from the old _pad0.)
 const SCOUT_P28_ACC_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
 const SCOUT_P28_ACC_LEN: usize = 8 + 2304;
 const SCOUT_P28_ACC_BALANCES_OFFSET: usize = 8 + 64;
 const SCOUT_P28_BALANCE_LEN: usize = 104;
 const SCOUT_P28_BALANCE_COUNT: usize = 16;
 const SCOUT_P28_BALANCE_BANK_PK_OFFSET: usize = 1;
+const SCOUT_P28_BALANCE_PREMIUM_SNAPSHOT_OFFSET: usize = 36;
 const SCOUT_P28_BALANCE_SHARES_OFFSET: usize = 40;
 const SCOUT_P28_BALANCE_EMISSIONS_OFFSET: usize = 72;
 const SCOUT_P28_BALANCE_LAST_UPDATE_OFFSET: usize = 88;
@@ -2342,6 +2348,7 @@ const SCOUT_P28_ACC_BIT_INDEX: u32 = 1 << 12;
 const SCOUT_P28_ACC_BIT_LIQ_RECORD: u32 = 1 << 13;
 const SCOUT_P28_ACC_BIT_TAIL_PAD: u32 = 1 << 14;
 const SCOUT_P28_ACC_BIT_SHAPE: u32 = 1 << 15;
+const SCOUT_P28_ACC_BIT_BALANCE_PREMIUM_SNAPSHOT: u32 = 1 << 16;
 
 // One bit per forbidden region of a Bank (OR over both victim banks).
 const SCOUT_P28_BANK_BIT_IDENTITY: u32 = 1 << 0;
@@ -4396,8 +4403,8 @@ impl MarginfiFixture {
         let bank = self.bank;
         let __scout_success = self.ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice { price })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice { price, setup: SCOUT_ORACLE_SETUP_FIXED, })
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: group,
                 admin: admin,
                 bank: bank,
@@ -5370,6 +5377,7 @@ impl MarginfiFixture {
                 marginfi_account: marginfi_account,
                 authority: authority,
                 fee_payer: fee_payer,
+                rebalance_fee_pool: Pubkey::find_program_address(&[b"rebalance_fee_pool", marginfi_account.as_ref()], &self.program_id).0,
             })
             .signers(&[&*self.payer])
             .send()
@@ -7655,10 +7663,11 @@ impl MarginfiFixture {
     fn scout_liquidate_set_fixed_price(&mut self, bank: Pubkey, price: fixed::types::I80F48) -> bool {
         if !(self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolSetFixedOraclePrice {
+                .call(instruction::LendingPoolSetOraclePrice {
                     price: marginfi::types::WrappedI80F48::from_i80f48(price),
+                    setup: SCOUT_ORACLE_SETUP_FIXED,
                 })
-                .accounts(accounts::LendingPoolSetFixedOraclePrice {
+                .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
                     bank,
@@ -8908,8 +8917,8 @@ impl MarginfiFixture {
         start_ix.accounts.extend(sorted_pair.iter().map(|k| anchor_lang::solana_program::instruction::AccountMeta::new_readonly(*k, false)));
         let price_ix = scout_anchor_instruction(
             self.program_id,
-            instruction::LendingPoolSetFixedOraclePrice { price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::from_num(10)) },
-            accounts::LendingPoolSetFixedOraclePrice { group: self.marginfi_group, admin: payer.pubkey(), bank: asset_bank },
+            instruction::LendingPoolSetOraclePrice { price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::from_num(10)), setup: SCOUT_ORACLE_SETUP_FIXED, },
+            accounts::LendingPoolSetOraclePrice { group: self.marginfi_group, admin: payer.pubkey(), bank: asset_bank },
         );
         let mut withdraw_ix = scout_anchor_instruction(
             self.program_id,
@@ -10853,8 +10862,8 @@ impl MarginfiFixture {
         if !self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice { price: one })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice { price: one, setup: SCOUT_ORACLE_SETUP_FIXED, })
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank,
@@ -10939,10 +10948,11 @@ impl MarginfiFixture {
         if !self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(one),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank: bank_collateral,
@@ -10984,10 +10994,11 @@ impl MarginfiFixture {
         if !self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(one),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank: bank_liability,
@@ -11081,10 +11092,11 @@ impl MarginfiFixture {
         if !self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ZERO),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank: bank_collateral,
@@ -11142,10 +11154,11 @@ impl MarginfiFixture {
         assert!(
             self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolSetFixedOraclePrice {
+                .call(instruction::LendingPoolSetOraclePrice {
                     price: marginfi::types::WrappedI80F48::from_i80f48(one),
+                    setup: SCOUT_ORACLE_SETUP_FIXED,
                 })
-                .accounts(accounts::LendingPoolSetFixedOraclePrice {
+                .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
                     bank: healthy_bank,
@@ -11212,10 +11225,11 @@ impl MarginfiFixture {
         assert!(
             self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolSetFixedOraclePrice {
+                .call(instruction::LendingPoolSetOraclePrice {
                     price: marginfi::types::WrappedI80F48::from_i80f48(one),
+                    setup: SCOUT_ORACLE_SETUP_FIXED,
                 })
-                .accounts(accounts::LendingPoolSetFixedOraclePrice {
+                .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
                     bank: bank_collateral,
@@ -11255,10 +11269,11 @@ impl MarginfiFixture {
         assert!(
             self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolSetFixedOraclePrice {
+                .call(instruction::LendingPoolSetOraclePrice {
                     price: marginfi::types::WrappedI80F48::from_i80f48(one),
+                    setup: SCOUT_ORACLE_SETUP_FIXED,
                 })
-                .accounts(accounts::LendingPoolSetFixedOraclePrice {
+                .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
                     bank: bank_liability,
@@ -11348,10 +11363,11 @@ impl MarginfiFixture {
         assert!(
             self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolSetFixedOraclePrice {
+                .call(instruction::LendingPoolSetOraclePrice {
                     price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ZERO),
+                    setup: SCOUT_ORACLE_SETUP_FIXED,
                 })
-                .accounts(accounts::LendingPoolSetFixedOraclePrice {
+                .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
                     bank: bank_collateral,
@@ -12239,6 +12255,7 @@ impl MarginfiFixture {
                 marginfi_account,
                 authority: payer.pubkey(),
                 fee_payer: payer.pubkey(),
+                rebalance_fee_pool: Pubkey::find_program_address(&[b"rebalance_fee_pool", marginfi_account.as_ref()], &self.program_id).0,
             })
             .signers(&[&*payer])
             .send()
@@ -14523,10 +14540,11 @@ impl MarginfiFixture {
         let priced = self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ONE),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank,
@@ -14552,10 +14570,11 @@ impl MarginfiFixture {
         let set = self
             .ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(price),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank,
@@ -14858,10 +14877,11 @@ impl MarginfiFixture {
 
         self.ctx
             .program(self.program_id)
-            .call(instruction::LendingPoolSetFixedOraclePrice {
+            .call(instruction::LendingPoolSetOraclePrice {
                 price: marginfi::types::WrappedI80F48::from_i80f48(next),
+                setup: SCOUT_ORACLE_SETUP_FIXED,
             })
-            .accounts(accounts::LendingPoolSetFixedOraclePrice {
+            .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
                 admin: self.payer.pubkey(),
                 bank,
@@ -14933,6 +14953,11 @@ impl MarginfiFixture {
         }
         let allow_health_cache = arm == SCOUT_P28_ARM_PULSE_HEALTH;
         let allow_emissions = false;
+        // 0.1.12: pulse_health doubles as the premium crank (pulse_health.rs:42-61) —
+        // update_premium_snapshots materializes premium_outstanding, rewrites
+        // premium_rate_snapshot, and bumps last_update on every liability balance in the
+        // health scratch, so those three bookkeeping regions are in-set for the pulse arm.
+        let allow_premium_bookkeeping = arm == SCOUT_P28_ARM_PULSE_HEALTH;
         let mut mask: u32 = 0;
         let mut first: u32 = 0;
 
@@ -15004,12 +15029,18 @@ impl MarginfiFixture {
         for index in 0..SCOUT_P28_BALANCE_COUNT {
             let base = SCOUT_P28_ACC_BALANCES_OFFSET + index * SCOUT_P28_BALANCE_LEN;
             let permitted_here = allow_emissions && index == settle_balance_index;
-            let balance_regions: [(usize, usize, u32, bool); 5] = [
+            let balance_regions: [(usize, usize, u32, bool); 6] = [
                 (
                     base,
-                    base + SCOUT_P28_BALANCE_SHARES_OFFSET,
+                    base + SCOUT_P28_BALANCE_PREMIUM_SNAPSHOT_OFFSET,
                     SCOUT_P28_ACC_BIT_BALANCE_SLOT,
                     false,
+                ),
+                (
+                    base + SCOUT_P28_BALANCE_PREMIUM_SNAPSHOT_OFFSET,
+                    base + SCOUT_P28_BALANCE_SHARES_OFFSET,
+                    SCOUT_P28_ACC_BIT_BALANCE_PREMIUM_SNAPSHOT,
+                    allow_premium_bookkeeping,
                 ),
                 (
                     base + SCOUT_P28_BALANCE_SHARES_OFFSET,
@@ -15021,13 +15052,13 @@ impl MarginfiFixture {
                     base + SCOUT_P28_BALANCE_EMISSIONS_OFFSET,
                     base + SCOUT_P28_BALANCE_LAST_UPDATE_OFFSET,
                     SCOUT_P28_ACC_BIT_BALANCE_EMISSIONS,
-                    permitted_here,
+                    permitted_here || allow_premium_bookkeeping,
                 ),
                 (
                     base + SCOUT_P28_BALANCE_LAST_UPDATE_OFFSET,
                     base + SCOUT_P28_BALANCE_PAD_OFFSET,
                     SCOUT_P28_ACC_BIT_BALANCE_LAST_UPDATE,
-                    permitted_here,
+                    permitted_here || allow_premium_bookkeeping,
                 ),
                 (
                     base + SCOUT_P28_BALANCE_PAD_OFFSET,
