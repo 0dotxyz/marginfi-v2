@@ -2845,10 +2845,14 @@ impl MarginfiFixture {
         crate::__scout_crucible_test_context::TestContext::add_program(&mut ctx, &program_id, SCOUT_TARGET_PROGRAM_ARTIFACT).unwrap();
         // SCOUT:TARGET-PROGRAM:END
         let payer = Rc::new(Keypair::new());
-        ctx.create_account().pubkey(payer.pubkey()).lamports(1_000_000_000)
+        // 100 SOL: one crank-scenario probe alone burns ~0.08 SOL in rent, and a max-length
+        // sequence can exceed 1 SOL easily. Once the fee payer drops below the rent-exempt
+        // floor after the fee debit (~0.0009 SOL), every payer-signed tx fails preflight with
+        // InsufficientFundsForRent and failure-based invariants fire spuriously.
+        ctx.create_account().pubkey(payer.pubkey()).lamports(100_000_000_000)
             .owner(system_program::ID).create().unwrap();
         let probe_user = Rc::new(Keypair::new());
-        ctx.create_account().pubkey(probe_user.pubkey()).lamports(1_000_000_000)
+        ctx.create_account().pubkey(probe_user.pubkey()).lamports(100_000_000_000)
             .owner(system_program::ID).create().unwrap();
         // SCOUT:SETUP-GLUE:BEGIN
         let bank_mint_pubkey = ctx
@@ -19611,10 +19615,13 @@ fn invariant_test(_f: &mut MarginfiFixture) {
         if !f.scout_p28_followup_measured {
             return;
         }
+        // Non-interference is only meaningful when the crank itself ran: a crank that failed
+        // (e.g. fee-payer insolvency, which also fails the follow-up for the same external
+        // reason) committed no state and cannot have interfered with anything.
         scout_check!(
             "P-0028",
             "crank-cannot-break-an-unrelated-later-transaction",
-            f.scout_p28_followup_ok,
+            !f.scout_p28_succeeded || f.scout_p28_followup_ok,
             "P-0028: crank arm {} by {} on {} broke a later unrelated deposit; crank succeeded={}",
             f.scout_p28_arm,
             f.scout_p28_actor,
