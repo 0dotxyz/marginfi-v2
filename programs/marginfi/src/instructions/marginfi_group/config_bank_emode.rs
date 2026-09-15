@@ -12,8 +12,9 @@ pub fn lending_pool_configure_bank_emode(
 ) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
-    let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
+
+    let mut bank = ctx.accounts.bank.load_mut()?;
 
     let mut sorted_entries = entries;
     sorted_entries.sort_by_key(|e| e.collateral_bank_emode_tag);
@@ -54,12 +55,10 @@ pub fn lending_pool_configure_bank_emode(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankEmode<'info> {
-    #[account(
-        has_one = emode_admin @ MarginfiError::Unauthorized
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub emode_admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,

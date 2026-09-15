@@ -53,7 +53,7 @@ describe("Init e-mode enabled group and banks", () => {
     }
   });
 
-  it("(admin) Set the emode admin - happy path", async () => {
+  it("(slow governance admin) Set the legacy emode-admin field - happy path", async () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
@@ -181,7 +181,7 @@ describe("Init e-mode enabled group and banks", () => {
       .accountsPartial({
         group: emodeGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        governanceAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();

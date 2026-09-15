@@ -2,7 +2,8 @@
 ///
 /// Behavior:
 /// - When frozen, the account authority is blocked from major actions (borrow/deposit/withdraw/repay/transfer/etc.) with `AccountFrozen`.
-/// - The group admin retains access to operate the account while frozen (for remediation/seizure).
+/// - The slow governance admin retains access to operate the account while frozen (for
+///   remediation/seizure); the fast group admin may only set or clear the frozen flag.
 /// - Setting `frozen = false` clears the flag and returns control to the authority under normal auth rules.
 pub fn set_account_freeze(ctx: Context<SetAccountFreeze>, frozen: bool) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;

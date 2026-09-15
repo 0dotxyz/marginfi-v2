@@ -100,7 +100,7 @@ Juplend risk accounts are the `bank, oracle, Lending` accounts, in that order.
 - Link that rewards model to the lending pool: `setRewardsRateModel` (Jup Lending program).
 - Call `startRewards(rewardAmount, duration, startTime, startTvl)`.
 
-### One-Time Setup (mrgn-wrapped Bank Admin / Integrator)
+### One-Time Setup (mrgn-wrapped Governance Admin / Integrator)
 
 - For mrgn Juplend withdraw compatibility, initialize the claim PDA for `liquidity_vault_authority`
   - mint via `initClaimAccount`. This instruction is permissionless: any signer can pay rent to

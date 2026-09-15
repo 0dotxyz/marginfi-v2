@@ -134,6 +134,45 @@ async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn premium_config_requires_fast_admin_after_authorities_diverge() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let group_f = &test_f.marginfi_group;
+    let slow_admin = Keypair::new();
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    group_f.try_set_bank_admin(&slow_admin).await?;
+
+    // The original payer remains the fast group admin and can configure premium settings.
+    group_f
+        .try_configure_group_premium(entry(100, 200, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank, 100, true)
+        .await?;
+
+    let err = group_f
+        .try_configure_group_premium_with_signer(entry(200, 100, 1.0), &slow_admin)
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
+
+    let err = group_f
+        .try_configure_bank_premium_with_signer(usdc_bank, 200, true, &slow_admin)
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn premium_config_rate_capped_at_100_percent() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;

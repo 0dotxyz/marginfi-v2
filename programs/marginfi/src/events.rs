@@ -74,6 +74,13 @@ pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
 }
 
 #[event]
+pub struct SetBankAdminEvent {
+    pub header: GroupEventHeader,
+    pub previous_bank_admin: Pubkey,
+    pub new_bank_admin: Pubkey,
+}
+
+#[event]
 pub struct LendingPoolBankConfigureFrozenEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,

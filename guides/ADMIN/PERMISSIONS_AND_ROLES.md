@@ -13,29 +13,63 @@
 
 ## Admin Roles
 
-The `MarginfiGroup` account defines seven distinct admin roles. Each role is a single `Pubkey`
-that can be set to any address, including a multisig program. Setting a role to `Pubkey::default()`
-(all zeros) effectively disables it.
+The `MarginfiGroup` account defines nine distinct group-level admin roles. Each role is a single
+`Pubkey` that can be set to an address, including a multisig program. `admin` is the fast
+operational authority; `governance_admin` is the slow, timelocked authority for changes that can
+materially affect user funds. A legacy group has a zero `governance_admin` after its account is
+resized, so slow-authority operations fail closed until `admin` bootstraps it once with the
+legacy-named `marginfi_group_set_bank_admin` instruction. After that, only
+`governance_admin` can rotate the role. It cannot be set to the zero pubkey.
+
+### Governance Admin (Slow / Timelocked)
+
+The governance admin is the safety-critical authority and should be a timelocked Squads wallet.
+
+**Can do:**
+- Rotate `governance_admin` after the fast admin's one-time legacy bootstrap
+- Create native, Kamino, Drift, Solend, and JupLend banks (and clone a bank on non-mainnet)
+- Configure a bank's oracle, Scope feed, or fixed price
+- Apply governance-class bank configuration: asset and liability weights, risk tier, asset tag,
+  oracle age/confidence bounds, and `TOKENLESS_REPAYMENTS_ALLOWED`
+- Transition a bank from Paused or ReduceOnly to Operational
+- Set the stored `emode_admin` and `risk_admin`, and group-wide e-mode / same-asset e-mode
+  leverage limits
+- Perform all e-mode configuration, including same-asset registry initialization, eligibility,
+  and cloning. The stored `emode_admin` does not independently authorize an instruction.
+- Initialize, edit, and transition staked-collateral settings
+- Operate a frozen user account for remediation or seizure, including withdrawals
+
+**Cannot do:**
+- Fast emergency actions such as freezing a user account, pausing/reducing a bank, or changing
+  circuit-breaker settings, unless it also holds the fast `admin` role
 
 ### Admin (Group Admin)
 
-The most powerful role. The admin has full control over the group and its banks.
+The fast operational authority. This role is intentionally able to stop or constrain activity
+quickly, but it cannot make the risk-sensitive changes listed under `governance_admin`.
 
 **Can do:**
-- Create new banks (`LendingPoolAddBank`, `LendingPoolAddBankWithSeed`)
-- Configure any bank setting (`LendingPoolConfigureBank`)
-- Configure the bank's oracle (`LendingPoolConfigureBankOracle`)
-- Set a fixed oracle price (`LendingPoolSetFixedOraclePrice`)
-- Set or remove all other admin roles
-- Configure the group itself
+- Configure fast-admin bank settings: deposit/borrow/init-value limits, interest curves,
+  permissionless bad-debt settlement, settings freeze, liquidation fees, and circuit breakers
+- Configure bank/group rate limits and the deleverage withdrawal limit (also delegable to the
+  limit admin)
+- Transition a bank to Paused or ReduceOnly
+- Clear a tripped circuit breaker (also allowed for `risk_admin`)
+- Set fast operational roles (`admin`, curve, limit, flow, emissions, and metadata delegates)
 - Freeze and unfreeze individual user accounts
 - Handle bankruptcy (in addition to `risk_admin`)
 - Close banks (when `CLOSE_ENABLED` flag is set)
-- Collect and withdraw group fees
+- Withdraw group or insurance fees and set a bank's permissionless fee-withdrawal destination
+- Use the staging/localnet-only `super_admin_deposit` and `super_admin_withdraw` recovery tools;
+  both instructions panic on mainnet
+- Configure bank and group variable-borrow premiums
 
 **Cannot do:**
 - Set a bank to `KilledByBankruptcy` (only happens programmatically)
 - Change global fee state (that's the `global_fee_admin`)
+- Set `risk_admin` or `emode_admin`, change e-mode settings, create/configure bank oracle or
+  fixed-price feeds, change governance-class bank risk parameters, enable tokenless repayments,
+  restore a bank to Operational, or edit staked settings
 
 ### Risk Admin
 
@@ -51,11 +85,10 @@ that require manual intervention.
 
 ### Emode Admin
 
-Controls E-mode (Efficiency Mode) configuration.
+Retained configuration role; e-mode changes now require the slow `governance_admin`.
 
-**Can do:**
-- Set emode tags on banks
-- Configure emode entries (preferential collateral ratios for correlated asset pairs)
+The role is retained in the group layout for compatibility, but no current instruction authorizes
+it independently.
 
 For more details see the [Emode Guide](../RISK_AND_LIQUIDATORS/EMODE_ADMIN.md).
 
@@ -156,7 +189,8 @@ All normal user flows are disabled:
 - Permissionless bank-fee collection
 - Permissionless bad-debt settlement (`HandleBankruptcy` when called by a non-admin, even on banks
   with the `PERMISSIONLESS_BAD_DEBT_SETTLEMENT` flag)
-- Admin bank configuration changes that route through `LendingPoolConfigureBank`
+- Bank configuration changes (`LendingPoolConfigureBank` and
+  `LendingPoolConfigureBankGov`)
 
 ### Permitted while paused (admin exceptions)
 
@@ -229,9 +263,9 @@ Some instructions can be called by anyone:
 
 ### Frozen Accounts
 
-The group admin can freeze any individual user account. When frozen:
+The fast group admin can freeze any individual user account. When frozen:
 - The account's authority is blocked from all operations.
-- Only the group admin can operate on the account (e.g. to withdraw or rebalance).
+- Only the slow `governance_admin` can operate on the account (e.g. to withdraw or rebalance).
 - The account remains frozen until explicitly unfrozen by the admin.
 
 This is used for compliance, investigations, or protecting accounts in unusual situations.
@@ -250,11 +284,14 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 
 | Instruction | Required Role |
 |-------------|---------------|
-| Configure group | `admin` |
-| Add bank | `admin` |
-| Configure bank (full) | `admin` |
-| Configure bank oracle | `admin` |
-| Set fixed oracle price | `admin` |
+| Configure fast group roles | `admin` |
+| Configure governance group roles / e-mode limits | `governance_admin` |
+| Bootstrap/rotate governance admin | `admin` only while zero; then `governance_admin` (legacy `marginfi_group_set_bank_admin`) |
+| Add bank (native, Kamino, Drift, Solend, JupLend) | `governance_admin` |
+| Configure bank — fast fields | `admin` |
+| Configure bank — governance fields / tokenless repayments / restore Operational | `governance_admin` |
+| Configure bank oracle / Scope feed | `governance_admin` |
+| Set fixed oracle price | `governance_admin` |
 | Configure interest rate config | `admin` or `delegate_curve_admin` |
 | Configure bank deposit/borrow/init limits | `admin` or `delegate_limit_admin` |
 | Configure bank/group rate limits | `admin` or `delegate_limit_admin` |
@@ -262,9 +299,15 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Settle group rate limiter batches | `admin` or `delegate_limit_admin` |
 | Settle deleverage withdraw batches | `admin` or `delegate_limit_admin` |
 | Configure emissions | Deprecated / no-op (no active authority path) |
-| Configure emode | `emode_admin` |
+| Configure e-mode / same-asset e-mode | `governance_admin` |
+| Configure variable-borrow premiums | `admin` |
+| Clear a tripped circuit breaker | `admin` or `risk_admin` |
+| Withdraw group fees / insurance; set fee destination | `admin` |
+| Collect bank fees / withdraw preconfigured fees | Anyone |
 | Write bank metadata | `metadata_admin` |
 | Freeze/unfreeze account | `admin` |
+| Operate a frozen account | `governance_admin` |
+| Initialize/edit/transition staked settings | `governance_admin` |
 | Handle bankruptcy | `risk_admin` or `admin` (or permissionless if flag set) |
 | Start forced deleverage | `risk_admin` |
 | Force tokenless repay complete | `risk_admin` |

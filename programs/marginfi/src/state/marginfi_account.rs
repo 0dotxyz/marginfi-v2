@@ -99,11 +99,11 @@ pub trait MarginfiAccountImpl {
 /// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
 /// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
 /// 3. If `allow_order_execution` is true and the account is in order execution → `true`
-/// 4. If the account is frozen → `true` only if signer is the group admin
+/// 4. If the account is frozen → `true` only if signer is the governance admin (the slow authority)
 /// 5. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
-    group_admin: Pubkey,
+    frozen_account_admin: Pubkey,
     signer: Pubkey,
     allow_receivership: bool,
     allow_order_execution: bool,
@@ -126,7 +126,7 @@ pub fn is_signer_authorized(
     }
 
     if marginfi_account.get_flag(ACCOUNT_FROZEN) {
-        return group_admin == signer;
+        return frozen_account_admin == signer;
     }
 
     marginfi_account.authority == signer

@@ -1,8 +1,9 @@
 use fixtures::prelude::*;
+use marginfi::instruction::MarginfiGroupConfigureGov;
 use marginfi_type_crate::types::{FeeState, MarginfiGroup};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 async fn group_account_len(test_f: &TestFixture) -> usize {
     let banks_client = test_f.context.borrow().banks_client.clone();
@@ -23,15 +24,18 @@ async fn group_resize_unbricks_v1_account() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;
 
-    // New groups are born at the current (full) size with the reserved region zeroed
+    // New groups are born at the current (full) size with bank_admin initialized and the
+    // remaining extension padding zeroed. The v1 simulation below drops bank_admin too.
     let banks_client = test_f.context.borrow().banks_client.clone();
     let fresh = banks_client.get_account(group_f.key).await?.unwrap();
     assert_eq!(fresh.data.len(), 8 + MarginfiGroup::LEN);
-    assert!(fresh.data[8 + MarginfiGroup::V1_LEN..]
+    let fresh_group = group_f.load().await;
+    assert_eq!(fresh_group.governance_admin, fresh_group.admin);
+    assert!(fresh.data[8 + MarginfiGroup::V1_LEN + 32..]
         .iter()
         .all(|b| *b == 0));
 
-    let group = group_f.load().await;
+    let group = fresh_group;
     let admin = group.admin;
     let curve_admin = group.delegate_curve_admin;
     let limit_admin = group.delegate_limit_admin;
@@ -58,22 +62,30 @@ async fn group_resize_unbricks_v1_account() -> anyhow::Result<()> {
         .await;
     assert!(res.is_err());
 
-    // The permissionless resize un-bricks it; state is preserved and the group is operable
+    // The permissionless resize un-bricks it. Its new extension is zeroed, so the fast admin
+    // must bootstrap the slow bank admin before any slow-authority operation is available.
     group_f.try_resize_group_account().await?;
     assert_eq!(group_account_len(&test_f).await, 8 + MarginfiGroup::LEN);
     let group = group_f.load().await;
     assert_eq!(group.admin, admin);
+    assert_eq!(group.governance_admin, Pubkey::default());
+
+    let bank_admin = Keypair::new();
+    group_f.try_set_bank_admin(&bank_admin).await?;
+    assert_eq!(group_f.load().await.governance_admin, bank_admin.pubkey());
+
     let new_emode_admin = Pubkey::new_unique();
     group_f
-        .try_update_with_flow_admin(
-            admin,
-            new_emode_admin,
-            curve_admin,
-            limit_admin,
-            flow_admin,
-            emissions_admin,
-            metadata_admin,
-            risk_admin,
+        .try_group_configure_gov_with_signer(
+            &bank_admin,
+            MarginfiGroupConfigureGov {
+                new_emode_admin: Some(new_emode_admin),
+                new_risk_admin: None,
+                emode_max_init_leverage: None,
+                emode_max_maint_leverage: None,
+                same_asset_emode_init_leverage: None,
+                same_asset_emode_maint_leverage: None,
+            },
         )
         .await?;
     let group = group_f.load().await;

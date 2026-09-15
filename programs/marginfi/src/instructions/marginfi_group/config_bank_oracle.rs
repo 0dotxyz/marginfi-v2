@@ -1,8 +1,11 @@
-use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
-use crate::ix_utils;
-use crate::state::bank::BankImpl;
-use crate::state::bank_config::BankConfigImpl;
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{
+    check,
+    events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent},
+    ix_utils,
+    state::bank::BankImpl,
+    state::bank_config::BankConfigImpl,
+    MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
@@ -87,7 +90,7 @@ pub fn lending_pool_configure_bank_oracle(
         emit!(LendingPoolBankConfigureOracleEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.governance_admin.key)
             },
             bank: ctx.accounts.bank.key(),
             oracle_setup: setup,
@@ -143,7 +146,7 @@ pub fn lending_pool_configure_bank_oracle_scope(
     emit!(LendingPoolBankConfigureOracleEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: ctx.accounts.bank.key(),
         oracle_setup: OracleSetup::Scope as u8,
@@ -155,12 +158,10 @@ pub fn lending_pool_configure_bank_oracle_scope(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankOracle<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,

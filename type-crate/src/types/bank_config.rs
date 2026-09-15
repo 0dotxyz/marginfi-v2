@@ -234,6 +234,178 @@ pub struct BankConfigOpt {
     pub cb_window_max_down_bps: Option<u16>,
 }
 
+/// Configuration fields controlled by the fast operational admin.
+///
+/// `operational_state`, when present, may only transition a bank to `Paused`, `ReduceOnly`, or
+/// `ReduceOnlyWithBorrowingPower`. Restoring a bank to `Operational` is governed by
+/// [`BankConfigGov`].
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct BankConfigFast {
+    pub deposit_limit: Option<u64>,
+    pub borrow_limit: Option<u64>,
+    pub operational_state: Option<BankOperationalState>,
+    pub interest_rate_config: Option<InterestRateConfigOpt>,
+    pub total_asset_value_init_limit: Option<u64>,
+    pub permissionless_bad_debt_settlement: Option<bool>,
+    pub freeze_settings: Option<bool>,
+    pub liquidation_liquidator_fee: Option<u32>,
+    pub liquidation_insurance_fee: Option<u32>,
+    pub circuit_breaker_enabled: Option<bool>,
+    pub cb_deviation_bps_tiers: Option<[u16; 3]>,
+    pub cb_tier_durations_seconds: Option<[u16; 3]>,
+    pub cb_escalation_window_mult: Option<u8>,
+    pub cb_ema_alpha_bps: Option<u16>,
+    pub cb_window_seconds: Option<u32>,
+    pub cb_window_max_up_bps: Option<u16>,
+    pub cb_window_max_down_bps: Option<u16>,
+}
+
+/// Configuration fields controlled by the slow, timelocked governance admin.
+///
+/// `operational_state`, when present, may only restore a bank to `Operational`.
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct BankConfigGov {
+    pub asset_weight_init: Option<WrappedI80F48>,
+    pub asset_weight_maint: Option<WrappedI80F48>,
+    pub liability_weight_init: Option<WrappedI80F48>,
+    pub liability_weight_maint: Option<WrappedI80F48>,
+    pub operational_state: Option<BankOperationalState>,
+    pub risk_tier: Option<RiskTier>,
+    pub asset_tag: Option<u8>,
+    pub oracle_max_confidence: Option<u32>,
+    pub oracle_max_age: Option<u16>,
+    pub tokenless_repayments_allowed: Option<bool>,
+}
+
+impl BankConfigFast {
+    pub fn is_empty(&self) -> bool {
+        self.deposit_limit.is_none()
+            && self.borrow_limit.is_none()
+            && self.operational_state.is_none()
+            && self.interest_rate_config.is_none()
+            && self.total_asset_value_init_limit.is_none()
+            && self.permissionless_bad_debt_settlement.is_none()
+            && self.freeze_settings.is_none()
+            && self.liquidation_liquidator_fee.is_none()
+            && self.liquidation_insurance_fee.is_none()
+            && self.circuit_breaker_enabled.is_none()
+            && self.cb_deviation_bps_tiers.is_none()
+            && self.cb_tier_durations_seconds.is_none()
+            && self.cb_escalation_window_mult.is_none()
+            && self.cb_ema_alpha_bps.is_none()
+            && self.cb_window_seconds.is_none()
+            && self.cb_window_max_up_bps.is_none()
+            && self.cb_window_max_down_bps.is_none()
+    }
+}
+
+impl BankConfigGov {
+    pub fn is_empty(&self) -> bool {
+        self.asset_weight_init.is_none()
+            && self.asset_weight_maint.is_none()
+            && self.liability_weight_init.is_none()
+            && self.liability_weight_maint.is_none()
+            && self.operational_state.is_none()
+            && self.risk_tier.is_none()
+            && self.asset_tag.is_none()
+            && self.oracle_max_confidence.is_none()
+            && self.oracle_max_age.is_none()
+            && self.tokenless_repayments_allowed.is_none()
+    }
+}
+
+impl From<BankConfigFast> for BankConfigOpt {
+    fn from(config: BankConfigFast) -> Self {
+        Self {
+            deposit_limit: config.deposit_limit,
+            borrow_limit: config.borrow_limit,
+            operational_state: config.operational_state,
+            interest_rate_config: config.interest_rate_config,
+            total_asset_value_init_limit: config.total_asset_value_init_limit,
+            permissionless_bad_debt_settlement: config.permissionless_bad_debt_settlement,
+            freeze_settings: config.freeze_settings,
+            liquidation_liquidator_fee: config.liquidation_liquidator_fee,
+            liquidation_insurance_fee: config.liquidation_insurance_fee,
+            circuit_breaker_enabled: config.circuit_breaker_enabled,
+            cb_deviation_bps_tiers: config.cb_deviation_bps_tiers,
+            cb_tier_durations_seconds: config.cb_tier_durations_seconds,
+            cb_escalation_window_mult: config.cb_escalation_window_mult,
+            cb_ema_alpha_bps: config.cb_ema_alpha_bps,
+            cb_window_seconds: config.cb_window_seconds,
+            cb_window_max_up_bps: config.cb_window_max_up_bps,
+            cb_window_max_down_bps: config.cb_window_max_down_bps,
+            ..Self::default()
+        }
+    }
+}
+
+impl From<BankConfigGov> for BankConfigOpt {
+    fn from(config: BankConfigGov) -> Self {
+        Self {
+            asset_weight_init: config.asset_weight_init,
+            asset_weight_maint: config.asset_weight_maint,
+            liability_weight_init: config.liability_weight_init,
+            liability_weight_maint: config.liability_weight_maint,
+            operational_state: config.operational_state,
+            risk_tier: config.risk_tier,
+            asset_tag: config.asset_tag,
+            oracle_max_confidence: config.oracle_max_confidence,
+            oracle_max_age: config.oracle_max_age,
+            tokenless_repayments_allowed: config.tokenless_repayments_allowed,
+            ..Self::default()
+        }
+    }
+}
+
+impl BankConfigOpt {
+    /// Test/client convenience for dispatching a legacy aggregate config through the explicit
+    /// fast and governance instructions. It performs no authorization or validation.
+    pub fn split(self) -> (BankConfigFast, BankConfigGov) {
+        let fast_operational_state = match self.operational_state {
+            Some(BankOperationalState::Operational) => None,
+            state => state,
+        };
+        let gov_operational_state = match self.operational_state {
+            Some(BankOperationalState::Operational) => Some(BankOperationalState::Operational),
+            _ => None,
+        };
+        let fast = BankConfigFast {
+            deposit_limit: self.deposit_limit,
+            borrow_limit: self.borrow_limit,
+            operational_state: fast_operational_state,
+            interest_rate_config: self.interest_rate_config,
+            total_asset_value_init_limit: self.total_asset_value_init_limit,
+            permissionless_bad_debt_settlement: self.permissionless_bad_debt_settlement,
+            freeze_settings: self.freeze_settings,
+            liquidation_liquidator_fee: self.liquidation_liquidator_fee,
+            liquidation_insurance_fee: self.liquidation_insurance_fee,
+            circuit_breaker_enabled: self.circuit_breaker_enabled,
+            cb_deviation_bps_tiers: self.cb_deviation_bps_tiers,
+            cb_tier_durations_seconds: self.cb_tier_durations_seconds,
+            cb_escalation_window_mult: self.cb_escalation_window_mult,
+            cb_ema_alpha_bps: self.cb_ema_alpha_bps,
+            cb_window_seconds: self.cb_window_seconds,
+            cb_window_max_up_bps: self.cb_window_max_up_bps,
+            cb_window_max_down_bps: self.cb_window_max_down_bps,
+        };
+        let gov = BankConfigGov {
+            asset_weight_init: self.asset_weight_init,
+            asset_weight_maint: self.asset_weight_maint,
+            liability_weight_init: self.liability_weight_init,
+            liability_weight_maint: self.liability_weight_maint,
+            operational_state: gov_operational_state,
+            risk_tier: self.risk_tier,
+            asset_tag: self.asset_tag,
+            oracle_max_confidence: self.oracle_max_confidence,
+            oracle_max_age: self.oracle_max_age,
+            tokenless_repayments_allowed: self.tokenless_repayments_allowed,
+        };
+        (fast, gov)
+    }
+}
+
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq)]

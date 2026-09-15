@@ -29,36 +29,25 @@ fn validate_and_apply_emode_leverage(
     Ok(())
 }
 
-/// Configure margin group.
+/// Configure fast-admin margin group roles.
 ///
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
-/// with `configure_group_fee`
-/// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
-///
-/// Admin only
+/// with `configure_group_fee`. `new_emissions_admin` is deprecated and currently has no on-chain
+/// effect.
 pub fn configure(
     ctx: Context<MarginfiGroupConfigure>,
     new_admin: Option<Pubkey>,
-    new_emode_admin: Option<Pubkey>,
     new_curve_admin: Option<Pubkey>,
     new_limit_admin: Option<Pubkey>,
     new_flow_admin: Option<Pubkey>,
     new_emissions_admin: Option<Pubkey>,
     new_metadata_admin: Option<Pubkey>,
-    new_risk_admin: Option<Pubkey>,
-    emode_max_init_leverage: Option<WrappedI80F48>,
-    emode_max_maint_leverage: Option<WrappedI80F48>,
-    same_asset_emode_init_leverage: Option<WrappedI80F48>,
-    same_asset_emode_maint_leverage: Option<WrappedI80F48>,
 ) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_mut()?;
     if let Some(new_admin) = new_admin {
         marginfi_group.update_admin(new_admin);
-    }
-    if let Some(new_emode_admin) = new_emode_admin {
-        marginfi_group.update_emode_admin(new_emode_admin);
     }
     if let Some(new_curve_admin) = new_curve_admin {
         marginfi_group.update_curve_admin(new_curve_admin);
@@ -74,6 +63,31 @@ pub fn configure(
     }
     if let Some(new_metadata_admin) = new_metadata_admin {
         marginfi_group.update_metadata_admin(new_metadata_admin);
+    }
+
+    finish_configure(
+        marginfi_group,
+        ctx.accounts.marginfi_group.key(),
+        ctx.accounts.admin.key(),
+        new_admin,
+    )
+}
+
+/// Configure slow, timelocked margin group governance roles and e-mode leverage caps.
+pub fn configure_gov(
+    ctx: Context<MarginfiGroupConfigureGov>,
+    new_emode_admin: Option<Pubkey>,
+    new_risk_admin: Option<Pubkey>,
+    emode_max_init_leverage: Option<WrappedI80F48>,
+    emode_max_maint_leverage: Option<WrappedI80F48>,
+    same_asset_emode_init_leverage: Option<WrappedI80F48>,
+    same_asset_emode_maint_leverage: Option<WrappedI80F48>,
+) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
+    let marginfi_group = &mut ctx.accounts.marginfi_group.load_mut()?;
+    if let Some(new_emode_admin) = new_emode_admin {
+        marginfi_group.update_emode_admin(new_emode_admin);
     }
     if let Some(new_risk_admin) = new_risk_admin {
         marginfi_group.update_risk_admin(new_risk_admin);
@@ -135,6 +149,21 @@ pub fn configure(
         );
         return Err(error!(MarginfiError::BadEmodeConfig));
     }
+
+    finish_configure(
+        marginfi_group,
+        ctx.accounts.marginfi_group.key(),
+        ctx.accounts.governance_admin.key(),
+        None,
+    )
+}
+
+fn finish_configure(
+    marginfi_group: &mut MarginfiGroup,
+    marginfi_group_key: Pubkey,
+    signer: Pubkey,
+    new_admin: Option<Pubkey>,
+) -> MarginfiResult {
     // The fuzzer should ignore this because the "Clock" mock sysvar doesn't load until after the
     // group is init. Eventually we might fix the fuzzer to load the clock first...
     #[cfg(not(feature = "client"))]
@@ -147,8 +176,8 @@ pub fn configure(
 
     emit!(MarginfiGroupConfigureEvent {
         header: GroupEventHeader {
-            marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            marginfi_group: marginfi_group_key,
+            signer: Some(signer)
         },
         admin: new_admin,
         flags: marginfi_group.group_flags
@@ -159,13 +188,22 @@ pub fn configure(
 
 #[derive(Accounts)]
 pub struct MarginfiGroupConfigure<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = admin @ MarginfiError::Unauthorized)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MarginfiGroupConfigureGov<'info> {
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
+    pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
+
+    pub governance_admin: Signer<'info>,
 
     /// CHECK: instruction sysvar
     #[account(address = solana_instructions_sysvar::id())]

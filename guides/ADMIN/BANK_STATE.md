@@ -12,7 +12,7 @@
 ## Bank Operational States
 
 Every bank has an operational state that determines which user operations are allowed. When a new
-bank is created, it starts in the **Paused** state. The group admin must explicitly set it to
+bank is created, it starts in the **Paused** state. The slow `governance_admin` must explicitly set it to
 **Operational** before users can interact with it.
 
 ### Paused
@@ -59,13 +59,17 @@ event wipes out all remaining assets in the bank. It **cannot** be set manually 
 
 ## State Transitions
 
-The group admin can transition a bank between Paused, Operational, and ReduceOnly using the
-`configure_bank` instruction. The admin **cannot** set a bank to KilledByBankruptcy directly;
-that transition only happens automatically during bankruptcy resolution.
+The fast `admin` can transition a bank to Paused, ReduceOnly, or ReduceOnlyWithBorrowingPower for
+immediate incident response.
+Only the slow `governance_admin` can transition a bank to Operational, including reopening a bank from
+Paused or ReduceOnly. Neither role can set a bank to KilledByBankruptcy directly; that transition
+only happens automatically during bankruptcy resolution.
 
 ```
-          admin sets             admin sets              admin sets
-Paused <───────────> Operational <───────────> ReduceOnly
+  governance_admin sets       admin sets    governance_admin sets
+Paused ─────────────> Operational ────────> ReduceOnly
+   ▲                       │                    │
+   └──── admin sets ───────┴──── admin sets ────┘
                            │                       │
                            │   handle_bankruptcy    │
                            └───────────┬────────────┘
@@ -103,10 +107,10 @@ waiting for the risk admin.
   is also frozen (it can only be updated when the bank is NOT frozen).
 
 This flag provides a credible commitment that the bank's risk parameters, oracle configuration,
-interest rate curves, and other settings will not change. It can only be set through the
-`configure_bank` instruction by the group admin. Once frozen, the admin can still adjust capacity
-limits, but cannot change anything that affects the risk profile of the bank (such as weights,
-oracle setup, interest rate curves, init limit, etc).
+interest rate curves, and other settings will not change. It can only be set through
+`lending_pool_configure_bank` by the fast group admin. Once frozen, the admin can still adjust
+capacity limits, but cannot change anything that affects the risk profile of the bank (such as
+weights, oracle setup, interest rate curves, init limit, etc).
 
 ### Close Enabled (Bit 4)
 
@@ -134,17 +138,18 @@ without moving tokens.
 | 2 | `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` | 4 | Admin | Anyone can settle bad debt |
 | 3 | `FREEZE_SETTINGS` | 8 | Admin | Freezes most bank config (only deposit/borrow limits changeable) |
 | 4 | `CLOSE_ENABLED_FLAG` | 16 | Auto (at creation) | Allows bank closure. Cannot be toggled after creation. |
-| 5 | `TOKENLESS_REPAYMENTS_ALLOWED` | 32 | Admin | Allows deleverage repayments |
+| 5 | `TOKENLESS_REPAYMENTS_ALLOWED` | 32 | Slow `governance_admin` | Allows deleverage repayments |
 | 6 | `TOKENLESS_REPAYMENTS_COMPLETE` | 64 | Auto or Risk admin | Signals deleverage complete. Auto-set when liabilities reach zero on a TOKENLESS_REPAYMENTS_ALLOWED bank. Can also be force-set by risk admin. |
 
 ## Typical Bank Lifecycle
 
-1. **Creation**: Bank is created in the **Paused** state. The admin configures oracle, risk
+1. **Creation**: Bank is created in the **Paused** state. The slow `governance_admin` configures oracle, risk
    parameters, interest rate curve, and limits.
-2. **Go Live**: Admin sets the state to **Operational**. Users can deposit, borrow, etc.
-3. **Normal Operation**: The bank operates normally. The admin may adjust limits as needed. If
+2. **Go Live**: Slow `governance_admin` sets the state to **Operational**. Users can deposit, borrow, etc.
+3. **Normal Operation**: The bank operates normally. The fast admin may adjust limits and circuit
+   breakers as needed; the slow admin controls risk-sensitive changes. If
    `FREEZE_SETTINGS` is set, only limits can change.
-4. **Wind Down** (if needed): Admin sets the state to **ReduceOnly**. Users can only withdraw and
+4. **Wind Down** (if needed): Fast admin sets the state to **ReduceOnly**. Users can only withdraw and
    repay. No new positions can be opened.
 5. **Closure** (if needed): Once all positions are closed and the bank is empty, the admin can
    close the bank (`CLOSE_ENABLED_FLAG` is already set from creation).

@@ -49,12 +49,12 @@ async fn create_nonce(
     Ok((nonce, hash))
 }
 
-fn configure_bank_premium_ix(test_f: &TestFixture, emode_admin: Pubkey) -> Instruction {
+fn configure_bank_premium_ix(test_f: &TestFixture, admin: Pubkey) -> Instruction {
     Instruction {
         program_id: marginfi::ID,
         accounts: marginfi::accounts::LendingPoolConfigureBankPremium {
             group: test_f.marginfi_group.key,
-            emode_admin,
+            admin,
             bank: test_f.get_bank(&BankMint::Usdc).key,
             instruction_sysvar: solana_instructions_sysvar::id(),
         }
