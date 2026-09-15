@@ -877,7 +877,7 @@ export const addBankPermissionless = (
 export const disableStakedOracles = (
   program: Program<Marginfi>,
   group: PublicKey,
-  admin?: PublicKey,
+  governanceAdmin?: PublicKey,
 ) => {
   const [stakedSettingsKey] = deriveStakedSettings(
     program.programId,
@@ -888,7 +888,7 @@ export const disableStakedOracles = (
     .accounts({
       group,
     })
-    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
+    .accountsPartial({ governanceAdmin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;
@@ -897,7 +897,7 @@ export const disableStakedOracles = (
 export const enableStakedOracleOnramp = (
   program: Program<Marginfi>,
   group: PublicKey,
-  admin?: PublicKey,
+  governanceAdmin?: PublicKey,
 ) => {
   const [stakedSettingsKey] = deriveStakedSettings(
     program.programId,
@@ -908,7 +908,7 @@ export const enableStakedOracleOnramp = (
     .accounts({
       group,
     })
-    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
+    .accountsPartial({ governanceAdmin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;

@@ -10,9 +10,8 @@ use crate::user::User;
 use crate::FuzzTest;
 
 impl FuzzTest {
-    /// Submit a `LendingPoolConfigureBank` ix that flips only the bank's
-    /// `operational_state`, leaving every other field at its prior value
-    /// (`BankConfigOpt` with all-`None` except `operational_state`).
+    /// Submit the explicit fast or governance bank-config ix that flips only the bank's
+    /// `operational_state`, leaving every other field at its prior value.
     ///
     /// Marginfi rejects new deposits when `Paused` and new borrows when
     /// `ReduceOnly` — the harness's existing deposit/borrow/withdraw/repay
@@ -27,46 +26,64 @@ impl FuzzTest {
         state: types::marginfi::BankOperationalState,
         msg: Option<&str>,
     ) {
-        let config = types::marginfi::BankConfigOpt {
-            asset_weight_init: None,
-            asset_weight_maint: None,
-            liability_weight_init: None,
-            liability_weight_maint: None,
-            deposit_limit: None,
-            borrow_limit: None,
-            operational_state: Some(state),
-            interest_rate_config: None,
-            risk_tier: None,
-            asset_tag: None,
-            total_asset_value_init_limit: None,
-            oracle_max_confidence: None,
-            oracle_max_age: None,
-            permissionless_bad_debt_settlement: None,
-            freeze_settings: None,
-            tokenless_repayments_allowed: None,
-            liquidation_liquidator_fee: None,
-            liquidation_insurance_fee: None,
-            circuit_breaker_enabled: None,
-            cb_deviation_bps_tiers: None,
-            cb_tier_durations_seconds: None,
-            cb_escalation_window_mult: None,
-            cb_ema_alpha_bps: None,
-            cb_window_seconds: None,
-            cb_window_max_up_bps: None,
-            cb_window_max_down_bps: None,
-        };
+        let ix = if matches!(state, types::marginfi::BankOperationalState::Operational) {
+            let config = types::marginfi::BankConfigGov {
+                asset_weight_init: None,
+                asset_weight_maint: None,
+                liability_weight_init: None,
+                liability_weight_maint: None,
+                operational_state: Some(state),
+                risk_tier: None,
+                asset_tag: None,
+                oracle_max_confidence: None,
+                oracle_max_age: None,
+                tokenless_repayments_allowed: None,
+            };
 
-        let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(
-            types::marginfi::LendingPoolConfigureBankInstructionData::new(config),
-        )
-        .accounts(
-            types::marginfi::LendingPoolConfigureBankInstructionAccounts::new(
-                self.marginfi_group,
-                self.payer.pubkey(),
-                bank,
-            ),
-        )
-        .instruction();
+            types::marginfi::LendingPoolConfigureBankGovInstruction::data(
+                types::marginfi::LendingPoolConfigureBankGovInstructionData::new(config),
+            )
+            .accounts(
+                types::marginfi::LendingPoolConfigureBankGovInstructionAccounts::new(
+                    self.marginfi_group,
+                    self.payer.pubkey(),
+                    bank,
+                ),
+            )
+            .instruction()
+        } else {
+            let config = types::marginfi::BankConfigFast {
+                deposit_limit: None,
+                borrow_limit: None,
+                operational_state: Some(state),
+                interest_rate_config: None,
+                total_asset_value_init_limit: None,
+                permissionless_bad_debt_settlement: None,
+                freeze_settings: None,
+                liquidation_liquidator_fee: None,
+                liquidation_insurance_fee: None,
+                circuit_breaker_enabled: None,
+                cb_deviation_bps_tiers: None,
+                cb_tier_durations_seconds: None,
+                cb_escalation_window_mult: None,
+                cb_ema_alpha_bps: None,
+                cb_window_seconds: None,
+                cb_window_max_up_bps: None,
+                cb_window_max_down_bps: None,
+            };
+
+            types::marginfi::LendingPoolConfigureBankInstruction::data(
+                types::marginfi::LendingPoolConfigureBankInstructionData::new(config),
+            )
+            .accounts(
+                types::marginfi::LendingPoolConfigureBankInstructionAccounts::new(
+                    self.marginfi_group,
+                    self.payer.pubkey(),
+                    bank,
+                ),
+            )
+            .instruction()
+        };
 
         // Most calls succeed (admin-signed, valid ix); a few may fail in
         // late-sequence states (e.g. KilledByBankruptcy is set
