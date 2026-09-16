@@ -77,7 +77,7 @@ import {
 // clock drift varies by multiple days between runs, which made CI failures (kfarms reward-tally
 // overflow, accrual divergence) irreproducible locally. Seed Math.random once, globally, so every
 // run replays the identical sequence. mulberry32 keeps the uniform [0, 1) contract.
-const mulberry32 = (seed: number) => {
+export const mulberry32 = (seed: number) => {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
