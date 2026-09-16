@@ -840,3 +840,13 @@ export const countTxAccountLocks = (
   return keys.size;
 };
 
+/** Runs `fn` with console.log suppressed, for setup helpers that narrate every account they make. */
+export const quiet = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = log;
+  }
+};
