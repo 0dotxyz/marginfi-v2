@@ -38,6 +38,7 @@ The governance admin is the safety-critical authority and should be a timelocked
   and cloning. The stored `emode_admin` does not independently authorize an instruction.
 - Initialize, edit, and transition staked-collateral settings
 - Operate a frozen user account for remediation or seizure, including withdrawals
+- Remove a user account from the frozen state
 
 **Cannot do:**
 - Fast emergency actions such as freezing a user account, pausing/reducing a bank, or changing
@@ -56,7 +57,7 @@ quickly, but it cannot make the risk-sensitive changes listed under `governance_
 - Transition a bank to Paused or ReduceOnly
 - Clear a tripped circuit breaker (also allowed for `risk_admin`)
 - Set fast operational roles (`admin`, curve, limit, flow, emissions, and metadata delegates)
-- Freeze and unfreeze individual user accounts
+- Freeze individual user accounts
 - Handle bankruptcy (in addition to `risk_admin`)
 - Close banks (when `CLOSE_ENABLED` flag is set)
 - Withdraw group or insurance fees and set a bank's permissionless fee-withdrawal destination
@@ -266,7 +267,8 @@ Some instructions can be called by anyone:
 The fast group admin can freeze any individual user account. When frozen:
 - The account's authority is blocked from all operations.
 - Only the slow `governance_admin` can operate on the account (e.g. to withdraw or rebalance).
-- The account remains frozen until explicitly unfrozen by the admin.
+- The account remains frozen until explicitly unfrozen by `governance_admin`; the fast `admin`
+  cannot clear the state.
 
 This is used for compliance, investigations, or protecting accounts in unusual situations.
 
@@ -305,7 +307,8 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Withdraw group fees / insurance; set fee destination | `admin` |
 | Collect bank fees / withdraw preconfigured fees | Anyone |
 | Write bank metadata | `metadata_admin` |
-| Freeze/unfreeze account | `admin` |
+| Freeze account | `admin` |
+| Unfreeze account | `governance_admin` |
 | Operate a frozen account | `governance_admin` |
 | Initialize/edit/transition staked settings | `governance_admin` |
 | Handle bankruptcy | `risk_admin` or `admin` (or permissionless if flag set) |

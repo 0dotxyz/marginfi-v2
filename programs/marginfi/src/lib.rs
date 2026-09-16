@@ -768,8 +768,8 @@ pub mod marginfi {
         marginfi_account::transfer_to_new_account_pda(ctx, account_index, third_party_id)
     }
 
-    /// (fast admin only) Freeze or unfreeze a marginfi account. A frozen account can only be
-    /// operated on by the slow governance admin.
+    /// Freeze a marginfi account with the fast admin, or unfreeze it with the slow governance
+    /// admin. A frozen account can only be operated on by the slow governance admin.
     pub fn marginfi_account_set_freeze(
         ctx: Context<SetAccountFreeze>,
         frozen: bool,

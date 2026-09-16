@@ -7,7 +7,7 @@ use solana_program_test::tokio;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 #[tokio::test]
-async fn admin_can_toggle_account_freeze() -> anyhow::Result<()> {
+async fn shared_fast_and_governance_admin_can_toggle_account_freeze() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
     let authority = Keypair::new();
 
@@ -198,7 +198,7 @@ async fn frozen_account_blocks_withdraw_allows_admin() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn frozen_account_withdraw_requires_slow_bank_admin() -> anyhow::Result<()> {
+async fn frozen_account_withdraw_requires_governance_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let authority = Keypair::new();
     let slow_admin = Keypair::new();
@@ -243,6 +243,13 @@ async fn frozen_account_withdraw_requires_slow_bank_admin() -> anyhow::Result<()
         .await;
     assert_custom_error!(fast_result.unwrap_err(), MarginfiError::Unauthorized);
 
+    let fast_unfreeze_result = marginfi_account.try_set_freeze(false).await;
+    assert_custom_error!(
+        fast_unfreeze_result.unwrap_err(),
+        MarginfiError::Unauthorized
+    );
+    assert!(marginfi_account.load().await.get_flag(ACCOUNT_FROZEN));
+
     let slow_dest = TokenAccountFixture::new(
         test_f.context.clone(),
         &usdc_bank.mint,
@@ -252,6 +259,11 @@ async fn frozen_account_withdraw_requires_slow_bank_admin() -> anyhow::Result<()
     marginfi_account
         .try_bank_withdraw_with_authority(slow_dest.key, &usdc_bank, 1.0, None, &slow_admin)
         .await?;
+
+    marginfi_account
+        .try_set_freeze_with_signer(false, &slow_admin)
+        .await?;
+    assert!(!marginfi_account.load().await.get_flag(ACCOUNT_FROZEN));
 
     Ok(())
 }

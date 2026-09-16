@@ -108,6 +108,7 @@ export const transferAccountAuthorityIx = (
 export type SetAccountFreezeArgs = {
   group: PublicKey;
   marginfiAccount: PublicKey;
+  /** Fast admin when `frozen` is true; governance admin when it is false. */
   admin: PublicKey;
   frozen: boolean;
 };
