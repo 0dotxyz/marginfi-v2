@@ -117,6 +117,8 @@ fn should_include_integration_observation_meta(bank: &Bank) -> bool {
             | OracleSetup::JuplendPythPull
             | OracleSetup::JuplendSwitchboardPull
             | OracleSetup::FixedJuplend
+            | OracleSetup::ScopeKamino
+            | OracleSetup::ScopeJuplend
     )
 }
 

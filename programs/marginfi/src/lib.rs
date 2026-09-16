@@ -200,7 +200,9 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_oracle(ctx, setup, oracle)
     }
 
-    /// (admin only) Point a bank at a Scope feed entry.
+    /// (admin only) Point a bank at a Scope feed entry. Picks `Scope`, `ScopeKamino`, or
+    /// `ScopeJuplend` from the bank's asset tag; Kamino/JupLend banks pass their reserve/lending
+    /// account after the feed in remaining accounts.
     /// * oracle - the feed's `OraclePrices` account
     /// * entry_index - which of the 512 entries in that account prices this bank
     pub fn lending_pool_configure_bank_oracle_scope(

@@ -404,6 +404,8 @@ pub enum OracleSetup {
     JuplendLST,             // 24
     PTPyth,                 // 25
     PTFixed,                // 26
+    ScopeKamino,            // 27
+    ScopeJuplend,           // 28
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -438,6 +440,8 @@ impl OracleSetup {
             24 => Some(Self::JuplendLST),
             25 => Some(Self::PTPyth),
             26 => Some(Self::PTFixed),
+            27 => Some(Self::ScopeKamino),
+            28 => Some(Self::ScopeJuplend),
             _ => None,
         }
     }
@@ -486,8 +490,11 @@ impl OracleSetup {
             | Self::FixedDrift
             | Self::FixedJuplend
             // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
-            // covers `oracle_keys[0]` cannot express that, so Scope banks never pair.
+            // covers `oracle_keys[0]` cannot express that, so Scope banks (venue-wrapped or not)
+            // never pair.
             | Self::Scope
+            | Self::ScopeKamino
+            | Self::ScopeJuplend
             | Self::PTFixed => None,
         }
     }
@@ -544,6 +551,19 @@ mod feed_family_tests {
             OracleSetup::FixedDrift,
             OracleSetup::FixedJuplend,
             OracleSetup::PTFixed,
+        ] {
+            assert_eq!(setup.feed_family(), None);
+        }
+    }
+
+    /// A Scope bank is identified by `(oracle_keys[0], scope_entry_index)`, which no family can
+    /// express, so neither the plain setup nor its venue wrappers may ever pair with anything.
+    #[test]
+    fn scope_setups_have_no_feed_family() {
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
         ] {
             assert_eq!(setup.feed_family(), None);
         }
