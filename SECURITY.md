@@ -1,6 +1,10 @@
 # Important Notice
 **DO NOT CREATE A GITHUB ISSUE** to report a security problem. Instead, please send an email to security@mrgn.group with a detailed description of the attack vector and security risk you have identified.
 
+For bugs in unreleased features, such any PR that has yet to be merged into the main branch (which
+reflects the code on mainnet at any given time), feel free to leave comments on the PR directly on
+Github.
+
 Due to the volume of scam reports, our spam filter is aggressive. Avoid sending links, and only
 attach txt, md, or pdf files. If you have not received a reply within 3 business days, try sending
 another email with no links or attachments. We do not open tar, zip, etc or click links.
@@ -22,7 +26,11 @@ Note that these are simply guidelines for the severity of the bugs. Each bug bou
 Bounties are only valid if they affect mainnet. Bugs in the most recent code marked for "release" or "pre-release" (https://github.com/0dotxyz/marginfi-v2/releases) are also eligible for bounty. Bugs that are related to an upcoming update to an integration (e.g., a release-flagged or main-branch update to SVSP, Kamino, Juplend, etc that could lead to a bug on our end when deploying to mainnet) may also be valid, but are assessed on a case by case basis and strictly first-come. Bugs affecting a flag/feature that is not in use in production will always be considered Medium or below.
 
 ## Infrastructure Bug Bounties
-Bug bounties for infrastructure components (networking, UI, SDK) are first-come-first-serve. The bounty amount is at the discretion of the team based on severity.
+
+Bug bounties for infrastructure components apply only to actively supported Project 0 production
+assets. Deprecated marginfi applications and infrastructure are excluded as described below.
+Eligible infrastructure reports are first-come, first-served, and bounty amounts are determined by
+the team based on severity and demonstrated production impact.
 
 |Severity|Bounty|
 |-----------|-------------|
@@ -52,13 +60,48 @@ A number of attacks are out of scope for the bug bounty, including but not limit
 8. Sybil attacks.
 9. Attempted phishing or other social engineering attacks involving marginfi contributors or users
 10. Denial of service, or automated testing of services that generate significant traffic.
+11. Vulnerabilities affecting only deprecated, archived, retired, staging, development, or
+    otherwise unsupported applications and infrastructure (see below).
 
+## Exclusions For Deprecated Marginfi App, SDK, and API Systems
+
+This scope clarification applies to reports submitted on or after August 6, 2026.
+
+The marginfi frontend application, website, sdk, and api were sunset in mid-2026. Note that this
+does affect the program, which continues to power Project 0, and is eligible for bounties.
+
+The following are explicitly out of scope:
+
+- The deprecated marginfi web application (i.e. https://app.marginfi.com, marginfi.com, etc),
+  including its legacy UI and API routes.
+- Deprecated or archived marginfi client applications and source repositories, including `mrgn-ts`
+  (see https://github.com/0dotxyz/p0-ts-sdk for the current, eligible sdk) and `marginfi-v2-ui` (the
+  current P0 frontend app repository is private).
+- Retired marginfi infrastructure, including legacy Vercel deployments, serverless functions,
+  storage services, Supabase projects, GCP resources, APIs, and documentation sites.
+
+Findings whose impact is limited to modifying, disclosing, or disrupting unused legacy data are out
+of scope. An asset being publicly reachable, present in source control or Git history, or displaying
+a deprecation notice does not make it eligible for a bounty.
+
+A finding involving a deprecated asset may still be eligible if the reporter demonstrates a direct
+impact on an active Project 0 production system, active user funds, non-public user data, or
+currently valid production credentials. Reporters must not perform production writes, access user
+data, or attempt to pivot from a deprecated system without prior written authorization.
+
+If you are unsure whether an asset is actively supported, email security@mrgn.group before testing.
 
 ## Credits
 
 Thank you to the following individuals for bug reports:
 
-* https://github.com/mySebbe for identifying a bug where debts below the zero threshold can remain on the books after a borrow, enabling the extraction of assets where 1 satoshi/lamport/atom is worth more than ~1/10 of the Solana tx fee. 
+* https://github.com/mySebbe for identifying a bug where debts below the zero threshold can remain
+  on the books after a borrow, enabling the extraction of assets where 1 satoshi/lamport/atom is
+  worth more than ~1/10 of the Solana tx fee. 
+
+* https://www.linkedin.com/in/tonmoy-bora-28861a384/ for identifying a bug where LST assets with low
+  staked liquidity could be artificially manipulated to provide more borrowing value by donating SOL
+  to their stake pools.
 
 ## Known Issues and Scope Clarifications
 
@@ -333,3 +376,55 @@ collateral value should not block writing off bad debt, which is a high-priority
 necessary, which is rare). In a future update, we expect to add a "forced withdraw" instruction to
 deal with e.g. forcing users to reclaim a zero-weight position. Users impacted by this edge case
 before the implementation of that ix would be reimbursed for orphaned positions OTC.
+
+### Dodging Liquidation Possible by Spamming New Accounts With Transfers
+
+Attackers can try to avoid liquidation by repeatedly transferring their account, which requires
+receivership liquidators to create a new record. 
+
+Our mitigation is the transfer fee. While it is true that an attacker can grief liquidators by
+repeatedly creating new accounts via transfers, which in turn requires liquidators to create a new
+record each time, the attacker must themselves pay the transfer fee each time they do this. The
+liquidation record creator can eventually reclaim the rent they paid for the record, so they
+ultimately lose nothing, while the attacker loses the transfer fee forever, as well as locking up
+considerable rent in accounts if someone does land a record/liquidation before they can transfer.
+
+We don't want to block accounts that have an active liquidation record from initiating a transfer
+because a transfer is often a "my wallet got hacked and I need to move my account right now" event
+whereas closing a record requires the account to be in good standing for some time.
+
+As such, we consider this issue sufficiently mitigated by economic realities.
+
+### Breakers Use Spot Instead of EMA/TWAP Prices
+
+This is by design: the live price is more reactive than the TWAP/EMA, and the breaker must fire as
+soon as possible. A return to normal pricing (i.e., nearly flat TWAP) will allow the breaker to
+reset before an escalation, causing minimal disruption. 
+
+### PT Token Sy Rate Can Desync, and PT Emergency Mode May Block the Bank Entirely
+
+We trust Exponent to make a timely update to their Vault's sy rate (triggering our oracle failure
+state). Even if they fail to do so, the underlying oracle should react to the loss, so there is no
+immediate solvency risk.
+
+Ensuring a fresh sy rate for all PT tokens requires us to pass the extra sy account or to mandate an
+Exponent refresh in the same tx: both of these are too cumbersome just to deal with this edge case,
+so we make the tradeoff of allowing, in the event Exponent does not make a timely update, a
+potentially stale sy rate.
+
+We use the sy rate to determine when to trigger Exponent "emergency mode". Exponent's emergency mode
+is a new feature (as of late Sept 2026) and our current implementation is proactively assuming
+assets in this state cannot be priced from normal Oracles. The feature would only take affect if the
+underlying asset has lost value. For a traditional LST this is generally impossible barring some
+black swan even like loss of underlying stake. For something like Hyusd, this can occur if a loss in
+Hyusd causes it to redeem for less than $1. 
+
+The issue is that Exponent tokens are essentially locked until maturity. In the event of a loss, the
+future value would likely be valued below the usual value, for example hysd now worth $0.7 might be
+worth $0.5 as a PT, as holders price in the increased risk of further holding. Since PT liquidity is
+limited, there is no good way to estimate the market's actual response. Our plan is to set a fixed
+oracle price in the event this occurs, so we currently have the oracle hard-fail until we are able
+to review. 
+
+Our use of the feature is still evolving, so we may relax liquidations during the initial oracle
+failure or enable them just for the risk manager.
