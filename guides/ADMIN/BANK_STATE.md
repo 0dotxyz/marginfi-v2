@@ -66,10 +66,10 @@ Paused or ReduceOnly. Neither role can set a bank to KilledByBankruptcy directly
 only happens automatically during bankruptcy resolution.
 
 ```
-  governance_admin sets       admin sets    governance_admin sets
-Paused ─────────────> Operational ────────> ReduceOnly
-   ▲                       │                    │
-   └──── admin sets ───────┴──── admin sets ────┘
+   governance_admin sets    governance_admin sets
+Paused ─────────────> Operational <───────── ReduceOnly
+   ▲                       │                      ▲
+   └──── admin sets ───────┴──── admin sets ──────┘
                            │                       │
                            │   handle_bankruptcy    │
                            └───────────┬────────────┘
