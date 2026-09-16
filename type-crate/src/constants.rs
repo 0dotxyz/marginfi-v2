@@ -234,10 +234,13 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 ///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
-/// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
-///   limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
-///   liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
-///   + reserve/spot-market), so they share the same limit.
+/// Maximum number of expensive positions per account. Integration (Kamino + Drift + Solend +
+///   JupLend) and staked balances share this cap: they never mix on an account, and both cost 3-5
+///   remaining accounts per position against the 64 accounts a transaction may lock.
+///
+/// A full 16-balance account stays liquidatable at 8, though a worst-case JupLend one needs the
+///   venue refreshes in a separate same-slot transaction. See `m03`/`m05` for the measured
+///   thresholds.
 ///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 ///   eventually get rid of this limit altogether.

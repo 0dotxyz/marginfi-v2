@@ -324,7 +324,7 @@ export const A_TREASURY_VAULTS_AUTHORITY = "TREASURY_VAULTS_AUTHORITY";
  *
  * This is only required for the staked-collateral test suite (s01-s10).
  */
-async function createValidatorBankrun(index: number): Promise<Validator> {
+export async function createValidatorBankrun(index: number): Promise<Validator> {
   const voteAccount = Keypair.generate();
   const node = Keypair.generate();
   const authorized = validatorAdmin.wallet.publicKey;
@@ -384,7 +384,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
 /**
  * Initialize a SPL single pool for a given validator vote account.
  */
-async function createSplStakePoolBankrun(
+export async function createSplStakePoolBankrun(
   validator: Validator,
 ): Promise<Validator> {
   // SinglePoolProgram.initialize returns a ready-to-send Transaction.

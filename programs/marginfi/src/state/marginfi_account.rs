@@ -2109,19 +2109,22 @@ impl<'a> BankAccountWrapper<'a> {
                 Ok(Self { balance, bank })
             }
             None => {
-                // Enforce integration position limit before creating a new integration position
-                if is_integration_asset_tag(bank.config.asset_tag) {
-                    let integration_position_count = lending_account
+                // Enforce the expensive-position limit before creating a new one. Integration and
+                // staked balances both cost 3-5 remaining accounts each against a 64-account
+                // transaction, and they never mix on one account, so one shared cap covers both.
+                let costly = |tag: u8| is_integration_asset_tag(tag) || tag == ASSET_TAG_STAKED;
+                if costly(bank.config.asset_tag) {
+                    let costly_position_count = lending_account
                         .balances
                         .iter()
-                        .filter(|b| b.is_active() && is_integration_asset_tag(b.bank_asset_tag))
+                        .filter(|b| b.is_active() && costly(b.bank_asset_tag))
                         .count();
 
                     // Note: this check is disabled in local integration tests so that we can measure the performance and
                     // eventually get rid of this limit altogether.
                     if live!() {
                         check!(
-                            integration_position_count < MAX_INTEGRATION_POSITIONS,
+                            costly_position_count < MAX_INTEGRATION_POSITIONS,
                             MarginfiError::IntegrationPositionLimitExceeded
                         );
                     }
