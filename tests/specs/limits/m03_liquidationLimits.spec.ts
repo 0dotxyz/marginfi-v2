@@ -101,7 +101,9 @@ import {
 } from "../../utils/pdas";
 
 /** Mirrors the program's `MAX_INTEGRATION_POSITIONS`. */
-const CAP = 8;
+const CAP = 4;
+/** Swept past the cap so the log still shows where each path actually tops out. */
+const PROBE = 8;
 const DECIMALS = 9;
 const TOKENS = (n: number) => new BN(n * 10 ** DECIMALS);
 
@@ -576,7 +578,7 @@ VENUES.forEach(({ venue, groupSeed }) => {
       );
 
       await quiet(async () => {
-        for (let i = 0; i < CAP; i++)
+        for (let i = 0; i < PROBE; i++)
           await addVenueBank(
             throwawayGroup.publicKey,
             new BN(1_001 + i),
@@ -587,7 +589,7 @@ VENUES.forEach(({ venue, groupSeed }) => {
 
     it("(user 0) fills the account to the venue cap and borrows the debt", async () => {
       const user = liquidatee();
-      for (const b of venueBanks) await venueDeposit(b, TOKENS(10));
+      for (const b of active(CAP)) await venueDeposit(b, TOKENS(10));
       await processBankrunTransaction(
         bankrunContext,
         new Transaction().add(
@@ -639,7 +641,7 @@ VENUES.forEach(({ venue, groupSeed }) => {
       console.log(
         `\n${venue} + native, ${MAX_BALANCES} balances, limit ${TX_ACCOUNT_LOCK_LIMIT} locks:`,
       );
-      for (let n = 1; n <= CAP; n++) {
+      for (let n = 1; n <= PROBE; n++) {
         padToFullAccount(n);
         const row = {
           classic: await locks(await classicIxs(n)),
@@ -647,8 +649,8 @@ VENUES.forEach(({ venue, groupSeed }) => {
           classicSplit: await locks(await classicIxs(n, false)),
           recvSplit: await locks(await receivershipIxs(n, false)),
         };
-        refreshAtCap = await locks(await refreshIxs(n));
-        (row as any).refresh = refreshAtCap;
+        const refresh = await locks(await refreshIxs(n));
+        if (n === CAP) refreshAtCap = refresh;
         console.log(
           `  ${String(n).padStart(2)} + ${MAX_BALANCES - n}: classic ${String(
             row.classic,
@@ -656,7 +658,7 @@ VENUES.forEach(({ venue, groupSeed }) => {
             2,
           )} split), receivership ${String(row.recv).padStart(2)} (${String(
             row.recvSplit,
-          ).padStart(2)} split), refresh tx ${row.refresh}`,
+          ).padStart(2)} split), refresh tx ${refresh}`,
         );
         for (const k of Object.keys(fits) as Array<keyof typeof fits>)
           if (fits[k] === n - 1 && row[k] <= TX_ACCOUNT_LOCK_LIMIT) fits[k] = n;
@@ -666,14 +668,14 @@ VENUES.forEach(({ venue, groupSeed }) => {
         `  covers: classic ${fits.classic}, receivership ${fits.recv}; with the refresh split out ${fits.classicSplit} and ${fits.recvSplit} (cap ${CAP})`,
       );
       assert.isAtLeast(
-        fits.classicSplit,
+        fits.classic,
         CAP,
-        "classic no longer covers the cap",
+        "classic no longer covers the cap in one transaction",
       );
       assert.isAtLeast(
         fits.recvSplit,
         CAP,
-        "receivership no longer covers the cap",
+        "receivership no longer covers the cap, even with the refresh split out",
       );
       assert.isAtMost(
         refreshAtCap,

@@ -74,7 +74,7 @@ import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { getEpochAndSlot } from "../../utils/bankrunConnection";
 
 /** Mirrors the program's `MAX_INTEGRATION_POSITIONS`, which caps staked positions too. */
-const CAP = 8;
+const CAP = 4;
 /** Swept past the cap so the log shows where each path actually tops out. */
 const STAKED_BANKS = 15;
 const ACCOUNT = "m05_account";
