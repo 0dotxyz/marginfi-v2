@@ -5,7 +5,7 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
             MarginfiAccountImpl,
         },
@@ -262,8 +262,8 @@ pub fn solend_withdraw<'info>(
             // Check account health, if below threshold fail transaction
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
             let mut premium_scratch = PremiumScratch::default();
-            check_account_init_health(
-                &marginfi_account,
+            check_account_init_health_and_clear_tag(
+                &mut marginfi_account,
                 &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),

@@ -70,7 +70,7 @@ premium-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests
 # Pyth pull tests (p01)
 pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/pyth/p*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Multi-limits tests (m01-m05)
+# Multi-limits tests (m01-m06)
 limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/limits/m*.spec.ts tests/m*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Drift tests (d01-d16)

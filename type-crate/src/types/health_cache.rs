@@ -10,6 +10,7 @@ use anchor_lang::prelude::*;
 pub const HEALTHY: u32 = 1;
 pub const ENGINE_OK: u32 = 2;
 pub const ORACLE_OK: u32 = 4;
+pub const EMODE_BOOSTED: u32 = 8;
 
 assert_struct_size!(HealthCache, 304);
 assert_struct_align!(HealthCache, 8);
@@ -70,7 +71,9 @@ pub struct HealthCache {
     ///   oracle cranks ran recently enough. Check `internal_err` and `err_index` for more details
     ///   in some circumstances. Invalid if generated after borrow/withdraw (these instructions will
     ///   ignore oracle issues if health is still satisfactory with some balance zeroed out).
-    /// * 8, 16, 32, 64, 128, etc - reserved for future use
+    /// * EMODE BOOSTED = 8 - If set, an emode or same-asset entry weights at least one collateral
+    ///   balance above its own bank's maintenance weight. Only written by maintenance passes.
+    /// * 16, 32, 64, 128, etc - reserved for future use
     pub flags: u32,
     /// If the engine errored, look here for the error code. If the engine returns ok, you may also
     /// check here to see if the risk engine rejected this tx (3009).
@@ -121,6 +124,19 @@ impl HealthCache {
             self.flags |= ENGINE_OK;
         } else {
             self.flags &= !ENGINE_OK;
+        }
+    }
+
+    /// True if an emode or same-asset entry raised at least one collateral balance's weight
+    pub fn is_emode_boosted(&self) -> bool {
+        self.flags & EMODE_BOOSTED != 0
+    }
+
+    pub fn set_emode_boosted(&mut self, boosted: bool) {
+        if boosted {
+            self.flags |= EMODE_BOOSTED;
+        } else {
+            self.flags &= !EMODE_BOOSTED;
         }
     }
 
