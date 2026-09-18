@@ -298,8 +298,8 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Configure bank deposit/borrow/init limits | `admin` or `delegate_limit_admin` |
 | Configure bank/group rate limits | `admin` or `delegate_limit_admin` |
 | Configure deleverage withdraw daily limit | `admin` or `delegate_limit_admin` |
-| Settle group rate limiter batches | `admin` or `delegate_limit_admin` |
-| Settle deleverage withdraw batches | `admin` or `delegate_limit_admin` |
+| Settle group rate limiter batches | `delegate_flow_admin` |
+| Settle deleverage withdraw batches | `delegate_flow_admin` |
 | Configure emissions | Deprecated / no-op (no active authority path) |
 | Configure e-mode / same-asset e-mode | `governance_admin` |
 | Configure variable-borrow premiums | `admin` |
