@@ -440,3 +440,9 @@ export function parseMarginfiEvents(
   }
   return events;
 }
+
+export function i80ToBn(value: any): BN {
+  return new BN(
+    wrappedI80F48toBigNumber(value).integerValue(BigNumber.ROUND_FLOOR).toFixed(0)
+  );
+}

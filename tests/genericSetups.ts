@@ -17,6 +17,7 @@ import {
   bankrunProgram,
   users,
   kaminoAccounts,
+  klendBankrunProgram,
   MARKET,
   TOKEN_A_RESERVE,
   A_FARM_STATE,
@@ -42,7 +43,11 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
   ORACLE_SETUP_SWITCHBOARD_PULL,
 } from "./utils/types";
-import { defaultKaminoBankConfig } from "./utils/kamino-utils";
+import {
+  defaultKaminoBankConfig,
+  simpleRefreshReserve,
+} from "./utils/kamino-utils";
+import { bnToBigIntSafe } from "./utils/bn-utils";
 import {
   makeAddKaminoBankIx,
   makeInitObligationIx,
@@ -497,6 +502,37 @@ async function addGenericKaminoBank(
   await processBankrunTransaction(bankrunContext, initBankTx, [
     groupAdmin.wallet,
   ]);
+  // Seed the obligation with enough liquidity to mint a non-zero number of cTokens. klend
+  // (>= 1.25) accrues interest by wall-clock time, so a spec that warps the clock far ahead (e.g.
+  // z01's year of weekly warps) leaves the shared reserve owing a huge refresh on the punitive test
+  // borrow curve, and a flat 100 native tokens can round down to zero cTokens. Refresh first
+  // (best effort; the init-obligation ix refreshes again anyway) and scale by the exchange rate.
+  let seedAmount = new BN(100);
+  try {
+    const refreshTx = new Transaction().add(
+      await simpleRefreshReserve(klendBankrunProgram, reserve, market, oracle),
+    );
+    await processBankrunTransaction(bankrunContext, refreshTx, [
+      groupAdmin.wallet,
+    ]);
+  } catch (_) {
+    // Oracle layout may not match `simpleRefreshReserve`; fall back to the unrefreshed rate.
+  }
+  const reserveState = await klendBankrunProgram.account.reserve.fetch(reserve);
+  const borrowed = bnToBigIntSafe(reserveState.liquidity.borrowedAmountSf) >> 60n;
+  const fees =
+    (bnToBigIntSafe(reserveState.liquidity.accumulatedProtocolFeesSf) +
+      bnToBigIntSafe(reserveState.liquidity.accumulatedReferrerFeesSf) +
+      bnToBigIntSafe(reserveState.liquidity.pendingReferrerFeesSf)) >>
+    60n;
+  const totalLiquidity =
+    bnToBigIntSafe(reserveState.liquidity.totalAvailableAmount) + borrowed - fees;
+  const cTokenSupply = bnToBigIntSafe(reserveState.collateral.mintTotalSupply);
+  if (cTokenSupply > 0n && totalLiquidity > cTokenSupply) {
+    // ceil(liquidity per cToken) * 100 cTokens
+    const liqPerCToken = (totalLiquidity + cTokenSupply - 1n) / cTokenSupply;
+    seedAmount = new BN((liqPerCToken * 100n).toString());
+  }
   let initObligationTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
     await makeInitObligationIx(
@@ -510,7 +546,7 @@ async function addGenericKaminoBank(
         reserveFarmState: farmState,
         obligationFarmUserState: userState,
       },
-      new BN(100),
+      seedAmount,
     ),
   );
   await processBankrunTransaction(bankrunContext, initObligationTx, [

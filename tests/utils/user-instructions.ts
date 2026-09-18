@@ -246,6 +246,28 @@ export const withdrawIx = (
   return ix;
 };
 
+export type CloseBalanceIxArgs = {
+  marginfiAccount: PublicKey;
+  bank: PublicKey;
+};
+
+/**
+ * Close an empty balance, freeing its slot on the account.
+ * * `authority` - MarginfiAccount's authority must sign
+ */
+export const closeBalanceIx = (
+  program: Program<Marginfi>,
+  args: CloseBalanceIxArgs,
+) => {
+  return program.methods
+    .lendingAccountCloseBalance()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      bank: args.bank,
+    })
+    .instruction();
+};
+
 export type RepayIxArgs = {
   marginfiAccount: PublicKey;
   bank: PublicKey;
@@ -563,6 +585,12 @@ export const liquidateIx = (
 export type HealthPulseArgs = {
   marginfiAccount: PublicKey;
   remaining: PublicKey[];
+  /**
+   * Optional. `group` has a has_one relation on `marginfi_account`, so Anchor's resolver
+   * fills it automatically. Pass it explicitly to avoid the extra account fetch or when the
+   * resolver cannot see the parent account.
+   */
+  group?: PublicKey;
 };
 
 export type PulseBankPriceArgs = {
@@ -589,11 +617,16 @@ export const healthPulse = (
     return { pubkey, isSigner: false, isWritable: false };
   });
 
+  const accounts: { marginfiAccount: PublicKey; group?: PublicKey } = {
+    marginfiAccount: args.marginfiAccount,
+  };
+  if (args.group) {
+    accounts.group = args.group;
+  }
+
   return program.methods
     .lendingAccountPulseHealth()
-    .accounts({
-      marginfiAccount: args.marginfiAccount,
-    })
+    .accounts(accounts)
     .remainingAccounts(oracleMeta)
     .instruction();
 };

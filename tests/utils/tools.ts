@@ -820,3 +820,33 @@ export async function setEmissionsDirect(
 
   return prevMint;
 }
+
+/** Solana's per-transaction account lock limit (`MAX_TX_ACCOUNT_LOCKS` without the 128 feature gate). */
+export const TX_ACCOUNT_LOCK_LIMIT = 64;
+
+/**
+ * Distinct accounts a transaction built from `instructions` would lock: the payer, every program
+ * id, and every instruction key. Lookup tables shrink the packet but not this count.
+ */
+export const countTxAccountLocks = (
+  payer: PublicKey,
+  instructions: TransactionInstruction[]
+): number => {
+  const keys = new Set<string>([payer.toBase58()]);
+  for (const ix of instructions) {
+    keys.add(ix.programId.toBase58());
+    ix.keys.forEach((k) => keys.add(k.pubkey.toBase58()));
+  }
+  return keys.size;
+};
+
+/** Runs `fn` with console.log suppressed, for setup helpers that narrate every account they make. */
+export const quiet = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = log;
+  }
+};

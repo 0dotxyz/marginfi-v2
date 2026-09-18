@@ -103,8 +103,8 @@ pub struct BankConfig {
     /// Time window in seconds for the oracle price feed to be considered live.
     pub oracle_max_age: u16,
 
-    /// Entry index into the Scope `OraclePrices` price list. Only read when
-    /// `oracle_setup == OracleSetup::Scope`; ignored (and zero) for every other setup.
+    /// Entry index into the Scope `OraclePrices` price list. Only read by the Scope setups
+    /// (`Scope`, `ScopeKamino`, `ScopeJuplend`); ignored (and zero) for every other setup.
     /// Occupies what was previously `_padding0`, so the layout is unchanged.
     pub scope_entry_index: u16,
 

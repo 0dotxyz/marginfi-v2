@@ -2,7 +2,7 @@ use crate::{
     check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
-    log_pool_info,
+    ix_utils, log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
@@ -21,6 +21,8 @@ pub fn lending_pool_clone_bank(
     ctx: Context<LendingPoolCloneBank>,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
         panic!("Staging or localnet only!");
     }
@@ -43,6 +45,7 @@ pub fn lending_pool_clone_bank(
         source_emissions_mint,
         source_emode,
         source_fees_destination_account,
+        source_premium_tag,
     ) = {
         let source_bank_info = ctx.accounts.source_bank.as_ref();
 
@@ -76,6 +79,7 @@ pub fn lending_pool_clone_bank(
             source_bank.emissions_mint,
             source_bank.emode,
             source_bank.fees_destination_account,
+            source_bank.premium_tag,
         )
     };
 
@@ -124,6 +128,7 @@ pub fn lending_pool_clone_bank(
     bank.emissions_mint = source_emissions_mint;
     bank.emode = source_emode;
     bank.fees_destination_account = source_fees_destination_account;
+    bank.premium_tag = source_premium_tag;
 
     log_pool_info(&bank);
 
@@ -250,4 +255,8 @@ pub struct LendingPoolCloneBank<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

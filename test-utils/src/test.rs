@@ -307,6 +307,23 @@ impl KaminoBankSetup {
             .await
     }
 
+    /// Put the reserve into emergency mode, in the state a later `refresh_reserve` leaves it:
+    /// current slot, not stale, price status cleared.
+    pub async fn set_reserve_emergency_mode(&self) {
+        let slot = self.test_f.get_clock().await.slot;
+        let reserve_key = self.bank_f.load().await.integration_acc_1;
+        let mut account = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut account.data[8..]);
+        reserve.config.emergency_mode = 1;
+        reserve.slot = slot;
+        reserve.stale = 0;
+        reserve.price_status = 0;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
     pub async fn load_user_accounted_collateral(
         &self,
         user: &MarginfiAccountFixture,
@@ -727,10 +744,10 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift", drift_mocks::drift::ID, None);
-            program.add_program("juplend_lending", juplend_mocks::ID, None);
-            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program("juplend_earn", juplend_mocks::ID, None);
+            program.add_program("liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
-                "juplend_rewards_rate_model",
+                "lending_reward_rate_model",
                 juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
@@ -1227,19 +1244,6 @@ impl TestFixture {
             .unwrap()
     }
 
-    /// Refresh the cached blockhash in the test context.
-    /// Call this in long-running tests to prevent BlockhashNotFound errors.
-    pub async fn refresh_blockhash(&self) {
-        let blockhash = self
-            .context
-            .borrow_mut()
-            .banks_client
-            .get_latest_blockhash()
-            .await
-            .unwrap();
-        self.context.borrow_mut().last_blockhash = blockhash;
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1426,6 +1430,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: reserve_mint.token_program,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -1490,8 +1495,6 @@ impl TestFixture {
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
 
-        test_f.refresh_blockhash().await;
-
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
             .unwrap();
@@ -1510,42 +1513,71 @@ impl TestFixture {
             protocol_fees: false,
         });
         let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
+        let mint = test_f.usdc_mint.clone();
+        let (bank_f, spot_market_vault, market_index) = test_f
+            .add_drift_bank_for_mint(&mint, DRIFT_USDC_MARKET_INDEX, DRIFT_TEST_BANK_SEED)
+            .await;
 
+        DriftBankSetup {
+            test_f,
+            bank_f,
+            spot_market_vault,
+            market_index,
+        }
+    }
+
+    /// Adds a Drift venue bank for `mint` at `market_index`/`bank_seed` onto this fixture, reusing the
+    /// singleton Drift `State` (initialized here only if absent) and creating a fresh spot market for
+    /// the index. Returns the bank fixture, its spot-market vault, and the market index. Composing
+    /// several venue banks on one fixture (for cross-venue rebalance tests) requires distinct
+    /// `market_index`/`bank_seed` per Drift bank.
+    pub async fn add_drift_bank_for_mint(
+        &self,
+        mint: &MintFixture,
+        market_index: u16,
+        bank_seed: u64,
+    ) -> (BankFixture, Pubkey, u16) {
         let drift_state = derive_drift_state().0;
         let drift_signer = derive_drift_signer().0;
-        let spot_market = derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX).0;
-        let spot_market_vault = derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX).0;
-        let insurance_fund_vault = derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX).0;
+        let spot_market = derive_drift_spot_market(market_index).0;
+        let spot_market_vault = derive_drift_spot_market_vault(market_index).0;
+        let insurance_fund_vault = derive_drift_insurance_fund_vault(market_index).0;
 
-        let init_drift_state_ix = Instruction {
-            program_id: drift_mocks::drift::ID,
-            accounts: drift::accounts::Initialize {
-                admin: test_f.payer(),
-                state: drift_state,
-                quote_asset_mint: test_f.usdc_mint.key,
-                drift_signer,
-                rent: sysvar::rent::ID,
-                system_program: system_program::ID,
-                token_program: spl_token::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: drift::args::Initialize {}.data(),
-        };
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        if self.try_load(&drift_state).await.unwrap().is_none() {
+            let init_drift_state_ix = Instruction {
+                program_id: drift_mocks::drift::ID,
+                accounts: drift::accounts::Initialize {
+                    admin: self.payer(),
+                    state: drift_state,
+                    quote_asset_mint: mint.key,
+                    drift_signer,
+                    rent: sysvar::rent::ID,
+                    system_program: system_program::ID,
+                    token_program: mint.token_program,
+                }
+                .to_account_metas(Some(true)),
+                data: drift::args::Initialize {}.data(),
+            };
+            Self::process_ixs(self.context.clone(), &[cu_ix.clone(), init_drift_state_ix])
+                .await
+                .unwrap();
+        }
 
         let init_spot_market_ix = Instruction {
             program_id: drift_mocks::drift::ID,
             accounts: drift::accounts::InitializeSpotMarket {
                 spot_market,
-                spot_market_mint: test_f.usdc_mint.key,
+                spot_market_mint: mint.key,
                 spot_market_vault,
                 insurance_fund_vault,
                 drift_signer,
                 state: drift_state,
                 oracle: system_program::ID,
-                admin: test_f.payer(),
+                admin: self.payer(),
                 rent: sysvar::rent::ID,
                 system_program: system_program::ID,
-                token_program: spl_token::ID,
+                token_program: mint.token_program,
             }
             .to_account_metas(Some(true)),
             data: drift::args::InitializeSpotMarket {
@@ -1571,31 +1603,26 @@ impl TestFixture {
             }
             .data(),
         };
-
-        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-        Self::process_ixs(
-            test_f.context.clone(),
-            &[cu_ix, init_drift_state_ix, init_spot_market_ix],
-        )
-        .await
-        .unwrap();
+        Self::process_ixs(self.context.clone(), &[cu_ix.clone(), init_spot_market_ix])
+            .await
+            .unwrap();
 
         let (bank_key, _) = Pubkey::find_program_address(
             &[
-                test_f.marginfi_group.key.as_ref(),
-                test_f.usdc_mint.key.as_ref(),
-                &DRIFT_TEST_BANK_SEED.to_le_bytes(),
+                self.marginfi_group.key.as_ref(),
+                mint.key.as_ref(),
+                &bank_seed.to_le_bytes(),
             ],
             &marginfi::ID,
         );
-        let bank_f = BankFixture::new(test_f.context.clone(), bank_key, &test_f.usdc_mint, None);
+        let bank_f = BankFixture::new(self.context.clone(), bank_key, mint, None);
 
         let liquidity_vault_authority =
             derive_bank_vault_authority(&bank_key, BankVaultType::Liquidity, &marginfi::ID).0;
         let drift_user = derive_drift_user(&liquidity_vault_authority, 0).0;
         let drift_user_stats = derive_drift_user_stats(&liquidity_vault_authority).0;
-        create_system_account_if_missing(test_f.context.clone(), drift_user).await;
-        create_system_account_if_missing(test_f.context.clone(), drift_user_stats).await;
+        create_system_account_if_missing(self.context.clone(), drift_user).await;
+        create_system_account_if_missing(self.context.clone(), drift_user_stats).await;
 
         let bank_config = DriftConfigCompact::new(
             PYTH_USDC_FEED,
@@ -1612,10 +1639,10 @@ impl TestFixture {
         );
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
-            group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
-            fee_payer: test_f.payer(),
-            bank_mint: test_f.usdc_mint.key,
+            group: self.marginfi_group.key,
+            admin: self.payer(),
+            fee_payer: self.payer(),
+            bank_mint: mint.key,
             bank: bank_key,
             integration_acc_1: spot_market,
             integration_acc_2: drift_user,
@@ -1640,13 +1667,14 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: spl_token::ID,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
             accounts: add_bank_accounts.to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolAddBankDrift {
                 bank_config,
-                bank_seed: DRIFT_TEST_BANK_SEED,
+                bank_seed,
             }
             .data(),
         };
@@ -1656,15 +1684,15 @@ impl TestFixture {
         add_bank_ix
             .accounts
             .push(AccountMeta::new_readonly(spot_market, false));
-        Self::process_ixs(test_f.context.clone(), &[add_bank_ix])
+        Self::process_ixs(self.context.clone(), &[add_bank_ix])
             .await
             .unwrap();
 
-        let init_source = test_f.usdc_mint.create_token_account_and_mint_to(1.0).await;
+        let init_source = mint.create_token_account_and_mint_to(1.0).await;
         let init_user_ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::DriftInitUser {
-                fee_payer: test_f.payer(),
+                fee_payer: self.payer(),
                 signer_token_account: init_source.key,
                 bank: bank_key,
                 liquidity_vault_authority,
@@ -1674,7 +1702,7 @@ impl TestFixture {
                     &marginfi::ID,
                 )
                 .0,
-                mint: test_f.usdc_mint.key,
+                mint: mint.key,
                 integration_acc_3: drift_user_stats,
                 integration_acc_2: drift_user,
                 drift_state,
@@ -1682,7 +1710,7 @@ impl TestFixture {
                 drift_spot_market_vault: spot_market_vault,
                 drift_oracle: None,
                 drift_program: drift_mocks::drift::ID,
-                token_program: spl_token::ID,
+                token_program: mint.token_program,
                 rent: sysvar::rent::ID,
                 system_program: system_program::ID,
             }
@@ -1692,17 +1720,11 @@ impl TestFixture {
             }
             .data(),
         };
-        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-        Self::process_ixs(test_f.context.clone(), &[cu_ix, init_user_ix])
+        Self::process_ixs(self.context.clone(), &[cu_ix, init_user_ix])
             .await
             .unwrap();
 
-        DriftBankSetup {
-            test_f,
-            bank_f,
-            spot_market_vault,
-            market_index: DRIFT_USDC_MARKET_INDEX,
-        }
+        (bank_f, spot_market_vault, market_index)
     }
 
     pub async fn setup_juplend_bank(test_settings: Option<TestSettings>) -> JuplendBankSetup {
@@ -1711,9 +1733,32 @@ impl TestFixture {
             protocol_fees: false,
         });
         let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
+        let mint = test_f.usdc_mint.clone();
+        let (bank_f, lending, reserve_vault) = test_f
+            .add_juplend_bank_for_mint(&mint, JUPLEND_TEST_BANK_SEED)
+            .await;
 
-        let mint = test_f.usdc_mint.key;
-        let token_program = spl_token::ID;
+        JuplendBankSetup {
+            test_f,
+            bank_f,
+            lending,
+            reserve_vault,
+        }
+    }
+
+    /// Adds a JupLend venue bank for `mint` at `bank_seed` onto this fixture, performing the full
+    /// liquidity/lending bring-up (token reserve, rate model, lending account, protocol positions) and
+    /// the marginfi add-bank + init-position. The liquidity layer's global `Liquidity`/admin accounts
+    /// are initialized here only if absent, so this can extend a fixture that already hosts other
+    /// venues. Returns the bank fixture, its `Lending` account, and the reserve vault.
+    pub async fn add_juplend_bank_for_mint(
+        &self,
+        mint_f: &MintFixture,
+        bank_seed: u64,
+    ) -> (BankFixture, Pubkey, Pubkey) {
+        let test_f = self;
+        let mint = mint_f.key;
+        let token_program = mint_f.token_program;
 
         let liquidity = derive_juplend_liquidity().0;
         let auth_list = derive_juplend_auth_list().0;
@@ -1979,17 +2024,20 @@ impl TestFixture {
         };
 
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-        Self::process_ixs(
-            test_f.context.clone(),
-            &[
-                cu_ix.clone(),
-                init_liquidity_ix,
-                init_rewards_admin_ix,
-                init_lending_admin_ix,
-            ],
-        )
-        .await
-        .unwrap();
+        // The liquidity layer's `Liquidity`/admin accounts are global singletons; init them once.
+        if test_f.try_load(&liquidity).await.unwrap().is_none() {
+            Self::process_ixs(
+                test_f.context.clone(),
+                &[
+                    cu_ix.clone(),
+                    init_liquidity_ix,
+                    init_rewards_admin_ix,
+                    init_lending_admin_ix,
+                ],
+            )
+            .await
+            .unwrap();
+        }
         Self::process_ixs(
             test_f.context.clone(),
             &[
@@ -2028,12 +2076,12 @@ impl TestFixture {
         let (bank_key, _) = Pubkey::find_program_address(
             &[
                 test_f.marginfi_group.key.as_ref(),
-                test_f.usdc_mint.key.as_ref(),
-                &JUPLEND_TEST_BANK_SEED.to_le_bytes(),
+                mint.as_ref(),
+                &bank_seed.to_le_bytes(),
             ],
             &marginfi::ID,
         );
-        let bank_f = BankFixture::new(test_f.context.clone(), bank_key, &test_f.usdc_mint, None);
+        let bank_f = BankFixture::new(test_f.context.clone(), bank_key, mint_f, None);
 
         let liquidity_vault_authority =
             derive_bank_vault_authority(&bank_key, BankVaultType::Liquidity, &marginfi::ID).0;
@@ -2090,11 +2138,12 @@ impl TestFixture {
                 integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
                 system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolAddBankJuplend {
                 bank_config,
-                bank_seed: JUPLEND_TEST_BANK_SEED,
+                bank_seed,
             }
             .data(),
         };
@@ -2140,10 +2189,7 @@ impl TestFixture {
         .await
         .unwrap();
 
-        let init_source = test_f
-            .usdc_mint
-            .create_token_account_and_mint_to(10.0)
-            .await;
+        let init_source = mint_f.create_token_account_and_mint_to(10.0).await;
         let init_position_ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::JuplendInitPosition {
@@ -2184,12 +2230,7 @@ impl TestFixture {
             .await
             .unwrap();
 
-        JuplendBankSetup {
-            test_f,
-            bank_f,
-            lending,
-            reserve_vault,
-        }
+        (bank_f, lending, reserve_vault)
     }
 
     pub async fn run_kamino_deposit(

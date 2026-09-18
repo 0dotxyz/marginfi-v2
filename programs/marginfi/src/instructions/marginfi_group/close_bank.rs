@@ -1,4 +1,5 @@
 use crate::check;
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::utils::NumTraitsWithTolerance;
 use crate::{MarginfiError, MarginfiResult};
@@ -17,6 +18,8 @@ pub fn lending_pool_close_bank(
     ctx: Context<LendingPoolCloseBank>,
     force_close: Option<bool>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut group = ctx.accounts.group.load_mut()?;
     // Note: Groups created prior to 0.1.2 have a non-authoritative count here, so subtraction
     // without saturation could reduce the count below zero.
@@ -73,4 +76,8 @@ pub struct LendingPoolCloseBank<'info> {
 
     #[account(mut)]
     pub admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
