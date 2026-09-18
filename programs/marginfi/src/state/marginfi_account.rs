@@ -336,7 +336,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.indexer_flags
             .sync_balance_derived(&self.lending_account.balances);
         self.indexer_flags.mark_active_now();
-        // A liability-free account is never taggable (see `tag_liquidation_record`)
+        // Repaying the last liability clears the tag here: a liability-free account is never taggable
         if self.indexer_flags.is_lending_only == 1 {
             self.liquidation_tagged_at = 0;
         }
