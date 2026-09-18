@@ -119,11 +119,7 @@ async fn set_governance_admin_rejects_durable_nonce_transaction() -> anyhow::Res
     let tx = Transaction::new_signed_with_payer(
         &[
             advance_nonce_account(&nonce.pubkey(), &governance_admin.pubkey()),
-            set_governance_admin_ix(
-                &test_f,
-                governance_admin.pubkey(),
-                Keypair::new().pubkey(),
-            ),
+            set_governance_admin_ix(&test_f, governance_admin.pubkey(), Keypair::new().pubkey()),
         ],
         Some(&governance_admin.pubkey()),
         &[&governance_admin],
