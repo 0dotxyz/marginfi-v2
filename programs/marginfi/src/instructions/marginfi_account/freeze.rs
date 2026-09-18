@@ -2,13 +2,20 @@
 ///
 /// Behavior:
 /// - When frozen, the account authority is blocked from major actions (borrow/deposit/withdraw/repay/transfer/etc.) with `AccountFrozen`.
-/// - The group admin retains access to operate the account while frozen (for remediation/seizure).
-/// - Setting `frozen = false` clears the flag and returns control to the authority under normal auth rules.
+/// - The slow governance admin retains access to operate the account while frozen (for
+///   remediation/seizure); the fast group admin may only set the frozen flag.
+/// - Setting `frozen = false` requires the slow governance admin, clears the flag, and returns
+///   control to the authority under normal auth rules.
 pub fn set_account_freeze(ctx: Context<SetAccountFreeze>, frozen: bool) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let group = ctx.accounts.group.load()?;
+    let required_authority = if frozen {
+        group.admin
+    } else {
+        group.governance_admin
+    };
     check_eq!(
-        group.admin,
+        required_authority,
         ctx.accounts.admin.key(),
         MarginfiError::Unauthorized
     );
@@ -53,9 +60,8 @@ pub struct SetAccountFreeze<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    #[account(
-        constraint = group.load()?.admin == admin.key() @ MarginfiError::Unauthorized
-    )]
+    /// Fast admin when freezing; governance admin when unfreezing. The legacy account name is
+    /// retained for instruction compatibility.
     pub admin: Signer<'info>,
 
     /// CHECK: instruction sysvar

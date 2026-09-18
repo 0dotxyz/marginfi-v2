@@ -235,9 +235,10 @@ impl FuzzTest {
     pub fn init_premium_foundation(&mut self) {
         let payer = self.payer.pubkey();
 
-        // The group initializes without an emode admin; premium config is emode-admin gated.
-        let ix = types::marginfi::MarginfiGroupConfigureInstruction::data(
-            types::marginfi::MarginfiGroupConfigureInstructionData::new(
+        // The governance instruction owns the retained emode-admin field. The fuzz identity is
+        // both fast and governance admin for this isolated harness.
+        let ix = types::marginfi::MarginfiGroupConfigureGovInstruction::data(
+            types::marginfi::MarginfiGroupConfigureGovInstructionData::new(
                 None,
                 Some(payer),
                 None,
@@ -245,14 +246,9 @@ impl FuzzTest {
                 None,
                 None,
                 None,
-                None,
-                None,
-                None,
-                None,
-                None,
             ),
         )
-        .accounts(types::marginfi::MarginfiGroupConfigureInstructionAccounts::new(
+        .accounts(types::marginfi::MarginfiGroupConfigureGovInstructionAccounts::new(
             self.marginfi_group,
             payer,
         ))

@@ -68,7 +68,7 @@ describe("Close bank", () => {
           .accountsPartial({
             group: marginfiGroup.publicKey,
             bank: bankKey,
-            admin: groupAdmin.wallet.publicKey,
+            governanceAdmin: groupAdmin.wallet.publicKey,
           })
           .remainingAccounts([
             {
@@ -108,7 +108,9 @@ describe("Close bank", () => {
         await groupAdmin.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
             await closeBank(groupAdmin.mrgnProgram, {
+              marginfiGroup: marginfiGroup.publicKey,
               bank: bankKey,
+              admin: groupAdmin.wallet.publicKey,
             })
           )
         );
@@ -155,7 +157,9 @@ describe("Close bank", () => {
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await closeBank(groupAdmin.mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
           bank: bankKey,
+          admin: groupAdmin.wallet.publicKey,
         })
       )
     );
@@ -201,7 +205,11 @@ describe("Close bank", () => {
         async () => {
           await groupAdmin.mrgnProgram.provider.sendAndConfirm(
             new Transaction().add(
-              await closeBank(groupAdmin.mrgnProgram, { bank: FORCE_BANK })
+              await closeBank(groupAdmin.mrgnProgram, {
+                marginfiGroup: marginfiGroup.publicKey,
+                bank: FORCE_BANK,
+                admin: groupAdmin.wallet.publicKey,
+              })
             )
           );
         },
@@ -219,8 +227,10 @@ describe("Close bank", () => {
       await groupAdmin.mrgnProgram.provider.sendAndConfirm(
         new Transaction().add(
           await closeBank(groupAdmin.mrgnProgram, {
+            marginfiGroup: marginfiGroup.publicKey,
             bank: FORCE_BANK,
             forceClose: true,
+            admin: groupAdmin.wallet.publicKey,
           })
         )
       );

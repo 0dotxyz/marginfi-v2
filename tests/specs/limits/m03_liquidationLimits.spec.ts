@@ -29,7 +29,7 @@ import {
   DRIFT_TOKEN_A_SPOT_MARKET,
 } from "../../rootHooks";
 import { configureBank } from "../../utils/group-instructions";
-import { defaultBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
+import { defaultBankConfigOptRaw, blankBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
 import {
   borrowIx,
   closeLiquidationRecordIx,
@@ -737,7 +737,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
           });
 
           it("(admin) Vastly increases regular bank liability ratio to make user 0 unhealthy", async () => {
-            const config = defaultBankConfigOptRaw();
+            const config = blankBankConfigOptRaw();
             config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
             config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
 

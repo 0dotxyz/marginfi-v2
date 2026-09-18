@@ -117,7 +117,7 @@ describe("Account freeze", () => {
     );
   });
 
-  it("(admin) toggles the account freeze flag", async () => {
+  it("(shared fast/governance admin) toggles the account freeze flag", async () => {
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await setAccountFreezeIx(groupAdmin.mrgnProgram, {
@@ -215,7 +215,7 @@ describe("Account freeze", () => {
     );
   });
 
-  it("(authority) cannot withdraw when frozen; admin can and unfreeze restores access", async () => {
+  it("(authority) cannot withdraw when frozen; governance admin can and unfreeze restores access", async () => {
     await expectFailedTxWithError(
       async () => {
         await freezeUser.mrgnProgram.provider.sendAndConfirm(
