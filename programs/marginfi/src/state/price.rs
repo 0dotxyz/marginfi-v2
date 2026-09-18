@@ -80,6 +80,10 @@ impl OraclePriceWithMultiplier {
 
 #[enum_dispatch]
 pub trait PriceAdapter {
+    /// False if this collateral can no longer back new borrows, e.g. a Kamino reserve in
+    /// emergency mode. Worth zero for Initial margin, unchanged for Maintenance.
+    fn has_borrow_power(&self) -> bool;
+
     fn get_price_and_confidence_of_type(
         &self,
         oracle_price_type: OraclePriceType,
@@ -554,6 +558,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = !reserve.is_emergency_mode();
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -597,6 +602,7 @@ impl OraclePriceFeedAdapter {
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                price_feed.has_borrow_power = !reserve.is_emergency_mode();
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(
                         price_type,
@@ -626,7 +632,10 @@ impl OraclePriceFeedAdapter {
                 );
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed { price }),
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        price,
+                        has_borrow_power: true,
+                    }),
                     cache_raw_price: None,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -841,6 +850,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: true,
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -888,6 +898,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: !reserve.is_emergency_mode(),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -929,6 +940,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: true,
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1091,6 +1103,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = !reserve.is_emergency_mode();
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1197,6 +1210,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = !reserve.is_emergency_mode();
 
                 // Apply the LST/SOL rate first so the cached raw price is the LST/USD price.
                 apply_i80f48_multiplier(&mut price_feed, lst_rate)?;
@@ -1296,7 +1310,10 @@ impl OraclePriceFeedAdapter {
                 let start_price: I80F48 = bank.config.fixed_price.into();
                 let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
 
-                let feed = FixedPriceFeed { price: pt_price };
+                let feed = FixedPriceFeed {
+                    price: pt_price,
+                    has_borrow_power: true,
+                };
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -2074,6 +2091,10 @@ impl ScopePriceFeed {
 }
 
 impl PriceAdapter for ScopePriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        true
+    }
+
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
@@ -2100,9 +2121,14 @@ impl PriceAdapter for ScopePriceFeed {
 #[derive(Copy, Clone, Debug)]
 pub struct FixedPriceFeed {
     pub price: I80F48,
+    has_borrow_power: bool,
 }
 
 impl PriceAdapter for FixedPriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
@@ -2127,6 +2153,7 @@ impl PriceAdapter for FixedPriceFeed {
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct SwitchboardPullPriceFeed {
     pub feed: Box<LitePullFeedAccountData>,
+    has_borrow_power: bool,
 }
 
 impl SwitchboardPullPriceFeed {
@@ -2150,6 +2177,7 @@ impl SwitchboardPullPriceFeed {
         }
 
         Ok(Self {
+            has_borrow_power: true,
             feed: Box::new(lite_feed),
         })
     }
@@ -2204,6 +2232,10 @@ impl SwitchboardPullPriceFeed {
 }
 
 impl PriceAdapter for SwitchboardPullPriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         _price_type: OraclePriceType,
@@ -2326,6 +2358,7 @@ pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpd
 pub struct PythPushOraclePriceFeed {
     ema_price: Box<price_update::Price>,
     price: Box<price_update::Price>,
+    has_borrow_power: bool,
 }
 
 impl PythPushOraclePriceFeed {
@@ -2374,6 +2407,7 @@ impl PythPushOraclePriceFeed {
         };
 
         Ok(Self {
+            has_borrow_power: true,
             price: Box::new(price),
             ema_price: Box::new(ema_price),
         })
@@ -2411,6 +2445,7 @@ impl PythPushOraclePriceFeed {
         Ok(Self {
             price: Box::new(price),
             ema_price: Box::new(ema_price),
+            has_borrow_power: true,
         })
     }
 
@@ -2508,6 +2543,10 @@ impl PythPushOraclePriceFeed {
 }
 
 impl PriceAdapter for PythPushOraclePriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         price_type: OraclePriceType,
@@ -2674,6 +2713,7 @@ mod tests {
 
     fn test_switchboard_pull_feed(value: i128) -> SwitchboardPullPriceFeed {
         SwitchboardPullPriceFeed {
+            has_borrow_power: true,
             feed: Box::new(LitePullFeedAccountData {
                 result: CurrentResult {
                     value,

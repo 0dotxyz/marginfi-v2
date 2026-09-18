@@ -202,9 +202,8 @@ Just `anchor clean` and `cargo clean` and rebuild. If the error persists it's pr
 
 ## BlockhashNotFound errors in Rust test suite
 
-On slower machines, or in tests with many txes, this error can be consistent or sometimes intermittent. Try
-refreshing the blockhash in longer tests: `test_f.refresh_blockhash().await;` and switching usage of
-`ctx.last_blockhash` to
+On slower machines, or in tests with many txes, this error can be consistent or sometimes intermittent. Never
+sign with the cached `ctx.last_blockhash`, which is captured once at startup; fetch a fresh one instead:
 
 ```
 let blockhash = {
