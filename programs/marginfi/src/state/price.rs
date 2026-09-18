@@ -401,7 +401,10 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
@@ -438,7 +441,10 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
