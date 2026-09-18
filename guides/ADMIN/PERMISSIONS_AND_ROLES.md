@@ -92,7 +92,15 @@ The role is retained in the group layout for compatibility, but no current instr
 it independently.
 
 For more details see the [Emode Guide](../RISK_AND_LIQUIDATORS/EMODE_ADMIN.md).
+  ### Delegate Flow Admin
 
+  A scoped admin that posts the off-chain aggregated flow totals behind group rate limits and the deleverage withdraw limit. User transactions only emit flow events, so a worker batches them and writes the totals back to the group with this role.
+
+  **Can do:**
+  - Settle group rate limiter batches (via `update_group_rate_limiter`)
+  - Settle deleverage withdraw batches (via `update_deleverage_withdrawals`)
+
+  It cannot configure the limits themselves; that stays with `admin` or `delegate_limit_admin`. See [RATE_LIMITS_AND_DELEVERAGE_WITHDRAW_LIMITS.md](./RATE_LIMITS_AND_DELEVERAGE_WITHDRAW_LIMITS.md).
 ### Delegate Curve Admin
 
 A scoped admin that can modify interest rate configuration, including both curve parameters and
