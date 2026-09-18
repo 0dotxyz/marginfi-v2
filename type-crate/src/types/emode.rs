@@ -156,6 +156,9 @@ pub struct ReconciledSameAssetConfig {
     /// Feed family shared by all liability banks; collateral banks must match it to receive the
     /// same-asset weight. `None` disables the config.
     pub feed_family: Option<OracleFeedFamily>,
+    /// Start price shared by all liability banks; only PT setups' prices depend on it, so a
+    /// collateral bank must match to count as the same asset (`0` for every other eligible setup).
+    pub fixed_price: I80F48,
     pub asset_weight: I80F48,
 }
 

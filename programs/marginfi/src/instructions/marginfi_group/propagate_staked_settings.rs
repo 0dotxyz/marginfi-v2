@@ -34,7 +34,7 @@ pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Resul
     // Only validate the oracle info if it has changed
     if oracle_before != oracle_after {
         bank.config
-            .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+            .validate_oracle_setup(bank.mint, ctx.remaining_accounts, None, None, None)?;
     }
 
     bank.config.validate()?;

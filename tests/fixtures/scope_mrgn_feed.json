@@ -1,0 +1,322 @@
+{
+  "_comment": "Snapshot of the marginfi scope feed (OraclePrices AMjqm5S4QaAHWLv52jJiRpFNW1qo23F6ZM5ChCF5tYgc) taken from mainnet. Timestamps are re-stamped at test time; only value/exp are asserted.",
+  "feed": "AMjqm5S4QaAHWLv52jJiRpFNW1qo23F6ZM5ChCF5tYgc",
+  "capturedAtUnix": 1788018764,
+  "entries": [
+    {
+      "index": 0,
+      "label": "SOL/USD (Pyth)",
+      "value": "10535407814",
+      "exp": 8,
+      "expectedPrice": 105.35407814
+    },
+    {
+      "index": 1,
+      "label": "Fixed 1.0 anchor",
+      "value": "1000000000",
+      "exp": 9,
+      "expectedPrice": 1.0
+    },
+    {
+      "index": 2,
+      "label": "hyUSD redemption rate",
+      "value": "729754",
+      "exp": 8,
+      "expectedPrice": 0.00729754
+    },
+    {
+      "index": 3,
+      "label": "JitoSOL/SOL (SplStake)",
+      "value": "1298431235078693",
+      "exp": 15,
+      "expectedPrice": 1.2984312351
+    },
+    {
+      "index": 4,
+      "label": "hyUSD chain",
+      "value": "99826717257578274",
+      "exp": 17,
+      "expectedPrice": 0.9982671726
+    },
+    {
+      "index": 5,
+      "label": "hyUSD capped",
+      "value": "99826717257578274",
+      "exp": 17,
+      "expectedPrice": 0.9982671726
+    },
+    {
+      "index": 6,
+      "label": "Anchor 1.2",
+      "value": "1200000000",
+      "exp": 9,
+      "expectedPrice": 1.2
+    },
+    {
+      "index": 7,
+      "label": "Anchor 1.5",
+      "value": "1500000000",
+      "exp": 9,
+      "expectedPrice": 1.5
+    },
+    {
+      "index": 30,
+      "label": "bbSOL/SOL (SplStake rate)",
+      "value": "1167702061061227",
+      "exp": 15,
+      "expectedPrice": 1.1677020611
+    },
+    {
+      "index": 31,
+      "label": "bbSOL/USD chain",
+      "value": "123022174185283561",
+      "exp": 15,
+      "expectedPrice": 123.0221741853
+    },
+    {
+      "index": 32,
+      "label": "BulkSOL/SOL (SplStake rate)",
+      "value": "1097345723570878",
+      "exp": 15,
+      "expectedPrice": 1.0973457236
+    },
+    {
+      "index": 34,
+      "label": "cgntSOL/SOL (SplStake rate)",
+      "value": "1295372059829807",
+      "exp": 15,
+      "expectedPrice": 1.2953720598
+    },
+    {
+      "index": 36,
+      "label": "corvusSOL/SOL (SplStake rate)",
+      "value": "1039734568677344",
+      "exp": 15,
+      "expectedPrice": 1.0397345687
+    },
+    {
+      "index": 37,
+      "label": "corvusSOL/USD chain",
+      "value": "109540276993292096",
+      "exp": 15,
+      "expectedPrice": 109.5402769933
+    },
+    {
+      "index": 38,
+      "label": "dfdvSOL/SOL (SplStake rate)",
+      "value": "1096424500816278",
+      "exp": 15,
+      "expectedPrice": 1.0964245008
+    },
+    {
+      "index": 40,
+      "label": "dzSOL/SOL (SplStake rate)",
+      "value": "1064451987930451",
+      "exp": 15,
+      "expectedPrice": 1.0644519879
+    },
+    {
+      "index": 42,
+      "label": "hyloSOL/SOL (SplStake rate)",
+      "value": "1072639807982852",
+      "exp": 15,
+      "expectedPrice": 1.072639808
+    },
+    {
+      "index": 44,
+      "label": "fwdSOL/SOL (SplStake rate)",
+      "value": "1046869148892872",
+      "exp": 15,
+      "expectedPrice": 1.0468691489
+    },
+    {
+      "index": 45,
+      "label": "fwdSOL/USD chain",
+      "value": "110291934114814931",
+      "exp": 15,
+      "expectedPrice": 110.2919341148
+    },
+    {
+      "index": 46,
+      "label": "hSOL/SOL (SplStake rate)",
+      "value": "1183651170230563",
+      "exp": 15,
+      "expectedPrice": 1.1836511702
+    },
+    {
+      "index": 47,
+      "label": "hSOL/USD chain",
+      "value": "124702477878973176",
+      "exp": 15,
+      "expectedPrice": 124.702477879
+    },
+    {
+      "index": 48,
+      "label": "hubSOL/SOL (SplStake rate)",
+      "value": "1194473446706508",
+      "exp": 15,
+      "expectedPrice": 1.1944734467
+    },
+    {
+      "index": 49,
+      "label": "hubSOL/USD chain",
+      "value": "125842648840472569",
+      "exp": 15,
+      "expectedPrice": 125.8426488405
+    },
+    {
+      "index": 50,
+      "label": "JSOL/SOL (SplStake rate)",
+      "value": "1372691001136379",
+      "exp": 15,
+      "expectedPrice": 1.3726910011
+    },
+    {
+      "index": 52,
+      "label": "JupSOL/SOL (SplStake rate)",
+      "value": "1206330368724138",
+      "exp": 15,
+      "expectedPrice": 1.2063303687
+    },
+    {
+      "index": 53,
+      "label": "JupSOL/USD chain",
+      "value": "127091823929217847",
+      "exp": 15,
+      "expectedPrice": 127.0918239292
+    },
+    {
+      "index": 54,
+      "label": "lanternSOL/SOL (SplStake rate)",
+      "value": "1235848931134189",
+      "exp": 15,
+      "expectedPrice": 1.2358489311
+    },
+    {
+      "index": 55,
+      "label": "lanternSOL/USD chain",
+      "value": "130201724859946827",
+      "exp": 15,
+      "expectedPrice": 130.2017248599
+    },
+    {
+      "index": 56,
+      "label": "LST/SOL (SplStake rate)",
+      "value": "1539367207729714",
+      "exp": 15,
+      "expectedPrice": 1.5393672077
+    },
+    {
+      "index": 57,
+      "label": "LST/USD chain",
+      "value": "162178613089309901",
+      "exp": 15,
+      "expectedPrice": 162.1786130893
+    },
+    {
+      "index": 58,
+      "label": "picoSOL/SOL (SplStake rate)",
+      "value": "1217544674034051",
+      "exp": 15,
+      "expectedPrice": 1.217544674
+    },
+    {
+      "index": 59,
+      "label": "picoSOL/USD chain",
+      "value": "128273296727124238",
+      "exp": 15,
+      "expectedPrice": 128.2732967271
+    },
+    {
+      "index": 60,
+      "label": "phaseSOL/SOL (SplStake rate)",
+      "value": "1185194907448645",
+      "exp": 15,
+      "expectedPrice": 1.1851949074
+    },
+    {
+      "index": 61,
+      "label": "phaseSOL/USD chain",
+      "value": "124865116890474613",
+      "exp": 15,
+      "expectedPrice": 124.8651168905
+    },
+    {
+      "index": 62,
+      "label": "rkSOL/SOL (SplStake rate)",
+      "value": "1274022503321142",
+      "exp": 15,
+      "expectedPrice": 1.2740225033
+    },
+    {
+      "index": 64,
+      "label": "rkuSOL/SOL (SplStake rate)",
+      "value": "1014459138554126",
+      "exp": 15,
+      "expectedPrice": 1.0144591386
+    },
+    {
+      "index": 65,
+      "label": "rkuSOL/USD chain",
+      "value": "106877407353068477",
+      "exp": 15,
+      "expectedPrice": 106.8774073531
+    },
+    {
+      "index": 66,
+      "label": "STKESOL/SOL (SplStake rate)",
+      "value": "1039883995137809",
+      "exp": 15,
+      "expectedPrice": 1.0398839951
+    },
+    {
+      "index": 67,
+      "label": "STKESOL/USD chain",
+      "value": "109556019680284109",
+      "exp": 15,
+      "expectedPrice": 109.5560196803
+    },
+    {
+      "index": 70,
+      "label": "PT-bulkSOL 31OCT26 (DiscountToMaturity)",
+      "value": "982893432",
+      "exp": 9,
+      "expectedPrice": 0.982893432
+    },
+    {
+      "index": 71,
+      "label": "PT-bulkSOL/USD chain",
+      "value": "103551831438220776",
+      "exp": 15,
+      "expectedPrice": 103.5518314382
+    },
+    {
+      "index": 72,
+      "label": "PT-hyloSOL 12DEC26 (DiscountToMaturity)",
+      "value": "960279701",
+      "exp": 9,
+      "expectedPrice": 0.960279701
+    },
+    {
+      "index": 73,
+      "label": "PT-hyloSOL/USD chain",
+      "value": "101169382655409836",
+      "exp": 15,
+      "expectedPrice": 101.1693826554
+    },
+    {
+      "index": 76,
+      "label": "PT-hyUSD 12DEC26 (DiscountToMaturity)",
+      "value": "953302197",
+      "exp": 9,
+      "expectedPrice": 0.953302197
+    },
+    {
+      "index": 77,
+      "label": "PT-hyUSD/USD chain",
+      "value": "95165028880947184",
+      "exp": 17,
+      "expectedPrice": 0.9516502888
+    }
+  ]
+}

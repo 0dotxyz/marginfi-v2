@@ -52,6 +52,20 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedDrift => Ok(2),
         // Fixed + JupLend: bank + lending state (no oracle)
         OracleSetup::FixedJuplend => Ok(2),
+        // PythMSOL: bank + Pyth + Marinade State
+        OracleSetup::PythMSOL => Ok(3),
+        // KaminoMSOL / JuplendMSOL: bank + Pyth + reserve/lending + Marinade State
+        OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => Ok(4),
+        // PythLST: bank + Pyth + SPL StakePool
+        OracleSetup::PythLST => Ok(3),
+        // KaminoLST / JuplendLST: bank + Pyth + reserve/lending + SPL StakePool
+        OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
+        // PTPyth: bank + Pyth + Exponent vault
+        OracleSetup::PTPyth => Ok(3),
+        // PTFixed: bank + Exponent vault (no base feed, i.e. the token is assumed to be ~= $1)
+        OracleSetup::PTFixed => Ok(2),
+        // ScopeKamino / ScopeJuplend: bank + Scope feed + reserve/lending
+        OracleSetup::ScopeKamino | OracleSetup::ScopeJuplend => Ok(3),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
@@ -782,6 +796,7 @@ struct EmodeConfigIterator<'a, 'info> {
     shared_mint: Option<Pubkey>,
     shared_oracle_key: Option<Pubkey>,
     shared_feed_family: Option<OracleFeedFamily>,
+    shared_fixed_price: Option<I80F48>,
     lowest_liab_weight: Option<I80F48>,
     same_asset_invalid: bool,
 }
@@ -805,6 +820,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             shared_mint: None,
             shared_oracle_key: None,
             shared_feed_family: None,
+            shared_fixed_price: None,
             lowest_liab_weight: None,
             same_asset_invalid: false,
         }
@@ -822,6 +838,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             Some(mint),
             Some(oracle_key),
             Some(feed_family),
+            Some(fixed_price),
             Some(liab_weight),
         ) = (
             self.same_asset_leverage,
@@ -829,11 +846,13 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             self.shared_mint,
             self.shared_oracle_key,
             self.shared_feed_family,
+            self.shared_fixed_price,
             self.lowest_liab_weight,
         ) {
             reconciled.same_asset.mint = mint;
             reconciled.same_asset.oracle_key = oracle_key;
             reconciled.same_asset.feed_family = Some(feed_family);
+            reconciled.same_asset.fixed_price = fixed_price;
             reconciled.same_asset.asset_weight =
                 compute_same_asset_emode_weight(leverage, liab_weight);
         }
@@ -879,6 +898,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                         &mut self.shared_mint,
                         &mut self.shared_oracle_key,
                         &mut self.shared_feed_family,
+                        &mut self.shared_fixed_price,
                         &mut self.lowest_liab_weight,
                         &bank,
                         bank.mint,
@@ -912,10 +932,12 @@ fn same_asset_leverage_for_requirement(
 /// lacks a feed family (fixed-price, deprecated, or unset oracle setup), is missing an oracle
 /// key, or diverges from a previously seen mint/oracle-key/feed-family triple. Callers must stop
 /// folding on `false`.
+#[allow(clippy::too_many_arguments)]
 fn update_reconciled_same_asset_config(
     shared_mint: &mut Option<Pubkey>,
     shared_oracle_key: &mut Option<Pubkey>,
     shared_feed_family: &mut Option<OracleFeedFamily>,
+    shared_fixed_price: &mut Option<I80F48>,
     lowest_liab_weight: &mut Option<I80F48>,
     bank: &Bank,
     mint: Pubkey,
@@ -925,11 +947,19 @@ fn update_reconciled_same_asset_config(
     // exchange-rate multiplier represents redemption-value risk. They must never establish the
     // liability side, however, because that would make independently moving multipliers appear
     // price-equivalent. Do not rely on `asset_tag` here; it is an admin-configurable field.
+    //
+    // The native multiplier setups (mSOL / LST / PT) are admissible on the same footing as
+    // `StakedWithPythPush`: each has its own feed family, so a liability of that family can only
+    // pair with collateral of the same family, mint, and `oracle_keys[0]`, pinning both sides to
+    // one multiplier source. Their `Kamino*` / `Juplend*` wrappers stay excluded.
     if !matches!(
         bank.config.oracle_setup,
         OracleSetup::PythPushOracle
             | OracleSetup::SwitchboardPull
             | OracleSetup::StakedWithPythPush
+            | OracleSetup::PythMSOL
+            | OracleSetup::PythLST
+            | OracleSetup::PTPyth
     ) {
         *lowest_liab_weight = None;
         return false;
@@ -948,11 +978,13 @@ fn update_reconciled_same_asset_config(
     }
 
     let oracle_key = bank.config.oracle_keys[0];
+    let fixed_price: I80F48 = bank.config.fixed_price.into();
     match shared_mint {
         Some(existing_mint)
             if *existing_mint != mint
                 || shared_oracle_key.as_ref() != Some(&oracle_key)
-                || shared_feed_family.as_ref() != Some(&feed_family) =>
+                || shared_feed_family.as_ref() != Some(&feed_family)
+                || shared_fixed_price.as_ref() != Some(&fixed_price) =>
         {
             *lowest_liab_weight = None;
             false
@@ -967,6 +999,7 @@ fn update_reconciled_same_asset_config(
             *shared_mint = Some(mint);
             *shared_oracle_key = Some(oracle_key);
             *shared_feed_family = Some(feed_family);
+            *shared_fixed_price = Some(fixed_price);
             *lowest_liab_weight = Some(liab_weight);
             true
         }
@@ -2836,6 +2869,13 @@ mod test {
         );
         bank.config.oracle_keys[0] = reconciled.same_asset.oracle_key;
 
+        bank.config.fixed_price = I80F48!(0.5).into();
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &reconciled),
+            I80F48::ZERO
+        );
+        bank.config.fixed_price = I80F48!(0).into();
+
         bank.mint = Pubkey::new_unique();
         assert_eq!(
             bank.get_asset_weight(RequirementType::Initial, &reconciled),
@@ -3033,6 +3073,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
@@ -3041,6 +3082,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3050,6 +3092,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3066,21 +3109,24 @@ mod test {
     }
 
     #[test]
-    fn same_asset_config_disables_when_liability_mints_diverge() {
-        let mint_a = Pubkey::new_unique();
-        let mint_b = Pubkey::new_unique();
+    fn same_asset_config_disables_when_fixed_price_diverges() {
+        let mint = Pubkey::new_unique();
         let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
-        let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
-        let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
+        let mut bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank_a.config.fixed_price = I80F48!(0.90).into();
+        let mut bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank_b.config.fixed_price = I80F48!(0.95).into();
 
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3090,6 +3136,43 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_mints_diverge() {
+        let mint_a = Pubkey::new_unique();
+        let mint_b = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut shared_fixed_price,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3106,6 +3189,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
@@ -3114,6 +3198,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3123,6 +3208,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3140,6 +3226,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         let mut bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
@@ -3149,6 +3236,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3158,6 +3246,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3175,6 +3264,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.config.oracle_setup = OracleSetup::Fixed;
@@ -3183,6 +3273,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3200,6 +3291,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.config.oracle_setup = OracleSetup::KaminoPythPush;
@@ -3208,6 +3300,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3225,6 +3318,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
@@ -3233,6 +3327,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3249,6 +3344,7 @@ mod test {
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
+        let mut shared_fixed_price = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
@@ -3257,6 +3353,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3266,6 +3363,7 @@ mod test {
             &mut shared_mint,
             &mut shared_oracle_key,
             &mut shared_feed_family,
+            &mut shared_fixed_price,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,

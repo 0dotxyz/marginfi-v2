@@ -117,6 +117,8 @@ fn should_include_integration_observation_meta(bank: &Bank) -> bool {
             | OracleSetup::JuplendPythPull
             | OracleSetup::JuplendSwitchboardPull
             | OracleSetup::FixedJuplend
+            | OracleSetup::ScopeKamino
+            | OracleSetup::ScopeJuplend
     )
 }
 
@@ -344,6 +346,7 @@ impl MarginfiAccountFixture {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
@@ -1440,12 +1443,41 @@ impl MarginfiAccountFixture {
                     });
                 }
 
-                if should_include_integration_observation_meta(bank) {
-                    metas.push(AccountMeta {
-                        pubkey: bank.integration_acc_1,
-                        is_signer: false,
-                        is_writable: false,
-                    });
+                // Non-integration mSOL/LST setups carry the rate account (Marinade State / SPL StakePool)
+                // at oracle_keys[1]; the integration variants carry the reserve/lending at oracle_keys[1]
+                // and the rate account at oracle_keys[2].
+                match bank.config.oracle_setup {
+                    OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    OracleSetup::KaminoMSOL
+                    | OracleSetup::JuplendMSOL
+                    | OracleSetup::KaminoLST
+                    | OracleSetup::JuplendLST => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[2],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    _ => {
+                        if should_include_integration_observation_meta(bank) {
+                            metas.push(AccountMeta {
+                                pubkey: bank.integration_acc_1,
+                                is_signer: false,
+                                is_writable: false,
+                            });
+                        }
+                    }
                 }
                 metas
             })
@@ -2323,6 +2355,7 @@ impl MarginfiAccountFixture {
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::EndDeleverage {}.data(),

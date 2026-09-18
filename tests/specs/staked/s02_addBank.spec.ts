@@ -11,6 +11,7 @@ import {
   addBank,
   addBankPermissionless,
   backfillStakedBankValidatorVoteAccount,
+  configureBankOracle,
   disableStakedOracles,
   enableStakedOracleOnramp,
   groupInitialize,
@@ -51,6 +52,7 @@ import {
   defaultBankConfig,
   defaultStakedInterestSettings,
   makeRatePoints,
+  ORACLE_SETUP_PYTH_LST,
   ORACLE_SETUP_PYTH_PUSH,
   STAKED_ORACLE_PRICE_USES_ONRAMP,
   STAKED_ORACLE_DISABLED,
@@ -273,6 +275,24 @@ describe("Init group and add banks with asset category flags", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
     assert.equal(bank.config.assetTag, ASSET_TAG_SOL);
+  });
+
+  it("(admin) Tries to configure LST oracle setup on the SOL bank - should fail", async () => {
+    let tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: bankKeypairSol.publicKey,
+        type: ORACLE_SETUP_PYTH_LST,
+        oracle: oracles.wsolOracle.publicKey,
+        remaining: [Keypair.generate().publicKey],
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    // InvalidOracleSetup
+    assertBankrunTxFailed(
+      await banksClient.tryProcessTransaction(tx),
+      "0x1789",
+    );
   });
 
   it("(admin) Tries to add staked bank WITH permission - should fail", async () => {
@@ -661,6 +681,23 @@ describe("Init group and add banks with asset category flags", () => {
 
     // Timing is annoying to test in bankrun context due to clock warping
     // assert.approximately(now, bank.lastUpdate.toNumber(), 2);
+  });
+
+  it("(admin) Tries to configure a plain Pyth feed on a staked bank - should fail", async () => {
+    let tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        type: ORACLE_SETUP_PYTH_PUSH,
+        oracle: oracles.wsolOracle.publicKey,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    // InvalidOracleSetup
+    assertBankrunTxFailed(
+      await banksClient.tryProcessTransaction(tx),
+      "0x1789",
+    );
   });
 
   it("(permissionless) Add staked collateral bank (validator 1) - happy path", async () => {
