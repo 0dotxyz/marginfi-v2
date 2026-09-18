@@ -83,6 +83,8 @@ export const ORACLE_SETUP_KAMINO_LST = 23;
 export const ORACLE_SETUP_JUPLEND_LST = 24;
 export const ORACLE_SETUP_PT_PYTH = 25;
 export const ORACLE_SETUP_PT_FIXED = 26;
+export const ORACLE_SETUP_SCOPE_KAMINO = 27;
+export const ORACLE_SETUP_SCOPE_JUPLEND = 28;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;

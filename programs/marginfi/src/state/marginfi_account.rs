@@ -64,6 +64,8 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::PTPyth => Ok(3),
         // PTFixed: bank + Exponent vault (no base feed, i.e. the token is assumed to be ~= $1)
         OracleSetup::PTFixed => Ok(2),
+        // ScopeKamino / ScopeJuplend: bank + Scope feed + reserve/lending
+        OracleSetup::ScopeKamino | OracleSetup::ScopeJuplend => Ok(3),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
