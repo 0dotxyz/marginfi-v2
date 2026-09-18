@@ -234,11 +234,14 @@ pub fn lending_account_borrow<'info>(
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
-    // the post-borrow collateral mix.
+    // the post-borrow collateral mix. Ratchet on incomplete is unreachable today (the gate
+    // above reverts first) — `true` is defense-in-depth so this owner-signed path can never
+    // regress to a rate freeze if that gate is ever relaxed.
     marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         clock.unix_timestamp as u64,
+        true,
     )?;
 
     let bank_pk = ctx.accounts.bank.key();

@@ -397,8 +397,22 @@ pub fn lending_account_liquidate<'info>(
                 .bank
                 .get_asset_amount(bank_account.balance.asset_shares.into())?;
 
+            // The seized value is vault-backed (the liquidatee's burned deposit tokens stay
+            // in the liquidity vault), so if the liquidator carries premium-active debt in
+            // this bank the credit settles premium FIRST, exactly like a repay. Without this,
+            // a credit that closes the principal would write the receivable off (the
+            // token-less flip rule) and the liquidator would escape accrued premium entirely
+            // — cheaply exploitable via self-liquidation between two accounts.
+            bank_account.claim_premium()?;
+            let premium_settled = bank_account.settle_premium(asset_amount)?;
+            let credit_amount = asset_amount
+                .checked_sub(premium_settled)
+                .ok_or_else(math_error!())?;
+
             // Liquidator will repay the debt (if any) and then deposit the remainder (if any).
-            bank_account.deposit_ignore_deposit_cap(asset_amount)?;
+            if credit_amount > I80F48::ZERO {
+                bank_account.deposit_ignore_deposit_cap(credit_amount)?;
+            }
 
             let post_balance: I80F48 = bank_account
                 .bank
@@ -598,7 +612,7 @@ fn check_liquidatee_health_and_refresh_premium<'info>(
         pre_liquidation_health,
         &mut Some(&mut premium_scratch),
     )?;
-    liquidatee_marginfi_account.update_premium_snapshots(group, &premium_scratch, now)?;
+    liquidatee_marginfi_account.update_premium_snapshots(group, &premium_scratch, now, false)?;
     Ok(post_liquidation_health)
 }
 
@@ -637,7 +651,7 @@ fn check_liquidator_health_and_refresh_premium<'info>(
         &mut None,
         &mut Some(&mut premium_scratch),
     )?;
-    liquidator_marginfi_account.update_premium_snapshots(group, &premium_scratch, now)?;
+    liquidator_marginfi_account.update_premium_snapshots(group, &premium_scratch, now, false)?;
 
     if !premium_scratch.complete && liab_info.premium_active {
         let balance = liquidator_marginfi_account

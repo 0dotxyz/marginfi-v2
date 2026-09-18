@@ -139,11 +139,14 @@ pub fn lending_account_end_flashloan<'info>(
     );
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
-    // the post-flashloan balances.
+    // the post-flashloan balances. Ratchet on incomplete is unreachable today (the gate above
+    // reverts first) — `true` is defense-in-depth so this owner-signed path can never regress
+    // to a rate freeze if that gate is ever relaxed.
     marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        true,
     )?;
 
     if marginfi_account.lending_account.has_liabilities() {
