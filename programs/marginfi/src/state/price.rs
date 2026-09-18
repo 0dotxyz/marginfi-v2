@@ -268,6 +268,29 @@ fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80
     }
 }
 
+fn compute_confidence_interval(
+    price: I80F48,
+    oracle_max_confidence: u32,
+) -> MarginfiResult<I80F48> {
+    if oracle_max_confidence == 0 {
+        return Ok(I80F48::ZERO);
+    }
+
+    let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
+
+    let conf_interval: I80F48 = price
+        .checked_mul(oracle_max_confidence)
+        .ok_or_else(math_error!())?
+        .checked_div(U32_MAX)
+        .ok_or_else(math_error!())?;
+
+    let max_conf_interval: I80F48 = price
+        .checked_mul(MAX_CONF_INTERVAL)
+        .ok_or_else(math_error!())?;
+
+    Ok(min(conf_interval, max_conf_interval))
+}
+
 struct OracleLoadContext {
     adjusted_price_feed: OraclePriceFeedAdapter,
     cache_raw_price: Option<OraclePriceWithConfidence>,
@@ -383,7 +406,6 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
@@ -421,7 +443,6 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
@@ -1992,8 +2013,9 @@ impl OraclePriceFeedAdapter {
 /// Reads one entry out of a Scope feed's `OraclePrices` account.
 ///
 /// Scope stores a fixed array of 512 `DatedPrice` records; a bank names the account in
-/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Scope carries no confidence
-/// interval, so this adapter reports zero confidence and risk is expressed through weights.
+/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Confidence is computed on demand
+/// from `oracle_max_confidence` (matching Switchboard semantics); collateral/debt bias is applied
+/// per `PriceAdapter`.
 #[derive(Copy, Clone, Debug)]
 pub struct ScopePriceFeed {
     pub price: I80F48,
@@ -2077,10 +2099,21 @@ impl PriceAdapter for ScopePriceFeed {
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
-        _bias: Option<PriceBias>,
-        _oracle_max_confidence: u32,
+        bias: Option<PriceBias>,
+        oracle_max_confidence: u32,
     ) -> MarginfiResult<I80F48> {
-        Ok(self.price)
+        let confidence = compute_confidence_interval(self.price, oracle_max_confidence)?;
+        match bias {
+            Some(PriceBias::Low) => Ok(self
+                .price
+                .checked_sub(confidence)
+                .ok_or_else(math_error!())?),
+            Some(PriceBias::High) => Ok(self
+                .price
+                .checked_add(confidence)
+                .ok_or_else(math_error!())?),
+            None => Ok(self.price),
+        }
     }
 
     fn get_price_and_confidence_of_type(
@@ -2090,8 +2123,7 @@ impl PriceAdapter for ScopePriceFeed {
     ) -> MarginfiResult<OraclePriceWithConfidence> {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
-            // Scope prices carry no confidence interval.
-            confidence: I80F48::ZERO,
+            confidence: compute_confidence_interval(self.price, oracle_max_confidence)?,
             source_time: self.last_updated_timestamp as i64,
         })
     }
@@ -2179,27 +2211,8 @@ impl SwitchboardPullPriceFeed {
     /// 0 disables confidence adjustment, u32::MAX (or anything exceeding `MAX_CONF_INTERVAL`) will
     /// clamp at `MAX_CONF_INTERVAL`.
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
-        if oracle_max_confidence == 0 {
-            return Ok(I80F48::ZERO);
-        }
-
         let price: I80F48 = self.get_price()?;
-        let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
-
-        // Note: negative prices also create negative confidence intervals (though we not anticipate
-        // negative prices in prod)
-        let conf_interval: I80F48 = price
-            .checked_mul(oracle_max_confidence)
-            .ok_or_else(math_error!())?
-            .checked_div(U32_MAX)
-            .ok_or_else(math_error!())?;
-
-        // Clamp to MAX_CONF_INTERVAL (5%) of price
-        let max_conf_interval: I80F48 = price
-            .checked_mul(MAX_CONF_INTERVAL)
-            .ok_or_else(math_error!())?;
-
-        Ok(min(conf_interval, max_conf_interval))
+        compute_confidence_interval(price, oracle_max_confidence)
     }
 }
 
@@ -2627,7 +2640,6 @@ mod tests {
     use anchor_lang::solana_program::account_info::AccountInfo;
     use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
     use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
-    use scope_mocks::state::{ScopeDatedPrice, ScopePrice};
     use solana_stake_interface::{
         stake_flags::StakeFlags,
         state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
@@ -3324,19 +3336,7 @@ mod tests {
 
     /// Builds a scope `OraclePrices` buffer with one populated entry.
     fn scope_account_data(index: usize, value: u64, exp: u64, timestamp: u64) -> Vec<u8> {
-        let mut oracle_prices = ScopeOraclePrices {
-            oracle_mappings: Pubkey::default(),
-            prices: [ScopeDatedPrice::default(); 512],
-        };
-        // last_updated_slot left zero (unused by the adapter)
-        oracle_prices.prices[index] = ScopeDatedPrice {
-            price: ScopePrice { value, exp },
-            unix_timestamp: timestamp,
-            ..ScopeDatedPrice::default()
-        };
-        let mut data = SCOPE_ORACLE_PRICES_DISCRIMINATOR.to_vec();
-        data.extend_from_slice(bytemuck::bytes_of(&oracle_prices));
-        data
+        scope_test_helpers::scope_account_data(index, value, exp, timestamp)
     }
 
     fn scope_ai<'a>(
@@ -3345,7 +3345,7 @@ mod tests {
         lamports: &'a mut u64,
         data: &'a mut [u8],
     ) -> AccountInfo<'a> {
-        AccountInfo::new(key, false, false, lamports, data, owner, false)
+        scope_test_helpers::scope_ai(key, owner, lamports, data)
     }
 
     #[test]
@@ -3360,9 +3360,9 @@ mod tests {
         // value/10^exp, within I80F48 rounding of the decimal literal
         assert!((feed.price - I80F48::from_num(103.445108)).abs() < I80F48::from_num(1e-9));
         assert_eq!(feed.last_updated_timestamp, 1000);
-        // Scope carries no confidence, and bias must not move the price.
+        // With oracle_max_confidence=0, confidence is zero, so bias has no effect.
         assert_eq!(
-            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), u32::MAX)
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
                 .unwrap(),
             feed.price
         );
@@ -3625,5 +3625,303 @@ mod tests {
             ScopePriceFeed::load_checked(&ai, 500, 90, 7).unwrap_err(),
             MarginfiError::ScopeInvalidEntry.into()
         );
+    }
+}
+
+#[cfg(test)]
+mod scope_test_helpers {
+    use super::*;
+    use scope_mocks::state::{ScopeDatedPrice, ScopeOraclePrices, ScopePrice};
+
+    pub fn scope_account_data(index: usize, value: u64, exp: u64, timestamp: u64) -> Vec<u8> {
+        let mut oracle_prices = ScopeOraclePrices {
+            oracle_mappings: Pubkey::default(),
+            prices: [ScopeDatedPrice::default(); 512],
+        };
+        oracle_prices.prices[index] = ScopeDatedPrice {
+            price: ScopePrice { value, exp },
+            unix_timestamp: timestamp,
+            ..ScopeDatedPrice::default()
+        };
+        let mut data = SCOPE_ORACLE_PRICES_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(bytemuck::bytes_of(&oracle_prices));
+        data
+    }
+
+    pub fn scope_ai<'a>(
+        key: &'a Pubkey,
+        owner: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut [u8],
+    ) -> AccountInfo<'a> {
+        AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+}
+
+#[cfg(test)]
+mod scope_oracle_confidence_tests {
+    use super::scope_test_helpers::{scope_account_data, scope_ai};
+    use super::*;
+
+    #[test]
+    fn scope_zero_confidence_preserves_price() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        assert_eq!(feed.price, I80F48::from_num(100));
+
+        let unbiased = feed
+            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+            .unwrap();
+        let biased_low = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+            .unwrap();
+        let biased_high = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
+            .unwrap();
+
+        assert_eq!(unbiased, I80F48::from_num(100));
+        assert_eq!(biased_low, I80F48::from_num(100));
+        assert_eq!(biased_high, I80F48::from_num(100));
+    }
+
+    #[test]
+    fn scope_nonzero_confidence_biases_price_correctly() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let one_percent = u32::MAX / 100;
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let price = I80F48::from_num(100);
+        assert_eq!(feed.price, price);
+
+        let expected_conf = compute_confidence_interval(price, one_percent).unwrap();
+
+        let unbiased = feed
+            .get_price_of_type(OraclePriceType::RealTime, None, one_percent)
+            .unwrap();
+        let biased_low = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), one_percent)
+            .unwrap();
+        let biased_high = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                one_percent,
+            )
+            .unwrap();
+
+        assert_eq!(unbiased, price);
+        assert_eq!(biased_low, price.checked_sub(expected_conf).unwrap());
+        assert_eq!(biased_high, price.checked_add(expected_conf).unwrap());
+    }
+
+    #[test]
+    fn scope_confidence_clamped_at_max_with_excessive_config() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let excessive = u32::MAX;
+
+        let price = I80F48::from_num(100);
+        let max_conf = price.checked_mul(MAX_CONF_INTERVAL).unwrap();
+
+        let conf = compute_confidence_interval(price, excessive).unwrap();
+        assert_eq!(conf, max_conf);
+    }
+
+    #[test]
+    fn scope_get_price_and_confidence_of_type_returns_confidence() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let one_percent = u32::MAX / 100;
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let pc = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap();
+
+        let expected_conf = compute_confidence_interval(feed.price, one_percent).unwrap();
+
+        assert_eq!(pc.price, feed.price);
+        assert_eq!(pc.confidence, expected_conf);
+        assert_eq!(pc.source_time, 1000);
+    }
+}
+
+#[cfg(test)]
+mod scope_wrapped_oracle_confidence_tests {
+    use super::scope_test_helpers::{scope_account_data, scope_ai};
+    use super::*;
+
+    fn assert_confidence_scales(multiplier: I80F48, use_bias: PriceBias) {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let one_percent = u32::MAX / 100;
+
+        let base_feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let base_biased = base_feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(use_bias), one_percent)
+            .unwrap();
+
+        let scaled_price = base_feed.price.checked_mul(multiplier).unwrap();
+        let scaled_conf = compute_confidence_interval(scaled_price, one_percent).unwrap();
+
+        let expected_scaled_biased = match use_bias {
+            PriceBias::Low => scaled_price.checked_sub(scaled_conf).unwrap(),
+            PriceBias::High => scaled_price.checked_add(scaled_conf).unwrap(),
+        };
+
+        let expected = base_biased.checked_mul(multiplier).unwrap();
+
+        assert!((expected_scaled_biased - expected).abs() < I80F48::from_num(1e-10));
+    }
+
+    #[test]
+    fn kamino_collateral_scales() {
+        assert_confidence_scales(I80F48::from_num(1.5), PriceBias::Low);
+    }
+
+    #[test]
+    fn juplend_debt_scales() {
+        assert_confidence_scales(I80F48::from_num(1.1), PriceBias::High);
+    }
+}
+
+#[cfg(test)]
+mod scope_oracle_config_tests {
+    use super::scope_test_helpers::{scope_account_data, scope_ai};
+    use super::*;
+
+    #[test]
+    fn scope_different_configs_produce_different_prices() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let old_low = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+            .unwrap();
+        let new_low = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::Low),
+                u32::MAX / 100,
+            )
+            .unwrap();
+
+        assert!(new_low < old_low);
+    }
+}
+
+#[cfg(test)]
+mod scope_vs_switchboard_confidence_tests {
+    use super::scope_test_helpers::{scope_account_data, scope_ai};
+    use super::*;
+
+    #[test]
+    fn scope_and_switchboard_same_confidence_formula() {
+        let one_percent = u32::MAX / 100;
+        let price = I80F48::from_num(50);
+
+        let scope_conf = compute_confidence_interval(price, one_percent).unwrap();
+
+        let formula_result = price
+            .checked_mul(I80F48::from_num(one_percent))
+            .unwrap()
+            .checked_div(U32_MAX)
+            .unwrap();
+        let max_conf = price.checked_mul(MAX_CONF_INTERVAL).unwrap();
+        let expected_conf = min(formula_result, max_conf);
+
+        assert_eq!(scope_conf, expected_conf);
+
+        assert!((scope_conf - I80F48::from_num(0.5)).abs() < I80F48::from_num(1e-6));
+    }
+
+    #[test]
+    fn scope_zero_confidence_matches_switchboard_no_bias() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let scope_feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let scope_debt = scope_feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
+            .unwrap();
+        let scope_collateral = scope_feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+            .unwrap();
+        let scope_unbiased = scope_feed
+            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+            .unwrap();
+
+        assert_eq!(scope_debt, scope_unbiased);
+        assert_eq!(scope_collateral, scope_unbiased);
+    }
+
+    #[test]
+    fn scope_confidence_never_exceeds_max_interval() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let price = I80F48::from_num(100);
+        let max_conf = price.checked_mul(MAX_CONF_INTERVAL).unwrap();
+
+        for config in [
+            u32::MAX / 1000,
+            u32::MAX / 100,
+            u32::MAX / 50,
+            u32::MAX / 20,
+            u32::MAX,
+        ] {
+            let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+            let conf = compute_confidence_interval(feed.price, config).unwrap();
+            assert!(conf <= max_conf);
+        }
+    }
+
+    #[test]
+    fn scope_confidence_increases_with_config() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+
+        let conf_1 = compute_confidence_interval(feed.price, u32::MAX / 200).unwrap();
+        let conf_2 = compute_confidence_interval(feed.price, u32::MAX / 100).unwrap();
+
+        let price = I80F48::from_num(100);
+        let max_conf = price.checked_mul(MAX_CONF_INTERVAL).unwrap();
+
+        assert!(conf_2 >= conf_1);
+        if conf_2 < max_conf {
+            assert!(conf_2 > conf_1);
+        }
     }
 }
