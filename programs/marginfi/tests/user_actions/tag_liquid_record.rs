@@ -7,12 +7,15 @@ use marginfi::constants::{LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMI
 use marginfi::prelude::*;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, EmodeEntry, LiquidationRecord, MarginfiAccount},
+    types::{
+        centi_to_u32, BankConfigOpt, EmodeEntry, LiquidationRecord, MarginfiAccount, OrderTrigger,
+        WrappedI80F48,
+    },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    account::Account, instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 
@@ -573,6 +576,183 @@ async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
         .await?;
 
     assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
+/// Tagged, maintenance-unhealthy borrower with an already-triggered stop-loss order on 2 SOL
+/// against 10 USDC, plus `fixed_borrow` Fixed of debt that survives the order.
+async fn setup_tagged_order_account(
+    fixed_borrow: f64,
+) -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    Pubkey,
+    Keypair,
+    Pubkey,
+    Pubkey,
+)> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let fixed_bank = test_f.get_bank(&BankMint::Fixed);
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank, 100, None)
+        .await?;
+    let lender_fixed = fixed_bank.mint.create_token_account_and_mint_to(100).await;
+    lender
+        .try_bank_deposit(lender_fixed.key, fixed_bank, 100, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f.sol_mint.create_token_account_and_mint_to(2).await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank, 2, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank, 10)
+        .await?;
+    let borrower_fixed = fixed_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_fixed.key, fixed_bank, fixed_borrow)
+        .await?;
+
+    // The order's net value is $10, so a $15 stop loss is already triggered
+    let order_pda = borrower
+        .try_place_order(
+            vec![sol_bank.key, usdc_bank.key],
+            OrderTrigger::StopLoss {
+                threshold: WrappedI80F48::from(I80F48!(15)),
+                max_slippage: centi_to_u32(I80F48!(0.05)),
+            },
+        )
+        .await?;
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &borrower, 0).await?;
+    assert_eq!(load_tag(&borrower).await, T0);
+
+    let keeper = Keypair::new();
+    {
+        let mut ctx = test_f.context.borrow_mut();
+        let rent = ctx.banks_client.get_rent().await?;
+        let account = Account {
+            lamports: rent.minimum_balance(0) + 1_000_000_000,
+            data: vec![],
+            owner: solana_system_interface::program::ID,
+            executable: false,
+            rent_epoch: 0,
+        };
+        ctx.set_account(&keeper.pubkey(), &account.into());
+    }
+    let keeper_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 100)
+        .await
+        .key;
+    let keeper_sol = test_f
+        .sol_mint
+        .create_empty_token_account_with_owner(&keeper.pubkey())
+        .await
+        .key;
+
+    Ok((test_f, borrower, order_pda, keeper, keeper_usdc, keeper_sol))
+}
+
+async fn run_order_execution(
+    test_f: &TestFixture,
+    borrower: &MarginfiAccountFixture,
+    order_pda: Pubkey,
+    keeper: &Keypair,
+    keeper_usdc: Pubkey,
+    keeper_sol: Pubkey,
+) -> anyhow::Result<()> {
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let (start_ix, execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(keeper_usdc, usdc_bank, 0.0, Some(true), keeper.pubkey())
+        .await;
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(keeper_sol, sol_bank, 1.0, None, keeper.pubkey())
+        .await;
+    let end_ix = borrower
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![usdc_bank.key],
+        )
+        .await;
+    let blockhash = test_f.get_latest_blockhash().await;
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        Some(&keeper.pubkey()),
+        &[keeper],
+        blockhash,
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await?;
+    Ok(())
+}
+
+/// Order execution clears the tag once the account is maintenance-healthy, while it still
+/// carries the Fixed debt.
+#[tokio::test]
+async fn order_execution_clears_the_tag_when_healthy() -> anyhow::Result<()> {
+    let (test_f, borrower, order_pda, keeper, keeper_usdc, keeper_sol) =
+        setup_tagged_order_account(1.0).await?;
+    run_order_execution(
+        &test_f,
+        &borrower,
+        order_pda,
+        &keeper,
+        keeper_usdc,
+        keeper_sol,
+    )
+    .await?;
+
+    let account = borrower.load().await;
+    assert_eq!(account.indexer_flags.is_lending_only, 0);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    Ok(())
+}
+
+/// Order execution leaves the tag alone while the account stays maintenance-unhealthy.
+#[tokio::test]
+async fn order_execution_keeps_the_tag_while_unhealthy() -> anyhow::Result<()> {
+    let (test_f, borrower, order_pda, keeper, keeper_usdc, keeper_sol) =
+        setup_tagged_order_account(4.0).await?;
+    run_order_execution(
+        &test_f,
+        &borrower,
+        order_pda,
+        &keeper,
+        keeper_usdc,
+        keeper_sol,
+    )
+    .await?;
+
+    assert_eq!(load_tag(&borrower).await, T0);
     Ok(())
 }
 
