@@ -8,7 +8,10 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
+use marginfi_type_crate::constants::{
+    ASSET_TAG_DEFAULT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
+    BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS,
+};
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 pub fn lending_pool_configure_bank_oracle(
@@ -39,7 +42,10 @@ pub fn lending_pool_configure_bank_oracle(
         }
         // Scope banks must go through `lending_pool_configure_bank_oracle_scope`, which takes
         // the entry index; this instruction has no way to provide it.
-        if matches!(setup_type, OracleSetup::Scope) {
+        if matches!(
+            setup_type,
+            OracleSetup::Scope | OracleSetup::ScopeKamino | OracleSetup::ScopeJuplend
+        ) {
             return err!(MarginfiError::UseConfigureBankOracleScope);
         }
         check!(
@@ -101,8 +107,13 @@ pub fn lending_pool_configure_bank_oracle(
     Ok(())
 }
 
-/// Configure a bank to price from a Scope feed: sets `OracleSetup::Scope`, the feed's
-/// `OraclePrices` account, and the entry index within it, then validates the feed can be read.
+/// Configure a bank to price from a Scope feed: sets the Scope setup matching the bank's asset
+/// tag (`Scope`, `ScopeKamino`, or `ScopeJuplend`), the feed's `OraclePrices` account, and the
+/// entry index within it, then validates the feed can be read.
+///
+/// Remaining accounts: `[oracle_prices]` for a regular bank, `[oracle_prices, reserve]` for a
+/// Kamino bank, `[oracle_prices, lending]` for a JupLend bank. The venue account must match the
+/// one stored in `oracle_keys[1]` at bank creation; it is never rewritten here.
 ///
 /// Separate from `lending_pool_configure_bank_oracle` because a Scope bank needs the entry index
 /// alongside the account key - the pair `(oracle_keys[0], scope_entry_index)` is what identifies
@@ -129,13 +140,21 @@ pub fn lending_pool_configure_bank_oracle_scope(
         "disable same-asset e-mode eligibility before moving a bank to a Scope oracle"
     );
 
-    bank.config.oracle_setup = OracleSetup::Scope;
+    let setup_type = match bank.config.asset_tag {
+        ASSET_TAG_DEFAULT | ASSET_TAG_SOL => OracleSetup::Scope,
+        ASSET_TAG_KAMINO => OracleSetup::ScopeKamino,
+        ASSET_TAG_JUPLEND => OracleSetup::ScopeJuplend,
+        _ => return err!(MarginfiError::InvalidOracleSetup),
+    };
+
+    bank.config.oracle_setup = setup_type;
     bank.config.oracle_keys[0] = oracle;
     bank.config.scope_entry_index = entry_index;
     bank.config.fixed_price = I80F48::ZERO.into();
 
     msg!(
-        "setting scope oracle key: {:?} entry: {:?}",
+        "setting scope oracle type: {:?} key: {:?} entry: {:?}",
+        setup_type,
         oracle,
         entry_index
     );
@@ -149,7 +168,7 @@ pub fn lending_pool_configure_bank_oracle_scope(
             signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: ctx.accounts.bank.key(),
-        oracle_setup: OracleSetup::Scope as u8,
+        oracle_setup: setup_type as u8,
         oracle
     });
 

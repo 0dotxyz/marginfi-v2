@@ -357,6 +357,82 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: I80F48::ONE,
                 })
             }
+            OracleSetup::ScopeKamino => {
+                // (0) Scope feed (for price) and (1) Kamino reserve (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let feed_info = &ais[0];
+                let reserve_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, feed_info)?;
+
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
+                let reserve = reserve_loader.load()?;
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
+                let multiplier: I80F48 = kamino_price_multiplier(&reserve)?;
+
+                let mut price_feed = ScopePriceFeed::load_checked(
+                    feed_info,
+                    clock.unix_timestamp,
+                    max_age,
+                    bank_config.scope_entry_index,
+                )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
+                price_feed.price = price_feed
+                    .price
+                    .checked_mul(multiplier)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
+            }
+            OracleSetup::ScopeJuplend => {
+                // (0) Scope feed (for price) and (1) JupLend Lending state (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let feed_info = &ais[0];
+                let lending_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, feed_info)?;
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let multiplier: I80F48 = juplend_price_multiplier(&lending)?;
+
+                let mut price_feed = ScopePriceFeed::load_checked(
+                    feed_info,
+                    clock.unix_timestamp,
+                    max_age,
+                    bank_config.scope_entry_index,
+                )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
+                price_feed.price = price_feed
+                    .price
+                    .checked_mul(multiplier)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
+            }
             OracleSetup::StakedWithPythPush => {
                 check!(ais.len() == 4, MarginfiError::WrongNumberOfOracleAccounts);
 
@@ -1373,6 +1449,52 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+                Ok(())
+            }
+            OracleSetup::ScopeKamino => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
+                // (0) Scope feed, (1) Kamino reserve
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::ScopeJuplend => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
+                // (0) Scope feed, (1) JupLend Lending state
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::SwitchboardPull => {
@@ -3325,6 +3447,124 @@ mod tests {
                 )
                 .unwrap_err(),
                 MarginfiError::InvalidOracleSetup.into()
+            );
+        }
+    }
+
+    /// The venue-wrapped Scope setups take `[feed, venue account]`: the feed is validated exactly
+    /// like plain Scope, and the venue account only has to match `oracle_keys[1]` here (the
+    /// reserve / lending state is loaded and freshness-checked at price time, not at configure
+    /// time, mirroring the Pyth/Switchboard venue setups).
+    #[test]
+    fn scope_venue_setups_require_matching_tag_and_venue_key() {
+        fn validate<'a>(
+            config: &BankConfig,
+            mint: Pubkey,
+            ais: &'a [AccountInfo<'a>],
+        ) -> MarginfiResult {
+            OraclePriceFeedAdapter::validate_bank_config(config, mint, ais, None, None, None)
+        }
+
+        let feed_key = Pubkey::new_unique();
+        let venue_key = Pubkey::new_unique();
+        let impostor_key = Pubkey::new_unique();
+        let venue_owner = Pubkey::new_unique();
+        let mut feed_lamports = 0u64;
+        let mut venue_lamports = 0u64;
+        let mut impostor_lamports = 0u64;
+        let mut feed_data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let mut venue_data = [0u8; 8];
+        let mut impostor_data = [0u8; 8];
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let venue_ai = scope_ai(
+            &venue_key,
+            &venue_owner,
+            &mut venue_lamports,
+            &mut venue_data,
+        );
+        let impostor_ai = scope_ai(
+            &impostor_key,
+            &venue_owner,
+            &mut impostor_lamports,
+            &mut impostor_data,
+        );
+        let mint = Pubkey::new_unique();
+
+        let feed_and_venue = [feed_ai.clone(), venue_ai.clone()];
+        let feed_and_impostor = [feed_ai.clone(), impostor_ai.clone()];
+        let venue_then_feed = [venue_ai.clone(), feed_ai.clone()];
+        let feed_only = [feed_ai.clone()];
+
+        for (setup, tag, venue_err) in [
+            (
+                OracleSetup::ScopeKamino,
+                ASSET_TAG_KAMINO,
+                MarginfiError::KaminoReserveValidationFailed,
+            ),
+            (
+                OracleSetup::ScopeJuplend,
+                ASSET_TAG_JUPLEND,
+                MarginfiError::JuplendLendingValidationFailed,
+            ),
+        ] {
+            let mut config = BankConfig {
+                oracle_setup: setup,
+                scope_entry_index: 42,
+                asset_tag: tag,
+                ..BankConfig::default()
+            };
+            config.oracle_keys[0] = feed_key;
+            config.oracle_keys[1] = venue_key;
+
+            validate(&config, mint, &feed_and_venue).unwrap();
+
+            // Only the matching venue tag may carry the setup.
+            for other_tag in [
+                ASSET_TAG_DEFAULT,
+                ASSET_TAG_SOL,
+                ASSET_TAG_STAKED,
+                ASSET_TAG_DRIFT,
+                ASSET_TAG_SOLEND,
+                ASSET_TAG_KAMINO,
+                ASSET_TAG_JUPLEND,
+            ]
+            .into_iter()
+            .filter(|t| *t != tag)
+            {
+                config.asset_tag = other_tag;
+                assert_eq!(
+                    validate(&config, mint, &feed_and_venue).unwrap_err(),
+                    MarginfiError::InvalidOracleSetup.into()
+                );
+            }
+            config.asset_tag = tag;
+
+            // The venue account is pinned to `oracle_keys[1]`.
+            assert_eq!(
+                validate(&config, mint, &feed_and_impostor).unwrap_err(),
+                venue_err.into()
+            );
+
+            // The feed alone is not enough, and the order is fixed.
+            assert_eq!(
+                validate(&config, mint, &feed_only).unwrap_err(),
+                MarginfiError::WrongNumberOfOracleAccounts.into()
+            );
+            assert_eq!(
+                validate(&config, mint, &venue_then_feed).unwrap_err(),
+                MarginfiError::WrongOracleAccountKeys.into()
+            );
+
+            // The entry must be readable, same as plain Scope.
+            config.scope_entry_index = 300;
+            assert_eq!(
+                validate(&config, mint, &feed_and_venue).unwrap_err(),
+                MarginfiError::ScopeInvalidEntry.into()
             );
         }
     }

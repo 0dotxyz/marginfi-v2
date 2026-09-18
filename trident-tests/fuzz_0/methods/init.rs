@@ -555,7 +555,9 @@ impl FuzzTest {
             | OracleSetup::SolendPythPull
             | OracleSetup::SolendSwitchboardPull
             | OracleSetup::JuplendPythPull
-            | OracleSetup::JuplendSwitchboardPull => {
+            | OracleSetup::JuplendSwitchboardPull
+            | OracleSetup::ScopeKamino
+            | OracleSetup::ScopeJuplend => {
                 vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
             }
 

@@ -34,38 +34,13 @@ import { bytesToF64, getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { createMintToInstruction } from "@solana/spl-token";
-
-const SCOPE_PROGRAM = new PublicKey(
-  "HFn8GnPADiny6XqUoWE8uRPPxb29ikn4yTuPa9MF2fWJ"
-);
-/** sha256("account:OraclePrices")[..8] */
-const ORACLE_PRICES_DISCRIMINATOR = Buffer.from([
-  89, 128, 118, 221, 6, 72, 180, 146,
-]);
-const PRICES_OFFSET = 40;
-const DATED_PRICE_SIZE = 56;
-const MAX_ENTRIES = 512;
-const ORACLE_PRICES_SIZE = PRICES_OFFSET + MAX_ENTRIES * DATED_PRICE_SIZE;
-
-type Entry = { index: number; value: bigint; exp: bigint; timestamp: number };
-
-/**
- * Builds a scope `OraclePrices` buffer: discriminator, the oracle_mappings pubkey, then 512
- * `DatedPrice { value: u64, exp: u64, last_updated_slot: u64, unix_timestamp: u64, _pad: [u8;24] }`.
- * Unlisted entries stay all-zero, i.e. "never refreshed".
- */
-const makePrices = (entries: Entry[]) => {
-  const data = Buffer.alloc(ORACLE_PRICES_SIZE);
-  ORACLE_PRICES_DISCRIMINATOR.copy(data, 0);
-  for (const e of entries) {
-    const off = PRICES_OFFSET + e.index * DATED_PRICE_SIZE;
-    data.writeBigUInt64LE(e.value, off);
-    data.writeBigUInt64LE(e.exp, off + 8);
-    data.writeBigUInt64LE(BigInt(e.timestamp), off + 16); // last_updated_slot (unused)
-    data.writeBigUInt64LE(BigInt(e.timestamp), off + 24);
-  }
-  return data;
-};
+import {
+  makeScopePrices,
+  ORACLE_PRICES_SIZE,
+  ScopeEntry,
+  SCOPE_PROGRAM,
+  setScopeFeed,
+} from "../../utils/scope-utils";
 
 const scopeGroup = Keypair.generate();
 const scopeBank = Keypair.generate();
@@ -79,20 +54,14 @@ let program: Program<Marginfi>;
 
 describe("Scope oracle", () => {
   const setFeed = (pubkey: PublicKey, data: Buffer, owner = SCOPE_PROGRAM) =>
-    bankrunContext.setAccount(pubkey, {
-      executable: false,
-      owner,
-      lamports: 1_000_000_000,
-      data,
-      rentEpoch: 0,
-    });
+    setScopeFeed(bankrunContext, pubkey, data, owner);
 
-  const freshFeed = async (extra: Partial<Entry>[] = []) => {
+  const freshFeed = async (extra: Partial<ScopeEntry>[] = []) => {
     const now = await getBankrunTime(bankrunContext);
-    return makePrices([
+    return makeScopePrices([
       { ...ENTRY_A, timestamp: now },
       { ...ENTRY_B, timestamp: now },
-      ...(extra as Entry[]),
+      ...(extra as ScopeEntry[]),
     ]);
   };
 
@@ -244,7 +213,10 @@ describe("Scope oracle", () => {
   it("rejects a stale price", async () => {
     const now = await getBankrunTime(bankrunContext);
     const maxAge = defaultBankConfig().oracleMaxAge;
-    setFeed(feed, makePrices([{ ...ENTRY_A, timestamp: now - (maxAge + 60) }]));
+    setFeed(
+      feed,
+      makeScopePrices([{ ...ENTRY_A, timestamp: now - (maxAge + 60) }])
+    );
     await expectFailedTxWithError(
       async () => {
         await pulse(scopeBank.publicKey);
@@ -257,7 +229,7 @@ describe("Scope oracle", () => {
 
   it("rejects an exponent past the power-of-ten table", async () => {
     const now = await getBankrunTime(bankrunContext);
-    setFeed(feed, makePrices([{ ...ENTRY_A, exp: 24n, timestamp: now }]));
+    setFeed(feed, makeScopePrices([{ ...ENTRY_A, exp: 24n, timestamp: now }]));
     await expectFailedTxWithError(
       async () => {
         await pulse(scopeBank.publicKey);
@@ -292,7 +264,7 @@ describe("Scope oracle", () => {
     const now = await getBankrunTime(bankrunContext);
     setFeed(
       feed,
-      makePrices([{ ...ENTRY_A, value: 20_000_000_000n, timestamp: now }])
+      makeScopePrices([{ ...ENTRY_A, value: 20_000_000_000n, timestamp: now }])
     );
     const pulsed = await pulse(scopeBank.publicKey);
     assertI80F48Approx(pulsed.cache.lastOraclePrice, 200.0, 0.000001);
@@ -303,7 +275,7 @@ describe("Scope oracle", () => {
     const now = await getBankrunTime(bankrunContext);
     setFeed(
       feed,
-      makePrices([{ ...ENTRY_A, value: 250n, exp: 0n, timestamp: now }])
+      makeScopePrices([{ ...ENTRY_A, value: 250n, exp: 0n, timestamp: now }])
     );
     const pulsed = await pulse(scopeBank.publicKey);
     assertI80F48Approx(pulsed.cache.lastOraclePrice, 250.0, 0.000001);
@@ -314,7 +286,7 @@ describe("Scope oracle", () => {
     const now = await getBankrunTime(bankrunContext);
     setFeed(
       feed,
-      makePrices([
+      makeScopePrices([
         {
           ...ENTRY_A,
           value: 12_345_678_900_000_000_000n,
@@ -331,12 +303,15 @@ describe("Scope oracle", () => {
   it("accepts a price exactly at max_age and rejects one second past it", async () => {
     const maxAge = defaultBankConfig().oracleMaxAge;
     let now = await getBankrunTime(bankrunContext);
-    setFeed(feed, makePrices([{ ...ENTRY_A, timestamp: now - maxAge }]));
+    setFeed(feed, makeScopePrices([{ ...ENTRY_A, timestamp: now - maxAge }]));
     const pulsed = await pulse(scopeBank.publicKey);
     assertI80F48Approx(pulsed.cache.lastOraclePrice, 103.445108, 0.000001);
 
     now = await getBankrunTime(bankrunContext);
-    setFeed(feed, makePrices([{ ...ENTRY_A, timestamp: now - (maxAge + 1) }]));
+    setFeed(
+      feed,
+      makeScopePrices([{ ...ENTRY_A, timestamp: now - (maxAge + 1) }])
+    );
     await expectFailedTxWithError(
       async () => {
         await pulse(scopeBank.publicKey);
@@ -349,7 +324,7 @@ describe("Scope oracle", () => {
 
   it("rejects a zero value carrying a fresh timestamp", async () => {
     const now = await getBankrunTime(bankrunContext);
-    setFeed(feed, makePrices([{ ...ENTRY_A, value: 0n, timestamp: now }]));
+    setFeed(feed, makeScopePrices([{ ...ENTRY_A, value: 0n, timestamp: now }]));
     await expectFailedTxWithError(
       async () => {
         await pulse(scopeBank.publicKey);
@@ -361,7 +336,7 @@ describe("Scope oracle", () => {
   });
 
   it("rejects a non-zero value with a zero timestamp", async () => {
-    setFeed(feed, makePrices([{ ...ENTRY_A, timestamp: 0 }]));
+    setFeed(feed, makeScopePrices([{ ...ENTRY_A, timestamp: 0 }]));
     await expectFailedTxWithError(
       async () => {
         await pulse(scopeBank.publicKey);

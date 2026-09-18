@@ -537,17 +537,20 @@ export type ConfigureBankOracleScopeArgs = {
   oracle: PublicKey;
   /** Which of the 512 entries in that account prices this bank */
   entryIndex: number;
+  /**
+   * Venue account after the feed: the Kamino reserve for a Kamino bank, the JupLend `Lending`
+   * state for a JupLend bank. Omit for a regular bank.
+   */
+  remaining?: PublicKey[];
 };
 
 export const configureBankOracleScope = (
   program: Program<Marginfi>,
   args: ConfigureBankOracleScopeArgs,
 ) => {
-  const oracleMeta: AccountMeta = {
-    pubkey: args.oracle,
-    isSigner: false,
-    isWritable: false,
-  };
+  const metas: AccountMeta[] = [args.oracle, ...(args.remaining ?? [])].map(
+    (pubkey) => ({ pubkey, isSigner: false, isWritable: false }),
+  );
 
   const governanceAdmin = args.governanceAdmin || (program.provider as AnchorProvider).wallet.publicKey;
   const accounts: Record<string, PublicKey> = {
@@ -562,7 +565,7 @@ export const configureBankOracleScope = (
   const ix = program.methods
     .lendingPoolConfigureBankOracleScope(args.oracle, args.entryIndex)
     .accounts(accounts)
-    .remainingAccounts([oracleMeta])
+    .remainingAccounts(metas)
     .instruction();
 
   return ix;
