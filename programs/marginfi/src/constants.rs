@@ -74,9 +74,9 @@ pub const LIQUIDATION_FLAT_FEE_DEFAULT: u32 = 5000;
 /// * This is the minimum value the program allows for the above, if fee state is set below this,
 ///   the program will use this instead.
 pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
-/// Liquidators can consume/close out the entire account with essentially no limits (e.g. regardless
-/// of liquidation bonus, etc) if it has net assets worth less than this amount in dollars. This
-/// roughly covers the fee to open a liquidation record plus a little extra.
+/// Liquidators may leave the account healthy, or close it out entirely, if it has net assets worth
+/// less than this amount in dollars. The liquidation bonus cap still applies. This roughly covers
+/// the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
 /// Margin above the health-neutral discount (`asset weight / liability weight`) that
 /// `lending_account_liquidate` credits the liquidatee, so a fee-capped liquidation still improves
