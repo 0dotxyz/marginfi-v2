@@ -29,6 +29,12 @@ Use `distill_kamino_macro_idl.py` to generate minimal Kamino IDLs for macro gene
 curl -sSfL https://raw.githubusercontent.com/Kamino-Finance/klend-sdk/master/src/idl/klend.json -o k_lend_idl_xxx.json
 ```
 
+> **Deployment check required:** `update_idls.sh` fetches the IDL from the GitHub `master`/`main`
+> branch but dumps the executable from mainnet RPC. Before committing generated fixtures, MAKE SURE
+> that the IDL is the code actually deployed to the target mainnet program (and not an unreleased or
+> newer branch revision). Do not assume the `.so` and IDL match merely because both were fetched
+> successfully.
+
 ### 2. Refresh `idls-complete/` first (full IDs)
 
 Make sure the full IDL is in `idls-complete/` before rewriting the minimal one in `idls/`.
@@ -86,6 +92,7 @@ cargo check -p kamino-mocks
   there is more than one FarmsAccount. We sidestep this annoyance by splitting duplicates like this
   into one type per instruction, e.g. a `DepositFarmsAccounts`.
 - TS code should import from `idls-complete/` when full/mainnet-like IDL behavior is required.
+- Follow the Deployment check required notes when fetching new IDLs.
 
 ## Drift + JupLend minimal distillation workflow
 
