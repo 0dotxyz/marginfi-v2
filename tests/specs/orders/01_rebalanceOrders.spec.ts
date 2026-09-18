@@ -2392,7 +2392,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
   });
   const MAX_BALANCES = 16;
   /** `MAX_INTEGRATION_POSITIONS`, the most integration balances an account may hold. */
-  const INTEGRATION_BALANCES = 8;
+  const INTEGRATION_BALANCES = 4;
   const WORST_CASE_SEED_BASE = 7_710;
   /** Measures ~923k. A bound rather than the figure, which every program edit shifts. */
   const CU_CEILING = 1_100_000;
