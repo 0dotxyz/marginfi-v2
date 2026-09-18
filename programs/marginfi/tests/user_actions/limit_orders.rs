@@ -861,7 +861,7 @@ async fn limit_order_start_succeeds_after_fixed_price_shift() -> anyhow::Result<
     let fixed_price = WrappedI80F48::from(fp!(150));
     let set_fixed_ix = test_f
         .marginfi_group
-        .make_lending_pool_set_fixed_oracle_price_ix(asset_bank_f, fixed_price);
+        .make_lending_pool_set_oracle_price_ix(asset_bank_f, fixed_price);
 
     {
         let ctx = test_f.context.borrow_mut();

@@ -112,7 +112,7 @@ impl SolendConfigCompact {
             cb_window_seconds: 0,
             total_asset_value_init_limit: self.total_asset_value_init_limit,
             oracle_max_age: self.oracle_max_age,
-            _padding0: [0; 2],
+            scope_entry_index: 0,
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],

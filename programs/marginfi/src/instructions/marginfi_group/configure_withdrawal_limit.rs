@@ -1,5 +1,6 @@
 use crate::{
-    check, errors::MarginfiError, state::marginfi_group::MarginfiGroupImpl, MarginfiResult,
+    check, errors::MarginfiError, ix_utils, state::marginfi_group::MarginfiGroupImpl,
+    MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
@@ -8,6 +9,8 @@ pub fn configure_deleverage_withdrawal_limit(
     ctx: Context<ConfigureDeleverageWithdrawalLimit>,
     daily_withdrawal_limit: u32,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut marginfi_group = ctx.accounts.marginfi_group.load_mut()?;
 
     check!(
@@ -39,4 +42,8 @@ pub struct ConfigureDeleverageWithdrawalLimit<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

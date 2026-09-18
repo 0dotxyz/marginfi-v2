@@ -1244,14 +1244,13 @@ impl TestFixture {
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
+        // Never sign with the context's cached `last_blockhash`: it is captured once at startup and
+        // falls out of the bank's recent-blockhash queue as slots advance, which surfaces as
+        // `BlockhashNotFound` on slower machines.
+        let blockhash = ctx.borrow_mut().banks_client.get_latest_blockhash().await?;
         let tx = {
             let c = ctx.borrow();
-            Transaction::new_signed_with_payer(
-                ixs,
-                Some(&c.payer.pubkey()),
-                &[&c.payer],
-                c.last_blockhash,
-            )
+            Transaction::new_signed_with_payer(ixs, Some(&c.payer.pubkey()), &[&c.payer], blockhash)
         };
         ctx.borrow_mut()
             .banks_client
@@ -1427,6 +1426,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: reserve_mint.token_program,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -1665,6 +1665,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: spl_token::ID,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -2135,6 +2136,7 @@ impl TestFixture {
                 integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
                 system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolAddBankJuplend {

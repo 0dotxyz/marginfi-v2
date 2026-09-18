@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::{
     check,
     constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, JUP_KEY, TITAN_KEY},
@@ -73,6 +74,7 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
 pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();

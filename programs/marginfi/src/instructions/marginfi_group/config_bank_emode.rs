@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiError;
@@ -10,6 +11,8 @@ pub fn lending_pool_configure_bank_emode(
     emode_tag: u16,
     entries: [EmodeEntry; MAX_EMODE_ENTRIES],
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
@@ -66,4 +69,8 @@ pub struct LendingPoolConfigureBankEmode<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

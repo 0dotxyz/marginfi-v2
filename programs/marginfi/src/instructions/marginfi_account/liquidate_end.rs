@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::{
     check,
     constants::{LIQUIDATION_BONUS_FEE_MINIMUM, LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD},
@@ -44,9 +45,9 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let pre_assets_equity: I80F48 = liq_record.cache.asset_value_equity.into();
 
     // Note: We guarantee that liquidation improves health to at most 0, unless the account's net
-    // value is below the threshold: such dust accounts may be fully cleared (ending healthy) and
-    // skip the premium cap, since a partial liquidation isn't worth the fees.
-    let is_dust_closeout = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
+    // value is below the threshold, then it may end healthy or fully cleared. The premium cap
+    // below applies regardless.
+    let below_closeout_threshold = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
@@ -59,7 +60,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        is_dust_closeout,
+        below_closeout_threshold,
         true,
     )?;
 
@@ -75,12 +76,10 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let max_fee: I80F48 = I80F48!(1) + premium;
 
     // Ensure seized asset‐value ≤ N% of repaid liability‐value, where N = 100% + the bonus fee
-    if !is_dust_closeout {
-        check!(
-            seized <= repaid * max_fee,
-            MarginfiError::LiquidationPremiumTooHigh
-        );
-    }
+    check!(
+        seized <= repaid * max_fee,
+        MarginfiError::LiquidationPremiumTooHigh
+    );
 
     let liquidation_flat_sol_fee = fee_state.liquidation_flat_sol_fee;
     if liquidation_flat_sol_fee > 0 {
@@ -106,6 +105,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 ///   extracted value to fund a health loss.
 ///   Note: no fees taken.
 pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let group = ctx.accounts.group.load()?;
@@ -133,6 +133,7 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
 }
 
 // Common logic for both liquidation and deleverage.
+// * `below_closeout_threshold`: the account may end healthy. Deleverage always allows it.
 // * `premium_capped`: the caller enforces a premium cap on what the receiver seized, so health may
 //   fall by up to that premium. Deleverage takes no premium and must not worsen health at all.
 pub fn end_receivership<'info>(
@@ -140,7 +141,7 @@ pub fn end_receivership<'info>(
     group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
-    ignore_healthy: bool,
+    below_closeout_threshold: bool,
     premium_capped: bool,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
     let pre_assets: I80F48 = liq_record.cache.asset_value_maint.into();
@@ -158,7 +159,7 @@ pub fn end_receivership<'info>(
             None,
             &mut Some(&mut post_hc),
             HealthPriceMode::Cached,
-            ignore_healthy,
+            below_closeout_threshold,
         )?;
     let mut premium_scratch = PremiumScratch::default();
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
@@ -361,6 +362,10 @@ pub struct EndDeleverage<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub risk_admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for EndDeleverage<'_> {
