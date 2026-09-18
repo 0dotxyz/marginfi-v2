@@ -47,13 +47,13 @@ async fn on_ramp_transition_flags_test() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn staked_oracle_transition_requires_slow_bank_admin() -> anyhow::Result<()> {
+async fn staked_oracle_transition_requires_governance_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let slow_admin = Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&slow_admin)
+        .try_set_governance_admin(&slow_admin)
         .await?;
 
     let fast_result = test_f.marginfi_group.try_disable_staked_oracles().await;

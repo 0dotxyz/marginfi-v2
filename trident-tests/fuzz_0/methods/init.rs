@@ -239,6 +239,7 @@ impl FuzzTest {
         // both fast and governance admin for this isolated harness.
         let ix = types::marginfi::MarginfiGroupConfigureGovInstruction::data(
             types::marginfi::MarginfiGroupConfigureGovInstructionData::new(
+                None,
                 Some(payer),
                 None,
                 None,

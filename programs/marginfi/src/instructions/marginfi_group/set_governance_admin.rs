@@ -1,16 +1,22 @@
 use crate::{
-    events::{GroupEventHeader, SetBankAdminEvent},
+    events::{GroupEventHeader, SetGovernanceAdminEvent},
+    ix_utils,
     state::marginfi_group::MarginfiGroupImpl,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 
-pub fn set_bank_admin(ctx: Context<SetBankAdmin>, new_bank_admin: Pubkey) -> MarginfiResult {
+pub fn set_governance_admin(
+    ctx: Context<SetGovernanceAdmin>,
+    new_governance_admin: Pubkey,
+) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     require_neq!(
-        new_bank_admin,
+        new_governance_admin,
         Pubkey::default(),
-        MarginfiError::InvalidBankAdmin
+        MarginfiError::InvalidGovernanceAdmin
     );
 
     let mut group = ctx.accounts.marginfi_group.load_mut()?;
@@ -22,24 +28,28 @@ pub fn set_bank_admin(ctx: Context<SetBankAdmin>, new_bank_admin: Pubkey) -> Mar
     } else {
         group.require_governance_admin(*ctx.accounts.signer.key)?;
     }
-    group.update_governance_admin(new_bank_admin);
+    group.update_governance_admin(new_governance_admin);
 
-    emit!(SetBankAdminEvent {
+    emit!(SetGovernanceAdminEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
             signer: Some(*ctx.accounts.signer.key)
         },
-        previous_bank_admin: previous_governance_admin,
-        new_bank_admin,
+        previous_governance_admin,
+        new_governance_admin,
     });
 
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct SetBankAdmin<'info> {
+pub struct SetGovernanceAdmin<'info> {
     #[account(mut)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub signer: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

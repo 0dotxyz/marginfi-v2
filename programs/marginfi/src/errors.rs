@@ -286,7 +286,7 @@ pub enum MarginfiError {
     #[msg("Deprecated: bank configuration now uses explicit fast and governance instructions")]
     MixedBankConfigAuthority, // 6140
     #[msg("Governance admin cannot be set to the default pubkey (all zeros); this would disable slow-authority operations")]
-    InvalidBankAdmin, // 6141
+    InvalidGovernanceAdmin, // 6141
     #[msg("Deprecated: group configuration now uses explicit fast and governance instructions")]
     MixedGroupConfigAuthority, // 6142
     #[msg("Fast bank configuration cannot transition a bank to Operational; use lending_pool_configure_bank_gov")]
@@ -702,7 +702,7 @@ impl From<u32> for MarginfiError {
             6138 => MarginfiError::InvalidPtStartPrice,
             6139 => MarginfiError::StakePoolStale,
             6140 => MarginfiError::MixedBankConfigAuthority,
-            6141 => MarginfiError::InvalidBankAdmin,
+            6141 => MarginfiError::InvalidGovernanceAdmin,
             6142 => MarginfiError::MixedGroupConfigAuthority,
             6143 => MarginfiError::InvalidFastBankOperationalState,
             6144 => MarginfiError::InvalidGovernanceBankOperationalState,

@@ -147,7 +147,7 @@ async fn premium_config_requires_fast_admin_after_authorities_diverge() -> anyho
     let slow_admin = Keypair::new();
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    group_f.try_set_bank_admin(&slow_admin).await?;
+    group_f.try_set_governance_admin(&slow_admin).await?;
 
     // The original payer remains the fast group admin and can configure premium settings.
     group_f

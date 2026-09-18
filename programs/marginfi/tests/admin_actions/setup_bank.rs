@@ -1304,10 +1304,10 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
-    let copy_to_bank_admin = test_f.get_bank(&BankMint::Sol);
+    let copy_to_bank = test_f.get_bank(&BankMint::Sol);
     let copy_to_bank_emode_admin = test_f.get_bank(&BankMint::PyUSD);
 
-    let copy_to_before = copy_to_bank_admin.load().await;
+    let copy_to_before = copy_to_bank.load().await;
     assert_eq!(copy_to_before.emode.flags, 0);
     assert_eq!(copy_to_before.emode.emode_tag, 0);
 
@@ -1334,11 +1334,11 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     // Admin can clone emode settings.
     test_f
         .marginfi_group
-        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank_admin)
+        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank)
         .await?;
 
     let copy_from_after = copy_from_bank.load().await;
-    let copy_to_after = copy_to_bank_admin.load().await;
+    let copy_to_after = copy_to_bank.load().await;
 
     assert_eq!(copy_to_after.emode, copy_from_after.emode);
     assert_eq!(copy_to_after.config, copy_to_before.config);

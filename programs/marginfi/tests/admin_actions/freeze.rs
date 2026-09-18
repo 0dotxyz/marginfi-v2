@@ -231,7 +231,7 @@ async fn frozen_account_withdraw_requires_governance_admin() -> anyhow::Result<(
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&slow_admin)
+        .try_set_governance_admin(&slow_admin)
         .await?;
     // The unchanged fast group admin can still freeze immediately.
     marginfi_account.try_set_freeze(true).await?;

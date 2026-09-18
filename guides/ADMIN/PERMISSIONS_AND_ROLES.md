@@ -18,7 +18,7 @@ The `MarginfiGroup` account defines nine distinct group-level admin roles. Each 
 operational authority; `governance_admin` is the slow, timelocked authority for changes that can
 materially affect user funds. A legacy group has a zero `governance_admin` after its account is
 resized, so slow-authority operations fail closed until `admin` bootstraps it once with the
-legacy-named `marginfi_group_set_bank_admin` instruction. After that, only
+`marginfi_group_set_governance_admin` instruction. After that, only
 `governance_admin` can rotate the role. It cannot be set to the zero pubkey.
 
 ### Governance Admin (Slow / Timelocked)
@@ -295,8 +295,8 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Instruction | Required Role |
 |-------------|---------------|
 | Configure fast group roles | `admin` |
-| Configure governance group roles / e-mode limits | `governance_admin` |
-| Bootstrap/rotate governance admin | `admin` only while zero; then `governance_admin` (legacy `marginfi_group_set_bank_admin`) |
+| Configure governance group roles, the fast admin, and e-mode limits | `governance_admin` |
+| Bootstrap/rotate governance admin | `admin` only while zero; then `governance_admin` (`marginfi_group_set_governance_admin`) |
 | Add bank (native, Kamino, Drift, Solend, JupLend) | `governance_admin` |
 | Configure bank — fast fields | `admin` |
 | Configure bank — governance fields / tokenless repayments / restore Operational | `governance_admin` |

@@ -73,9 +73,11 @@ pub fn configure(
     )
 }
 
-/// Configure slow, timelocked margin group governance roles and e-mode leverage caps.
+/// Configure slow, timelocked margin group governance roles, the fast admin, and e-mode leverage
+/// caps.
 pub fn configure_gov(
     ctx: Context<MarginfiGroupConfigureGov>,
+    new_admin: Option<Pubkey>,
     new_emode_admin: Option<Pubkey>,
     new_risk_admin: Option<Pubkey>,
     emode_max_init_leverage: Option<WrappedI80F48>,
@@ -86,6 +88,9 @@ pub fn configure_gov(
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_mut()?;
+    if let Some(new_admin) = new_admin {
+        marginfi_group.update_admin(new_admin);
+    }
     if let Some(new_emode_admin) = new_emode_admin {
         marginfi_group.update_emode_admin(new_emode_admin);
     }
@@ -154,7 +159,7 @@ pub fn configure_gov(
         marginfi_group,
         ctx.accounts.marginfi_group.key(),
         ctx.accounts.governance_admin.key(),
-        None,
+        new_admin,
     )
 }
 

@@ -41,10 +41,10 @@ async fn aggregate_test_config_dispatches_fast_and_governance_instructions() -> 
 #[tokio::test]
 async fn group_configuration_has_explicit_fast_and_governance_entry_points() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let bank_admin = Keypair::new();
+    let governance_admin = Keypair::new();
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let metadata_admin = solana_sdk::pubkey::Pubkey::new_unique();
@@ -64,11 +64,13 @@ async fn group_configuration_has_explicit_fast_and_governance_entry_points() -> 
         .await?;
 
     let risk_admin = solana_sdk::pubkey::Pubkey::new_unique();
+    let new_fast_admin = solana_sdk::pubkey::Pubkey::new_unique();
     test_f
         .marginfi_group
         .try_group_configure_gov_with_signer(
-            &bank_admin,
+            &governance_admin,
             marginfi::instruction::MarginfiGroupConfigureGov {
+                new_admin: Some(new_fast_admin),
                 new_emode_admin: None,
                 new_risk_admin: Some(risk_admin),
                 emode_max_init_leverage: None,
@@ -80,6 +82,7 @@ async fn group_configuration_has_explicit_fast_and_governance_entry_points() -> 
         .await?;
 
     let group = test_f.marginfi_group.load().await;
+    assert_eq!(group.admin, new_fast_admin);
     assert_eq!(group.metadata_admin, metadata_admin);
     assert_eq!(group.risk_admin, risk_admin);
     Ok(())
@@ -97,10 +100,10 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
     }))
     .await;
     let bank = test_f.get_bank(&BankMint::Usdc);
-    let bank_admin = Keypair::new();
+    let governance_admin = Keypair::new();
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let fast_ix = Instruction {
@@ -135,7 +138,7 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
         program_id: marginfi::ID,
         accounts: marginfi::accounts::LendingPoolConfigureBankGov {
             group: test_f.marginfi_group.key,
-            governance_admin: bank_admin.pubkey(),
+            governance_admin: governance_admin.pubkey(),
             bank: bank.key,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
@@ -152,7 +155,7 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
     let tx = Transaction::new_signed_with_payer(
         &[gov_ix],
         Some(&ctx.payer.pubkey()),
-        &[&ctx.payer, &bank_admin],
+        &[&ctx.payer, &governance_admin],
         ctx.banks_client.get_latest_blockhash().await?,
     );
     let err = ctx.banks_client.process_transaction(tx).await.unwrap_err();

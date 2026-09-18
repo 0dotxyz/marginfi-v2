@@ -67,6 +67,26 @@ fn configure_bank_premium_ix(test_f: &TestFixture, admin: Pubkey) -> Instruction
     }
 }
 
+fn set_governance_admin_ix(
+    test_f: &TestFixture,
+    signer: Pubkey,
+    new_governance_admin: Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::SetGovernanceAdmin {
+            marginfi_group: test_f.marginfi_group.key,
+            signer,
+            instruction_sysvar: solana_instructions_sysvar::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiGroupSetGovernanceAdmin {
+            new_governance_admin,
+        }
+        .data(),
+    }
+}
+
 #[tokio::test]
 async fn admin_instruction_rejects_durable_nonce_transaction() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -80,6 +100,33 @@ async fn admin_instruction_rejects_durable_nonce_transaction() -> anyhow::Result
         ],
         Some(&admin.pubkey()),
         &[&admin],
+        nonce_hash,
+    );
+    let res = banks_client(&test_f)
+        .process_transaction_with_preflight(tx)
+        .await;
+
+    assert_custom_error!(res.unwrap_err(), MarginfiError::DurableNonceNotAllowed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn set_governance_admin_rejects_durable_nonce_transaction() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let governance_admin = test_f.payer_keypair();
+    let (nonce, nonce_hash) = create_nonce(&test_f, &governance_admin).await?;
+
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            advance_nonce_account(&nonce.pubkey(), &governance_admin.pubkey()),
+            set_governance_admin_ix(
+                &test_f,
+                governance_admin.pubkey(),
+                Keypair::new().pubkey(),
+            ),
+        ],
+        Some(&governance_admin.pubkey()),
+        &[&governance_admin],
         nonce_hash,
     );
     let res = banks_client(&test_f)

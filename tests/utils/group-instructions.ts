@@ -1,5 +1,9 @@
 import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import {
+  AccountMeta,
+  PublicKey,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import {
   deriveBankWithSeed,
@@ -138,12 +142,15 @@ export const addBankWithSeed = (
 };
 
 /**
- * Every omitted field is encoded as `null` and left unchanged. Fast-admin and slow-governance-admin
- * fields use distinct instructions. Use `groupConfigureIxs` when a test deliberately updates
- * both classes in the same transaction.
+ * Every omitted field is encoded as `null` and left unchanged. Fast-admin configuration and
+ * slow-governance configuration use distinct instructions. `newFastAdmin` deliberately routes a
+ * fast-admin rotation through the governance instruction. Use `groupConfigureIxs` when a test
+ * updates both classes in the same transaction.
  */
 export type GroupConfigureArgs = {
   newAdmin?: PublicKey | null; // optional; pass null or leave undefined to keep current admin
+  /** Optional fast-admin rotation authorized by the governance admin. */
+  newFastAdmin?: PublicKey | null;
   newEmodeAdmin?: PublicKey | null;
   newCurveAdmin?: PublicKey | null;
   newLimitAdmin?: PublicKey | null;
@@ -173,7 +180,6 @@ const groupConfigureFast = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      admin: (program.provider as AnchorProvider).wallet.publicKey,
     })
     .instruction();
 };
@@ -184,6 +190,7 @@ const groupConfigureGov = (
 ) => {
   return program.methods
     .marginfiGroupConfigureGov(
+      args.newFastAdmin ?? null,
       args.newEmodeAdmin ?? null,
       args.newRiskAdmin ?? null,
       args.emodeMaxInitLeverage ?? null,
@@ -193,7 +200,6 @@ const groupConfigureGov = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      governanceAdmin: (program.provider as AnchorProvider).wallet.publicKey,
     })
     .instruction();
 };
@@ -207,6 +213,7 @@ const hasFastGroupConfig = (args: GroupConfigureArgs) =>
   args.newMetadataAdmin != null;
 
 const hasGovGroupConfig = (args: GroupConfigureArgs) =>
+  args.newFastAdmin != null ||
   args.newEmodeAdmin != null ||
   args.newRiskAdmin != null ||
   args.emodeMaxInitLeverage != null ||
@@ -226,7 +233,9 @@ export const groupConfigure = async (
       "groupConfigure received fast and governance fields; use groupConfigureIxs",
     );
   }
-  return gov ? groupConfigureGov(program, args) : groupConfigureFast(program, args);
+  return gov
+    ? groupConfigureGov(program, args)
+    : groupConfigureFast(program, args);
 };
 
 /** Build explicit fast and governance instructions for one atomic test transaction. */
@@ -235,7 +244,8 @@ export const groupConfigureIxs = async (
   args: GroupConfigureArgs,
 ): Promise<TransactionInstruction[]> => {
   const ixs: TransactionInstruction[] = [];
-  if (hasFastGroupConfig(args)) ixs.push(await groupConfigureFast(program, args));
+  if (hasFastGroupConfig(args))
+    ixs.push(await groupConfigureFast(program, args));
   if (hasGovGroupConfig(args)) ixs.push(await groupConfigureGov(program, args));
   return ixs;
 };
@@ -262,15 +272,23 @@ export const groupInitialize = (
   return ix;
 };
 
-/** One-time legacy migration shim: bootstrap a resized v1 group's slow governance admin. */
-export const setBankAdmin = (
+/** Bootstrap or rotate a group's slow governance admin. */
+export const setGovernanceAdmin = (
   program: Program<Marginfi>,
-  args: { marginfiGroup: PublicKey; newBankAdmin: PublicKey; signer?: PublicKey },
+  args: {
+    marginfiGroup: PublicKey;
+    newGovernanceAdmin: PublicKey;
+    signer?: PublicKey;
+  },
 ) => {
-  const signer = args.signer ?? (program.provider as AnchorProvider).wallet.publicKey;
+  const signer =
+    args.signer ?? (program.provider as AnchorProvider).wallet.publicKey;
   return program.methods
-    .marginfiGroupSetBankAdmin(args.newBankAdmin)
-    .accounts({ marginfiGroup: args.marginfiGroup, signer })
+    .marginfiGroupSetGovernanceAdmin(args.newGovernanceAdmin)
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+      signer,
+    })
     .instruction();
 };
 
@@ -334,7 +352,8 @@ const isOperational = (state: BankConfigOptRaw["operationalState"]) =>
 const hasFastBankConfig = (config: BankConfigOptRaw) =>
   config.depositLimit != null ||
   config.borrowLimit != null ||
-  (config.operationalState != null && !isOperational(config.operationalState)) ||
+  (config.operationalState != null &&
+    !isOperational(config.operationalState)) ||
   config.interestRateConfig != null ||
   config.totalAssetValueInitLimit != null ||
   config.permissionlessBadDebtSettlement != null ||
@@ -365,7 +384,9 @@ const hasGovBankConfig = (config: BankConfigOptRaw) =>
 const fastBankConfig = (config: BankConfigOptRaw) => ({
   depositLimit: config.depositLimit,
   borrowLimit: config.borrowLimit,
-  operationalState: isOperational(config.operationalState) ? null : config.operationalState,
+  operationalState: isOperational(config.operationalState)
+    ? null
+    : config.operationalState,
   interestRateConfig: config.interestRateConfig,
   totalAssetValueInitLimit: config.totalAssetValueInitLimit,
   permissionlessBadDebtSettlement: config.permissionlessBadDebtSettlement,
@@ -387,7 +408,9 @@ const govBankConfig = (config: BankConfigOptRaw) => ({
   assetWeightMaint: config.assetWeightMaint,
   liabilityWeightInit: config.liabilityWeightInit,
   liabilityWeightMaint: config.liabilityWeightMaint,
-  operationalState: isOperational(config.operationalState) ? config.operationalState : null,
+  operationalState: isOperational(config.operationalState)
+    ? config.operationalState
+    : null,
   riskTier: config.riskTier,
   assetTag: config.assetTag,
   oracleMaxConfidence: config.oracleMaxConfidence,
@@ -399,7 +422,8 @@ const configureFastBank = (
   program: Program<Marginfi>,
   args: ConfigureBankArgs,
 ): Promise<TransactionInstruction> => {
-  const admin = args.signer || (program.provider as AnchorProvider).wallet.publicKey;
+  const admin =
+    args.signer || (program.provider as AnchorProvider).wallet.publicKey;
   const accounts: Record<string, PublicKey> = { bank: args.bank, admin };
   if (args.group) accounts.group = args.group;
   return program.methods
@@ -412,8 +436,12 @@ const configureGovBank = (
   program: Program<Marginfi>,
   args: ConfigureBankArgs,
 ): Promise<TransactionInstruction> => {
-  const governanceAdmin = args.signer || (program.provider as AnchorProvider).wallet.publicKey;
-  const accounts: Record<string, PublicKey> = { bank: args.bank, governanceAdmin };
+  const governanceAdmin =
+    args.signer || (program.provider as AnchorProvider).wallet.publicKey;
+  const accounts: Record<string, PublicKey> = {
+    bank: args.bank,
+    governanceAdmin,
+  };
   if (args.group) accounts.group = args.group;
   return program.methods
     .lendingPoolConfigureBankGov(govBankConfig(args.bankConfigOpt))
@@ -433,7 +461,9 @@ export const configureBank = (
       "configureBank received fast and governance fields; use configureBankIxs",
     );
   }
-  return gov ? configureGovBank(program, args) : configureFastBank(program, args);
+  return gov
+    ? configureGovBank(program, args)
+    : configureFastBank(program, args);
 };
 
 /** Build explicit fast and governance instructions for one atomic test transaction. */
@@ -442,8 +472,10 @@ export const configureBankIxs = async (
   args: ConfigureBankArgs,
 ): Promise<TransactionInstruction[]> => {
   const ixs: TransactionInstruction[] = [];
-  if (hasFastBankConfig(args.bankConfigOpt)) ixs.push(await configureFastBank(program, args));
-  if (hasGovBankConfig(args.bankConfigOpt)) ixs.push(await configureGovBank(program, args));
+  if (hasFastBankConfig(args.bankConfigOpt))
+    ixs.push(await configureFastBank(program, args));
+  if (hasGovBankConfig(args.bankConfigOpt))
+    ixs.push(await configureGovBank(program, args));
   return ixs;
 };
 
@@ -511,7 +543,9 @@ export const configureBankOracle = (
     (pubkey) => ({ pubkey, isSigner: false, isWritable: false }),
   );
 
-  const governanceAdmin = args.governanceAdmin || (program.provider as AnchorProvider).wallet.publicKey;
+  const governanceAdmin =
+    args.governanceAdmin ||
+    (program.provider as AnchorProvider).wallet.publicKey;
   const accounts: Record<string, PublicKey> = {
     bank: args.bank,
     governanceAdmin,
@@ -552,7 +586,9 @@ export const configureBankOracleScope = (
     (pubkey) => ({ pubkey, isSigner: false, isWritable: false }),
   );
 
-  const governanceAdmin = args.governanceAdmin || (program.provider as AnchorProvider).wallet.publicKey;
+  const governanceAdmin =
+    args.governanceAdmin ||
+    (program.provider as AnchorProvider).wallet.publicKey;
   const accounts: Record<string, PublicKey> = {
     bank: args.bank,
     governanceAdmin,
@@ -678,7 +714,7 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
-      args.accountTransferFee ?? null
+      args.accountTransferFee ?? null,
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -882,10 +918,7 @@ export const disableStakedOracles = (
   group: PublicKey,
   governanceAdmin?: PublicKey,
 ) => {
-  const [stakedSettingsKey] = deriveStakedSettings(
-    program.programId,
-    group,
-  );
+  const [stakedSettingsKey] = deriveStakedSettings(program.programId, group);
   const ix = program.methods
     .disableStakedOracles()
     .accounts({
@@ -902,10 +935,7 @@ export const enableStakedOracleOnramp = (
   group: PublicKey,
   governanceAdmin?: PublicKey,
 ) => {
-  const [stakedSettingsKey] = deriveStakedSettings(
-    program.programId,
-    group,
-  );
+  const [stakedSettingsKey] = deriveStakedSettings(program.programId, group);
   const ix = program.methods
     .enableStakedOracleOnramp()
     .accounts({
@@ -1164,9 +1194,9 @@ export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   const ix = program.methods
     .lendingPoolCloseBank(args.forceClose ?? null)
     .accounts({
-      group: args.marginfiGroup,
+      // group: args.marginfiGroup,
       bank: args.bank,
-      admin: args.admin,
+      // admin: args.admin,
     })
     .instruction();
   return ix;
@@ -1180,7 +1210,7 @@ export type ClearCircuitBreakerArgs = {
 
 export const clearCircuitBreaker = async (
   program: Program<Marginfi>,
-  args: ClearCircuitBreakerArgs
+  args: ClearCircuitBreakerArgs,
 ) => {
   return program.methods
     .lendingPoolClearCircuitBreaker(args.reseedReference ?? false)
@@ -1280,7 +1310,7 @@ export const initSameAssetEmodeRegistry = (
     .lendingPoolInitSameAssetEmodeRegistry()
     .accounts({
       group: args.group,
-      governanceAdmin: args.governanceAdmin,
+      // governanceAdmin: args.governanceAdmin,
       // sameAssetEmodeRegistry,
     })
     .instruction();
@@ -1305,7 +1335,9 @@ export const setFixedPrice = (
     return { pubkey, isSigner: false, isWritable: false };
   });
 
-  const governanceAdmin = args.governanceAdmin || (program.provider as AnchorProvider).wallet.publicKey;
+  const governanceAdmin =
+    args.governanceAdmin ||
+    (program.provider as AnchorProvider).wallet.publicKey;
   const accounts: Record<string, PublicKey> = {
     bank: args.bank,
     governanceAdmin,
@@ -1342,7 +1374,7 @@ export const setBankSameAssetEmodeEligibility = (
     .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
     .accounts({
       // group: args.group,
-      governanceAdmin: args.governanceAdmin,
+      // governanceAdmin: args.governanceAdmin,
       bank: args.bank,
       // sameAssetEmodeRegistry,
     })
@@ -1392,7 +1424,7 @@ export const writeBankMetadata = (
   const ix = program.methods
     .writeBankMetadata(
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       // group: implied
@@ -1445,7 +1477,7 @@ export const writeBankMetadataPreInit = (
     .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,

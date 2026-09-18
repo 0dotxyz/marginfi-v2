@@ -15,11 +15,11 @@ async fn configure_bank_authority_split() -> anyhow::Result<()> {
     .await;
 
     let bank = test_f.get_bank(&BankMint::Usdc);
-    let bank_admin_kp = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin_kp)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let config = BankConfigOpt {
@@ -35,7 +35,7 @@ async fn configure_bank_authority_split() -> anyhow::Result<()> {
     };
     let result = test_f
         .marginfi_group
-        .try_lending_pool_configure_bank_with_signer(&bank_admin_kp, bank, config)
+        .try_lending_pool_configure_bank_with_signer(&governance_admin, bank, config)
         .await;
     assert!(result.is_err());
 
@@ -45,7 +45,7 @@ async fn configure_bank_authority_split() -> anyhow::Result<()> {
     };
     let result = test_f
         .marginfi_group
-        .try_lending_pool_configure_bank_with_signer(&bank_admin_kp, bank, config)
+        .try_lending_pool_configure_bank_with_signer(&governance_admin, bank, config)
         .await;
     assert!(result.is_ok());
 
@@ -69,7 +69,7 @@ async fn configure_bank_authority_split() -> anyhow::Result<()> {
     let result = test_f
         .marginfi_group
         .try_lending_pool_configure_bank_with_signer(
-            &bank_admin_kp,
+            &governance_admin,
             bank,
             config_operational.clone(),
         )
@@ -93,7 +93,7 @@ async fn configure_bank_authority_split() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn legacy_group_requires_bank_admin_bootstrap() -> anyhow::Result<()> {
+async fn legacy_group_requires_governance_admin_bootstrap() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![TestBankSetting {
             mint: BankMint::Usdc,
@@ -122,22 +122,22 @@ async fn legacy_group_requires_bank_admin_bootstrap() -> anyhow::Result<()> {
         ..BankConfigOpt::default()
     };
     let result = bank.update_config(config, None).await;
-    assert!(result.is_err(), "a zero bank_admin must fail closed");
+    assert!(result.is_err(), "a zero governance_admin must fail closed");
 
-    let bank_admin = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
     let attacker = solana_sdk::signature::Keypair::new();
     let result = test_f
         .marginfi_group
-        .try_set_bank_admin_with_signer(&attacker, bank_admin.pubkey())
+        .try_set_governance_admin_with_signer(&attacker, governance_admin.pubkey())
         .await;
     assert!(
         result.is_err(),
-        "only the fast admin may bootstrap bank_admin"
+        "only the fast admin may bootstrap governance_admin"
     );
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let config = BankConfigOpt {
@@ -146,7 +146,7 @@ async fn legacy_group_requires_bank_admin_bootstrap() -> anyhow::Result<()> {
     };
     let result = test_f
         .marginfi_group
-        .try_lending_pool_configure_bank_with_signer(&bank_admin, bank, config)
+        .try_lending_pool_configure_bank_with_signer(&governance_admin, bank, config)
         .await;
     assert!(result.is_ok());
 

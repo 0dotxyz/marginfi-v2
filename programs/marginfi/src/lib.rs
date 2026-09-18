@@ -53,12 +53,13 @@ pub mod marginfi {
         )
     }
 
-    /// Configure slow, timelocked governance group roles and e-mode leverage caps. `None` leaves
-    /// a field unchanged.
+    /// Configure slow, timelocked governance group roles, the fast admin, and e-mode leverage
+    /// caps. `None` leaves a field unchanged.
     /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
     /// values below `1`, including `0`, are invalid.
     pub fn marginfi_group_configure_gov(
         ctx: Context<MarginfiGroupConfigureGov>,
+        new_admin: Option<Pubkey>,
         new_emode_admin: Option<Pubkey>,
         new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
@@ -68,6 +69,7 @@ pub mod marginfi {
     ) -> MarginfiResult {
         marginfi_group::configure_gov(
             ctx,
+            new_admin,
             new_emode_admin,
             new_risk_admin,
             emode_max_init_leverage,
@@ -77,15 +79,14 @@ pub mod marginfi {
         )
     }
 
-    // TODO remove in 1.13
-    /// Bootstrap or rotate the slow governance admin. This legacy-named instruction is retained
-    /// for the transition: when the stored value is zero on a resized legacy group, the fast
-    /// admin may bootstrap it once; thereafter only the current governance admin may rotate it.
-    pub fn marginfi_group_set_bank_admin(
-        ctx: Context<SetBankAdmin>,
-        new_bank_admin: Pubkey,
+    /// Bootstrap or rotate the slow governance admin. When the stored value is zero on a resized
+    /// legacy group, the fast admin may bootstrap it once; thereafter only the current governance
+    /// admin may rotate it.
+    pub fn marginfi_group_set_governance_admin(
+        ctx: Context<SetGovernanceAdmin>,
+        new_governance_admin: Pubkey,
     ) -> MarginfiResult {
-        marginfi_group::set_bank_admin(ctx, new_bank_admin)
+        marginfi_group::set_governance_admin(ctx, new_governance_admin)
     }
 
     /// (governance_admin only) Add a new bank to the lending pool

@@ -120,6 +120,7 @@ impl MarginfiGroupFixture {
                 }
                 .to_account_metas(Some(true)),
                 data: MarginfiGroupConfigureGov {
+                    new_admin: None,
                     new_emode_admin: Some(admin),
                     new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
@@ -1355,6 +1356,7 @@ impl MarginfiGroupFixture {
             new_metadata_admin: Some(new_metadata_admin),
         });
         let slow_ix = self.make_group_configure_gov_ix(MarginfiGroupConfigureGov {
+            new_admin: None,
             new_emode_admin: Some(new_emode_admin),
             new_risk_admin: Some(new_risk_admin),
             emode_max_init_leverage: None,
@@ -1427,6 +1429,7 @@ impl MarginfiGroupFixture {
             new_metadata_admin: Some(new_metadata_admin),
         });
         let slow_ix = self.make_group_configure_gov_ix(MarginfiGroupConfigureGov {
+            new_admin: None,
             new_emode_admin: Some(new_emode_admin),
             new_risk_admin: Some(new_risk_admin),
             emode_max_init_leverage,
@@ -2137,16 +2140,17 @@ impl MarginfiGroupFixture {
             .await
     }
 
-    pub async fn try_set_bank_admin(&self, new_bank_admin: &Keypair) -> Result<()> {
+    pub async fn try_set_governance_admin(&self, new_governance_admin: &Keypair) -> Result<()> {
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::SetBankAdmin {
+            accounts: marginfi::accounts::SetGovernanceAdmin {
                 marginfi_group: self.key,
                 signer: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
-            data: MarginfiGroupSetBankAdmin {
-                new_bank_admin: new_bank_admin.pubkey(),
+            data: MarginfiGroupSetGovernanceAdmin {
+                new_governance_admin: new_governance_admin.pubkey(),
             }
             .data(),
         };
@@ -2171,19 +2175,23 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_set_bank_admin_with_signer(
+    pub async fn try_set_governance_admin_with_signer(
         &self,
         signer: &Keypair,
-        new_bank_admin: Pubkey,
+        new_governance_admin: Pubkey,
     ) -> Result<()> {
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::SetBankAdmin {
+            accounts: marginfi::accounts::SetGovernanceAdmin {
                 marginfi_group: self.key,
                 signer: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
-            data: MarginfiGroupSetBankAdmin { new_bank_admin }.data(),
+            data: MarginfiGroupSetGovernanceAdmin {
+                new_governance_admin,
+            }
+            .data(),
         };
 
         let ctx = self.ctx.borrow();

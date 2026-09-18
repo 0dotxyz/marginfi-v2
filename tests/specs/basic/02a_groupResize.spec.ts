@@ -4,7 +4,7 @@ import {
   groupConfigure,
   resizeGlobalFeeState,
   resizeGroupAccount,
-  setBankAdmin,
+  setGovernanceAdmin,
 } from "../../utils/group-instructions";
 import { deriveGlobalFeeState } from "../../utils/pdas";
 import {
@@ -92,9 +92,9 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     // A resized v1 group has a zeroed extension. Bootstrap its slow admin before the later bank
     // setup specs exercise slow-authority instructions.
     const bootstrapTx = new Transaction().add(
-      await setBankAdmin(groupAdmin.mrgnBankrunProgram, {
+      await setGovernanceAdmin(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: marginfiGroup.publicKey,
-        newBankAdmin: groupAdmin.wallet.publicKey,
+        newGovernanceAdmin: groupAdmin.wallet.publicKey,
       }),
     );
     await processBankrunTransaction(bankrunContext, bootstrapTx, [groupAdmin.wallet]);

@@ -109,7 +109,7 @@ pub struct MarginfiGroup {
     pub premium_entries: [PremiumEntry; MAX_PREMIUM_ENTRIES],
     /// Also called the "slow" admin. Dedicated authority for time-locked configuration. Legacy
     /// groups have this field zeroed after resize and must be bootstrapped by the fast admin with
-    /// `marginfi_group_set_bank_admin` before slow-authority operations are available.
+    /// `marginfi_group_set_governance_admin` before slow-authority operations are available.
     ///
     /// This is the first 32 bytes of post-v1 reserved space; renaming the field does not alter
     /// any serialized account bytes.

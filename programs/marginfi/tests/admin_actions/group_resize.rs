@@ -24,8 +24,8 @@ async fn group_resize_unbricks_v1_account() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;
 
-    // New groups are born at the current (full) size with bank_admin initialized and the
-    // remaining extension padding zeroed. The v1 simulation below drops bank_admin too.
+    // New groups are born at the current (full) size with governance_admin initialized and the
+    // remaining extension padding zeroed. The v1 simulation below drops governance_admin too.
     let banks_client = test_f.context.borrow().banks_client.clone();
     let fresh = banks_client.get_account(group_f.key).await?.unwrap();
     assert_eq!(fresh.data.len(), 8 + MarginfiGroup::LEN);
@@ -63,22 +63,26 @@ async fn group_resize_unbricks_v1_account() -> anyhow::Result<()> {
     assert!(res.is_err());
 
     // The permissionless resize un-bricks it. Its new extension is zeroed, so the fast admin
-    // must bootstrap the slow bank admin before any slow-authority operation is available.
+    // must bootstrap the governance admin before any slow-authority operation is available.
     group_f.try_resize_group_account().await?;
     assert_eq!(group_account_len(&test_f).await, 8 + MarginfiGroup::LEN);
     let group = group_f.load().await;
     assert_eq!(group.admin, admin);
     assert_eq!(group.governance_admin, Pubkey::default());
 
-    let bank_admin = Keypair::new();
-    group_f.try_set_bank_admin(&bank_admin).await?;
-    assert_eq!(group_f.load().await.governance_admin, bank_admin.pubkey());
+    let governance_admin = Keypair::new();
+    group_f.try_set_governance_admin(&governance_admin).await?;
+    assert_eq!(
+        group_f.load().await.governance_admin,
+        governance_admin.pubkey()
+    );
 
     let new_emode_admin = Pubkey::new_unique();
     group_f
         .try_group_configure_gov_with_signer(
-            &bank_admin,
+            &governance_admin,
             MarginfiGroupConfigureGov {
+                new_admin: None,
                 new_emode_admin: Some(new_emode_admin),
                 new_risk_admin: None,
                 emode_max_init_leverage: None,

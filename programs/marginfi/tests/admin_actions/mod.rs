@@ -1,7 +1,5 @@
 mod account_transfer;
 mod actions_during_pause;
-mod bank_admin_authorization;
-mod bank_admin_rotation;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod circuit_breaker;
@@ -12,6 +10,8 @@ mod deleverage_withdraw_limit;
 mod durable_nonce;
 mod fixed_oracle_authorization;
 mod freeze;
+mod governance_admin_authorization;
+mod governance_admin_rotation;
 mod group_resize;
 mod interest_accrual;
 mod mixed_authority;

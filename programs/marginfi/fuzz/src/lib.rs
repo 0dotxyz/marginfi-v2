@@ -1106,6 +1106,7 @@ fn initialize_marginfi_group<'a>(
             &[],
             Default::default(),
         ),
+        None, // admin
         Some(admin.key()), // emode_admin
         Some(admin.key()), // risk_admin
         None,

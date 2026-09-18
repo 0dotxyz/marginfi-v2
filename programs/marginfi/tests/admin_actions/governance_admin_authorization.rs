@@ -8,7 +8,7 @@ use solana_program_test::BanksClientError;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 #[tokio::test]
-async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
+async fn governance_actions_require_governance_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![TestBankSetting {
             mint: BankMint::Usdc,
@@ -19,7 +19,7 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
     .await;
 
     let bank = test_f.get_bank(&BankMint::Usdc);
-    let new_bank_admin = solana_sdk::signature::Keypair::new();
+    let new_governance_admin = solana_sdk::signature::Keypair::new();
     let payer_key = test_f.context.borrow().payer.pubkey();
 
     let group_initial = test_f
@@ -32,7 +32,7 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&new_bank_admin)
+        .try_set_governance_admin(&new_governance_admin)
         .await?;
 
     let group_after = test_f
@@ -40,7 +40,7 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
             &test_f.marginfi_group.key,
         )
         .await;
-    assert_eq!(group_after.governance_admin, new_bank_admin.pubkey());
+    assert_eq!(group_after.governance_admin, new_governance_admin.pubkey());
     assert_ne!(group_after.governance_admin, group_after.admin);
 
     let config = BankConfigOpt {
@@ -60,11 +60,11 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
 
     test_f
         .marginfi_group
-        .try_lending_pool_configure_bank_with_signer(&new_bank_admin, &bank, tokenless_config)
+        .try_lending_pool_configure_bank_with_signer(&new_governance_admin, &bank, tokenless_config)
         .await?;
     assert!(
         bank.load().await.get_flag(TOKENLESS_REPAYMENTS_ALLOWED),
-        "bank_admin should be able to enable tokenless repayments"
+        "governance_admin should be able to enable tokenless repayments"
     );
 
     let fast_result = test_f
@@ -72,6 +72,7 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
         .try_group_configure_gov_with_signer(
             &test_f.payer_keypair(),
             MarginfiGroupConfigureGov {
+                new_admin: None,
                 new_emode_admin: Some(solana_sdk::pubkey::Pubkey::new_unique()),
                 new_risk_admin: Some(solana_sdk::pubkey::Pubkey::new_unique()),
                 emode_max_init_leverage: None,
@@ -88,8 +89,9 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
     test_f
         .marginfi_group
         .try_group_configure_gov_with_signer(
-            &new_bank_admin,
+            &new_governance_admin,
             MarginfiGroupConfigureGov {
+                new_admin: None,
                 new_emode_admin: Some(new_emode_admin.pubkey()),
                 new_risk_admin: Some(new_risk_admin),
                 emode_max_init_leverage: None,
@@ -117,20 +119,20 @@ async fn governance_actions_require_bank_admin() -> anyhow::Result<()> {
 
     test_f
         .marginfi_group
-        .try_lending_pool_configure_bank_emode_with_signer(&bank, 0, &[], &new_bank_admin)
+        .try_lending_pool_configure_bank_emode_with_signer(&bank, 0, &[], &new_governance_admin)
         .await?;
 
     Ok(())
 }
 
 #[tokio::test]
-async fn add_bank_requires_bank_admin_authorization() -> anyhow::Result<()> {
+async fn add_bank_requires_governance_admin_authorization() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let bank_admin_kp = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin_kp)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
@@ -141,7 +143,7 @@ async fn add_bank_requires_bank_admin_authorization() -> anyhow::Result<()> {
         .await;
     assert!(
         result.is_err(),
-        "admin should NOT be able to add_bank when bank_admin != admin"
+        "fast admin should NOT be able to add_bank when governance_admin differs"
     );
     assert_custom_error!(result.unwrap_err(), MarginfiError::Unauthorized);
 
@@ -149,13 +151,13 @@ async fn add_bank_requires_bank_admin_authorization() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn add_bank_with_seed_requires_bank_admin_authorization() -> anyhow::Result<()> {
+async fn add_bank_with_seed_requires_governance_admin_authorization() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let bank_admin_kp = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin_kp)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
@@ -172,7 +174,7 @@ async fn add_bank_with_seed_requires_bank_admin_authorization() -> anyhow::Resul
         .await;
     assert!(
         result.is_err(),
-        "admin should NOT be able to add_bank_with_seed when bank_admin != admin"
+        "fast admin should NOT be able to add_bank_with_seed when governance_admin differs"
     );
     assert_custom_error!(result.unwrap_err(), MarginfiError::Unauthorized);
 
@@ -182,11 +184,11 @@ async fn add_bank_with_seed_requires_bank_admin_authorization() -> anyhow::Resul
 #[tokio::test]
 async fn add_bank_both_directions_after_rotation() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let bank_admin_kp = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin_kp)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
@@ -198,15 +200,18 @@ async fn add_bank_both_directions_after_rotation() -> anyhow::Result<()> {
         .await;
     assert!(
         result.is_err(),
-        "admin should NOT be able to add_bank when bank_admin != admin"
+        "fast admin should NOT be able to add_bank when governance_admin differs"
     );
     assert_custom_error!(result.unwrap_err(), MarginfiError::Unauthorized);
 
     let result = test_f
         .marginfi_group
-        .try_lending_pool_add_bank_with_signer(&bank_admin_kp, &mint_f, compact_config)
+        .try_lending_pool_add_bank_with_signer(&governance_admin, &mint_f, compact_config)
         .await;
-    assert!(result.is_ok(), "bank_admin should be able to add_bank");
+    assert!(
+        result.is_ok(),
+        "governance_admin should be able to add_bank"
+    );
 
     Ok(())
 }
@@ -214,11 +219,11 @@ async fn add_bank_both_directions_after_rotation() -> anyhow::Result<()> {
 #[tokio::test]
 async fn add_bank_with_seed_both_directions_after_rotation() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let bank_admin_kp = solana_sdk::signature::Keypair::new();
+    let governance_admin = solana_sdk::signature::Keypair::new();
 
     test_f
         .marginfi_group
-        .try_set_bank_admin(&bank_admin_kp)
+        .try_set_governance_admin(&governance_admin)
         .await?;
 
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
@@ -235,7 +240,7 @@ async fn add_bank_with_seed_both_directions_after_rotation() -> anyhow::Result<(
         .await;
     assert!(
         result.is_err(),
-        "admin should NOT be able to add_bank_with_seed when bank_admin != admin"
+        "fast admin should NOT be able to add_bank_with_seed when governance_admin differs"
     );
     assert_custom_error!(result.unwrap_err(), MarginfiError::Unauthorized);
 
