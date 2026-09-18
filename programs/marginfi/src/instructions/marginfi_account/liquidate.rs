@@ -29,24 +29,14 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
-        LIQUIDITY_VAULT_SEED, PREMIUM_ACTIVE,
+        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PREMIUM_ACTIVE,
     },
     types::{
-        is_marginfi_asset_tag, u32_to_centi, BalanceSide, Bank, BankVaultType, HealthPriceMode,
-        MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
+        MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
-/// Converts a per-bank liquidation fee (`u32_to_centi` encoding, `u32::MAX` = 100%) to an I80F48
-/// fraction. A 0 value falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
-fn liquidation_fee_fraction(fee: u32) -> I80F48 {
-    if fee == 0 {
-        DEFAULT_LIQUIDATION_FEE // const of I80F48 type
-    } else {
-        u32_to_centi(fee)
-    }
-}
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
 ///
@@ -275,9 +265,8 @@ pub fn lending_account_liquidate<'info>(
         };
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
-        // Liquidation fees are configured per-bank on the liability bank (0 => default 2.5%).
-        let liquidator_fee = liquidation_fee_fraction(liab_bank.liquidation_liquidator_fee);
-        let insurance_fee = liquidation_fee_fraction(liab_bank.liquidation_insurance_fee);
+        let liquidator_fee = liab_bank.liquidator_fee();
+        let insurance_fee = liab_bank.insurance_fee();
         let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
         let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 
