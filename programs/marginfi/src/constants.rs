@@ -108,7 +108,7 @@ pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLeve
 pub const DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS: u32 = 5_000_000;
 
 /// Default position-transfer fee in lamports, used when `FeeState.position_transfer_fee` is 0.
-/// Paid by the receiving authority to the global fee wallet.
+/// Paid by the fee payer to the global fee wallet.
 pub const DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS: u32 = 500_000;
 
 /// Default minimum value of a position transfer in USD cents, used when

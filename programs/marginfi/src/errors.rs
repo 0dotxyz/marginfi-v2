@@ -529,8 +529,8 @@ pub enum MarginfiError {
     // **************END SCOPE ERRORS
 
     // ************** BEGIN POSITION TRANSFER ERRORS (starting at 6900)
-    #[msg("Position transfer is disabled for this account")]
-    PositionTransferDisabled = 900, // 6900
+    #[msg("Account is not allowed to receive position transfers")]
+    PositionTransferReceiveDisabled = 900, // 6900
     #[msg("Account is not allowed to send position transfers")]
     PositionTransferSendDisabled, // 6901
     #[msg("Invalid position transfer amount")]
@@ -825,7 +825,7 @@ impl From<u32> for MarginfiError {
             6803 => MarginfiError::UseConfigureBankOracleScope,
 
             // Position-transfer errors (starting at 6900)
-            6900 => MarginfiError::PositionTransferDisabled,
+            6900 => MarginfiError::PositionTransferReceiveDisabled,
             6901 => MarginfiError::PositionTransferSendDisabled,
             6902 => MarginfiError::InvalidPositionTransferAmount,
             6903 => MarginfiError::PositionTransferInsufficientFunds,

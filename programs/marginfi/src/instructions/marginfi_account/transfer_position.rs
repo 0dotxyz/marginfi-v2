@@ -5,6 +5,7 @@ use crate::{
         PROGRAM_VERSION,
     },
     events::{AccountEventHeader, LendingAccountTransferPositionEvent},
+    math_error,
     prelude::*,
     state::{
         bank::BankImpl,
@@ -17,8 +18,8 @@ use crate::{
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, validate_asset_tags, validate_bank_state,
-        InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -26,19 +27,21 @@ use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{EMPTY_BALANCE_THRESHOLD, FEE_STATE_SEED},
+    constants::{EMPTY_BALANCE_THRESHOLD, FEE_STATE_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, FeeState, HealthCache, MarginfiAccount,
         MarginfiGroup, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED, ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED,
+        ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
     },
 };
 
 /// Moves `transfer_amount` native units of the source's position in `bank` to the destination, on
 /// whichever side the source holds there. Collateral moves on the source authority's signature
 /// alone unless the receiver opted out; debt also needs the receiver's consent, either a shared
-/// authority or `destination_authority` signing. `fee_payer` pays the flat protocol fee.
+/// authority or `destination_authority` signing, and carries the source's accrued premium
+/// receivable when the whole debt moves. `fee_payer` pays the flat protocol fee.
 /// Remaining accounts: the source's observation set, then the destination's
 /// (`destination_accounts` long), each `[bank, oracles...]` per active balance in balance order.
 pub fn lending_account_transfer_position<'info>(
@@ -80,7 +83,10 @@ pub fn lending_account_transfer_position<'info>(
         );
         check!(
             !account.get_flag(
-                ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_DELEVERAGE
+                ACCOUNT_IN_RECEIVERSHIP
+                    | ACCOUNT_IN_ORDER_EXECUTION
+                    | ACCOUNT_IN_DELEVERAGE
+                    | ACCOUNT_IN_REBALANCE
             ),
             MarginfiError::ForbiddenIx
         );
@@ -95,7 +101,7 @@ pub fn lending_account_transfer_position<'info>(
     );
     check!(
         !destination_account.get_flag(ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED),
-        MarginfiError::PositionTransferDisabled
+        MarginfiError::PositionTransferReceiveDisabled
     );
 
     let source_balance = source_account
@@ -167,13 +173,22 @@ pub fn lending_account_transfer_position<'info>(
         MarginfiError::PositionTransferInsufficientFunds
     );
 
+    // Repaying the last of a debt writes its premium receivable off, so it is materialized first
+    // and handed to the destination when the source empties; a partial move leaves it in place.
+    let mut carried_premium = I80F48::ZERO;
     let share_amount = {
         let mut source_position =
             BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?;
         if is_liability {
-            source_position.repay(amount)?
+            source_position.claim_premium()?;
+            let receivable: I80F48 = source_position.balance.premium_outstanding.into();
+            let shares = source_position.repay(amount)?;
+            if source_position.balance.is_empty(BalanceSide::Liabilities) {
+                carried_premium = receivable;
+            }
+            shares
         } else {
-            source_position.withdraw(amount)?
+            source_position.transfer_out(amount)?
         }
     };
     // The destination takes on what the burned shares were worth, so the bank's totals round-trip.
@@ -189,15 +204,20 @@ pub fn lending_account_transfer_position<'info>(
             &mut destination_account.lending_account,
         )?;
         if is_liability {
-            destination_position.borrow(moved_amount)?;
+            destination_position.debt_transfer_in(moved_amount)?;
             check!(
                 I80F48::from(destination_position.balance.liability_shares)
                     >= EMPTY_BALANCE_THRESHOLD,
                 MarginfiError::IllegalBalanceState,
                 "Transfer would leave positive liability shares below the empty balance threshold"
             );
+            destination_position.balance.premium_outstanding =
+                I80F48::from(destination_position.balance.premium_outstanding)
+                    .checked_add(carried_premium)
+                    .ok_or_else(math_error!())?
+                    .into();
         } else {
-            destination_position.deposit(moved_amount)?;
+            destination_position.transfer_in(moved_amount)?;
         }
     }
     if is_liability && bank.config.risk_tier == RiskTier::Isolated {
@@ -224,16 +244,19 @@ pub fn lending_account_transfer_position<'info>(
         .checked_sub(destination_accounts as usize)
         .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     let (source_obs, destination_obs) = ctx.remaining_accounts.split_at(split);
-    // Shedding collateral while owing, or taking on debt, is the risk-carrying leg.
-    let source_carries_risk = !is_liability && source_account.lending_account.has_liabilities();
-    check_health_and_refresh_premium(
-        &mut source_account,
-        &group,
-        source_obs,
-        &clock,
-        source_carries_risk,
-        false,
-    )?;
+    // Shedding debt only improves the source's health, so like a repay it is not re-checked;
+    // shedding collateral while owing, or taking on debt, is the risk-carrying leg.
+    if !is_liability {
+        let source_carries_risk = source_account.lending_account.has_liabilities();
+        check_health_and_refresh_premium(
+            &mut source_account,
+            &group,
+            source_obs,
+            &clock,
+            source_carries_risk,
+            false,
+        )?;
+    }
     check_health_and_refresh_premium(
         &mut destination_account,
         &group,
@@ -242,6 +265,18 @@ pub fn lending_account_transfer_position<'info>(
         is_liability,
         is_liability,
     )?;
+
+    let maybe_price = fetch_unbiased_price_for_bank_cache(
+        &bank_key,
+        &*ctx.accounts.bank.load()?,
+        &clock,
+        ctx.remaining_accounts,
+    )
+    .ok();
+    ctx.accounts
+        .bank
+        .load_mut()?
+        .update_cache_price(maybe_price)?;
 
     emit!(LendingAccountTransferPositionEvent {
         header: AccountEventHeader {
@@ -259,6 +294,7 @@ pub fn lending_account_transfer_position<'info>(
         is_liability,
         transfer_amount,
         transfer_share_amount: share_amount.into(),
+        premium_carried: carried_premium.into(),
         protocol_fee_lamports: position_transfer_fee,
     });
 
@@ -338,6 +374,8 @@ pub struct LendingAccountTransferPosition<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForStandardInstructions,
+        constraint = !bank.load()?.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
+            @ MarginfiError::BankReduceOnly,
     )]
     pub bank: AccountLoader<'info, Bank>,
 

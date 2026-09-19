@@ -256,6 +256,8 @@ pub struct LendingAccountTransferPositionEvent {
     pub is_liability: bool,
     pub transfer_amount: u64,
     pub transfer_share_amount: WrappedI80F48,
+    /// Premium receivable moved along with a debt that left the source empty
+    pub premium_carried: WrappedI80F48,
     pub protocol_fee_lamports: u32,
 }
 

@@ -761,6 +761,49 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
+    pub async fn try_edit_position_transfer_fees(
+        &self,
+        position_transfer_fee: Option<u32>,
+        position_transfer_min_value_usd_cents: Option<u32>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeState {
+                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::EditGlobalFeeState {
+                admin: None,
+                fee_wallet: None,
+                bank_init_flat_sol_fee: None,
+                liquidation_flat_sol_fee: None,
+                order_init_flat_sol_fee: None,
+                program_fee_fixed: None,
+                program_fee_rate: None,
+                liquidation_max_fee: None,
+                order_execution_max_fee: None,
+                pause_delegate_admin: None,
+                account_transfer_fee: None,
+                position_transfer_fee,
+                position_transfer_min_value_usd_cents,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
     /// Set one premium matrix pair (rate 0 = remove). For several pairs, call once per pair.
     pub async fn try_configure_group_premium(
         &self,

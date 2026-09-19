@@ -228,7 +228,7 @@ describe("Position transfer", () => {
   it("(user 0 -> user 1) rejects a destination that disabled receiving", async () => {
     await setPositionTransferFlags(users[1], null, true);
     const result = await transfer(users[0], users[1], bankA, lst);
-    // PositionTransferDisabled
+    // PositionTransferReceiveDisabled
     assertBankrunTxFailed(result, 6900);
     await setPositionTransferFlags(users[1], null, false);
   });

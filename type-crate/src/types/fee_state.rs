@@ -73,8 +73,8 @@ pub struct FeeState {
     /// * `Pubkey::default()` = unset (sweeps are rejected until the fee admin configures it),
     ///   which is what v1-sized accounts hold after `resize_global_fee_state` zero-fills them.
     pub premium_wallet: Pubkey,
-    /// Flat fee in lamports the receiving authority pays the global fee wallet per position
-    /// transfer. A stored 0 means "use the default" (`DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS`).
+    /// Flat fee in lamports the fee payer pays the global fee wallet per position transfer. A
+    /// stored 0 means "use the default" (`DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS`).
     pub position_transfer_fee: u32,
     /// Smallest position a transfer may move, in USD cents. A stored 0 means "use the default"
     /// (`DEFAULT_POSITION_TRANSFER_MIN_VALUE_USD_CENTS`).
