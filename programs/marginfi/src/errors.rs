@@ -537,11 +537,9 @@ pub enum MarginfiError {
     InvalidPositionTransferAmount, // 6902
     #[msg("Insufficient funds for position transfer")]
     PositionTransferInsufficientFunds, // 6903
-    #[msg("Position transfer would violate health constraints")]
-    PositionTransferHealthCheckFailed, // 6904
     #[msg("Cannot transfer a position to the same account")]
-    PositionTransferIdenticalAccounts, // 6905
-    // ************** END POSITION TRANSFER ERRORS
+    PositionTransferIdenticalAccounts, // 6904
+                                       // ************** END POSITION TRANSFER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -829,8 +827,7 @@ impl From<u32> for MarginfiError {
             6901 => MarginfiError::PositionTransferSendDisabled,
             6902 => MarginfiError::InvalidPositionTransferAmount,
             6903 => MarginfiError::PositionTransferInsufficientFunds,
-            6904 => MarginfiError::PositionTransferHealthCheckFailed,
-            6905 => MarginfiError::PositionTransferIdenticalAccounts,
+            6904 => MarginfiError::PositionTransferIdenticalAccounts,
 
             _ => MarginfiError::InternalLogicError,
         }

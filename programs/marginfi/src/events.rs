@@ -467,13 +467,6 @@ pub struct DeleverageWithdrawFlowEvent {
     pub current_timestamp: i64,
 }
 
-#[event]
-pub struct TransferFlagsSetEvent {
-    pub header: AccountEventHeader,
-    pub disable_receive: bool,
-    pub disable_send: bool,
-}
-
 /// Emitted when the per-bank oracle circuit breaker trips or escalates a halt.
 #[event]
 pub struct CircuitBreakerTrippedEvent {

@@ -2690,88 +2690,44 @@ impl MarginfiAccountFixture {
         source_authority: &Keypair,
         destination_authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
-        let source_account = self.load().await;
-        let destination_account_loaded = destination_account.load().await;
+        let (fee_state_key, _bump) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
+        let fee_wallet = load_and_deserialize::<FeeState>(self.ctx.clone(), &fee_state_key)
+            .await
+            .global_fee_wallet;
+        // Observation sets as the accounts stand after the transfer: the source keeps its slot in
+        // the bank, the destination gains one.
+        let source_obs = self.load_observation_account_metas(vec![], vec![]).await;
+        let destination_obs = destination_account
+            .load_observation_account_metas(vec![bank.key], vec![])
+            .await;
 
-        let (fee_state_key, _bump) = Pubkey::find_program_address(&[b"feestate"], &marginfi::ID);
-        let fee_wallet = {
-            let ctx_ref = self.ctx.borrow();
-            let fee_state_account = ctx_ref
-                .banks_client
-                .get_account(fee_state_key)
-                .await?
-                .ok_or(BanksClientError::ClientError("Fee state account not found"))?;
-
-            let fee_state: FeeState = FeeState::try_deserialize(&mut &fee_state_account.data[..])
-                .map_err(|_| {
-                BanksClientError::ClientError("Failed to deserialize fee state")
-            })?;
-            fee_state.global_fee_wallet
-        };
-
-        let mut accounts = vec![
-            AccountMeta::new_readonly(source_account.group, false),
-            AccountMeta::new(self.key, false),
-            AccountMeta::new(destination_account.key, false),
-            AccountMeta::new_readonly(source_authority.pubkey(), true),
-            AccountMeta::new_readonly(destination_authority.pubkey(), true),
-            AccountMeta::new(bank.key, false),
-            AccountMeta::new(fee_wallet, false),
-            AccountMeta::new_readonly(system_program::ID, false),
-        ];
-
-        let mut all_banks_set = std::collections::BTreeSet::new();
-
-        let transferred_bank_account = bank.load().await;
-        all_banks_set.insert(bank.key);
-
-        for balance in source_account.lending_account.balances.iter() {
-            if balance.is_active() {
-                all_banks_set.insert(balance.bank_pk);
-            }
+        let mut accounts = marginfi::accounts::LendingAccountTransferPosition {
+            group: self.load().await.group,
+            source_marginfi_account: self.key,
+            destination_marginfi_account: destination_account.key,
+            authority: source_authority.pubkey(),
+            destination_authority: destination_authority.pubkey(),
+            bank: bank.key,
+            global_fee_wallet: fee_wallet,
+            fee_state: fee_state_key,
+            system_program: system_program::ID,
         }
-
-        for balance in destination_account_loaded.lending_account.balances.iter() {
-            if balance.is_active() {
-                all_banks_set.insert(balance.bank_pk);
-            }
-        }
-
-        let mut all_banks_map = std::collections::BTreeMap::new();
-        all_banks_map.insert(bank.key, transferred_bank_account);
-
-        for bank_pk in all_banks_set.iter() {
-            if *bank_pk == bank.key {
-                continue;
-            }
-            let bank_account = load_and_deserialize::<Bank>(self.ctx.clone(), bank_pk).await;
-            all_banks_map.insert(*bank_pk, bank_account);
-        }
-
-        let mut observation_metas = Vec::new();
-
-        for (bank_pk, bank_account) in all_banks_map.iter().rev() {
-            observation_metas.push(AccountMeta::new_readonly(*bank_pk, false));
-            if should_include_oracle_observation_meta(bank_account)
-                && !bank_account.config.oracle_keys[0].eq(&Pubkey::default())
-            {
-                observation_metas.push(AccountMeta::new_readonly(
-                    bank_account.config.oracle_keys[0],
-                    false,
-                ));
-            }
-        }
-
-        accounts.extend(observation_metas);
-
-        let transfer_amount_bytes = ui_to_native!(ui_amount.into(), bank.mint.mint.decimals);
-        let mut ix_data = vec![63, 111, 55, 56, 14, 212, 75, 137];
-        ix_data.extend_from_slice(&transfer_amount_bytes.to_le_bytes());
+        .to_account_metas(Some(true));
+        let destination_accounts = destination_obs.len() as u8;
+        accounts.extend(source_obs);
+        accounts.extend(destination_obs);
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: ix_data,
+            data: marginfi::instruction::LendingAccountTransferPosition {
+                transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                destination_accounts,
+            }
+            .data(),
         };
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;

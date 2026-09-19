@@ -565,11 +565,18 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
+    /// (both authorities) Move part of an asset position in one bank between two marginfi accounts;
+    /// both must stay initial-healthy and the destination authority pays the flat protocol fee.
     pub fn lending_account_transfer_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,
+        destination_accounts: u8,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_transfer_position(ctx, transfer_amount)
+        marginfi_account::lending_account_transfer_position(
+            ctx,
+            transfer_amount,
+            destination_accounts,
+        )
     }
 
     /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
@@ -753,14 +760,6 @@ pub mod marginfi {
         frozen: bool,
     ) -> MarginfiResult {
         marginfi_account::set_account_freeze(ctx, frozen)
-    }
-
-    pub fn marginfi_account_set_transfer_flags(
-        ctx: Context<SetTransferFlags>,
-        disable_receive: bool,
-        disable_send: bool,
-    ) -> MarginfiResult {
-        marginfi_account::set_transfer_flags(ctx, disable_receive, disable_send)
     }
 
     /// (account authority) Set position transfer opt-out flags. Allows account owner to prevent

@@ -2,44 +2,60 @@ use crate::{
     check, check_eq,
     constants::{
         DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS, DEFAULT_POSITION_TRANSFER_MIN_VALUE_USD_CENTS,
+        PROGRAM_VERSION,
     },
     events::{AccountEventHeader, LendingAccountTransferPositionEvent},
     prelude::*,
-    require,
     state::{
-        self,
         bank::BankImpl,
-        marginfi_account,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            deposit_is_halt_safe, is_signer_authorized, run_cb_price_gate, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        price::PriceAdapter,
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
-    utils::{is_marginfi_asset_tag, validate_bank_state, InstructionKind},
+    utils::{
+        fetch_asset_price_for_bank_low_bias, validate_asset_tags, validate_bank_state,
+        InstructionKind,
+    },
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
+use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_DISABLED,
-    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED, ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
-    MAX_LENDING_ACCOUNT_BALANCES,
+use marginfi_type_crate::{
+    constants::FEE_STATE_SEED,
+    types::{
+        is_marginfi_asset_tag, Bank, FeeState, HealthCache, MarginfiAccount, MarginfiGroup,
+        ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED,
+        ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
+    },
 };
 
+/// Moves `transfer_amount` native units of the source's asset position in `bank` to the
+/// destination; both authorities sign and the destination authority pays the flat protocol fee.
+/// Remaining accounts: the source's observation set, then the destination's
+/// (`destination_accounts` long), each `[bank, oracles...]` per active balance in balance order.
 pub fn lending_account_transfer_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
+    destination_accounts: u8,
 ) -> MarginfiResult {
     check!(
         ctx.accounts.source_marginfi_account.key()
             != ctx.accounts.destination_marginfi_account.key(),
         MarginfiError::PositionTransferIdenticalAccounts
     );
+    check!(
+        transfer_amount > 0,
+        MarginfiError::InvalidPositionTransferAmount
+    );
 
     let clock = Clock::get()?;
+    let bank_key = ctx.accounts.bank.key();
     let mut source_account = ctx.accounts.source_marginfi_account.load_mut()?;
     let mut destination_account = ctx.accounts.destination_marginfi_account.load_mut()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
@@ -51,39 +67,22 @@ pub fn lending_account_transfer_position<'info>(
         MarginfiError::InvalidGlobalFeeWallet
     );
 
-    check!(
-        !source_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-    check!(
-        !source_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !source_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !source_account.get_flag(ACCOUNT_IN_DELEVERAGE),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !destination_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-    check!(
-        !destination_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !destination_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !destination_account.get_flag(ACCOUNT_IN_DELEVERAGE),
-        MarginfiError::ForbiddenIx
-    );
-
+    for account in [&*source_account, &*destination_account] {
+        check!(
+            !account.get_flag(ACCOUNT_DISABLED),
+            MarginfiError::AccountDisabled
+        );
+        check!(
+            !account.get_flag(ACCOUNT_IN_FLASHLOAN),
+            MarginfiError::AccountInFlashloan
+        );
+        check!(
+            !account.get_flag(
+                ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_DELEVERAGE
+            ),
+            MarginfiError::ForbiddenIx
+        );
+    }
     check!(
         !source_account.get_flag(ACCOUNT_POSITION_TRANSFER_SEND_DISABLED),
         MarginfiError::PositionTransferSendDisabled
@@ -93,63 +92,44 @@ pub fn lending_account_transfer_position<'info>(
         MarginfiError::PositionTransferDisabled
     );
 
-    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
-
-    check!(
-        transfer_amount > 0,
-        MarginfiError::InvalidPositionTransferAmount
-    );
-
-    let source_balance = source_account
-        .lending_account
-        .get_balance(&ctx.accounts.bank.key())
-        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
-
-    let available_shares = I80F48::from(source_balance.asset_shares);
-    check!(available_shares > I80F48::ZERO, MarginfiError::NoAssetFound);
-
-    let accounts_per_bank = marginfi_account::get_remaining_accounts_per_bank(&bank)?;
-
-    let bank_index = ctx
-        .remaining_accounts
-        .iter()
-        .position(|ai| ai.key() == ctx.accounts.bank.key())
-        .ok_or(MarginfiError::InvalidBankAccount)?;
-
-    require!(
-        ctx.remaining_accounts.len() >= bank_index + accounts_per_bank,
-        MarginfiError::WrongNumberOfOracleAccounts
-    );
-
-    let oracle_ais = &ctx.remaining_accounts[(bank_index + 1)..(bank_index + accounts_per_bank)];
-
-    let pf = state::price::OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock)?;
-    let price = pf.get_price_of_type(
-        OraclePriceType::RealTime,
-        Some(PriceBias::Low),
-        bank.config.oracle_max_confidence,
+    validate_asset_tags(&bank, &destination_account)?;
+    // Halt-safe only when both legs are: the source sheds collateral like a withdraw, the
+    // destination gains it like a deposit.
+    validate_bank_state(
+        &bank,
+        InstructionKind::FailsIfPausedOrReduceState,
+        !source_account.lending_account.has_liabilities()
+            && deposit_is_halt_safe(&destination_account, &bank_key),
     )?;
 
+    let source_shares: I80F48 = source_account
+        .lending_account
+        .get_balance(&bank_key)
+        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?
+        .asset_shares
+        .into();
+    check!(source_shares > I80F48::ZERO, MarginfiError::NoAssetFound);
+
+    let fee_state = ctx.accounts.fee_state.load()?;
+    let min_value_usd_cents = match fee_state.position_transfer_min_value_usd_cents {
+        0 => DEFAULT_POSITION_TRANSFER_MIN_VALUE_USD_CENTS,
+        cents => cents,
+    };
+    let position_transfer_fee = match fee_state.position_transfer_fee {
+        0 => DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS,
+        fee => fee,
+    };
+
+    let price =
+        fetch_asset_price_for_bank_low_bias(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
     let transfer_usd_value = calc_value(
         I80F48::from_num(transfer_amount),
         price,
         bank.get_balance_decimals(),
         None,
     )?;
-
-    let min_value_usd_cents = if group
-        .fee_state_cache
-        .position_transfer_min_value_initialized
-        != 0
-    {
-        group.fee_state_cache.position_transfer_min_value_usd_cents as u64
-    } else {
-        DEFAULT_POSITION_TRANSFER_MIN_VALUE_USD_CENTS as u64
-    };
-    let min_usd_value = I80F48::from_num(min_value_usd_cents) / I80F48::from_num(100u64);
-
     check!(
-        transfer_usd_value >= min_usd_value,
+        transfer_usd_value >= I80F48::from_num(min_value_usd_cents) / I80F48::from_num(100),
         MarginfiError::InvalidPositionTransferAmount
     );
 
@@ -157,130 +137,62 @@ pub fn lending_account_transfer_position<'info>(
         clock.unix_timestamp,
         &group,
         #[cfg(not(feature = "client"))]
-        ctx.accounts.bank.key(),
+        bank_key,
     )?;
-
-    let source_balance_after_accrual = source_account
-        .lending_account
-        .get_balance(&ctx.accounts.bank.key())
-        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
-
-    let available_amount =
-        bank.get_asset_amount(I80F48::from(source_balance_after_accrual.asset_shares))?;
     check!(
-        available_amount >= I80F48::from_num(transfer_amount),
+        bank.get_asset_amount(source_shares)? >= I80F48::from_num(transfer_amount),
         MarginfiError::PositionTransferInsufficientFunds
     );
 
-    let position_transfer_fee = if group.fee_state_cache.position_transfer_fee_initialized != 0 {
-        group.fee_state_cache.position_transfer_fee
-    } else {
-        DEFAULT_POSITION_TRANSFER_FEE_LAMPORTS
-    };
-
-    let share_amount = {
-        let lending_account = &mut source_account.lending_account;
-        let mut source_bank_account =
-            BankAccountWrapper::find(&ctx.accounts.bank.key(), &mut bank, lending_account)?;
-
-        source_bank_account.withdraw(I80F48::from_num(transfer_amount))?
-    };
-
-    let has_existing_balance = destination_account
-        .lending_account
-        .get_balance(&ctx.accounts.bank.key())
-        .is_some();
-
-    if !has_existing_balance {
-        let active_balance_count = destination_account
-            .lending_account
-            .balances
-            .iter()
-            .filter(|b| b.is_active())
-            .count();
-
-        check!(
-            active_balance_count < MAX_LENDING_ACCOUNT_BALANCES,
-            MarginfiError::LendingAccountBalanceSlotsFull
-        );
-    }
-
+    let share_amount =
+        BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?
+            .withdraw(I80F48::from_num(transfer_amount))?;
     let asset_amount = bank.get_asset_amount(share_amount)?;
-    {
-        let lending_account = &mut destination_account.lending_account;
-        let mut dest_bank_account = BankAccountWrapper::find_or_create(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            lending_account,
-        )?;
-        dest_bank_account.deposit(asset_amount)?;
+    BankAccountWrapper::find_or_create(
+        &bank_key,
+        &mut bank,
+        &mut destination_account.lending_account,
+    )?
+    .deposit(asset_amount)?;
+
+    anchor_lang::system_program::transfer(
+        ctx.accounts.transfer_fee(),
+        u64::from(position_transfer_fee),
+    )?;
+
+    for account in [&mut *source_account, &mut *destination_account] {
+        account.last_update = clock.unix_timestamp as u64;
+        account.lending_account.sort_balances();
+        account.sync_indexer_flags();
     }
-
-    if position_transfer_fee > 0 {
-        anchor_lang::system_program::transfer(
-            ctx.accounts.transfer_fee(),
-            position_transfer_fee as u64,
-        )?;
-    }
-
-    source_account.last_update = clock.unix_timestamp as u64;
-    destination_account.last_update = clock.unix_timestamp as u64;
-
-    source_account.lending_account.sort_balances();
-    source_account.sync_indexer_flags();
-    destination_account.lending_account.sort_balances();
-    destination_account.sync_indexer_flags();
-
-    let source_authority = source_account.authority;
-    let source_group = source_account.group;
-    let dest_authority = destination_account.authority;
-    let bank_mint = bank.mint;
-
     bank.update_bank_cache(&group)?;
-
+    let bank_mint = bank.mint;
     drop(bank);
-    drop(source_account);
-    drop(destination_account);
 
-    let source_account_reloaded = ctx.accounts.source_marginfi_account.load()?;
-    let destination_account_reloaded = ctx.accounts.destination_marginfi_account.load()?;
-
-    match check_account_init_health(
-        &source_account_reloaded,
-        &group,
-        ctx.remaining_accounts,
-        &mut None,
-    ) {
-        Ok(_) => {}
-        Err(_e) => {
-            return err!(MarginfiError::PositionTransferHealthCheckFailed);
-        }
+    let split = ctx
+        .remaining_accounts
+        .len()
+        .checked_sub(destination_accounts as usize)
+        .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    let (source_obs, destination_obs) = ctx.remaining_accounts.split_at(split);
+    check_health_and_refresh_premium(&mut source_account, &group, source_obs, &clock)?;
+    if source_account.lending_account.has_liabilities() {
+        run_cb_price_gate(&source_account, source_obs)?;
     }
-
-    match check_account_init_health(
-        &destination_account_reloaded,
-        &group,
-        ctx.remaining_accounts,
-        &mut None,
-    ) {
-        Ok(_) => {}
-        Err(_e) => {
-            return err!(MarginfiError::PositionTransferHealthCheckFailed);
-        }
-    }
+    check_health_and_refresh_premium(&mut destination_account, &group, destination_obs, &clock)?;
 
     emit!(LendingAccountTransferPositionEvent {
         header: AccountEventHeader {
             signer: Some(ctx.accounts.authority.key()),
             marginfi_account: ctx.accounts.source_marginfi_account.key(),
-            marginfi_account_authority: source_authority,
-            marginfi_group: source_group,
+            marginfi_account_authority: source_account.authority,
+            marginfi_group: source_account.group,
         },
         source_account: ctx.accounts.source_marginfi_account.key(),
-        source_account_authority: source_authority,
+        source_account_authority: source_account.authority,
         destination_account: ctx.accounts.destination_marginfi_account.key(),
-        destination_account_authority: dest_authority,
-        bank: ctx.accounts.bank.key(),
+        destination_account_authority: destination_account.authority,
+        bank: bank_key,
         mint: bank_mint,
         transfer_amount,
         transfer_share_amount: share_amount.into(),
@@ -290,12 +202,34 @@ pub fn lending_account_transfer_position<'info>(
     Ok(())
 }
 
+/// Non-inlined so each account's `PremiumScratch` gets its own frame within the SBF stack budget.
+#[inline(never)]
+fn check_health_and_refresh_premium<'info>(
+    account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    observation_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult {
+    let mut health_cache = HealthCache::zeroed();
+    health_cache.timestamp = clock.unix_timestamp;
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health(
+        account,
+        group,
+        observation_ais,
+        &mut Some(&mut health_cache),
+        &mut Some(&mut premium_scratch),
+    )?;
+    health_cache.program_version = PROGRAM_VERSION;
+    health_cache.set_engine_ok(true);
+    account.health_cache = health_cache;
+    account.update_premium_snapshots(group, &premium_scratch, clock.unix_timestamp as u64)
+}
+
 #[derive(Accounts)]
 pub struct LendingAccountTransferPosition<'info> {
     #[account(
-        constraint = (
-            !group.load()?.is_protocol_paused()
-        ) @ MarginfiError::ProtocolPaused
+        constraint = !group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
@@ -309,7 +243,7 @@ pub struct LendingAccountTransferPosition<'info> {
         constraint = {
             let a = source_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -324,13 +258,15 @@ pub struct LendingAccountTransferPosition<'info> {
         constraint = {
             let a = destination_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, destination_authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, destination_authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub destination_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     pub authority: Signer<'info>,
 
+    /// Pays the flat protocol fee.
+    #[account(mut)]
     pub destination_authority: Signer<'info>,
 
     #[account(
@@ -341,9 +277,16 @@ pub struct LendingAccountTransferPosition<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// CHECK: Validated against group.fee_state_cache.global_fee_wallet in the instruction handler
+    /// CHECK: validated against `group.fee_state_cache.global_fee_wallet` in the handler.
     #[account(mut)]
     pub global_fee_wallet: UncheckedAccount<'info>,
+
+    // Note: there is just one FeeState per program. Read here for the configurable transfer fee.
+    #[account(
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump,
+    )]
+    pub fee_state: AccountLoader<'info, FeeState>,
 
     pub system_program: Program<'info, System>,
 }

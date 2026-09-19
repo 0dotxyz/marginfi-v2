@@ -122,7 +122,6 @@ pub fn edit_fee_state(
             position_transfer_fee
         );
         fee_state.position_transfer_fee = position_transfer_fee;
-        fee_state.position_transfer_fee_initialized = 1;
     }
     if let Some(position_transfer_min_value_usd_cents) = position_transfer_min_value_usd_cents {
         msg!(
@@ -131,7 +130,6 @@ pub fn edit_fee_state(
             position_transfer_min_value_usd_cents
         );
         fee_state.position_transfer_min_value_usd_cents = position_transfer_min_value_usd_cents;
-        fee_state.position_transfer_min_value_initialized = 1;
     }
 
     Ok(())

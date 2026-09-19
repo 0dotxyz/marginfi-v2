@@ -20,7 +20,6 @@ mod repay;
 mod set_position_transfer_flags;
 mod sync_indexer_flags;
 mod transfer_account;
-mod transfer_flags;
 mod transfer_position;
 mod withdraw;
 
@@ -46,6 +45,5 @@ pub use repay::*;
 pub use set_position_transfer_flags::*;
 pub use sync_indexer_flags::*;
 pub use transfer_account::*;
-pub use transfer_flags::*;
 pub use transfer_position::*;
 pub use withdraw::*;

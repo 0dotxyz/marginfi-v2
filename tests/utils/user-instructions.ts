@@ -1036,41 +1036,52 @@ export const endExecuteOrderIx = (
 
 
 export type LendingAccountTransferPositionArgs = {
+  group: PublicKey;
   sourceMarginfiAccount: PublicKey;
   destinationMarginfiAccount: PublicKey;
-  bank: PublicKey;
-  marginfiGroup: PublicKey;
   authority: PublicKey;
   destinationAuthority: PublicKey;
-  transferAmount: BN;
+  bank: PublicKey;
   globalFeeWallet: PublicKey;
-  remainingAccounts: AccountMeta[];
+  transferAmount: BN;
+  /** Source observation set: `[bank, oracles...]` per active balance, as it stands after the move */
+  sourceRemaining: PublicKey[];
+  /** Destination observation set, same layout, including the transferred bank */
+  destinationRemaining: PublicKey[];
 };
 
+/**
+ * Move part of an asset position from one account to another in the same bank. Both authorities
+ * sign; the destination authority pays the flat protocol fee.
+ */
 export const lendingAccountTransferPositionIx = (
   program: Program<Marginfi>,
-  args: LendingAccountTransferPositionArgs
-): Promise<TransactionInstruction> => {
-  const transferAmountBytes = new BN(args.transferAmount).toBuffer('le', 8);
-  const discriminator = Buffer.from([63, 111, 55, 56, 14, 212, 75, 137]);
-  const data = Buffer.concat([discriminator, transferAmountBytes]);
+  args: LendingAccountTransferPositionArgs,
+) => {
+  const meta = (pubkey: PublicKey): AccountMeta => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  });
+  const ix = program.methods
+    .lendingAccountTransferPosition(
+      args.transferAmount,
+      args.destinationRemaining.length,
+    )
+    .accounts({
+      group: args.group,
+      sourceMarginfiAccount: args.sourceMarginfiAccount,
+      destinationMarginfiAccount: args.destinationMarginfiAccount,
+      authority: args.authority,
+      destinationAuthority: args.destinationAuthority,
+      bank: args.bank,
+      globalFeeWallet: args.globalFeeWallet,
+      // feeState = deriveGlobalFeeState(id)
+    })
+    .remainingAccounts(
+      [...args.sourceRemaining, ...args.destinationRemaining].map(meta),
+    )
+    .instruction();
 
-  const accounts: AccountMeta[] = [
-    { pubkey: args.marginfiGroup, isSigner: false, isWritable: false },
-    { pubkey: args.sourceMarginfiAccount, isSigner: false, isWritable: true },
-    { pubkey: args.destinationMarginfiAccount, isSigner: false, isWritable: true },
-    { pubkey: args.authority, isSigner: true, isWritable: false },
-    { pubkey: args.destinationAuthority, isSigner: true, isWritable: true },
-    { pubkey: args.bank, isSigner: false, isWritable: true },
-    { pubkey: args.globalFeeWallet, isSigner: false, isWritable: true },
-    { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
-  ];
-
-  accounts.push(...args.remainingAccounts);
-
-  return Promise.resolve(new TransactionInstruction({
-    programId: program.programId,
-    keys: accounts,
-    data,
-  }));
+  return ix;
 };

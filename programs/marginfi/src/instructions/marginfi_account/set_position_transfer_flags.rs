@@ -1,5 +1,4 @@
 use crate::{
-    check,
     events::{AccountEventHeader, MarginfiAccountFlagUpdateEvent},
     prelude::*,
     state::marginfi_account::MarginfiAccountImpl,
@@ -16,11 +15,6 @@ pub fn set_position_transfer_flags(
     disable_receive: Option<bool>,
 ) -> MarginfiResult {
     let mut account = ctx.accounts.marginfi_account.load_mut()?;
-
-    check!(
-        account.authority == ctx.accounts.authority.key(),
-        MarginfiError::Unauthorized
-    );
 
     if let Some(v) = disable_send {
         if v {
@@ -56,7 +50,7 @@ pub fn set_position_transfer_flags(
 
 #[derive(Accounts)]
 pub struct SetPositionTransferFlags<'info> {
-    #[account(mut)]
+    #[account(mut, has_one = authority @ MarginfiError::Unauthorized)]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     pub authority: Signer<'info>,
