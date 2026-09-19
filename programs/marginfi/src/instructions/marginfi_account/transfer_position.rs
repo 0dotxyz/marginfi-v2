@@ -37,9 +37,8 @@ use marginfi_type_crate::{
     },
 };
 
-/// Moves `transfer_amount` of the source's position in `bank` to the destination, on whichever
-/// side the source holds there. Remaining accounts: the source's observation set, then the
-/// destination's (`destination_accounts` long), `[bank, oracles...]` per active balance in order.
+/// Moves `transfer_amount` of the source's position in `bank` to the destination, on the side it
+/// holds. Remaining accounts: the source's observation set, then the destination's.
 pub fn lending_account_transfer_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
