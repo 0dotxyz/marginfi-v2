@@ -11,6 +11,7 @@ import {
   users,
 } from "../../rootHooks";
 import {
+  borrowIx,
   composeRemainingAccounts,
   depositIx,
   lendingAccountTransferPositionIx,
@@ -32,21 +33,26 @@ describe("Position transfer", () => {
   const lst = new BN(10).pow(new BN(ecosystem.lstAlphaDecimals));
 
   let group: PublicKey;
-  let bank: PublicKey;
+  /** Collateral bank */
+  let bankA: PublicKey;
+  /** Debt bank */
+  let bankB: PublicKey;
   let feeWallet: PublicKey;
 
   before(async () => {
     const setup = await genericMultiBankTestSetup(
-      1,
+      2,
       accountName,
       groupSeed,
       9_000,
     );
     group = setup.throwawayGroup.publicKey;
-    bank = setup.banks[0];
+    [bankA, bankB] = setup.banks;
     const groupAcc = await bankrunProgram.account.marginfiGroup.fetch(group);
     feeWallet = groupAcc.feeStateCache.globalFeeWallet;
   });
+
+  const account = (user: MockUser) => user.accounts.get(accountName);
 
   const lamports = async (key: PublicKey) =>
     BigInt((await banksClient.getAccount(key))!.lamports);
@@ -57,23 +63,9 @@ describe("Position transfer", () => {
     return banksClient.tryProcessTransaction(tx);
   };
 
-  const deposit = async (user: MockUser, amount: BN) => {
-    const tx = new Transaction().add(
-      await depositIx(user.mrgnBankrunProgram, {
-        marginfiAccount: user.accounts.get(accountName),
-        bank,
-        tokenAccount: user.lstAlphaAccount,
-        amount,
-        depositUpToLimit: false,
-      }),
-    );
-    const result = await send(tx, user);
-    assert.isNull(result.result);
-  };
-
   /** `[bank, oracle]` per active balance (plus `extraBank`), in the on-chain descending order */
-  const observation = async (account: PublicKey, extraBank?: PublicKey) => {
-    const acc = await bankrunProgram.account.marginfiAccount.fetch(account);
+  const observation = async (accountPk: PublicKey, extraBank?: PublicKey) => {
+    const acc = await bankrunProgram.account.marginfiAccount.fetch(accountPk);
     const banks = acc.lendingAccount.balances
       .filter((b) => b.active === 1)
       .map((b) => b.bankPk);
@@ -89,40 +81,67 @@ describe("Position transfer", () => {
     return composeRemainingAccounts(groups);
   };
 
+  const deposit = async (user: MockUser, bank: PublicKey, amount: BN) => {
+    const tx = new Transaction().add(
+      await depositIx(user.mrgnBankrunProgram, {
+        marginfiAccount: account(user),
+        bank,
+        tokenAccount: user.lstAlphaAccount,
+        amount,
+        depositUpToLimit: false,
+      }),
+    );
+    const result = await send(tx, user);
+    assert.isNull(result.result);
+  };
+
+  const borrow = async (user: MockUser, bank: PublicKey, amount: BN) => {
+    const tx = new Transaction().add(
+      await borrowIx(user.mrgnBankrunProgram, {
+        marginfiAccount: account(user),
+        bank,
+        tokenAccount: user.lstAlphaAccount,
+        remaining: await observation(account(user), bank),
+        amount,
+      }),
+    );
+    const result = await send(tx, user);
+    assert.isNull(result.result);
+  };
+
+  /** The source authority signs and pays the fee; `consenting` signs only to accept debt. */
   const transfer = async (
     source: MockUser,
     destination: MockUser,
+    bank: PublicKey,
     amount: BN,
-    destinationAuthority: MockUser = destination,
+    consenting?: MockUser,
   ) => {
-    const sourceAccount = source.accounts.get(accountName);
-    const destinationAccount = destination.accounts.get(accountName);
     const tx = new Transaction().add(
       await lendingAccountTransferPositionIx(bankrunProgram, {
         group,
-        sourceMarginfiAccount: sourceAccount,
-        destinationMarginfiAccount: destinationAccount,
+        sourceMarginfiAccount: account(source),
+        destinationMarginfiAccount: account(destination),
         authority: source.wallet.publicKey,
-        destinationAuthority: destinationAuthority.wallet.publicKey,
+        destinationAuthority: consenting ? consenting.wallet.publicKey : null,
+        feePayer: source.wallet.publicKey,
         bank,
         globalFeeWallet: feeWallet,
         transferAmount: amount,
-        sourceRemaining: await observation(sourceAccount),
-        destinationRemaining: await observation(destinationAccount, bank),
+        sourceRemaining: await observation(account(source)),
+        destinationRemaining: await observation(account(destination), bank),
       }),
     );
-    return send(tx, source, destinationAuthority);
+    return consenting ? send(tx, source, consenting) : send(tx, source);
   };
 
-  const shares = async (user: MockUser) => {
-    const acc = await bankrunProgram.account.marginfiAccount.fetch(
-      user.accounts.get(accountName),
-    );
-    const balance = acc.lendingAccount.balances.find(
+  const balance = async (user: MockUser, bank: PublicKey) => {
+    const acc = await bankrunProgram.account.marginfiAccount.fetch(account(user));
+    const found = acc.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(bank),
     );
-    assert.isDefined(balance);
-    return balance.assetShares;
+    assert.isDefined(found);
+    return found;
   };
 
   const setPositionTransferFlags = async (
@@ -134,7 +153,7 @@ describe("Position transfer", () => {
       await user.mrgnBankrunProgram.methods
         .marginfiAccountSetPositionTransferFlags(disableSend, disableReceive)
         .accounts({
-          marginfiAccount: user.accounts.get(accountName),
+          marginfiAccount: account(user),
           authority: user.wallet.publicKey,
         })
         .instruction(),
@@ -149,7 +168,7 @@ describe("Position transfer", () => {
         .marginfiAccountSetFreeze(frozen)
         .accounts({
           group,
-          marginfiAccount: user.accounts.get(accountName),
+          marginfiAccount: account(user),
           admin: groupAdmin.wallet.publicKey,
         })
         .instruction(),
@@ -158,47 +177,41 @@ describe("Position transfer", () => {
     assert.isNull(result.result);
   };
 
-  it("(user 0 -> user 1) moves half a position; the receiver pays the default fee", async () => {
+  it("(user 0 -> user 1) moves half a position on the sender's signature; the sender pays the default fee", async () => {
     const depositAmount = new BN(100).mul(lst);
     const transferAmount = depositAmount.divn(2);
-    await deposit(users[0], depositAmount);
+    await deposit(users[0], bankA, depositAmount);
 
     const feeWalletBefore = await lamports(feeWallet);
     const receiverBefore = await lamports(users[1].wallet.publicKey);
-    const result = await transfer(users[0], users[1], transferAmount);
+    const result = await transfer(users[0], users[1], bankA, transferAmount);
     assert.isNull(result.result);
 
     // No borrows exist in this bank, so one share is exactly one native unit.
     assert.equal(
-      toI80Scaled(await shares(users[0])),
+      toI80Scaled((await balance(users[0], bankA)).assetShares),
       nativeToI80Scaled(depositAmount.sub(transferAmount)),
     );
-    assert.equal(toI80Scaled(await shares(users[1])), nativeToI80Scaled(transferAmount));
+    assert.equal(
+      toI80Scaled((await balance(users[1], bankA)).assetShares),
+      nativeToI80Scaled(transferAmount),
+    );
     assert.equal(
       await lamports(feeWallet),
       feeWalletBefore + DEFAULT_POSITION_TRANSFER_FEE,
     );
-    assert.equal(
-      await lamports(users[1].wallet.publicKey),
-      receiverBefore - DEFAULT_POSITION_TRANSFER_FEE,
-    );
+    assert.equal(await lamports(users[1].wallet.publicKey), receiverBefore);
   });
 
   it("(user 0 -> user 0) rejects a transfer to the same account", async () => {
-    const result = await transfer(users[0], users[0], lst);
+    const result = await transfer(users[0], users[0], bankA, lst);
     // PositionTransferIdenticalAccounts
     assertBankrunTxFailed(result, 6904);
   });
 
-  it("(user 0 -> user 1) rejects a destination authority that does not own the destination", async () => {
-    const result = await transfer(users[0], users[1], lst, users[0]);
-    // Unauthorized
-    assertBankrunTxFailed(result, 6042);
-  });
-
   it("(user 0 -> user 2) rejects a frozen destination", async () => {
     await setFreeze(users[2], true);
-    const result = await transfer(users[0], users[2], lst);
+    const result = await transfer(users[0], users[2], bankA, lst);
     // AccountFrozen
     assertBankrunTxFailed(result, 6103);
     await setFreeze(users[2], false);
@@ -206,7 +219,7 @@ describe("Position transfer", () => {
 
   it("(user 0 -> user 1) rejects a source that disabled sending", async () => {
     await setPositionTransferFlags(users[0], true, null);
-    const result = await transfer(users[0], users[1], lst);
+    const result = await transfer(users[0], users[1], bankA, lst);
     // PositionTransferSendDisabled
     assertBankrunTxFailed(result, 6901);
     await setPositionTransferFlags(users[0], false, null);
@@ -214,14 +227,14 @@ describe("Position transfer", () => {
 
   it("(user 0 -> user 1) rejects a destination that disabled receiving", async () => {
     await setPositionTransferFlags(users[1], null, true);
-    const result = await transfer(users[0], users[1], lst);
+    const result = await transfer(users[0], users[1], bankA, lst);
     // PositionTransferDisabled
     assertBankrunTxFailed(result, 6900);
     await setPositionTransferFlags(users[1], null, false);
   });
 
   it("(user 0 -> user 1) rejects a transfer below the minimum value", async () => {
-    const result = await transfer(users[0], users[1], new BN(1_000));
+    const result = await transfer(users[0], users[1], bankA, new BN(1_000));
     // InvalidPositionTransferAmount
     assertBankrunTxFailed(result, 6902);
   });
@@ -241,18 +254,18 @@ describe("Position transfer", () => {
     await setFee(FEE_LAMPORTS);
 
     const transferAmount = new BN(10).mul(lst);
-    const sourceBefore = await shares(users[0]);
-    const destinationBefore = await shares(users[1]);
+    const sourceBefore = (await balance(users[0], bankA)).assetShares;
+    const destinationBefore = (await balance(users[1], bankA)).assetShares;
     const feeWalletBefore = await lamports(feeWallet);
-    const result = await transfer(users[0], users[1], transferAmount);
+    const result = await transfer(users[0], users[1], bankA, transferAmount);
     assert.isNull(result.result);
 
     assert.equal(
-      toI80Scaled(await shares(users[0])),
+      toI80Scaled((await balance(users[0], bankA)).assetShares),
       toI80Scaled(sourceBefore) - nativeToI80Scaled(transferAmount),
     );
     assert.equal(
-      toI80Scaled(await shares(users[1])),
+      toI80Scaled((await balance(users[1], bankA)).assetShares),
       toI80Scaled(destinationBefore) + nativeToI80Scaled(transferAmount),
     );
     assert.equal(
@@ -262,5 +275,31 @@ describe("Position transfer", () => {
 
     // Back to the program default for the rest of the suite.
     await setFee(0);
+  });
+
+  it("(user 0 -> user 2) moves debt only with the receiver's signature", async () => {
+    // User 1 funds the debt bank, user 0 borrows against its collateral, user 2 posts collateral.
+    await deposit(users[1], bankB, new BN(100).mul(lst));
+    const borrowAmount = new BN(10).mul(lst);
+    await borrow(users[0], bankB, borrowAmount);
+    await deposit(users[2], bankA, new BN(100).mul(lst));
+
+    const debtAmount = new BN(5).mul(lst);
+    const refused = await transfer(users[0], users[2], bankB, debtAmount);
+    // PositionTransferDebtConsentRequired
+    assertBankrunTxFailed(refused, 6905);
+
+    const result = await transfer(users[0], users[2], bankB, debtAmount, users[2]);
+    assert.isNull(result.result);
+
+    // The clock has not moved since the borrow, so one liability share is one native unit.
+    assert.equal(
+      toI80Scaled((await balance(users[0], bankB)).liabilityShares),
+      nativeToI80Scaled(borrowAmount.sub(debtAmount)),
+    );
+    assert.equal(
+      toI80Scaled((await balance(users[2], bankB)).liabilityShares),
+      nativeToI80Scaled(debtAmount),
+    );
   });
 });

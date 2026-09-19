@@ -2677,18 +2677,19 @@ impl MarginfiAccountFixture {
             bank,
             ui_amount,
             authority,
-            authority,
+            None,
         )
         .await
     }
 
+    /// `destination_authority` signs only to consent to receiving debt.
     pub async fn try_position_transfer_with_authorities<T: Into<f64> + Copy>(
         &self,
         destination_account: &MarginfiAccountFixture,
         bank: &BankFixture,
         ui_amount: T,
         source_authority: &Keypair,
-        destination_authority: &Keypair,
+        destination_authority: Option<&Keypair>,
     ) -> anyhow::Result<(), BanksClientError> {
         let (fee_state_key, _bump) = Pubkey::find_program_address(
             &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
@@ -2704,12 +2705,14 @@ impl MarginfiAccountFixture {
             .load_observation_account_metas(vec![bank.key], vec![])
             .await;
 
+        let payer = self.ctx.borrow().payer.insecure_clone();
         let mut accounts = marginfi::accounts::LendingAccountTransferPosition {
             group: self.load().await.group,
             source_marginfi_account: self.key,
             destination_marginfi_account: destination_account.key,
             authority: source_authority.pubkey(),
-            destination_authority: destination_authority.pubkey(),
+            destination_authority: destination_authority.map(|k| k.pubkey()),
+            fee_payer: payer.pubkey(),
             bank: bank.key,
             global_fee_wallet: fee_wallet,
             fee_state: fee_state_key,
@@ -2735,10 +2738,13 @@ impl MarginfiAccountFixture {
         if source_authority.pubkey() != payer.pubkey() {
             signers.push(source_authority);
         }
-        if destination_authority.pubkey() != payer.pubkey()
-            && destination_authority.pubkey() != source_authority.pubkey()
-        {
-            signers.push(destination_authority);
+        if let Some(destination_authority) = destination_authority {
+            if !signers
+                .iter()
+                .any(|k| k.pubkey() == destination_authority.pubkey())
+            {
+                signers.push(destination_authority);
+            }
         }
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);

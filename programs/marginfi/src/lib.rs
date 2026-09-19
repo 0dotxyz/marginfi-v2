@@ -565,8 +565,9 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
-    /// (both authorities) Move part of an asset position in one bank between two marginfi accounts;
-    /// both must stay initial-healthy and the destination authority pays the flat protocol fee.
+    /// (source authority) Move part of a position in one bank to another marginfi account. Collateral
+    /// moves one-sided unless the receiver opted out; debt also needs the receiver's consent (shared
+    /// authority or `destination_authority` signing). Both accounts must stay initial-healthy.
     pub fn lending_account_transfer_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,

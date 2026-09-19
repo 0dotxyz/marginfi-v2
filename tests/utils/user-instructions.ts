@@ -1040,7 +1040,9 @@ export type LendingAccountTransferPositionArgs = {
   sourceMarginfiAccount: PublicKey;
   destinationMarginfiAccount: PublicKey;
   authority: PublicKey;
-  destinationAuthority: PublicKey;
+  /** Signs only to consent to receiving debt; null for a collateral move */
+  destinationAuthority: PublicKey | null;
+  feePayer: PublicKey;
   bank: PublicKey;
   globalFeeWallet: PublicKey;
   transferAmount: BN;
@@ -1051,8 +1053,9 @@ export type LendingAccountTransferPositionArgs = {
 };
 
 /**
- * Move part of an asset position from one account to another in the same bank. Both authorities
- * sign; the destination authority pays the flat protocol fee.
+ * Move part of a position in one bank to another account, on whichever side the source holds.
+ * Collateral needs only the source authority; debt also needs `destinationAuthority` to sign unless
+ * both accounts share an authority. `feePayer` pays the flat protocol fee.
  */
 export const lendingAccountTransferPositionIx = (
   program: Program<Marginfi>,
@@ -1074,6 +1077,7 @@ export const lendingAccountTransferPositionIx = (
       destinationMarginfiAccount: args.destinationMarginfiAccount,
       authority: args.authority,
       destinationAuthority: args.destinationAuthority,
+      feePayer: args.feePayer,
       bank: args.bank,
       globalFeeWallet: args.globalFeeWallet,
       // feeState = deriveGlobalFeeState(id)

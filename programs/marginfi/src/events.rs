@@ -253,6 +253,7 @@ pub struct LendingAccountTransferPositionEvent {
     pub destination_account_authority: Pubkey,
     pub bank: Pubkey,
     pub mint: Pubkey,
+    pub is_liability: bool,
     pub transfer_amount: u64,
     pub transfer_share_amount: WrappedI80F48,
     pub protocol_fee_lamports: u32,

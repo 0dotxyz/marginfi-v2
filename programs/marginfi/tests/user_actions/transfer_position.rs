@@ -1,12 +1,54 @@
 use anchor_lang::prelude::Clock;
 use bytemuck::from_bytes_mut;
 use fixed::types::I80F48;
+use fixtures::bank::BankFixture;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::*;
 use marginfi::state::bank::BankImpl;
-use marginfi_type_crate::types::{Bank, BankOperationalState};
+use marginfi_type_crate::types::{Bank, BankOperationalState, ACCOUNT_FROZEN};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
+use solana_sdk::signature::Keypair;
+
+async fn liability_shares(account: &MarginfiAccountFixture, bank: &BankFixture) -> I80F48 {
+    account
+        .load()
+        .await
+        .lending_account
+        .get_balance(&bank.key)
+        .unwrap()
+        .liability_shares
+        .into()
+}
+
+/// A lender funding the SOL bank, and a source account holding `usdc_deposit` USDC that borrowed
+/// 30 SOL against it.
+async fn indebted_source(test_f: &TestFixture, usdc_deposit: f64) -> MarginfiAccountFixture {
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let lender_f = test_f.create_marginfi_account().await;
+    let lender_sol = test_f.sol_mint.create_token_account_and_mint_to(500).await;
+    lender_f
+        .try_bank_deposit(lender_sol.key, sol_bank_f, 200.0, None)
+        .await
+        .unwrap();
+    let source_f = test_f.create_marginfi_account().await;
+    let source_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    source_f
+        .try_bank_deposit(source_usdc.key, usdc_bank_f, usdc_deposit, None)
+        .await
+        .unwrap();
+    let source_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    source_f
+        .try_bank_borrow(source_sol.key, sol_bank_f, 30.0)
+        .await
+        .unwrap();
+    source_f
+}
 
 #[tokio::test]
 async fn test_position_transfer_basic() -> anyhow::Result<()> {
@@ -939,5 +981,192 @@ async fn test_position_transfer_with_accrued_interest() -> anyhow::Result<()> {
         total_asset_shares_before - burned_shares + minted_shares
     );
 
+    Ok(())
+}
+
+/// Collateral reaches an account of another authority on the sender's signature alone.
+#[tokio::test]
+async fn test_position_transfer_collateral_needs_no_receiver_signature() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source_f = test_f.create_marginfi_account().await;
+    let source_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    source_f
+        .try_bank_deposit(source_usdc.key, usdc_bank_f, 500.0, None)
+        .await?;
+    let receiver = Keypair::new();
+    let dest_f = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &receiver,
+    )
+    .await;
+
+    source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
+        .await?;
+
+    let decimals = usdc_bank_f.mint.mint.decimals as u32;
+    let dest_shares: I80F48 = dest_f
+        .load()
+        .await
+        .lending_account
+        .get_balance(&usdc_bank_f.key)
+        .unwrap()
+        .asset_shares
+        .into();
+    assert_eq!(
+        dest_shares,
+        I80F48::from_num(100.0) * I80F48::from_num(10u64.pow(decimals))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_position_transfer_rejects_frozen_destination() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source_f = test_f.create_marginfi_account().await;
+    let source_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    source_f
+        .try_bank_deposit(source_usdc.key, usdc_bank_f, 500.0, None)
+        .await?;
+    let dest_f = test_f.create_marginfi_account().await;
+    let mut dest_account = dest_f.load().await;
+    dest_account.account_flags |= ACCOUNT_FROZEN;
+    dest_f.set_account(&dest_account).await?;
+
+    let res = source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+    Ok(())
+}
+
+/// Debt moves between two accounts of one authority without a second signature, burning and
+/// minting liability shares at the bank's share value.
+#[tokio::test]
+async fn test_position_transfer_debt_between_own_accounts() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = test_f.create_marginfi_account().await;
+    let dest_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    dest_f
+        .try_bank_deposit(dest_usdc.key, usdc_bank_f, 500.0, None)
+        .await?;
+
+    let source_shares_before = liability_shares(&source_f, sol_bank_f).await;
+    let total_shares_before: I80F48 = sol_bank_f.load().await.total_liability_shares.into();
+
+    source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 10.0)
+        .await?;
+
+    let bank = sol_bank_f.load().await;
+    let decimals = sol_bank_f.mint.mint.decimals as u32;
+    let transfer_native = I80F48::from_num(10.0) * I80F48::from_num(10u64.pow(decimals));
+    let burned_shares = bank.get_liability_shares(transfer_native)?;
+    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
+    assert_eq!(
+        liability_shares(&source_f, sol_bank_f).await,
+        source_shares_before - burned_shares
+    );
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    assert_eq!(
+        I80F48::from(bank.total_liability_shares),
+        total_shares_before - burned_shares + minted_shares
+    );
+    Ok(())
+}
+
+/// Debt sent to another authority's account needs that authority's signature, while collateral
+/// does not.
+#[tokio::test]
+async fn test_position_transfer_debt_requires_receiver_consent() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 1_000.0).await;
+    let receiver = Keypair::new();
+    let dest_f = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &receiver,
+    )
+    .await;
+    source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 300.0)
+        .await?;
+
+    let res = source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 10.0)
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDebtConsentRequired
+    );
+
+    let payer = test_f.payer_keypair();
+    source_f
+        .try_position_transfer_with_authorities(&dest_f, sol_bank_f, 10.0, &payer, Some(&receiver))
+        .await?;
+    let bank = sol_bank_f.load().await;
+    let decimals = sol_bank_f.mint.mint.decimals as u32;
+    let burned_shares =
+        bank.get_liability_shares(I80F48::from_num(10.0) * I80F48::from_num(10u64.pow(decimals)))?;
+    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_position_transfer_debt_into_asset_holder() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = test_f.create_marginfi_account().await;
+    let dest_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    dest_f
+        .try_bank_deposit(dest_sol.key, sol_bank_f, 50.0, None)
+        .await?;
+
+    let res = source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 10.0)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::OperationBorrowOnly);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_position_transfer_debt_makes_destination_unhealthy() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = test_f.create_marginfi_account().await;
+    let dest_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    // 50 USDC cannot back 10 SOL ($100) of debt.
+    dest_f
+        .try_bank_deposit(dest_usdc.key, usdc_bank_f, 50.0, None)
+        .await?;
+
+    let res = source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 10.0)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RiskEngineInitRejected);
     Ok(())
 }

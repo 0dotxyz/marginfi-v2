@@ -26,17 +26,19 @@ use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::FEE_STATE_SEED,
+    constants::{EMPTY_BALANCE_THRESHOLD, FEE_STATE_SEED},
     types::{
-        is_marginfi_asset_tag, Bank, FeeState, HealthCache, MarginfiAccount, MarginfiGroup,
-        ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED,
-        ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
+        is_marginfi_asset_tag, BalanceSide, Bank, FeeState, HealthCache, MarginfiAccount,
+        MarginfiGroup, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED, ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
     },
 };
 
-/// Moves `transfer_amount` native units of the source's asset position in `bank` to the
-/// destination; both authorities sign and the destination authority pays the flat protocol fee.
+/// Moves `transfer_amount` native units of the source's position in `bank` to the destination, on
+/// whichever side the source holds there. Collateral moves on the source authority's signature
+/// alone unless the receiver opted out; debt also needs the receiver's consent, either a shared
+/// authority or `destination_authority` signing. `fee_payer` pays the flat protocol fee.
 /// Remaining accounts: the source's observation set, then the destination's
 /// (`destination_accounts` long), each `[bank, oracles...]` per active balance in balance order.
 pub fn lending_account_transfer_position<'info>(
@@ -84,6 +86,10 @@ pub fn lending_account_transfer_position<'info>(
         );
     }
     check!(
+        !destination_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
+    );
+    check!(
         !source_account.get_flag(ACCOUNT_POSITION_TRANSFER_SEND_DISABLED),
         MarginfiError::PositionTransferSendDisabled
     );
@@ -92,23 +98,39 @@ pub fn lending_account_transfer_position<'info>(
         MarginfiError::PositionTransferDisabled
     );
 
+    let source_balance = source_account
+        .lending_account
+        .get_balance(&bank_key)
+        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
+    let (is_liability, source_shares): (bool, I80F48) = match source_balance.get_side() {
+        Some(BalanceSide::Liabilities) => (true, source_balance.liability_shares.into()),
+        Some(BalanceSide::Assets) => (false, source_balance.asset_shares.into()),
+        None => return err!(MarginfiError::NoAssetFound),
+    };
+    if is_liability {
+        let receiver_consents = destination_account.authority == ctx.accounts.authority.key()
+            || ctx
+                .accounts
+                .destination_authority
+                .as_ref()
+                .is_some_and(|signer| signer.key() == destination_account.authority);
+        check!(
+            receiver_consents,
+            MarginfiError::PositionTransferDebtConsentRequired
+        );
+    }
+
     validate_asset_tags(&bank, &destination_account)?;
-    // Halt-safe only when both legs are: the source sheds collateral like a withdraw, the
-    // destination gains it like a deposit.
+    // Taking on debt is never halt-safe; a collateral move is when both legs are: the source
+    // sheds like a withdraw, the destination gains like a deposit.
+    let halt_safe = !is_liability
+        && !source_account.lending_account.has_liabilities()
+        && deposit_is_halt_safe(&destination_account, &bank_key);
     validate_bank_state(
         &bank,
         InstructionKind::FailsIfPausedOrReduceState,
-        !source_account.lending_account.has_liabilities()
-            && deposit_is_halt_safe(&destination_account, &bank_key),
+        halt_safe,
     )?;
-
-    let source_shares: I80F48 = source_account
-        .lending_account
-        .get_balance(&bank_key)
-        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?
-        .asset_shares
-        .into();
-    check!(source_shares > I80F48::ZERO, MarginfiError::NoAssetFound);
 
     let fee_state = ctx.accounts.fee_state.load()?;
     let min_value_usd_cents = match fee_state.position_transfer_min_value_usd_cents {
@@ -120,14 +142,10 @@ pub fn lending_account_transfer_position<'info>(
         fee => fee,
     };
 
+    let amount = I80F48::from_num(transfer_amount);
     let price =
         fetch_asset_price_for_bank_low_bias(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
-    let transfer_usd_value = calc_value(
-        I80F48::from_num(transfer_amount),
-        price,
-        bank.get_balance_decimals(),
-        None,
-    )?;
+    let transfer_usd_value = calc_value(amount, price, bank.get_balance_decimals(), None)?;
     check!(
         transfer_usd_value >= I80F48::from_num(min_value_usd_cents) / I80F48::from_num(100),
         MarginfiError::InvalidPositionTransferAmount
@@ -139,21 +157,52 @@ pub fn lending_account_transfer_position<'info>(
         #[cfg(not(feature = "client"))]
         bank_key,
     )?;
+    let available = if is_liability {
+        bank.get_liability_amount(source_shares)?
+    } else {
+        bank.get_asset_amount(source_shares)?
+    };
     check!(
-        bank.get_asset_amount(source_shares)? >= I80F48::from_num(transfer_amount),
+        available >= amount,
         MarginfiError::PositionTransferInsufficientFunds
     );
 
-    let share_amount =
-        BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?
-            .withdraw(I80F48::from_num(transfer_amount))?;
-    let asset_amount = bank.get_asset_amount(share_amount)?;
-    BankAccountWrapper::find_or_create(
-        &bank_key,
-        &mut bank,
-        &mut destination_account.lending_account,
-    )?
-    .deposit(asset_amount)?;
+    let share_amount = {
+        let mut source_position =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?;
+        if is_liability {
+            source_position.repay(amount)?
+        } else {
+            source_position.withdraw(amount)?
+        }
+    };
+    // The destination takes on what the burned shares were worth, so the bank's totals round-trip.
+    let moved_amount = if is_liability {
+        bank.get_liability_amount(share_amount)?
+    } else {
+        bank.get_asset_amount(share_amount)?
+    };
+    {
+        let mut destination_position = BankAccountWrapper::find_or_create(
+            &bank_key,
+            &mut bank,
+            &mut destination_account.lending_account,
+        )?;
+        if is_liability {
+            destination_position.borrow(moved_amount)?;
+            check!(
+                I80F48::from(destination_position.balance.liability_shares)
+                    >= EMPTY_BALANCE_THRESHOLD,
+                MarginfiError::IllegalBalanceState,
+                "Transfer would leave positive liability shares below the empty balance threshold"
+            );
+        } else {
+            destination_position.deposit(moved_amount)?;
+        }
+    }
+    if is_liability && bank.config.risk_tier == RiskTier::Isolated {
+        destination_account.indexer_flags.has_isolated = 1;
+    }
 
     anchor_lang::system_program::transfer(
         ctx.accounts.transfer_fee(),
@@ -175,11 +224,24 @@ pub fn lending_account_transfer_position<'info>(
         .checked_sub(destination_accounts as usize)
         .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     let (source_obs, destination_obs) = ctx.remaining_accounts.split_at(split);
-    check_health_and_refresh_premium(&mut source_account, &group, source_obs, &clock)?;
-    if source_account.lending_account.has_liabilities() {
-        run_cb_price_gate(&source_account, source_obs)?;
-    }
-    check_health_and_refresh_premium(&mut destination_account, &group, destination_obs, &clock)?;
+    // Shedding collateral while owing, or taking on debt, is the risk-carrying leg.
+    let source_carries_risk = !is_liability && source_account.lending_account.has_liabilities();
+    check_health_and_refresh_premium(
+        &mut source_account,
+        &group,
+        source_obs,
+        &clock,
+        source_carries_risk,
+        false,
+    )?;
+    check_health_and_refresh_premium(
+        &mut destination_account,
+        &group,
+        destination_obs,
+        &clock,
+        is_liability,
+        is_liability,
+    )?;
 
     emit!(LendingAccountTransferPositionEvent {
         header: AccountEventHeader {
@@ -194,6 +256,7 @@ pub fn lending_account_transfer_position<'info>(
         destination_account_authority: destination_account.authority,
         bank: bank_key,
         mint: bank_mint,
+        is_liability,
         transfer_amount,
         transfer_share_amount: share_amount.into(),
         protocol_fee_lamports: position_transfer_fee,
@@ -209,6 +272,8 @@ fn check_health_and_refresh_premium<'info>(
     group: &MarginfiGroup,
     observation_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
+    carries_risk: bool,
+    takes_on_debt: bool,
 ) -> MarginfiResult {
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
@@ -223,6 +288,15 @@ fn check_health_and_refresh_premium<'info>(
     health_cache.program_version = PROGRAM_VERSION;
     health_cache.set_engine_ok(true);
     account.health_cache = health_cache;
+    if takes_on_debt {
+        check!(
+            !premium_scratch.refresh_unavailable(),
+            MarginfiError::PremiumSnapshotUnavailable
+        );
+    }
+    if carries_risk {
+        run_cb_price_gate(account, observation_ais)?;
+    }
     account.update_premium_snapshots(group, &premium_scratch, clock.unix_timestamp as u64)
 }
 
@@ -248,26 +322,16 @@ pub struct LendingAccountTransferPosition<'info> {
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    #[account(
-        mut,
-        has_one = group @ MarginfiError::InvalidGroup,
-        constraint = {
-            let a = destination_marginfi_account.load()?;
-            account_not_frozen_for_authority(&a, destination_authority.key())
-        } @ MarginfiError::AccountFrozen,
-        constraint = {
-            let a = destination_marginfi_account.load()?;
-            let g = group.load()?;
-            is_signer_authorized(&a, g.admin, destination_authority.key(), false, false, false)
-        } @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub destination_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     pub authority: Signer<'info>,
 
-    /// Pays the flat protocol fee.
+    /// Consents to receiving debt; a collateral move needs no signature from the receiver.
+    pub destination_authority: Option<Signer<'info>>,
+
     #[account(mut)]
-    pub destination_authority: Signer<'info>,
+    pub fee_payer: Signer<'info>,
 
     #[account(
         mut,
@@ -298,7 +362,7 @@ impl<'info> LendingAccountTransferPosition<'info> {
         CpiContext::new(
             self.system_program.key(),
             anchor_lang::system_program::Transfer {
-                from: self.destination_authority.to_account_info(),
+                from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),
             },
         )
