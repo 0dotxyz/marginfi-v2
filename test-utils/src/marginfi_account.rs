@@ -2649,4 +2649,107 @@ impl MarginfiAccountFixture {
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
     }
+
+    pub async fn try_position_transfer<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authority(
+            destination_account,
+            bank,
+            ui_amount,
+            &self.ctx.borrow().payer.insecure_clone(),
+        )
+        .await
+    }
+
+    pub async fn try_position_transfer_with_authority<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authorities(
+            destination_account,
+            bank,
+            ui_amount,
+            authority,
+            None,
+        )
+        .await
+    }
+
+    /// `destination_authority` signs only to consent to receiving debt.
+    pub async fn try_position_transfer_with_authorities<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        source_authority: &Keypair,
+        destination_authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let (fee_state_key, _bump) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
+        let fee_wallet = load_and_deserialize::<FeeState>(self.ctx.clone(), &fee_state_key)
+            .await
+            .global_fee_wallet;
+        // Post-transfer observation sets: the source keeps its slot, the destination gains one.
+        let source_obs = self.load_observation_account_metas(vec![], vec![]).await;
+        let destination_obs = destination_account
+            .load_observation_account_metas(vec![bank.key], vec![])
+            .await;
+
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        let mut accounts = marginfi::accounts::LendingAccountTransferPosition {
+            group: self.load().await.group,
+            source_marginfi_account: self.key,
+            destination_marginfi_account: destination_account.key,
+            authority: source_authority.pubkey(),
+            destination_authority: destination_authority.map(|k| k.pubkey()),
+            fee_payer: payer.pubkey(),
+            bank: bank.key,
+            global_fee_wallet: fee_wallet,
+            fee_state: fee_state_key,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+        let destination_accounts = destination_obs.len() as u8;
+        accounts.extend(source_obs);
+        accounts.extend(destination_obs);
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingAccountTransferPosition {
+                transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                destination_accounts,
+            }
+            .data(),
+        };
+
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if source_authority.pubkey() != payer.pubkey() {
+            signers.push(source_authority);
+        }
+        if let Some(destination_authority) = destination_authority {
+            if !signers
+                .iter()
+                .any(|k| k.pubkey() == destination_authority.pubkey())
+            {
+                signers.push(destination_authority);
+            }
+        }
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
 }

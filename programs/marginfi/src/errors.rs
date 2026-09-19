@@ -526,7 +526,22 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+
+    // ************** BEGIN POSITION TRANSFER ERRORS (starting at 6900)
+    #[msg("Account is not allowed to receive position transfers")]
+    PositionTransferReceiveDisabled = 900, // 6900
+    #[msg("Account is not allowed to send position transfers")]
+    PositionTransferSendDisabled, // 6901
+    #[msg("Invalid position transfer amount")]
+    InvalidPositionTransferAmount, // 6902
+    #[msg("Insufficient funds for position transfer")]
+    PositionTransferInsufficientFunds, // 6903
+    #[msg("Cannot transfer a position to the same account")]
+    PositionTransferIdenticalAccounts, // 6904
+    #[msg("Receiving debt requires the destination authority's consent")]
+    PositionTransferDebtConsentRequired, // 6905
+                                         // ************** END POSITION TRANSFER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -808,6 +823,14 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Position-transfer errors (starting at 6900)
+            6900 => MarginfiError::PositionTransferReceiveDisabled,
+            6901 => MarginfiError::PositionTransferSendDisabled,
+            6902 => MarginfiError::InvalidPositionTransferAmount,
+            6903 => MarginfiError::PositionTransferInsufficientFunds,
+            6904 => MarginfiError::PositionTransferIdenticalAccounts,
+            6905 => MarginfiError::PositionTransferDebtConsentRequired,
 
             _ => MarginfiError::InternalLogicError,
         }

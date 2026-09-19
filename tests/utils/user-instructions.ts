@@ -1033,3 +1033,58 @@ export const endExecuteOrderIx = (
     .remainingAccounts(rem)
     .instruction();
 };
+
+
+export type LendingAccountTransferPositionArgs = {
+  group: PublicKey;
+  sourceMarginfiAccount: PublicKey;
+  destinationMarginfiAccount: PublicKey;
+  authority: PublicKey;
+  /** Signs only to consent to receiving debt; null for a collateral move */
+  destinationAuthority: PublicKey | null;
+  feePayer: PublicKey;
+  bank: PublicKey;
+  globalFeeWallet: PublicKey;
+  transferAmount: BN;
+  /** Source observation set: `[bank, oracles...]` per active balance, as it stands after the move */
+  sourceRemaining: PublicKey[];
+  /** Destination observation set, same layout, including the transferred bank */
+  destinationRemaining: PublicKey[];
+};
+
+/**
+ * Move part of a position to another account in the same bank. `destinationAuthority` signs only to
+ * consent to receiving debt; `feePayer` pays the flat fee.
+ */
+export const lendingAccountTransferPositionIx = (
+  program: Program<Marginfi>,
+  args: LendingAccountTransferPositionArgs,
+) => {
+  const meta = (pubkey: PublicKey): AccountMeta => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  });
+  const ix = program.methods
+    .lendingAccountTransferPosition(
+      args.transferAmount,
+      args.destinationRemaining.length,
+    )
+    .accounts({
+      group: args.group,
+      sourceMarginfiAccount: args.sourceMarginfiAccount,
+      destinationMarginfiAccount: args.destinationMarginfiAccount,
+      authority: args.authority,
+      destinationAuthority: args.destinationAuthority,
+      feePayer: args.feePayer,
+      bank: args.bank,
+      globalFeeWallet: args.globalFeeWallet,
+      // feeState = deriveGlobalFeeState(id)
+    })
+    .remainingAccounts(
+      [...args.sourceRemaining, ...args.destinationRemaining].map(meta),
+    )
+    .instruction();
+
+  return ix;
+};

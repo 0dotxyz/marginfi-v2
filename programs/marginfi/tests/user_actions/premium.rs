@@ -70,7 +70,7 @@ fn zero_interest_config() -> InterestRateConfig {
 
 /// USDC (borrowed, tag stable, zero base interest) + SOL (collateral, tag sol), pair
 /// (sol -> stable) = 1% APR, no cap.
-async fn premium_test_fixture() -> TestFixture {
+pub(super) async fn premium_test_fixture() -> TestFixture {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -115,7 +115,7 @@ async fn premium_test_fixture() -> TestFixture {
 
 /// A lender supplying USDC liquidity + a borrower with SOL collateral borrowing USDC.
 /// Returns (lender, borrower, borrower's USDC token account key).
-async fn setup_borrower(
+pub(super) async fn setup_borrower(
     test_f: &TestFixture,
     usdc_borrowed: f64,
 ) -> (MarginfiAccountFixture, MarginfiAccountFixture, Pubkey) {
@@ -150,7 +150,7 @@ async fn setup_borrower(
     (lender, borrower, borrower_usdc.key)
 }
 
-async fn advance_clock(test_f: &TestFixture, seconds: i64) {
+pub(super) async fn advance_clock(test_f: &TestFixture, seconds: i64) {
     advance_clock_with_feeds(
         test_f,
         seconds,
