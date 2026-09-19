@@ -593,12 +593,14 @@ describe("k21: Scope-priced Kamino bank", () => {
       bankRunProvider,
       user.usdcAccount
     );
-    // withdraw amount is in cTokens; at a ~1.00x rate the liquidity out is within rounding
-    assert.approximately(
-      userUsdcAfter - userUsdcBefore,
-      withdrawAmount.toNumber(),
-      withdrawAmount.toNumber() * 0.01
+    // withdraw amount is in cTokens; the liquidity out follows the refreshed reserve's rate
+    const reserveRaw = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve
     );
+    const expectedWithdraw = getLiquidityExchangeRate({ ...reserveRaw } as Reserve)
+      .mul(withdrawAmount.toNumber())
+      .toNumber();
+    assert.approximately(userUsdcAfter - userUsdcBefore, expectedWithdraw, 2);
   });
 
   it("(user 3) repay and withdraw all - gets the initial deposit back", async () => {
