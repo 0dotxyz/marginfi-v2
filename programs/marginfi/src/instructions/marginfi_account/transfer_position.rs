@@ -156,15 +156,16 @@ pub fn lending_account_transfer_position<'info>(
         #[cfg(not(feature = "client"))]
         bank_key,
     )?;
-    let available = if is_liability {
-        bank.get_liability_amount(source_shares)?
+    // A debt move is capped at the debt itself, so an over-ask moves all of it as interest accrues.
+    let amount = if is_liability {
+        amount.min(bank.get_liability_amount(source_shares)?)
     } else {
-        bank.get_asset_amount(source_shares)?
+        check!(
+            bank.get_asset_amount(source_shares)? >= amount,
+            MarginfiError::PositionTransferInsufficientFunds
+        );
+        amount
     };
-    check!(
-        available >= amount,
-        MarginfiError::PositionTransferInsufficientFunds
-    );
 
     // Repaying the last of a debt writes its premium receivable off, so it is read first and moved
     // with an emptied source.
@@ -283,7 +284,7 @@ pub fn lending_account_transfer_position<'info>(
         bank: bank_key,
         mint: bank_mint,
         is_liability,
-        transfer_amount,
+        transfer_amount: amount.checked_to_num().ok_or_else(math_error!())?,
         transfer_share_amount: share_amount.into(),
         premium_carried: carried_premium.into(),
         protocol_fee_lamports: position_transfer_fee,

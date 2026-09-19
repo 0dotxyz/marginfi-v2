@@ -565,8 +565,8 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
-    /// (source authority) Move part of a position in one bank to another account; debt also needs
-    /// the receiver's consent (a shared authority or `destination_authority` signing).
+    /// (source authority) Move part of a position in one bank to another account. Debt needs the
+    /// receiver's consent (shared authority or `destination_authority`); an over-ask moves it all.
     pub fn lending_account_transfer_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,

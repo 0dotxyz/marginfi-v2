@@ -1507,3 +1507,36 @@ async fn test_position_transfer_within_capped_banks() -> anyhow::Result<()> {
     assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
     Ok(())
 }
+
+/// Asking for more debt than the source owes moves the whole debt.
+#[tokio::test]
+async fn test_position_transfer_debt_over_ask_moves_all() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = test_f.create_marginfi_account().await;
+    let dest_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    dest_f
+        .try_bank_deposit(dest_usdc.key, usdc_bank_f, 500.0, None)
+        .await?;
+    let source_shares_before = liability_shares(&source_f, sol_bank_f).await;
+
+    source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 100.0)
+        .await?;
+
+    let bank = sol_bank_f.load().await;
+    let burned_shares =
+        bank.get_liability_shares(bank.get_liability_amount(source_shares_before)?)?;
+    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
+    assert_eq!(
+        liability_shares(&source_f, sol_bank_f).await,
+        source_shares_before - burned_shares
+    );
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    Ok(())
+}
