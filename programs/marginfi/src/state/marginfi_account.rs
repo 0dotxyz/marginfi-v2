@@ -359,8 +359,7 @@ pub enum BalanceIncreaseType {
     RepayOnly,
     DepositOnly,
     BypassDepositLimit,
-    /// Deposit-only, receiving shares from another balance of the same bank: the bank's total is
-    /// unchanged, so the deposit cap does not apply.
+    /// Deposit-only, from another balance of the same bank: exempt from the deposit cap.
     TransferIn,
 }
 
@@ -369,11 +368,9 @@ pub enum BalanceDecreaseType {
     WithdrawOnly,
     BorrowOnly,
     BypassBorrowLimit,
-    /// Withdraw-only, sending shares to another balance of the same bank: the bank's total is
-    /// restored in the same instruction, so the utilization floor does not apply.
+    /// Withdraw-only, to another balance of the same bank: exempt from the utilization floor.
     TransferOut,
-    /// Borrow-only, taking over debt from another balance of the same bank: the bank's total is
-    /// unchanged, so the borrow cap does not apply.
+    /// Borrow-only, from another balance of the same bank: exempt from the borrow cap.
     DebtTransferIn,
 }
 
@@ -2274,20 +2271,20 @@ impl<'a> BankAccountWrapper<'a> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BorrowOnly)
     }
 
-    /// Receive an asset moved from another balance of the same bank. Deposit-only; the deposit cap
-    /// does not apply. Returns the asset share delta minted.
+    /// Deposit an asset arriving from another balance of the same bank. Returns the asset share
+    /// delta minted.
     pub fn transfer_in(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.increase_balance_internal(amount, BalanceIncreaseType::TransferIn)
     }
 
-    /// Send an asset to another balance of the same bank. Withdraw-only; the utilization floor does
-    /// not apply. Returns the asset share delta burned.
+    /// Withdraw an asset leaving for another balance of the same bank. Returns the asset share
+    /// delta burned.
     pub fn transfer_out(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::TransferOut)
     }
 
-    /// Take over debt from another balance of the same bank. Borrow-only; the borrow cap does not
-    /// apply. Returns the liability share delta minted.
+    /// Borrow debt arriving from another balance of the same bank. Returns the liability share
+    /// delta minted.
     pub fn debt_transfer_in(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::DebtTransferIn)
     }
@@ -2761,8 +2758,8 @@ impl<'a> BankAccountWrapper<'a> {
             I80F48::ZERO
         };
 
-        // Liquidation bypasses this check (a bank so bankrupt that assets < liabs must still
-        // liquidate); a same-bank transfer out restores the total in the same instruction.
+        // Liquidation may run with assets < liabs; a same-bank transfer restores the total in the
+        // same instruction.
         if !matches!(
             operation_type,
             BalanceDecreaseType::BypassBorrowLimit | BalanceDecreaseType::TransferOut

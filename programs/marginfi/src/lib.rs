@@ -565,9 +565,8 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
-    /// (source authority) Move part of a position in one bank to another marginfi account. Collateral
-    /// moves one-sided unless the receiver opted out; debt also needs the receiver's consent (shared
-    /// authority or `destination_authority` signing). Both accounts must stay initial-healthy.
+    /// (source authority) Move part of a position in one bank to another account; debt also needs
+    /// the receiver's consent (a shared authority or `destination_authority` signing).
     pub fn lending_account_transfer_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,
@@ -763,8 +762,7 @@ pub mod marginfi {
         marginfi_account::set_account_freeze(ctx, frozen)
     }
 
-    /// (account authority) Set position transfer opt-out flags. Allows account owner to prevent
-    /// sending or receiving position transfers.
+    /// (account authority) Opt the account out of sending or receiving position transfers.
     pub fn marginfi_account_set_position_transfer_flags(
         ctx: Context<SetPositionTransferFlags>,
         disable_send: Option<bool>,

@@ -959,8 +959,7 @@ async fn test_position_transfer_with_accrued_interest() -> anyhow::Result<()> {
         .try_position_transfer_with_authority(&dest_account_f, usdc_bank_f, transfer_amount, &payer)
         .await?;
 
-    // The transfer burns the shares worth `transfer_amount` at the accrued share value and mints
-    // shares for the amount those burned shares were worth, so the round trip is exact bank math.
+    // The expected shares follow the bank's own burn-then-mint round trip.
     let bank_after_transfer = usdc_bank_f.load().await;
     let total_asset_shares_after: I80F48 = bank_after_transfer.total_asset_shares.into();
     let decimals = usdc_bank_f.mint.mint.decimals as u32;

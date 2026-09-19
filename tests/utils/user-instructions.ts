@@ -1053,9 +1053,8 @@ export type LendingAccountTransferPositionArgs = {
 };
 
 /**
- * Move part of a position in one bank to another account, on whichever side the source holds.
- * Collateral needs only the source authority; debt also needs `destinationAuthority` to sign unless
- * both accounts share an authority. `feePayer` pays the flat protocol fee.
+ * Move part of a position to another account in the same bank. `destinationAuthority` signs only to
+ * consent to receiving debt; `feePayer` pays the flat fee.
  */
 export const lendingAccountTransferPositionIx = (
   program: Program<Marginfi>,

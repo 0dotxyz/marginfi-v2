@@ -33,10 +33,8 @@ describe("Position transfer", () => {
   const lst = new BN(10).pow(new BN(ecosystem.lstAlphaDecimals));
 
   let group: PublicKey;
-  /** Collateral bank */
-  let bankA: PublicKey;
-  /** Debt bank */
-  let bankB: PublicKey;
+  let collateralBank: PublicKey;
+  let debtBank: PublicKey;
   let feeWallet: PublicKey;
 
   before(async () => {
@@ -47,7 +45,7 @@ describe("Position transfer", () => {
       9_000,
     );
     group = setup.throwawayGroup.publicKey;
-    [bankA, bankB] = setup.banks;
+    [collateralBank, debtBank] = setup.banks;
     const groupAcc = await bankrunProgram.account.marginfiGroup.fetch(group);
     feeWallet = groupAcc.feeStateCache.globalFeeWallet;
   });
@@ -74,8 +72,8 @@ describe("Position transfer", () => {
     }
     const groups = await Promise.all(
       banks.map(async (b) => {
-        const bankAcc = await bankrunProgram.account.bank.fetch(b);
-        return [b, bankAcc.config.oracleKeys[0]];
+        const collateralBankcc = await bankrunProgram.account.bank.fetch(b);
+        return [b, collateralBankcc.config.oracleKeys[0]];
       }),
     );
     return composeRemainingAccounts(groups);
@@ -180,20 +178,20 @@ describe("Position transfer", () => {
   it("(user 0 -> user 1) moves half a position on the sender's signature; the sender pays the default fee", async () => {
     const depositAmount = new BN(100).mul(lst);
     const transferAmount = depositAmount.divn(2);
-    await deposit(users[0], bankA, depositAmount);
+    await deposit(users[0], collateralBank, depositAmount);
 
     const feeWalletBefore = await lamports(feeWallet);
     const receiverBefore = await lamports(users[1].wallet.publicKey);
-    const result = await transfer(users[0], users[1], bankA, transferAmount);
+    const result = await transfer(users[0], users[1], collateralBank, transferAmount);
     assert.isNull(result.result);
 
     // No borrows exist in this bank, so one share is exactly one native unit.
     assert.equal(
-      toI80Scaled((await balance(users[0], bankA)).assetShares),
+      toI80Scaled((await balance(users[0], collateralBank)).assetShares),
       nativeToI80Scaled(depositAmount.sub(transferAmount)),
     );
     assert.equal(
-      toI80Scaled((await balance(users[1], bankA)).assetShares),
+      toI80Scaled((await balance(users[1], collateralBank)).assetShares),
       nativeToI80Scaled(transferAmount),
     );
     assert.equal(
@@ -204,14 +202,14 @@ describe("Position transfer", () => {
   });
 
   it("(user 0 -> user 0) rejects a transfer to the same account", async () => {
-    const result = await transfer(users[0], users[0], bankA, lst);
+    const result = await transfer(users[0], users[0], collateralBank, lst);
     // PositionTransferIdenticalAccounts
     assertBankrunTxFailed(result, 6904);
   });
 
   it("(user 0 -> user 2) rejects a frozen destination", async () => {
     await setFreeze(users[2], true);
-    const result = await transfer(users[0], users[2], bankA, lst);
+    const result = await transfer(users[0], users[2], collateralBank, lst);
     // AccountFrozen
     assertBankrunTxFailed(result, 6103);
     await setFreeze(users[2], false);
@@ -219,7 +217,7 @@ describe("Position transfer", () => {
 
   it("(user 0 -> user 1) rejects a source that disabled sending", async () => {
     await setPositionTransferFlags(users[0], true, null);
-    const result = await transfer(users[0], users[1], bankA, lst);
+    const result = await transfer(users[0], users[1], collateralBank, lst);
     // PositionTransferSendDisabled
     assertBankrunTxFailed(result, 6901);
     await setPositionTransferFlags(users[0], false, null);
@@ -227,14 +225,14 @@ describe("Position transfer", () => {
 
   it("(user 0 -> user 1) rejects a destination that disabled receiving", async () => {
     await setPositionTransferFlags(users[1], null, true);
-    const result = await transfer(users[0], users[1], bankA, lst);
+    const result = await transfer(users[0], users[1], collateralBank, lst);
     // PositionTransferReceiveDisabled
     assertBankrunTxFailed(result, 6900);
     await setPositionTransferFlags(users[1], null, false);
   });
 
   it("(user 0 -> user 1) rejects a transfer below the minimum value", async () => {
-    const result = await transfer(users[0], users[1], bankA, new BN(1_000));
+    const result = await transfer(users[0], users[1], collateralBank, new BN(1_000));
     // InvalidPositionTransferAmount
     assertBankrunTxFailed(result, 6902);
   });
@@ -254,18 +252,18 @@ describe("Position transfer", () => {
     await setFee(FEE_LAMPORTS);
 
     const transferAmount = new BN(10).mul(lst);
-    const sourceBefore = (await balance(users[0], bankA)).assetShares;
-    const destinationBefore = (await balance(users[1], bankA)).assetShares;
+    const sourceBefore = (await balance(users[0], collateralBank)).assetShares;
+    const destinationBefore = (await balance(users[1], collateralBank)).assetShares;
     const feeWalletBefore = await lamports(feeWallet);
-    const result = await transfer(users[0], users[1], bankA, transferAmount);
+    const result = await transfer(users[0], users[1], collateralBank, transferAmount);
     assert.isNull(result.result);
 
     assert.equal(
-      toI80Scaled((await balance(users[0], bankA)).assetShares),
+      toI80Scaled((await balance(users[0], collateralBank)).assetShares),
       toI80Scaled(sourceBefore) - nativeToI80Scaled(transferAmount),
     );
     assert.equal(
-      toI80Scaled((await balance(users[1], bankA)).assetShares),
+      toI80Scaled((await balance(users[1], collateralBank)).assetShares),
       toI80Scaled(destinationBefore) + nativeToI80Scaled(transferAmount),
     );
     assert.equal(
@@ -278,27 +276,26 @@ describe("Position transfer", () => {
   });
 
   it("(user 0 -> user 2) moves debt only with the receiver's signature", async () => {
-    // User 1 funds the debt bank, user 0 borrows against its collateral, user 2 posts collateral.
-    await deposit(users[1], bankB, new BN(100).mul(lst));
+    await deposit(users[1], debtBank, new BN(100).mul(lst));
     const borrowAmount = new BN(10).mul(lst);
-    await borrow(users[0], bankB, borrowAmount);
-    await deposit(users[2], bankA, new BN(100).mul(lst));
+    await borrow(users[0], debtBank, borrowAmount);
+    await deposit(users[2], collateralBank, new BN(100).mul(lst));
 
     const debtAmount = new BN(5).mul(lst);
-    const refused = await transfer(users[0], users[2], bankB, debtAmount);
+    const refused = await transfer(users[0], users[2], debtBank, debtAmount);
     // PositionTransferDebtConsentRequired
     assertBankrunTxFailed(refused, 6905);
 
-    const result = await transfer(users[0], users[2], bankB, debtAmount, users[2]);
+    const result = await transfer(users[0], users[2], debtBank, debtAmount, users[2]);
     assert.isNull(result.result);
 
     // The clock has not moved since the borrow, so one liability share is one native unit.
     assert.equal(
-      toI80Scaled((await balance(users[0], bankB)).liabilityShares),
+      toI80Scaled((await balance(users[0], debtBank)).liabilityShares),
       nativeToI80Scaled(borrowAmount.sub(debtAmount)),
     );
     assert.equal(
-      toI80Scaled((await balance(users[2], bankB)).liabilityShares),
+      toI80Scaled((await balance(users[2], debtBank)).liabilityShares),
       nativeToI80Scaled(debtAmount),
     );
   });

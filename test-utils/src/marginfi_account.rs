@@ -2698,8 +2698,7 @@ impl MarginfiAccountFixture {
         let fee_wallet = load_and_deserialize::<FeeState>(self.ctx.clone(), &fee_state_key)
             .await
             .global_fee_wallet;
-        // Observation sets as the accounts stand after the transfer: the source keeps its slot in
-        // the bank, the destination gains one.
+        // Post-transfer observation sets: the source keeps its slot, the destination gains one.
         let source_obs = self.load_observation_account_metas(vec![], vec![]).await;
         let destination_obs = destination_account
             .load_observation_account_metas(vec![bank.key], vec![])

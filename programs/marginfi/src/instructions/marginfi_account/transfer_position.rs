@@ -37,13 +37,9 @@ use marginfi_type_crate::{
     },
 };
 
-/// Moves `transfer_amount` native units of the source's position in `bank` to the destination, on
-/// whichever side the source holds there. Collateral moves on the source authority's signature
-/// alone unless the receiver opted out; debt also needs the receiver's consent, either a shared
-/// authority or `destination_authority` signing, and carries the source's accrued premium
-/// receivable when the whole debt moves. `fee_payer` pays the flat protocol fee.
-/// Remaining accounts: the source's observation set, then the destination's
-/// (`destination_accounts` long), each `[bank, oracles...]` per active balance in balance order.
+/// Moves `transfer_amount` of the source's position in `bank` to the destination, on whichever
+/// side the source holds there. Remaining accounts: the source's observation set, then the
+/// destination's (`destination_accounts` long), `[bank, oracles...]` per active balance in order.
 pub fn lending_account_transfer_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
@@ -127,8 +123,6 @@ pub fn lending_account_transfer_position<'info>(
     }
 
     validate_asset_tags(&bank, &destination_account)?;
-    // Taking on debt is never halt-safe; a collateral move is when both legs are: the source
-    // sheds like a withdraw, the destination gains like a deposit.
     let halt_safe = !is_liability
         && !source_account.lending_account.has_liabilities()
         && deposit_is_halt_safe(&destination_account, &bank_key);
@@ -173,8 +167,8 @@ pub fn lending_account_transfer_position<'info>(
         MarginfiError::PositionTransferInsufficientFunds
     );
 
-    // Repaying the last of a debt writes its premium receivable off, so it is materialized first
-    // and handed to the destination when the source empties; a partial move leaves it in place.
+    // Repaying the last of a debt writes its premium receivable off, so it is read first and moved
+    // with an emptied source.
     let mut carried_premium = I80F48::ZERO;
     let share_amount = {
         let mut source_position =
@@ -191,7 +185,6 @@ pub fn lending_account_transfer_position<'info>(
             source_position.transfer_out(amount)?
         }
     };
-    // The destination takes on what the burned shares were worth, so the bank's totals round-trip.
     let moved_amount = if is_liability {
         bank.get_liability_amount(share_amount)?
     } else {
@@ -244,8 +237,7 @@ pub fn lending_account_transfer_position<'info>(
         .checked_sub(destination_accounts as usize)
         .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     let (source_obs, destination_obs) = ctx.remaining_accounts.split_at(split);
-    // Shedding debt only improves the source's health, so like a repay it is not re-checked;
-    // shedding collateral while owing, or taking on debt, is the risk-carrying leg.
+    // A source shedding debt is not re-checked, as with repay.
     if !is_liability {
         let source_carries_risk = source_account.lending_account.has_liabilities();
         check_health_and_refresh_premium(
@@ -363,7 +355,7 @@ pub struct LendingAccountTransferPosition<'info> {
 
     pub authority: Signer<'info>,
 
-    /// Consents to receiving debt; a collateral move needs no signature from the receiver.
+    /// Signs only to consent to receiving debt.
     pub destination_authority: Option<Signer<'info>>,
 
     #[account(mut)]
@@ -383,7 +375,6 @@ pub struct LendingAccountTransferPosition<'info> {
     #[account(mut)]
     pub global_fee_wallet: UncheckedAccount<'info>,
 
-    // Note: there is just one FeeState per program. Read here for the configurable transfer fee.
     #[account(
         seeds = [FEE_STATE_SEED.as_bytes()],
         bump,
