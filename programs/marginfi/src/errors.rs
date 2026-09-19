@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")] // 6054
+    OrderInterestBankNotWritable,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -526,7 +526,17 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+    // ************** BEGIN INTEREST ORDER ERRORS (starting at 6900)
+    #[msg("An order bank has no rate reading as old as the order's measurement window yet")]
+    OrderInterestHistoryTooShort = 900, // 6900
+    #[msg("Realized carry does not meet the order's negative-rate margin")]
+    OrderInterestNotNegative, // 6901
+    #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
+    OrderInterestCostExceedsCarry, // 6902
+    #[msg("Interest trigger window or exit budget is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6903
+                                // ************** END INTEREST ORDER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -604,7 +614,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::OrderInterestBankNotWritable,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -808,6 +818,12 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Interest order errors (starting at 6900)
+            6900 => MarginfiError::OrderInterestHistoryTooShort,
+            6901 => MarginfiError::OrderInterestNotNegative,
+            6902 => MarginfiError::OrderInterestCostExceedsCarry,
+            6903 => MarginfiError::OrderInterestInvalidConfig,
 
             _ => MarginfiError::InternalLogicError,
         }
