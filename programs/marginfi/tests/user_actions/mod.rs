@@ -1,5 +1,7 @@
 mod bank_cache;
 mod borrow;
+mod borrow_order;
+mod borrow_order_common;
 mod close_account;
 mod close_balance;
 mod close_liquid_record;
@@ -11,6 +13,8 @@ mod drift;
 mod emissions;
 mod flash_loan;
 mod indexer_flags;
+mod interest_order;
+mod interest_order_common;
 mod juplend;
 mod kamino;
 mod limit_orders;

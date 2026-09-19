@@ -7,7 +7,7 @@ use crate::{
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            MarginfiAccountImpl, ALLOW_RECEIVERSHIP,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -347,7 +347,7 @@ pub struct SolendWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

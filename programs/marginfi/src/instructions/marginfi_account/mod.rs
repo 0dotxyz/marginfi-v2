@@ -1,5 +1,6 @@
 mod admin_close;
 mod borrow;
+mod borrow_order;
 mod close;
 mod close_balance;
 mod close_liquid_record;
@@ -23,6 +24,7 @@ mod withdraw;
 
 pub use admin_close::*;
 pub use borrow::*;
+pub use borrow_order::*;
 pub use close::*;
 pub use close_balance::*;
 pub use close_liquid_record::*;

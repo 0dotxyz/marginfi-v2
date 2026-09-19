@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")] // 6054
+    OrderInterestBankNotWritable,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -526,7 +526,56 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+    // ************** BEGIN INTEREST ORDER ERRORS (starting at 6900)
+    #[msg("An order bank has no rate reading as old as the order's measurement window yet")]
+    OrderInterestHistoryTooShort = 900, // 6900
+    #[msg("Realized carry does not meet the order's negative-rate margin")]
+    OrderInterestNotNegative, // 6901
+    #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
+    OrderInterestCostExceedsCarry, // 6902
+    #[msg("Interest trigger window or exit budget is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6903
+    // ************** END INTEREST ORDER ERRORS
+    // Borrow order errors (7000 block)
+    #[msg("Bank has no rate reading old enough to cover the order's window")]
+    BorrowOrderHistoryTooShort = 1000, // 7000
+    #[msg("Borrow order configuration is not actionable")]
+    BorrowOrderInvalidConfig, // 7001
+    #[msg("Fill exceeds what the order has left to borrow, or a close what it owes")]
+    BorrowOrderExceedsRemaining, // 7002
+    #[msg("Realized borrow rate is not under the order's open level")]
+    BorrowOrderRateNotLowEnough, // 7003
+    #[msg("Fill would push the borrow rate past the order's open level")]
+    BorrowOrderFillOvershoots, // 7004
+    #[msg("Borrow order cooldown has not elapsed")]
+    BorrowOrderCooldown, // 7005
+    #[msg("Borrow order has no close side: it needs a close level and a destination bank")]
+    BorrowOrderNoCloseSide, // 7006
+    #[msg("Borrow order sandwich must contain exactly one start and one end instruction")]
+    BorrowOrderMalformedSandwich, // 7007
+    #[msg("Borrow order legs must all act on the account being filled")]
+    BorrowOrderForeignAccountLeg, // 7008
+    #[msg("Borrow order fill did not move the amount it was authorized to")]
+    BorrowOrderFillMismatch, // 7009
+    #[msg("Borrow orders support native banks only, as borrow and destination")]
+    BorrowOrderUnsupportedBank, // 7010
+    #[msg("Borrow order legs may only act on the order's borrow and destination banks")]
+    BorrowOrderLegBankMismatch, // 7011
+    #[msg("Borrow order wallet fills must deliver to the authority's token account")]
+    BorrowOrderWrongDestination, // 7012
+    #[msg("Borrow order fill touched a balance outside the order's banks")]
+    BorrowOrderUntrackedBalance, // 7013
+    #[msg("Realized borrow rate has not risen over the order's close level")]
+    BorrowOrderRateNotHighEnough, // 7014
+    #[msg("Borrow order holds no debt to close")]
+    BorrowOrderNothingToClose, // 7015
+    #[msg("Fill leaves more than a granule of room under the order's level")]
+    BorrowOrderFillNotMaximal, // 7016
+    #[msg("Close repaid less than the destination bank could cover")]
+    BorrowOrderCloseIncomplete, // 7017
+    #[msg("Fill moved less than a granule of the order")]
+    BorrowOrderFillBelowGranule, // 7018
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -604,7 +653,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::OrderInterestBankNotWritable,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -808,6 +857,33 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Interest order errors (starting at 6900)
+            6900 => MarginfiError::OrderInterestHistoryTooShort,
+            6901 => MarginfiError::OrderInterestNotNegative,
+            6902 => MarginfiError::OrderInterestCostExceedsCarry,
+            6903 => MarginfiError::OrderInterestInvalidConfig,
+
+            // Borrow order errors (7000 block)
+            7000 => MarginfiError::BorrowOrderHistoryTooShort,
+            7001 => MarginfiError::BorrowOrderInvalidConfig,
+            7002 => MarginfiError::BorrowOrderExceedsRemaining,
+            7003 => MarginfiError::BorrowOrderRateNotLowEnough,
+            7004 => MarginfiError::BorrowOrderFillOvershoots,
+            7005 => MarginfiError::BorrowOrderCooldown,
+            7006 => MarginfiError::BorrowOrderNoCloseSide,
+            7007 => MarginfiError::BorrowOrderMalformedSandwich,
+            7008 => MarginfiError::BorrowOrderForeignAccountLeg,
+            7009 => MarginfiError::BorrowOrderFillMismatch,
+            7010 => MarginfiError::BorrowOrderUnsupportedBank,
+            7011 => MarginfiError::BorrowOrderLegBankMismatch,
+            7012 => MarginfiError::BorrowOrderWrongDestination,
+            7013 => MarginfiError::BorrowOrderUntrackedBalance,
+            7014 => MarginfiError::BorrowOrderRateNotHighEnough,
+            7015 => MarginfiError::BorrowOrderNothingToClose,
+            7016 => MarginfiError::BorrowOrderFillNotMaximal,
+            7017 => MarginfiError::BorrowOrderCloseIncomplete,
+            7018 => MarginfiError::BorrowOrderFillBelowGranule,
 
             _ => MarginfiError::InternalLogicError,
         }
