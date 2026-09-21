@@ -34,6 +34,8 @@ fn validate_and_apply_emode_leverage(
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
 /// with `configure_group_fee`
 /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
+/// Note: raising `same_asset_emode_maint_leverage` does not re-check the liquidation fees of banks
+/// already opted into same-asset e-mode. Verify them off-chain before raising it.
 ///
 /// Admin only
 pub fn configure(
@@ -79,6 +81,16 @@ pub fn configure(
         marginfi_group.update_risk_admin(new_risk_admin);
     }
 
+    // Each pair moves together, so a group can never hold one half of a leverage setting.
+    if emode_max_init_leverage.is_some() != emode_max_maint_leverage.is_some() {
+        msg!("emode init and maint leverage must be set together");
+        return Err(error!(MarginfiError::BadEmodeConfig));
+    }
+    if same_asset_emode_init_leverage.is_some() != same_asset_emode_maint_leverage.is_some() {
+        msg!("same-asset emode init and maint leverage must be set together");
+        return Err(error!(MarginfiError::BadEmodeConfig));
+    }
+
     validate_and_apply_emode_leverage(
         emode_max_init_leverage,
         &mut marginfi_group.emode_max_init_leverage,
@@ -91,8 +103,11 @@ pub fn configure(
     let emode_init_leverage = u32_to_basis(marginfi_group.emode_max_init_leverage);
     let emode_maint_leverage = u32_to_basis(marginfi_group.emode_max_maint_leverage);
 
+    let emode_caps_set =
+        marginfi_group.emode_max_init_leverage != 0 || marginfi_group.emode_max_maint_leverage != 0;
+
     // Validate that init < maint
-    if emode_init_leverage >= emode_maint_leverage {
+    if emode_caps_set && emode_init_leverage >= emode_maint_leverage {
         msg!(
             "emode init leverage ({:.6}) must be < maint leverage ({:.6})",
             i80f48_to_f64(emode_init_leverage),
@@ -135,6 +150,7 @@ pub fn configure(
         );
         return Err(error!(MarginfiError::BadEmodeConfig));
     }
+
     // The fuzzer should ignore this because the "Clock" mock sysvar doesn't load until after the
     // group is init. Eventually we might fix the fuzzer to load the clock first...
     #[cfg(not(feature = "client"))]
