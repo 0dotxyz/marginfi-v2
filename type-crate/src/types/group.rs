@@ -71,6 +71,8 @@ pub struct MarginfiGroup {
     pub same_asset_emode_init_leverage: u32,
     /// Encoded same-asset automatic emode leverage for maintenance margin.
     /// Decode with `u32_to_basis`. Ordering is validated in decoded space.
+    /// Eligible banks have their liquidation fees checked against this value only when they opt in
+    /// or change fees. Raising it does not re-check them, so verify every eligible bank off-chain first.
     pub same_asset_emode_maint_leverage: u32,
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.
