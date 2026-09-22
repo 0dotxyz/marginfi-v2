@@ -40,8 +40,6 @@ pub fn tag_liquidation_record<'info>(
         true,
     )?;
 
-    // Accounts with no liabilities cannot be meaningfully liquidated: they are never taggable,
-    // and any stale tag on them can be cleared.
     if health > I80F48::ZERO || liabs == I80F48::ZERO {
         check!(
             marginfi_account.liquidation_tagged_at != 0,

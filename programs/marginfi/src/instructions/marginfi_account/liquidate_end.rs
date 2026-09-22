@@ -44,9 +44,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let pre_assets_equity: I80F48 = liq_record.cache.asset_value_equity.into();
 
-    // Note: We guarantee that liquidation improves health to at most 0, unless the account's net
-    // value is below the threshold, then it may end healthy or fully cleared. The premium cap
-    // below applies regardless.
+    // Below the threshold the account may end healthy or fully cleared; the premium cap still
+    // applies.
     let below_closeout_threshold = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
@@ -64,8 +63,6 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         true,
     )?;
 
-    // Allowed fee floors at the bonus minimum and grows once tagged. Emode collateral and accounts
-    // already in bad debt hold at the base: neither has borrower equity to fund the growth.
     let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
     let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
     let premium = if emode_boosted || in_bad_debt {
@@ -200,8 +197,6 @@ pub fn end_receivership<'info>(
             return err!(MarginfiError::WorseHealthPostLiquidation);
         }
 
-        // The premium comes out of the liquidatee's equity, so an account may be drained to zero
-        // equity but not into bad debt.
         if pre_assets_equity >= pre_liabs_equity && post_assets_equity < post_liabilities_equity {
             msg!(
                 "premium leaves the account insolvent: {} < {}",

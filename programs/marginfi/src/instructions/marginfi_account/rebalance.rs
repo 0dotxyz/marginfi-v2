@@ -1136,7 +1136,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.health_cache = health_cache;
-        // A maintenance-healthy account is untaggable, matching `tag_liquidation_record`
         account.liquidation_tagged_at = 0;
         account.unset_flag(ACCOUNT_IN_REBALANCE, false);
         account.lending_account.sort_balances();

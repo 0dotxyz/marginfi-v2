@@ -19,8 +19,7 @@ pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> Marginfi
     let mut destination_bank = ctx.accounts.copy_to_bank.load_mut()?;
 
     destination_bank.emode = source_bank.emode;
-    // The destination carries its own liability weights and fee, so the copied entries are
-    // revalidated against them.
+    // Copied entries are validated against the destination's own liability weights and fee.
     let total_liquidation_fee = destination_bank.total_liquidation_fee();
     destination_bank
         .emode
