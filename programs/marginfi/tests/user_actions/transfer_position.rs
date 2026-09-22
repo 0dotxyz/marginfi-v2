@@ -178,44 +178,6 @@ async fn test_position_transfer_insufficient_balance() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_position_transfer_send_disabled_flag() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
-
-    let source_account_f = test_f.create_marginfi_account().await;
-    let dest_account_f = test_f.create_marginfi_account().await;
-    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
-
-    let source_token_account = test_f
-        .usdc_mint
-        .create_token_account_and_mint_to(1_000)
-        .await;
-    source_account_f
-        .try_bank_deposit(source_token_account.key, usdc_bank_f, 500.0, None)
-        .await?;
-
-    let mut source_account = source_account_f.load().await;
-    source_account.account_flags |=
-        marginfi_type_crate::types::ACCOUNT_POSITION_TRANSFER_SEND_DISABLED;
-    source_account_f.set_account(&source_account).await?;
-
-    let payer = test_f.payer_keypair();
-    let res = source_account_f
-        .try_position_transfer_with_authority(&dest_account_f, usdc_bank_f, 100.0, &payer)
-        .await;
-
-    assert!(
-        res.is_err(),
-        "Transfer from account with SEND_DISABLED should fail"
-    );
-    assert_custom_error!(
-        res.unwrap_err(),
-        MarginfiError::PositionTransferSendDisabled
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_position_transfer_receive_disabled_flag() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 

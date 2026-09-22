@@ -33,7 +33,6 @@ use marginfi_type_crate::{
         MarginfiGroup, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
         ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED,
-        ACCOUNT_POSITION_TRANSFER_SEND_DISABLED,
     },
 };
 
@@ -89,10 +88,6 @@ pub fn lending_account_transfer_position<'info>(
     check!(
         !destination_account.get_flag(ACCOUNT_FROZEN),
         MarginfiError::AccountFrozen
-    );
-    check!(
-        !source_account.get_flag(ACCOUNT_POSITION_TRANSFER_SEND_DISABLED),
-        MarginfiError::PositionTransferSendDisabled
     );
     check!(
         !destination_account.get_flag(ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED),

@@ -301,8 +301,7 @@ pub struct MarginfiAccountFreezeEvent {
 #[event]
 pub struct MarginfiAccountFlagUpdateEvent {
     pub header: AccountEventHeader,
-    pub disable_position_transfer_send: Option<bool>,
-    pub disable_position_transfer_receive: Option<bool>,
+    pub disable_position_transfer_receive: bool,
 }
 
 #[event]

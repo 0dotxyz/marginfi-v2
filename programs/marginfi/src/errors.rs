@@ -531,16 +531,14 @@ pub enum MarginfiError {
     // ************** BEGIN POSITION TRANSFER ERRORS (starting at 6900)
     #[msg("Account is not allowed to receive position transfers")]
     PositionTransferReceiveDisabled = 900, // 6900
-    #[msg("Account is not allowed to send position transfers")]
-    PositionTransferSendDisabled, // 6901
     #[msg("Invalid position transfer amount")]
-    InvalidPositionTransferAmount, // 6902
+    InvalidPositionTransferAmount, // 6901
     #[msg("Insufficient funds for position transfer")]
-    PositionTransferInsufficientFunds, // 6903
+    PositionTransferInsufficientFunds, // 6902
     #[msg("Cannot transfer a position to the same account")]
-    PositionTransferIdenticalAccounts, // 6904
+    PositionTransferIdenticalAccounts, // 6903
     #[msg("Receiving debt requires the destination authority's consent")]
-    PositionTransferDebtConsentRequired, // 6905
+    PositionTransferDebtConsentRequired, // 6904
                                          // ************** END POSITION TRANSFER ERRORS
 }
 
@@ -826,11 +824,10 @@ impl From<u32> for MarginfiError {
 
             // Position-transfer errors (starting at 6900)
             6900 => MarginfiError::PositionTransferReceiveDisabled,
-            6901 => MarginfiError::PositionTransferSendDisabled,
-            6902 => MarginfiError::InvalidPositionTransferAmount,
-            6903 => MarginfiError::PositionTransferInsufficientFunds,
-            6904 => MarginfiError::PositionTransferIdenticalAccounts,
-            6905 => MarginfiError::PositionTransferDebtConsentRequired,
+            6901 => MarginfiError::InvalidPositionTransferAmount,
+            6902 => MarginfiError::PositionTransferInsufficientFunds,
+            6903 => MarginfiError::PositionTransferIdenticalAccounts,
+            6904 => MarginfiError::PositionTransferDebtConsentRequired,
 
             _ => MarginfiError::InternalLogicError,
         }

@@ -762,13 +762,12 @@ pub mod marginfi {
         marginfi_account::set_account_freeze(ctx, frozen)
     }
 
-    /// (account authority) Opt the account out of sending or receiving position transfers.
+    /// (account authority) Opt the account out of, or back into, receiving position transfers.
     pub fn marginfi_account_set_position_transfer_flags(
         ctx: Context<SetPositionTransferFlags>,
-        disable_send: Option<bool>,
-        disable_receive: Option<bool>,
+        disable_receive: bool,
     ) -> MarginfiResult {
-        marginfi_account::set_position_transfer_flags(ctx, disable_send, disable_receive)
+        marginfi_account::set_position_transfer_flags(ctx, disable_receive)
     }
 
     /// (account authority) Close a marginfi account. Requires all balances to be empty and no

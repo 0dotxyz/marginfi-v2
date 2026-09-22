@@ -144,12 +144,11 @@ describe("Position transfer", () => {
 
   const setPositionTransferFlags = async (
     user: MockUser,
-    disableSend: boolean | null,
-    disableReceive: boolean | null,
+    disableReceive: boolean,
   ) => {
     const tx = new Transaction().add(
       await user.mrgnBankrunProgram.methods
-        .marginfiAccountSetPositionTransferFlags(disableSend, disableReceive)
+        .marginfiAccountSetPositionTransferFlags(disableReceive)
         .accounts({
           marginfiAccount: account(user),
           authority: user.wallet.publicKey,
@@ -204,7 +203,7 @@ describe("Position transfer", () => {
   it("(user 0 -> user 0) rejects a transfer to the same account", async () => {
     const result = await transfer(users[0], users[0], collateralBank, lst);
     // PositionTransferIdenticalAccounts
-    assertBankrunTxFailed(result, 6904);
+    assertBankrunTxFailed(result, 6903);
   });
 
   it("(user 0 -> user 2) rejects a frozen destination", async () => {
@@ -215,26 +214,18 @@ describe("Position transfer", () => {
     await setFreeze(users[2], false);
   });
 
-  it("(user 0 -> user 1) rejects a source that disabled sending", async () => {
-    await setPositionTransferFlags(users[0], true, null);
-    const result = await transfer(users[0], users[1], collateralBank, lst);
-    // PositionTransferSendDisabled
-    assertBankrunTxFailed(result, 6901);
-    await setPositionTransferFlags(users[0], false, null);
-  });
-
   it("(user 0 -> user 1) rejects a destination that disabled receiving", async () => {
-    await setPositionTransferFlags(users[1], null, true);
+    await setPositionTransferFlags(users[1], true);
     const result = await transfer(users[0], users[1], collateralBank, lst);
     // PositionTransferReceiveDisabled
     assertBankrunTxFailed(result, 6900);
-    await setPositionTransferFlags(users[1], null, false);
+    await setPositionTransferFlags(users[1], false);
   });
 
   it("(user 0 -> user 1) rejects a transfer below the minimum value", async () => {
     const result = await transfer(users[0], users[1], collateralBank, new BN(1_000));
     // InvalidPositionTransferAmount
-    assertBankrunTxFailed(result, 6902);
+    assertBankrunTxFailed(result, 6901);
   });
 
   it("(fee admin) configures a position-transfer fee, which is then charged", async () => {
@@ -284,7 +275,7 @@ describe("Position transfer", () => {
     const debtAmount = new BN(5).mul(lst);
     const refused = await transfer(users[0], users[2], debtBank, debtAmount);
     // PositionTransferDebtConsentRequired
-    assertBankrunTxFailed(refused, 6905);
+    assertBankrunTxFailed(refused, 6904);
 
     const result = await transfer(users[0], users[2], debtBank, debtAmount, users[2]);
     assert.isNull(result.result);
