@@ -3,7 +3,10 @@ use crate::{
     events::LiquidationTagEvent,
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
-    state::marginfi_account::check_pre_liquidation_condition_and_get_account_health,
+    state::{
+        marginfi_account::check_pre_liquidation_condition_and_get_account_health,
+        marginfi_group::MarginfiGroupImpl,
+    },
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -16,6 +19,7 @@ use marginfi_type_crate::types::{
 /// time (see `tag_adjusted_premium`). Calling this instruction while the account is healthy again
 /// or has no liabilities clears any existing tag instead.
 /// * Fails if unhealthy and already tagged, or healthy and not tagged.
+/// * Fails while the protocol is paused.
 /// * A CB halt does not block tagging.
 pub fn tag_liquidation_record<'info>(
     ctx: Context<'info, TagLiquidationRecord<'info>>,
@@ -68,6 +72,9 @@ pub struct TagLiquidationRecord<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
+    #[account(
+        constraint = !group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
+    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 }
 

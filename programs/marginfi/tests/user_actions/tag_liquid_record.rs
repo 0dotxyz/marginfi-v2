@@ -1094,3 +1094,18 @@ async fn tag_growth_does_not_apply_once_in_bad_debt() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn tag_rejected_while_paused() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+    let res = send_tag(&test_f, &liquidatee, 0).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ProtocolPaused);
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
