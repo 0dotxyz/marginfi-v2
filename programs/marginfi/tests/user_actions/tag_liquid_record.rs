@@ -1103,3 +1103,48 @@ async fn tag_rejected_while_paused() -> anyhow::Result<()> {
     assert_eq!(load_tag(&liquidatee).await, 0);
     Ok(())
 }
+
+/// A closeout that repays the last liability before seizing the collateral ends at the grown
+/// cap: the lending-only tag clear is suspended inside a receivership.
+#[tokio::test]
+async fn full_closeout_at_grown_premium_survives_repay_first_leg_order() -> anyhow::Result<()> {
+    // $18.90 debt against 2 SOL ($20): 5.8% equity, above the 5% base cap
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
+        setup_liquidatee_with(18.9, I80F48!(0.5), I80F48!(0.5)).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+
+    // One day into growth the cap is about 18%
+    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + 24 * 60 * 60).await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    let payer = test_f.payer();
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let repay_all_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 18.9, Some(true))
+        .await;
+    let withdraw_all_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 2.0, Some(true))
+        .await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+    send_ixs(&test_f, &[start_ix, repay_all_ix, withdraw_all_ix, end_ix]).await?;
+
+    assert_eq!(liquidator_sol_acc.balance().await, native!(2, "SOL"));
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}

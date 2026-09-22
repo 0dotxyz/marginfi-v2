@@ -51,8 +51,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
-    // Read before `end_receivership` updates the tag and overwrites the cache. Receivership
-    // withdraw/repay leave the cache alone, so this is the state the account was seized in.
+    // Read before `end_receivership` updates them. The receivership legs leave both alone: the
+    // cache write and the lending-only tag clear are both suspended while in receivership.
     let tagged_at = marginfi_account.liquidation_tagged_at;
     let emode_boosted = marginfi_account.health_cache.is_emode_boosted();
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(

@@ -350,8 +350,9 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.indexer_flags
             .sync_balance_derived(&self.lending_account.balances);
         self.indexer_flags.mark_active_now();
-        // Repaying the last liability clears the tag here: a liability-free account is never taggable
-        if self.indexer_flags.is_lending_only == 1 {
+        // Repaying the last liability clears the tag. Inside a receivership the tag is left for
+        // `tag_after_liquidation` at the end.
+        if self.indexer_flags.is_lending_only == 1 && !self.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
             self.liquidation_tagged_at = 0;
         }
     }
