@@ -479,6 +479,8 @@ export type EditGlobalFeeStateArgs = {
   orderExecutionMaxFee?: WrappedI80F48 | null;
   pauseDelegateAdmin?: PublicKey | null; // undefined = no-op, null = clear
   accountTransferFee?: number | null; // u32, in lamports; 0 => use default
+  positionTransferFee?: number | null; // u32, in lamports; 0 => use default
+  positionTransferMinValueUsdCents?: number | null; // u32; 0 => use default
 };
 
 // Covered by e05_panicMode "(fee admin) edits all global fee fields and restores them".
@@ -503,7 +505,9 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
-      args.accountTransferFee ?? null
+      args.accountTransferFee ?? null,
+      args.positionTransferFee ?? null,
+      args.positionTransferMinValueUsdCents ?? null
     )
     .accounts({
       globalFeeAdmin: args.admin,
