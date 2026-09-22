@@ -107,22 +107,26 @@ describe("Position transfer", () => {
     assert.isNull(result.result);
   };
 
-  /** The source authority signs and pays the fee; `consenting` signs only to accept debt. */
+  /**
+   * `signer` (the source authority unless given) signs and pays the fee; `consenting` signs only
+   * to accept debt.
+   */
   const transfer = async (
     source: MockUser,
     destination: MockUser,
     bank: PublicKey,
     amount: BN,
     consenting?: MockUser,
+    signer: MockUser = source,
   ) => {
     const tx = new Transaction().add(
       await lendingAccountTransferPositionIx(bankrunProgram, {
         group,
         sourceMarginfiAccount: account(source),
         destinationMarginfiAccount: account(destination),
-        authority: source.wallet.publicKey,
+        authority: signer.wallet.publicKey,
         destinationAuthority: consenting ? consenting.wallet.publicKey : null,
-        feePayer: source.wallet.publicKey,
+        feePayer: signer.wallet.publicKey,
         bank,
         globalFeeWallet: feeWallet,
         transferAmount: amount,
@@ -130,7 +134,7 @@ describe("Position transfer", () => {
         destinationRemaining: await observation(account(destination), bank),
       }),
     );
-    return consenting ? send(tx, source, consenting) : send(tx, source);
+    return consenting ? send(tx, signer, consenting) : send(tx, signer);
   };
 
   const balance = async (user: MockUser, bank: PublicKey) => {
@@ -212,6 +216,39 @@ describe("Position transfer", () => {
     // AccountFrozen
     assertBankrunTxFailed(result, 6103);
     await setFreeze(users[2], false);
+  });
+
+  it("(user 0 -> user 1) frozen source: the owner is rejected, the group admin moves it", async () => {
+    await setFreeze(users[0], true);
+    const refused = await transfer(users[0], users[1], collateralBank, lst);
+    // AccountFrozen
+    assertBankrunTxFailed(refused, 6103);
+
+    const sourceBefore = toI80Scaled(
+      (await balance(users[0], collateralBank)).assetShares,
+    );
+    const destBefore = toI80Scaled(
+      (await balance(users[1], collateralBank)).assetShares,
+    );
+    const result = await transfer(
+      users[0],
+      users[1],
+      collateralBank,
+      lst,
+      undefined,
+      groupAdmin,
+    );
+    assert.isNull(result.result);
+    // With no borrows in this bank, one share is one native unit.
+    assert.equal(
+      toI80Scaled((await balance(users[0], collateralBank)).assetShares),
+      sourceBefore - nativeToI80Scaled(lst),
+    );
+    assert.equal(
+      toI80Scaled((await balance(users[1], collateralBank)).assetShares),
+      destBefore + nativeToI80Scaled(lst),
+    );
+    await setFreeze(users[0], false);
   });
 
   it("(user 0 -> user 1) rejects a destination that disabled receiving", async () => {
