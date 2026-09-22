@@ -1228,3 +1228,20 @@ async fn dust_emode_deposit_does_not_hold_premium() -> anyhow::Result<()> {
     assert!(!liquidatee.load().await.health_cache.is_emode_boosted());
     Ok(())
 }
+
+/// Legacy liquidation prices the liquidatee with its emode weights: $15 of debt against 2 SOL is
+/// unhealthy at SOL's own 0.5 weight and healthy at the 0.94 emode weight.
+#[tokio::test]
+async fn emode_weight_keeps_account_healthy_for_legacy_liquidation() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
+        setup_liquidatee_with(15.0, I80F48!(0.5), I80F48!(0.5)).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    configure_usdc_emode_for(&test_f, sol_bank).await?;
+
+    let res = liquidator
+        .try_liquidate(&liquidatee, sol_bank, 0.1, usdc_bank)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::HealthyAccount);
+    Ok(())
+}
