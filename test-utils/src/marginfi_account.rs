@@ -1755,11 +1755,8 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountTagLiqRecord {}.data(),
         };
-        ix.accounts.extend_from_slice(
-            &self
-                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
-                .await,
-        );
+        ix.accounts
+            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
         ix
     }
 
