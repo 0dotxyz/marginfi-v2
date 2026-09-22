@@ -240,7 +240,7 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 ///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
-/// Maximum number of expensive positions per account. Integration (Kamino + Drift + Solend +
+/// Maximum number of costly positions per account. Integration (Kamino + Drift + Solend +
 ///   JupLend) and staked balances share this cap: they never mix on an account, and both cost 3-5
 ///   remaining accounts per position against the 64 accounts a transaction may lock.
 ///
@@ -251,7 +251,7 @@ pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 ///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 ///   eventually get rid of this limit altogether.
-pub const MAX_INTEGRATION_POSITIONS: usize = 4;
+pub const MAX_COSTLY_POSITIONS: usize = 4;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 //   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 //   live in prod.

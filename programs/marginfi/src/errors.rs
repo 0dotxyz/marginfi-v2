@@ -148,8 +148,8 @@ pub enum MarginfiError {
     TooSevereLiquidation,
     #[msg("Liquidation would worsen account health")] // 6072
     WorseHealthPostLiquidation,
-    #[msg("Exceeded the maximum allowed integration positions")] // 6073
-    IntegrationPositionLimitExceeded,
+    #[msg("Exceeded the maximum allowed integration or staked positions")] // 6073
+    CostlyPositionLimitExceeded,
     #[msg("Maximum initial leverage exceeded")] // 6074
     MaxInitLeverageExceeded,
     #[msg("The Emode config was invalid")] // 6075
@@ -623,7 +623,7 @@ impl From<u32> for MarginfiError {
             6070 => MarginfiError::TooSeverePayoff,
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
-            6073 => MarginfiError::IntegrationPositionLimitExceeded,
+            6073 => MarginfiError::CostlyPositionLimitExceeded,
             6074 => MarginfiError::MaxInitLeverageExceeded,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,

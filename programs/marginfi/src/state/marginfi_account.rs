@@ -16,8 +16,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS,
-        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, KAMINO_MARKET_EMERGENCY, MAX_COSTLY_POSITIONS,
+        ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
@@ -2131,7 +2131,7 @@ impl<'a> BankAccountWrapper<'a> {
                 Ok(Self { balance, bank })
             }
             None => {
-                // Enforce the expensive-position limit before creating a new one. Integration and
+                // Enforce the costly-position limit before creating a new one. Integration and
                 // staked balances both cost 3-5 remaining accounts each against a 64-account
                 // transaction, and they never mix on one account, so one shared cap covers both.
                 let costly = |tag: u8| is_integration_asset_tag(tag) || tag == ASSET_TAG_STAKED;
@@ -2146,8 +2146,8 @@ impl<'a> BankAccountWrapper<'a> {
                     // eventually get rid of this limit altogether.
                     if live!() {
                         check!(
-                            costly_position_count < MAX_INTEGRATION_POSITIONS,
-                            MarginfiError::IntegrationPositionLimitExceeded
+                            costly_position_count < MAX_COSTLY_POSITIONS,
+                            MarginfiError::CostlyPositionLimitExceeded
                         );
                     }
                 }
