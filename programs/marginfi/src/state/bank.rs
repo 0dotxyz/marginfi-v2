@@ -570,15 +570,6 @@ impl BankImpl for Bank {
     }
 
     fn configure(&mut self, config: &BankConfigOpt) -> MarginfiResult {
-        check!(
-            config.asset_weight_init.is_some() == config.asset_weight_maint.is_some(),
-            MarginfiError::InvalidConfig
-        );
-        check!(
-            config.liability_weight_init.is_some() == config.liability_weight_maint.is_some(),
-            MarginfiError::InvalidConfig
-        );
-
         set_if_some!(self.config.asset_weight_init, config.asset_weight_init);
         set_if_some!(self.config.asset_weight_maint, config.asset_weight_maint);
         set_if_some!(

@@ -81,16 +81,6 @@ pub fn configure(
         marginfi_group.update_risk_admin(new_risk_admin);
     }
 
-    // Each pair moves together, so a group can never hold one half of a leverage setting.
-    if emode_max_init_leverage.is_some() != emode_max_maint_leverage.is_some() {
-        msg!("emode init and maint leverage must be set together");
-        return Err(error!(MarginfiError::BadEmodeConfig));
-    }
-    if same_asset_emode_init_leverage.is_some() != same_asset_emode_maint_leverage.is_some() {
-        msg!("same-asset emode init and maint leverage must be set together");
-        return Err(error!(MarginfiError::BadEmodeConfig));
-    }
-
     validate_and_apply_emode_leverage(
         emode_max_init_leverage,
         &mut marginfi_group.emode_max_init_leverage,
@@ -105,6 +95,14 @@ pub fn configure(
 
     let emode_caps_set =
         marginfi_group.emode_max_init_leverage != 0 || marginfi_group.emode_max_maint_leverage != 0;
+
+    if emode_caps_set
+        && (marginfi_group.emode_max_init_leverage == 0
+            || marginfi_group.emode_max_maint_leverage == 0)
+    {
+        msg!("emode init and maint leverage must both be set or both be unset");
+        return Err(error!(MarginfiError::BadEmodeConfig));
+    }
 
     // Validate that init < maint
     if emode_caps_set && emode_init_leverage >= emode_maint_leverage {
