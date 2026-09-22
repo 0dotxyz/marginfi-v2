@@ -33,7 +33,7 @@ use marginfi_type_crate::{
     },
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
-        MarginfiGroup, OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        MarginfiGroup, OraclePriceType, PriceBias, RequirementType, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -205,15 +205,16 @@ pub fn lending_account_liquidate<'info>(
 
     let asset_bank_key = ctx.accounts.asset_bank.key();
     let liab_bank_key = ctx.accounts.liab_bank.key();
-    let (pre_liquidation_health, _, _) = check_pre_liquidation_condition_and_get_account_health(
-        &liquidatee_marginfi_account,
-        group,
-        liquidatee_remaining_accounts,
-        Some(&liab_bank_key),
-        &mut None,
-        HealthPriceMode::Live { liq_cache: None },
-        false,
-    )?;
+    let (pre_liquidation_health, _, pre_liabs) =
+        check_pre_liquidation_condition_and_get_account_health(
+            &liquidatee_marginfi_account,
+            group,
+            liquidatee_remaining_accounts,
+            Some(&liab_bank_key),
+            &mut None,
+            HealthPriceMode::Live { liq_cache: None },
+            false,
+        )?;
 
     let asset_bank = ctx.accounts.asset_bank.load()?;
     let asset_price_unbiased = fetch_unbiased_price_for_bank_cache(
@@ -237,7 +238,7 @@ pub fn lending_account_liquidate<'info>(
 
     // ##Accounting changes##
 
-    let (pre_balances, post_balances) = {
+    let (pre_balances, post_balances, repaid_maint) = {
         let asset_amount: I80F48 = I80F48::from_num(asset_amount);
 
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
@@ -296,6 +297,17 @@ pub fn lending_account_liquidate<'info>(
 
         // Insurance fund fee
         let insurance_fund_fee: I80F48 = liab_amount_liquidator - liab_amount_final;
+
+        let repaid_maint = calc_value(
+            liab_amount_final,
+            liab_price,
+            liab_bank.get_balance_decimals(),
+            Some(
+                liab_bank
+                    .config
+                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities),
+            ),
+        )?;
 
         assert!(
             insurance_fund_fee >= I80F48::ZERO,
@@ -485,6 +497,7 @@ pub fn lending_account_liquidate<'info>(
                 liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_post_balance
                     .to_num::<f64>(),
             },
+            repaid_maint,
         )
     };
 
@@ -516,6 +529,8 @@ pub fn lending_account_liquidate<'info>(
         liquidatee_marginfi_account.liquidation_tagged_at,
         pre_liquidation_health,
         post_liquidation_health,
+        pre_liabs,
+        repaid_maint,
         current_timestamp,
     );
 

@@ -102,6 +102,9 @@ pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(1);
 /// Share of the account's health deficit a liquidation must erase to restart the premium-growth
 /// clock (see `tag_after_liquidation`).
 pub const LIQUIDATION_TAG_RESET_DEFICIT_FRACTION: I80F48 = I80F48!(0.25);
+/// Share of the account's liabilities a liquidation must repay to restart the premium-growth
+/// clock, whichever way the deficit moved.
+pub const LIQUIDATION_TAG_RESET_REPAID_FRACTION: I80F48 = I80F48!(0.25);
 /// Maximum order execution fee as a percent of the order size
 /// * This value is used together with the slippage set by the user.
 pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%

@@ -228,6 +228,8 @@ pub fn end_receivership<'info>(
         marginfi_account.liquidation_tagged_at,
         pre_health,
         post_health,
+        pre_liabs_equity,
+        repaid,
         now,
     );
 

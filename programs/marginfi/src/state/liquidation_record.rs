@@ -2,7 +2,7 @@ use fixed::types::I80F48;
 
 use crate::constants::{
     LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMIUM_SECS, LIQUIDATION_TAG_MAX_PREMIUM,
-    LIQUIDATION_TAG_RESET_DEFICIT_FRACTION,
+    LIQUIDATION_TAG_RESET_DEFICIT_FRACTION, LIQUIDATION_TAG_RESET_REPAID_FRACTION,
 };
 
 /// Maximum premium a liquidator may earn, accounting for the record's tag: `base_premium` until
@@ -22,13 +22,17 @@ pub fn tag_adjusted_premium(base_premium: I80F48, tagged_at: i64, now: i64) -> I
     base_premium + (LIQUIDATION_TAG_MAX_PREMIUM - base_premium) * progress
 }
 
-/// The record's `tagged_at` after a completed liquidation: cleared once the account is healthy,
+/// The account's `tagged_at` after a completed liquidation: cleared once the account is healthy,
 /// restarted at `now` when the liquidation erased at least `LIQUIDATION_TAG_RESET_DEFICIT_FRACTION`
-/// of the health deficit, otherwise unchanged. Healths are maintenance-weighted at matching prices.
+/// of the health deficit or repaid at least `LIQUIDATION_TAG_RESET_REPAID_FRACTION` of the
+/// liabilities, otherwise unchanged. The two healths share one weighting and price set, as do
+/// `pre_liabs` and `repaid`.
 pub fn tag_after_liquidation(
     tagged_at: i64,
     pre_health: I80F48,
     post_health: I80F48,
+    pre_liabs: I80F48,
+    repaid: I80F48,
     now: i64,
 ) -> i64 {
     if tagged_at == 0 {
@@ -39,7 +43,11 @@ pub fn tag_after_liquidation(
     if post_deficit == I80F48::ZERO {
         return 0;
     }
-    if pre_deficit - post_deficit >= pre_deficit * LIQUIDATION_TAG_RESET_DEFICIT_FRACTION {
+    let deficit_erased =
+        pre_deficit - post_deficit >= pre_deficit * LIQUIDATION_TAG_RESET_DEFICIT_FRACTION;
+    let debt_repaid =
+        pre_liabs > I80F48::ZERO && repaid >= pre_liabs * LIQUIDATION_TAG_RESET_REPAID_FRACTION;
+    if deficit_erased || debt_repaid {
         return now;
     }
     tagged_at
@@ -108,11 +116,12 @@ mod tests {
     }
 
     const NOW: i64 = TAGGED_AT + 50_000;
+    const LIABS: I80F48 = I80F48!(1000);
 
     #[test]
     fn untagged_record_is_never_tagged_by_a_liquidation() {
         assert_eq!(
-            tag_after_liquidation(0, I80F48!(-100), I80F48!(-10), NOW),
+            tag_after_liquidation(0, I80F48!(-100), I80F48!(-10), LIABS, I80F48!(500), NOW),
             0
         );
     }
@@ -120,11 +129,18 @@ mod tests {
     #[test]
     fn healthy_after_liquidation_clears_tag() {
         assert_eq!(
-            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48::ZERO, NOW),
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-100),
+                I80F48::ZERO,
+                LIABS,
+                I80F48!(1),
+                NOW
+            ),
             0
         );
         assert_eq!(
-            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(5), NOW),
+            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(5), LIABS, I80F48!(1), NOW),
             0
         );
     }
@@ -133,7 +149,14 @@ mod tests {
     fn deficit_reduction_at_threshold_restarts_clock() {
         // Exactly 25% of a 100 deficit erased
         assert_eq!(
-            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(-75), NOW),
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-100),
+                I80F48!(-75),
+                LIABS,
+                I80F48!(1),
+                NOW
+            ),
             NOW
         );
     }
@@ -141,12 +164,57 @@ mod tests {
     #[test]
     fn deficit_reduction_below_threshold_leaves_tag() {
         assert_eq!(
-            tag_after_liquidation(TAGGED_AT, I80F48!(-100), I80F48!(-75.01), NOW),
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-100),
+                I80F48!(-75.01),
+                LIABS,
+                I80F48!(1),
+                NOW
+            ),
             TAGGED_AT
         );
         // Dust repayment on a large deficit: the growth clock keeps running
         assert_eq!(
-            tag_after_liquidation(TAGGED_AT, I80F48!(-1000), I80F48!(-999.99), NOW),
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-1000),
+                I80F48!(-999.99),
+                LIABS,
+                I80F48!(0.01),
+                NOW
+            ),
+            TAGGED_AT
+        );
+    }
+
+    #[test]
+    fn repaying_threshold_share_of_debt_restarts_clock_even_as_deficit_grows() {
+        // A full-premium liquidation: exactly 25% of the debt repaid while the deficit deepens
+        assert_eq!(
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-100),
+                I80F48!(-120),
+                LIABS,
+                I80F48!(250),
+                NOW
+            ),
+            NOW
+        );
+    }
+
+    #[test]
+    fn repaying_below_threshold_share_leaves_tag() {
+        assert_eq!(
+            tag_after_liquidation(
+                TAGGED_AT,
+                I80F48!(-100),
+                I80F48!(-90),
+                LIABS,
+                I80F48!(249.99),
+                NOW
+            ),
             TAGGED_AT
         );
     }
