@@ -1093,7 +1093,8 @@ pub fn get_health_components<'info>(
     // Skips the per-balance weight comparison below entirely for accounts no entry can reach.
     let emode_possible = matches!(requirement_type, RequirementType::Maintenance)
         && (reconciled_emode_config.count > 0 || reconciled_emode_config.same_asset.is_enabled());
-    let mut emode_boosted = false;
+    let mut collateral_seen = false;
+    let mut unboosted_collateral_seen = false;
 
     // `position_index` is the ordinal among ACTIVE balances (health-cache indexing);
     // `balance_index` is the raw array slot (premium scratch addressing — inactive holes must
@@ -1197,14 +1198,15 @@ pub fn get_health_components<'info>(
             )?
         };
 
-        if emode_possible
-            && !balance.is_empty(BalanceSide::Assets)
-            && bank.get_asset_weight(requirement_type, &reconciled_emode_config)
-                > bank
+        if emode_possible && !balance.is_empty(BalanceSide::Assets) {
+            collateral_seen = true;
+            if bank.get_asset_weight(requirement_type, &reconciled_emode_config)
+                <= bank
                     .config
                     .get_weight(requirement_type, BalanceSide::Assets)
-        {
-            emode_boosted = true;
+            {
+                unboosted_collateral_seen = true;
+            }
         }
 
         // Record error index if applicable
@@ -1271,7 +1273,7 @@ pub fn get_health_components<'info>(
             RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
-                cache.set_emode_boosted(emode_boosted);
+                cache.set_emode_boosted(collateral_seen && !unboosted_collateral_seen);
             }
             RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();

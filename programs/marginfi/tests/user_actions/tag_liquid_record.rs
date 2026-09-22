@@ -1,8 +1,8 @@
 use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, native, prelude::*};
+use fixtures::{bank::BankFixture, marginfi_account::MarginfiAccountFixture};
 use marginfi::constants::{LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMIUM_SECS};
 use marginfi::prelude::*;
 use marginfi_type_crate::{
@@ -971,26 +971,7 @@ async fn tag_growth_does_not_apply_to_emode_collateral() -> anyhow::Result<()> {
         setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
-
-    let collateral_tag = 1u16;
-    test_f
-        .marginfi_group
-        .try_lending_pool_configure_bank_emode(sol_bank, collateral_tag, &[])
-        .await?;
-    test_f
-        .marginfi_group
-        .try_lending_pool_configure_bank_emode(
-            usdc_bank,
-            2,
-            &[EmodeEntry {
-                collateral_bank_emode_tag: collateral_tag,
-                flags: 0,
-                pad0: [0; 5],
-                asset_weight_init: I80F48!(0.9).into(),
-                asset_weight_maint: I80F48!(0.94).into(),
-            }],
-        )
-        .await?;
+    configure_usdc_emode_for(&test_f, sol_bank).await?;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
@@ -1146,5 +1127,104 @@ async fn full_closeout_at_grown_premium_survives_repay_first_leg_order() -> anyh
 
     assert_eq!(liquidator_sol_acc.balance().await, native!(2, "SOL"));
     assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
+/// Configures SOL-equivalent (or SOL, per `collateral_bank`) as emode collateral for USDC debt at
+/// 0.9 / 0.94, lifting it above the 0.5 the fixture leaves it at.
+async fn configure_usdc_emode_for(
+    test_f: &TestFixture,
+    collateral_bank: &BankFixture,
+) -> anyhow::Result<()> {
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let collateral_tag = 1u16;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(collateral_bank, collateral_tag, &[])
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            usdc_bank,
+            2,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: collateral_tag,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.9).into(),
+                asset_weight_maint: I80F48!(0.94).into(),
+            }],
+        )
+        .await?;
+    Ok(())
+}
+
+/// The emode hold needs every collateral balance boosted: dust of a boosted asset next to
+/// unboosted collateral leaves the grown cap in force.
+#[tokio::test]
+async fn dust_emode_deposit_does_not_hold_premium() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, liquidatee_authority) =
+        setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    sol_eq_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.5).into()),
+                asset_weight_maint: Some(I80F48!(0.5).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    configure_usdc_emode_for(&test_f, sol_eq_bank).await?;
+
+    let dust_acc = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 1)
+        .await;
+    liquidatee
+        .try_bank_deposit_with_authority(
+            dust_acc.key,
+            sol_eq_bank,
+            0.000001,
+            None,
+            &liquidatee_authority,
+        )
+        .await?;
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_EQUIVALENT_FEED, T0)
+        .await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+
+    let matured = T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS;
+    set_timestamp(&test_f, matured).await;
+    refresh_oracles(&test_f).await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_EQUIVALENT_FEED, matured)
+        .await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+    test_f
+        .marginfi_group
+        .try_accrue_interest(sol_eq_bank)
+        .await?;
+
+    // $1.20 of SOL for $0.80 repaid is a 50% premium, allowed at the matured cap
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.12,
+        0.8,
+    )
+    .await?;
+    assert!(!liquidatee.load().await.health_cache.is_emode_boosted());
     Ok(())
 }

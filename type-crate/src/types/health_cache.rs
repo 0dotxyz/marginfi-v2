@@ -71,8 +71,8 @@ pub struct HealthCache {
     ///   oracle cranks ran recently enough. Check `internal_err` and `err_index` for more details
     ///   in some circumstances. Invalid if generated after borrow/withdraw (these instructions will
     ///   ignore oracle issues if health is still satisfactory with some balance zeroed out).
-    /// * EMODE BOOSTED = 8 - If set, an emode or same-asset entry weights at least one collateral
-    ///   balance above its own bank's maintenance weight. Only written by maintenance passes.
+    /// * EMODE BOOSTED = 8 - If set, an emode or same-asset entry weights every collateral balance
+    ///   above its own bank's maintenance weight. Only written by maintenance passes.
     /// * 16, 32, 64, 128, etc - reserved for future use
     pub flags: u32,
     /// If the engine errored, look here for the error code. If the engine returns ok, you may also
@@ -127,7 +127,7 @@ impl HealthCache {
         }
     }
 
-    /// True if an emode or same-asset entry raised at least one collateral balance's weight
+    /// True if an emode or same-asset entry raised every collateral balance's weight
     pub fn is_emode_boosted(&self) -> bool {
         self.flags & EMODE_BOOSTED != 0
     }
