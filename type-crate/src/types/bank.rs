@@ -118,6 +118,8 @@ pub struct Bank {
     /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
     /// - Bit 13 (8192): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
     ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
+    /// - Bit 14 (16384): `KAMINO_MARKET_EMERGENCY` — the Kamino lending market behind this bank is
+    ///   in emergency mode, so the bank backs no new borrowing.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.

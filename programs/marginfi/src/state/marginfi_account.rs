@@ -1855,8 +1855,10 @@ fn calc_weighted_asset_value_standalone(
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
             // Worth nothing for new borrows, but keeps Maintenance value for liquidation. As with
-            // Paused/ReduceOnly above, the premium scratch still counts this collateral.
-            if !price_feed.has_borrow_power()
+            // Paused/ReduceOnly above, the premium scratch still counts this collateral. The
+            // market-level flag is cached on the bank because the Kamino market account never
+            // reaches this path.
+            if (!price_feed.has_borrow_power() || bank.get_flag(KAMINO_MARKET_EMERGENCY))
                 && matches!(requirement_type, RequirementType::Initial)
             {
                 debug!("Bank without borrow power is worth 0 for Initial margin");

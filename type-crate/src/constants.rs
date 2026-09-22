@@ -136,6 +136,12 @@ pub const BANK_SAME_ASSET_EMODE_ELIGIBLE: u64 = 1 << 12;
 /// premium and project it in health checks.
 pub const PREMIUM_ACTIVE: u64 = 1 << 13;
 
+/// Kamino-bank flag: the reserve's lending market is in emergency mode. Cached here because the
+/// market account is not passed on the health path, and refreshed permissionlessly by
+/// `propagate_kamino_market_emergency`. Worth zero for Initial margin, exactly like a reserve in
+/// emergency mode.
+pub const KAMINO_MARKET_EMERGENCY: u64 = 1 << 14;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
