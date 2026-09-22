@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{
-    is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    is_closeable_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
@@ -45,6 +45,7 @@ pub fn lending_account_close_balance(ctx: Context<LendingAccountCloseBalance>) -
     let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account: &mut marginfi_type_crate::types::LendingAccount =
         &mut marginfi_account.lending_account;
+
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
@@ -80,7 +81,7 @@ pub struct LendingAccountCloseBalance<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
+        constraint = is_closeable_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForStandardInstructions
     )]
     pub bank: AccountLoader<'info, Bank>,
