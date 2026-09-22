@@ -85,9 +85,9 @@ pub struct MarginfiAccount {
     /// Monotonic counter. seeding each rebalance execution's `RebalanceRecord`.
     pub rebalance_execution_seq: u64,
     /// Unix timestamp when this account was tagged as unhealthy, growing the allowed liquidation
-    /// premium over time. Cleared once an instruction proves the account healthy again, restarted
-    /// when a liquidation erases a material share of the health deficit or repays a material share
-    /// of the debt.
+    /// premium over time. Cleared once an instruction proves the account healthy again (deposit
+    /// and repay do not), restarted when a liquidation erases a material share of the health
+    /// deficit or repays a material share of the debt.
     /// * 0 if not tagged
     pub liquidation_tagged_at: i64,
     pub _padding0: [u64; 2],

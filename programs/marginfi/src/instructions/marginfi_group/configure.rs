@@ -34,8 +34,9 @@ fn validate_and_apply_emode_leverage(
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
 /// with `configure_group_fee`
 /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
-/// Note: raising `same_asset_emode_maint_leverage` does not re-check the liquidation fees of banks
-/// already opted into same-asset e-mode. Verify them off-chain before raising it.
+/// Note: enabling or raising `same_asset_emode_maint_leverage` does not re-check the liquidation
+/// fees of banks already opted into same-asset e-mode, and a bank opted in while it was disabled
+/// was never checked. Verify every eligible bank off-chain first.
 ///
 /// Admin only
 pub fn configure(

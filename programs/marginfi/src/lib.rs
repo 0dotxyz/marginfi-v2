@@ -356,9 +356,8 @@ pub mod marginfi {
         marginfi_account::close_liquidation_record(ctx)
     }
 
-    /// (permissionless) Tag an unhealthy account's liquidation record, growing the allowed
-    /// liquidation premium over time. Calling it on an account that is healthy again clears its
-    /// existing tag.
+    /// (permissionless) Tag an unhealthy account, growing the allowed liquidation premium over
+    /// time. Calling it on an account that is healthy again clears its existing tag.
     pub fn marginfi_account_tag_liq_record<'info>(
         ctx: Context<'info, TagLiquidationRecord<'info>>,
     ) -> MarginfiResult {

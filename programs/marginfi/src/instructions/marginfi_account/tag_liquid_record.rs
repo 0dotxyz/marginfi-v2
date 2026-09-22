@@ -23,6 +23,7 @@ use marginfi_type_crate::types::{
 /// * Fails while the protocol is paused.
 /// * A CB halt does not block tagging. Neither does a freeze: it only locks out the account's
 ///   authority, and the account stays liquidatable.
+/// * Deposit and repay do not clear the tag; this instruction does once the account is healthy.
 pub fn tag_liquidation_record<'info>(
     ctx: Context<'info, TagLiquidationRecord<'info>>,
 ) -> MarginfiResult {

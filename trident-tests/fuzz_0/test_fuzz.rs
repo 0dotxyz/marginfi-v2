@@ -942,11 +942,11 @@ impl FuzzTest {
     }
 
     // ================================================================================================
-    // Close + re-init the liquidation record. Exercises the
-    // tagged-record close guard (close must fail while tagged); a
-    // successful close is immediately followed by a re-init so every
-    // user keeps a record, an assumption baked into the legacy-
-    // liquidate and receivership helpers.
+    // Close + re-init the liquidation record. Closing succeeds while
+    // tagged (the tag lives on the account); a successful close is
+    // immediately followed by a re-init so every user keeps a record,
+    // an assumption baked into the legacy-liquidate and receivership
+    // helpers.
     #[flow(weight = 1)]
     fn flow_close_liq_record(&mut self) {
         let user = self.get_random_user();

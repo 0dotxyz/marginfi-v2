@@ -19,6 +19,8 @@ pub const DEFAULT_INIT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(15);
 /// Default Maximum allowed theoretical leverage for emode configurations (maintenance).
 /// L = 1 / (1 - CW/LW) where CW is collateral weight and LW is liability weight.
 /// A value of 20 means positions can theoretically leverage up to 20x through recursive borrowing.
+/// The bank's liquidation fees bound the reachable leverage below the cap (`fees_fit_leverage`):
+/// at the default 5% total fee the ceiling is just under 20x.
 pub const DEFAULT_MAINT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(20);
 
 /// Default maximum allowed same-asset leverage for group initialization (initial).
