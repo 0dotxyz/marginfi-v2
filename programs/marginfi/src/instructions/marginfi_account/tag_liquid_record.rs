@@ -11,8 +11,9 @@ use crate::{
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_ORDER_EXECUTION,
-    ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
+    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 
 /// (Permissionless) Tags an unhealthy account, letting the allowed liquidation premium grow over
@@ -20,7 +21,8 @@ use marginfi_type_crate::types::{
 /// or has no liabilities clears any existing tag instead.
 /// * Fails if unhealthy and already tagged, or healthy and not tagged.
 /// * Fails while the protocol is paused.
-/// * A CB halt does not block tagging.
+/// * A CB halt does not block tagging. Neither does a freeze: it only locks out the account's
+///   authority, and the account stays liquidatable.
 pub fn tag_liquidation_record<'info>(
     ctx: Context<'info, TagLiquidationRecord<'info>>,
 ) -> MarginfiResult {
@@ -67,7 +69,12 @@ pub struct TagLiquidationRecord<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = !marginfi_account.load()?.get_flag(
-            ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+            ACCOUNT_DISABLED
+                | ACCOUNT_IN_FLASHLOAN
+                | ACCOUNT_IN_RECEIVERSHIP
+                | ACCOUNT_IN_DELEVERAGE
+                | ACCOUNT_IN_ORDER_EXECUTION
+                | ACCOUNT_IN_REBALANCE
         ) @ MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

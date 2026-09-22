@@ -894,22 +894,16 @@ async fn tag_allowed_while_cb_halted() -> anyhow::Result<()> {
     Ok(())
 }
 
-// A frozen account's authority cannot repay or withdraw, so it cannot be tagged either.
+// Freezing only locks out the account's authority; the account stays liquidatable and taggable.
 #[tokio::test]
-async fn tag_rejected_while_frozen() -> anyhow::Result<()> {
+async fn tag_allowed_while_frozen() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, _liquidatee_authority) =
         setup_unhealthy_liquidatee().await?;
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
     liquidatee.try_set_freeze(true).await?;
-    let res = send_tag(&test_f, &liquidatee, 0).await;
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::UnexpectedLiquidationState);
-    assert_eq!(load_tag(&liquidatee).await, 0);
-
-    liquidatee.try_set_freeze(false).await?;
-    send_tag(&test_f, &liquidatee, 1).await?;
+    send_tag(&test_f, &liquidatee, 0).await?;
     assert_eq!(load_tag(&liquidatee).await, T0);
     Ok(())
 }
