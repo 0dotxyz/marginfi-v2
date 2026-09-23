@@ -351,6 +351,11 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.indexer_flags
             .sync_balance_derived(&self.lending_account.balances);
         self.indexer_flags.mark_active_now();
+        // Repaying the last liability clears the tag. Inside a receivership the tag is left for
+        // `tag_after_liquidation` at the end.
+        if self.indexer_flags.is_lending_only == 1 && !self.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+            self.liquidation_tagged_at = 0;
+        }
     }
 }
 
@@ -1094,6 +1099,12 @@ pub fn get_health_components<'info>(
     let mut first_err_index = NO_INDEX_FOUND;
     let mut account_index = 0usize;
 
+    // Skips the per-balance weight comparison below entirely for accounts no entry can reach.
+    let emode_possible = matches!(requirement_type, RequirementType::Maintenance)
+        && (reconciled_emode_config.count > 0 || reconciled_emode_config.same_asset.is_enabled());
+    let mut collateral_seen = false;
+    let mut unboosted_collateral_seen = false;
+
     // `position_index` is the ordinal among ACTIVE balances (health-cache indexing);
     // `balance_index` is the raw array slot (premium scratch addressing — inactive holes must
     // not shift it).
@@ -1209,6 +1220,17 @@ pub fn get_health_components<'info>(
             )
         };
 
+        if emode_possible && !balance.is_empty(BalanceSide::Assets) {
+            collateral_seen = true;
+            if bank.get_asset_weight(requirement_type, &reconciled_emode_config)
+                <= bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+            {
+                unboosted_collateral_seen = true;
+            }
+        }
+
         // Record error index if applicable
         if err_code != 0 && first_err_index == NO_INDEX_FOUND {
             first_err_index = position_index;
@@ -1280,6 +1302,7 @@ pub fn get_health_components<'info>(
             RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
+                cache.set_emode_boosted(collateral_seen && !unboosted_collateral_seen);
             }
             RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();
@@ -1658,6 +1681,43 @@ fn check_account_health<'info>(
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)
+}
+
+/// Runs `check_account_init_health`, then clears the account's premium-growth tag if the account
+/// is also healthy at maintenance weights and real-time prices (the init pass uses EMA prices).
+/// Inside a flashloan, where risk checks are skipped, the tag is left alone.
+pub fn check_account_init_health_and_clear_tag<'info>(
+    marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+    premium_scratch: &mut Option<&mut PremiumScratch>,
+) -> MarginfiResult {
+    check_account_init_health(
+        marginfi_account,
+        group,
+        remaining_ais,
+        health_cache,
+        premium_scratch,
+    )?;
+    if marginfi_account.liquidation_tagged_at == 0
+        || marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN)
+    {
+        return Ok(());
+    }
+    let (assets, liabs) = get_health_components(
+        marginfi_account,
+        group,
+        remaining_ais,
+        RequirementType::Maintenance,
+        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
+        &mut None,
+    )?;
+    if assets > liabs {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+    Ok(())
 }
 
 /// Initial health check: errors if initial health is negative.

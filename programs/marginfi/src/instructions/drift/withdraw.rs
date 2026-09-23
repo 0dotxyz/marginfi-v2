@@ -6,7 +6,7 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
             MarginfiAccountImpl,
         },
@@ -284,8 +284,8 @@ pub fn drift_withdraw<'info>(
         if !marginfi_account.defers_health_to_end_instruction() {
             let group = ctx.accounts.group.load()?;
             let mut premium_scratch = PremiumScratch::default();
-            check_account_init_health(
-                &marginfi_account,
+            check_account_init_health_and_clear_tag(
+                &mut marginfi_account,
                 &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),

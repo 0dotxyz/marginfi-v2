@@ -60,14 +60,14 @@ const encodeQuoteCurrency = (quoteCurrency: string | number[]) => {
 };
 
 export async function createKaminoMarket(
-  quote: string | number[] = "USDC",
+  quote: string | number[] = "USDC"
 ): Promise<PublicKey> {
   const lendingMarket = Keypair.generate();
   const quoteCurrency = encodeQuoteCurrency(quote);
 
   const [lendingMarketAuthorityAddress] = await lendingMarketAuthPda(
     toAddress(lendingMarket.publicKey),
-    toAddress(klendBankrunProgram.programId),
+    toAddress(klendBankrunProgram.programId)
   );
   const lendingMarketAuthority = toPublicKey(lendingMarketAuthorityAddress);
 
@@ -78,7 +78,7 @@ export async function createKaminoMarket(
       space: LENDING_MARKET_SIZE + 8,
       lamports:
         await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-          LENDING_MARKET_SIZE + 8,
+          LENDING_MARKET_SIZE + 8
         ),
       programId: klendBankrunProgram.programId,
     }),
@@ -92,7 +92,7 @@ export async function createKaminoMarket(
         rent: SYSVAR_RENT_PUBKEY,
         instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
-      .instruction(),
+      .instruction()
   );
 
   await processBankrunTransaction(bankrunContext, tx, [
@@ -110,30 +110,30 @@ export async function createReserve(
   reserveLabel: string,
   decimals: number,
   oracle: PublicKey,
-  liquiditySource: PublicKey,
+  liquiditySource: PublicKey
 ) {
   const programAddress = toAddress(klendBankrunProgram.programId);
   const reserveAddress = toAddress(reserve.publicKey);
 
   const [lendingMarketAuthorityAddress] = await lendingMarketAuthPda(
     toAddress(market),
-    programAddress,
+    programAddress
   );
   const [reserveLiquiditySupplyAddress] = await reserveLiqSupplyPda(
     reserveAddress,
-    programAddress,
+    programAddress
   );
   const [reserveFeeVaultAddress] = await reserveFeeVaultPda(
     reserveAddress,
-    programAddress,
+    programAddress
   );
   const [reserveCollateralMintAddress] = await reserveCollateralMintPda(
     reserveAddress,
-    programAddress,
+    programAddress
   );
   const [reserveCollateralSupplyAddress] = await reserveCollateralSupplyPda(
     reserveAddress,
-    programAddress,
+    programAddress
   );
 
   const lendingMarketAuthority = toPublicKey(lendingMarketAuthorityAddress);
@@ -151,7 +151,7 @@ export async function createReserve(
       space: RESERVE_SIZE + 8,
       lamports:
         await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-          RESERVE_SIZE + 8,
+          RESERVE_SIZE + 8
         ),
       programId: klendBankrunProgram.programId,
     }),
@@ -174,7 +174,7 @@ export async function createReserve(
         collateralTokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
-      .instruction(),
+      .instruction()
   );
 
   await processBankrunTransaction(bankrunContext, tx, [
@@ -189,10 +189,10 @@ export async function createReserve(
   }
 
   const marketAcc: LendingMarket = LendingMarket.decode(
-    (await bankRunProvider.connection.getAccountInfo(market)).data,
+    (await bankRunProvider.connection.getAccountInfo(market)).data
   );
   const reserveAcc: Reserve = Reserve.decode(
-    (await bankRunProvider.connection.getAccountInfo(reserve.publicKey)).data,
+    (await bankRunProvider.connection.getAccountInfo(reserve.publicKey)).data
   );
   assert.equal(reserveAcc.lendingMarket.toString(), market.toString());
   // Reserves start in an unconfigured "Hidden" state.
@@ -210,7 +210,7 @@ export async function createReserve(
       new CurvePoint({ utilizationRateBps: 8000, borrowRateBps: 500000 }),
       new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
       ...Array(7).fill(
-        new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
+        new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 })
       ),
     ],
   } as BorrowRateCurveFields);
@@ -245,16 +245,32 @@ export async function createReserve(
     reserveAddress,
     assetReserveConfig,
     programAddress,
-    signer,
+    signer
   );
 
   for (const ix of ixes) {
-    instructions.push(toWeb3Ix(ix.ix as any));
+    const updateReserveConfigIx = toWeb3Ix(ix.ix as any);
+
+    // The pinned SDK predates the mock's trailing Instructions sysvar account.
+    // Preserve compatibility with an SDK upgrade that supplies it itself.
+    if (
+      !updateReserveConfigIx.keys.some((account) =>
+        account.pubkey.equals(SYSVAR_INSTRUCTIONS_PUBKEY)
+      )
+    ) {
+      updateReserveConfigIx.keys.push({
+        pubkey: SYSVAR_INSTRUCTIONS_PUBKEY,
+        isSigner: false,
+        isWritable: false,
+      });
+    }
+
+    instructions.push(updateReserveConfigIx);
   }
 
   const lutAccount = await createLookupTableForInstructions(
     groupAdmin.wallet,
-    instructions,
+    instructions
   );
 
   const messageV0 = new TransactionMessage({
