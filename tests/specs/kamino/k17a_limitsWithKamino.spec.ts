@@ -27,7 +27,7 @@ import {
   groupConfigure,
 } from "../../utils/group-instructions";
 import { assert } from "chai";
-import { defaultBankConfigOptRaw, newEmodeEntry } from "../../utils/types";
+import { defaultBankConfigOptRaw, blankBankConfigOptRaw, newEmodeEntry } from "../../utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
@@ -126,6 +126,9 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: throwawayGroup.publicKey,
           newAdmin: groupAdmin.wallet.publicKey,
+        }),
+        await groupConfigure(groupAdmin.mrgnBankrunProgram, {
+          marginfiGroup: throwawayGroup.publicKey,
           newEmodeAdmin: groupAdmin.wallet.publicKey,
         }),
       );
@@ -535,7 +538,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
     });
 
     it("(admin) vastly increase last bank liability ratio to make user 0 unhealthy", async () => {
-      let config = defaultBankConfigOptRaw();
+      let config = blankBankConfigOptRaw();
       config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
       config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
 

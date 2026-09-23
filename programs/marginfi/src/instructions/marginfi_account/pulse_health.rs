@@ -58,6 +58,7 @@ pub fn lending_account_pulse_health<'info>(
         &group,
         &premium_scratch,
         clock.unix_timestamp as u64,
+        false,
     )?;
 
     match engine_result {
