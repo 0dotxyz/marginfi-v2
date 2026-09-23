@@ -54,6 +54,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     }
 
     bank.update_flag(enabled, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+    let group = ctx.accounts.group.load()?;
     check_same_asset_fee(&bank, &group)?;
 
     emit!(LendingPoolBankSetSameAssetEmodeEligibilityEvent {

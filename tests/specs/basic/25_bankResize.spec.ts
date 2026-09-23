@@ -12,7 +12,9 @@ import {
 import { assertBankrunTxFailed } from "../../utils/genericTests";
 import { getBankrunBlockhash } from "../../utils/tools";
 
-/** v1 bank layout size (8-byte discriminator + Bank::V1_LEN), as on mainnet today */
+/** 
+ * v1 bank layout size (8-byte discriminator + Bank::V1_LEN), as on mainnet in 0.1.11 and earlier 
+ * */
 const BANK_V1_ACCOUNT_LEN = 8 + 1856;
 
 describe("25: Bank resize (v1 accounts grow to the current layout)", () => {

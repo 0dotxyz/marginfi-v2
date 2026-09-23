@@ -29,6 +29,7 @@ import {
   accrueInterest,
   addBank,
   configureBank,
+  configureBankIxs,
 } from "../../utils/group-instructions";
 import {
   borrowIx,
@@ -234,10 +235,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await configureBank(groupAdmin.mrgnBankrunProgram, {
+        ...(await configureBankIxs(groupAdmin.mrgnBankrunProgram, {
           bank: collateralBank,
           bankConfigOpt: collateralWeightConfig(0.05, 0.1),
-        })
+        }))
       ),
       [groupAdmin.wallet]
     );
@@ -415,10 +416,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await configureBank(groupAdmin.mrgnBankrunProgram, {
+        ...(await configureBankIxs(groupAdmin.mrgnBankrunProgram, {
           bank: collateralBank,
           bankConfigOpt: collateralWeightConfig(1, 1),
-        })
+        }))
       ),
       [groupAdmin.wallet]
     );
@@ -435,10 +436,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await configureBank(groupAdmin.mrgnBankrunProgram, {
+        ...(await configureBankIxs(groupAdmin.mrgnBankrunProgram, {
           bank: collateralBank,
           bankConfigOpt: collateralWeightConfig(0.05, 0.1),
-        })
+        }))
       ),
       [groupAdmin.wallet]
     );
