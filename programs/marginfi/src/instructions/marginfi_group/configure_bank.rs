@@ -149,7 +149,7 @@ fn configure_bank(
         if bank_config.liquidation_liquidator_fee.is_some()
             || bank_config.liquidation_insurance_fee.is_some()
         {
-            check_same_asset_fee(&bank, &group)?;
+            check_same_asset_fee(bank, group)?;
         }
 
         emit!(LendingPoolBankConfigureEvent {
