@@ -289,7 +289,7 @@ pub enum MarginfiError {
     InvalidGovernanceAdmin, // 6141
     #[msg("Deprecated: group configuration now uses explicit fast and governance instructions")]
     MixedGroupConfigAuthority, // 6142
-    #[msg("Fast bank configuration cannot transition a bank to Operational; use lending_pool_configure_bank_gov")]
+    #[msg("Fast bank configuration may only make a risk-reducing operational-state transition")]
     InvalidFastBankOperationalState, // 6143
     #[msg("Governance bank configuration may only transition a bank to Operational")]
     InvalidGovernanceBankOperationalState, // 6144

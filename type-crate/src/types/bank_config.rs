@@ -236,8 +236,10 @@ pub struct BankConfigOpt {
 
 /// Configuration fields controlled by the fast operational admin.
 ///
-/// `operational_state`, when present, may only transition a bank to `Paused`, `ReduceOnly`, or
-/// `ReduceOnlyWithBorrowingPower`. Restoring a bank to `Operational` is governed by
+/// `operational_state`, when present, may only make a risk-reducing transition: Operational
+/// to `Paused`, `ReduceOnly`, or `ReduceOnlyWithBorrowingPower`; or
+/// `ReduceOnlyWithBorrowingPower` to `ReduceOnly`. It may also set a bank to `Paused` from
+/// any administratively configurable state. Restoring a bank to `Operational` is governed by
 /// [`BankConfigGov`].
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -248,7 +250,6 @@ pub struct BankConfigFast {
     pub interest_rate_config: Option<InterestRateConfigOpt>,
     pub total_asset_value_init_limit: Option<u64>,
     pub permissionless_bad_debt_settlement: Option<bool>,
-    pub freeze_settings: Option<bool>,
     pub liquidation_liquidator_fee: Option<u32>,
     pub liquidation_insurance_fee: Option<u32>,
     pub circuit_breaker_enabled: Option<bool>,
@@ -277,6 +278,7 @@ pub struct BankConfigGov {
     pub oracle_max_confidence: Option<u32>,
     pub oracle_max_age: Option<u16>,
     pub tokenless_repayments_allowed: Option<bool>,
+    pub freeze_settings: Option<bool>,
 }
 
 impl BankConfigFast {
@@ -287,7 +289,6 @@ impl BankConfigFast {
             && self.interest_rate_config.is_none()
             && self.total_asset_value_init_limit.is_none()
             && self.permissionless_bad_debt_settlement.is_none()
-            && self.freeze_settings.is_none()
             && self.liquidation_liquidator_fee.is_none()
             && self.liquidation_insurance_fee.is_none()
             && self.circuit_breaker_enabled.is_none()
@@ -313,6 +314,7 @@ impl BankConfigGov {
             && self.oracle_max_confidence.is_none()
             && self.oracle_max_age.is_none()
             && self.tokenless_repayments_allowed.is_none()
+            && self.freeze_settings.is_none()
     }
 }
 
@@ -325,7 +327,6 @@ impl From<BankConfigFast> for BankConfigOpt {
             interest_rate_config: config.interest_rate_config,
             total_asset_value_init_limit: config.total_asset_value_init_limit,
             permissionless_bad_debt_settlement: config.permissionless_bad_debt_settlement,
-            freeze_settings: config.freeze_settings,
             liquidation_liquidator_fee: config.liquidation_liquidator_fee,
             liquidation_insurance_fee: config.liquidation_insurance_fee,
             circuit_breaker_enabled: config.circuit_breaker_enabled,
@@ -354,6 +355,7 @@ impl From<BankConfigGov> for BankConfigOpt {
             oracle_max_confidence: config.oracle_max_confidence,
             oracle_max_age: config.oracle_max_age,
             tokenless_repayments_allowed: config.tokenless_repayments_allowed,
+            freeze_settings: config.freeze_settings,
             ..Self::default()
         }
     }
@@ -378,7 +380,6 @@ impl BankConfigOpt {
             interest_rate_config: self.interest_rate_config,
             total_asset_value_init_limit: self.total_asset_value_init_limit,
             permissionless_bad_debt_settlement: self.permissionless_bad_debt_settlement,
-            freeze_settings: self.freeze_settings,
             liquidation_liquidator_fee: self.liquidation_liquidator_fee,
             liquidation_insurance_fee: self.liquidation_insurance_fee,
             circuit_breaker_enabled: self.circuit_breaker_enabled,
@@ -401,6 +402,7 @@ impl BankConfigOpt {
             oracle_max_confidence: self.oracle_max_confidence,
             oracle_max_age: self.oracle_max_age,
             tokenless_repayments_allowed: self.tokenless_repayments_allowed,
+            freeze_settings: self.freeze_settings,
         };
         (fast, gov)
     }

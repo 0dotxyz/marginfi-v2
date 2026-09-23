@@ -11,7 +11,6 @@ pub async fn seed_liquidity(
         .mint
         .create_token_account_and_mint_to(lender_wallet_balance)
         .await;
-    test_f.refresh_blockhash().await;
     lender
         .try_bank_deposit(lender_token_account.key, bank_f, ui_amount, None)
         .await?;
@@ -39,7 +38,6 @@ pub async fn create_account_with_positions(
             .mint
             .create_token_account_and_mint_to(wallet_balance)
             .await;
-        test_f.refresh_blockhash().await;
         borrower
             .try_bank_deposit(token_account.key, bank_f, *amount, None)
             .await?;
@@ -48,7 +46,6 @@ pub async fn create_account_with_positions(
     for (mint, amount) in liabilities {
         let bank_f = test_f.get_bank(mint);
         let borrow_account = bank_f.mint.create_empty_token_account().await;
-        test_f.refresh_blockhash().await;
         borrower
             .try_bank_borrow(borrow_account.key, bank_f, *amount)
             .await?;

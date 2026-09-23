@@ -38,6 +38,7 @@ impl FuzzTest {
                 oracle_max_confidence: None,
                 oracle_max_age: None,
                 tokenless_repayments_allowed: None,
+                freeze_settings: None,
             };
 
             types::marginfi::LendingPoolConfigureBankGovInstruction::data(
@@ -59,7 +60,6 @@ impl FuzzTest {
                 interest_rate_config: None,
                 total_asset_value_init_limit: None,
                 permissionless_bad_debt_settlement: None,
-                freeze_settings: None,
                 liquidation_liquidator_fee: None,
                 liquidation_insurance_fee: None,
                 circuit_breaker_enabled: None,

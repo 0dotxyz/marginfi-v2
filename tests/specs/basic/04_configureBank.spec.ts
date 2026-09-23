@@ -342,7 +342,7 @@ describe("Lending pool configure bank", () => {
     }, "Missing signature for");
   });
 
-  it("(admin) Freeze USDC settings so they cannot be changed again (USDC)", async () => {
+  it("(governance admin) Freeze USDC settings so they cannot be changed again (USDC)", async () => {
     let config = blankBankConfigOptRaw();
     config.freezeSettings = true;
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(

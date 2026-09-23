@@ -30,8 +30,8 @@ The governance admin is the safety-critical authority and should be a timelocked
 - Create native, Kamino, Drift, Solend, and JupLend banks (and clone a bank on non-mainnet)
 - Configure a bank's oracle, Scope feed, or fixed price
 - Apply governance-class bank configuration: asset and liability weights, risk tier, asset tag,
-  oracle age/confidence bounds, and `TOKENLESS_REPAYMENTS_ALLOWED`
-- Transition a bank from Paused or ReduceOnly to Operational
+  oracle age/confidence bounds, `TOKENLESS_REPAYMENTS_ALLOWED`, and `FREEZE_SETTINGS`
+- Transition a bank from Paused, ReduceOnly, or ReduceOnlyWithBorrowingPower to Operational
 - Set the stored `emode_admin` and `risk_admin`, and group-wide e-mode / same-asset e-mode
   leverage limits
 - Perform all e-mode configuration, including same-asset registry initialization, eligibility,
@@ -51,10 +51,12 @@ quickly, but it cannot make the risk-sensitive changes listed under `governance_
 
 **Can do:**
 - Configure fast-admin bank settings: deposit/borrow/init-value limits, interest curves,
-  permissionless bad-debt settlement, settings freeze, liquidation fees, and circuit breakers
+  permissionless bad-debt settlement, liquidation fees, and circuit breakers
 - Configure bank/group rate limits and the deleverage withdrawal limit (also delegable to the
   limit admin)
-- Transition a bank to Paused or ReduceOnly
+- Make only risk-reducing bank-state transitions: Operational → Paused, ReduceOnly, or
+  ReduceOnlyWithBorrowingPower; ReduceOnlyWithBorrowingPower → ReduceOnly; and any supported
+  state → Paused
 - Clear a tripped circuit breaker (also allowed for `risk_admin`)
 - Set fast operational roles (`admin`, curve, limit, flow, emissions, and metadata delegates)
 - Freeze individual user accounts
@@ -70,7 +72,7 @@ quickly, but it cannot make the risk-sensitive changes listed under `governance_
 - Change global fee state (that's the `global_fee_admin`)
 - Set `risk_admin` or `emode_admin`, change e-mode settings, create/configure bank oracle or
   fixed-price feeds, change governance-class bank risk parameters, enable tokenless repayments,
-  restore a bank to Operational, or edit staked settings
+  freeze bank settings, restore a bank to Operational, or edit staked settings
 
 ### Risk Admin
 
@@ -299,7 +301,7 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Bootstrap/rotate governance admin | `admin` only while zero; then `governance_admin` (`marginfi_group_set_governance_admin`) |
 | Add bank (native, Kamino, Drift, Solend, JupLend) | `governance_admin` |
 | Configure bank — fast fields | `admin` |
-| Configure bank — governance fields / tokenless repayments / restore Operational | `governance_admin` |
+| Configure bank — governance fields / tokenless repayments / settings freeze / restore Operational | `governance_admin` |
 | Configure bank oracle / Scope feed | `governance_admin` |
 | Set fixed oracle price | `governance_admin` |
 | Configure interest rate config | `admin` or `delegate_curve_admin` |

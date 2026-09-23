@@ -2,11 +2,44 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{
-    BankConfigFast, BankConfigGov, BankConfigOpt, BankOperationalState,
+use marginfi_type_crate::{
+    constants::FREEZE_SETTINGS,
+    types::{BankConfigFast, BankConfigGov, BankConfigOpt, BankOperationalState},
 };
 use solana_sdk::instruction::Instruction;
 use solana_sdk::{signature::Keypair, signer::Signer, transaction::Transaction};
+
+async fn try_configure_fast_state(
+    test_f: &TestFixture,
+    bank: &fixtures::bank::BankFixture,
+    operational_state: BankOperationalState,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::LendingPoolConfigureBank {
+            group: test_f.marginfi_group.key,
+            admin: test_f.payer_keypair().pubkey(),
+            bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingPoolConfigureBank {
+            bank_config_opt: BankConfigFast {
+                operational_state: Some(operational_state),
+                ..BankConfigFast::default()
+            },
+        }
+        .data(),
+    };
+    let ctx = test_f.context.borrow();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    ctx.banks_client.process_transaction(tx).await
+}
 
 #[tokio::test]
 async fn aggregate_test_config_dispatches_fast_and_governance_instructions() -> anyhow::Result<()> {
@@ -161,5 +194,110 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
     let err = ctx.banks_client.process_transaction(tx).await.unwrap_err();
     assert_custom_error!(err, MarginfiError::InvalidGovernanceBankOperationalState);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn fast_admin_can_make_only_risk_reducing_bank_state_transitions() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                ..Default::default()
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+    let reduce_only_bank = test_f.get_bank(&BankMint::Usdc);
+    let borrowing_power_bank = test_f.get_bank(&BankMint::Sol);
+
+    assert_eq!(
+        reduce_only_bank.load().await.config.operational_state,
+        BankOperationalState::Operational
+    );
+    try_configure_fast_state(&test_f, reduce_only_bank, BankOperationalState::ReduceOnly).await?;
+    assert_eq!(
+        reduce_only_bank.load().await.config.operational_state,
+        BankOperationalState::ReduceOnly
+    );
+
+    assert_eq!(
+        borrowing_power_bank.load().await.config.operational_state,
+        BankOperationalState::Operational
+    );
+    try_configure_fast_state(
+        &test_f,
+        borrowing_power_bank,
+        BankOperationalState::ReduceOnlyWithBorrowingPower,
+    )
+    .await?;
+    assert_eq!(
+        borrowing_power_bank.load().await.config.operational_state,
+        BankOperationalState::ReduceOnlyWithBorrowingPower
+    );
+    try_configure_fast_state(
+        &test_f,
+        borrowing_power_bank,
+        BankOperationalState::ReduceOnly,
+    )
+    .await?;
+    assert_eq!(
+        borrowing_power_bank.load().await.config.operational_state,
+        BankOperationalState::ReduceOnly
+    );
+
+    let err = try_configure_fast_state(
+        &test_f,
+        reduce_only_bank,
+        BankOperationalState::ReduceOnlyWithBorrowingPower,
+    )
+    .await
+    .unwrap_err();
+    assert_custom_error!(err, MarginfiError::InvalidFastBankOperationalState);
+
+    try_configure_fast_state(&test_f, reduce_only_bank, BankOperationalState::Paused).await?;
+    assert_eq!(
+        reduce_only_bank.load().await.config.operational_state,
+        BankOperationalState::Paused
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn governance_admin_can_freeze_bank_settings() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+    let governance_admin = Keypair::new();
+    test_f
+        .marginfi_group
+        .try_set_governance_admin(&governance_admin)
+        .await?;
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_with_signer(
+            &governance_admin,
+            bank,
+            BankConfigOpt {
+                freeze_settings: Some(true),
+                ..BankConfigOpt::default()
+            },
+        )
+        .await?;
+
+    assert_ne!(bank.load().await.flags & FREEZE_SETTINGS, 0);
     Ok(())
 }

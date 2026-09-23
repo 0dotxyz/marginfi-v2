@@ -160,9 +160,10 @@ pub mod marginfi {
         marginfi_group::enable_staked_oracle_onramp(ctx)
     }
 
-    /// Configure fast-admin bank parameters. This can only pause or reduce a bank (including
-    /// ReduceOnlyWithBorrowingPower); restoring it to Operational requires
-    /// `lending_pool_configure_bank_gov`.
+    /// Configure fast-admin bank parameters. Operational banks may be paused, set to
+    /// ReduceOnly, or set to ReduceOnlyWithBorrowingPower; the latter may subsequently be set to
+    /// ReduceOnly. The fast admin may pause a bank from any state. Restoring a bank to
+    /// Operational requires `lending_pool_configure_bank_gov`.
     pub fn lending_pool_configure_bank(
         ctx: Context<LendingPoolConfigureBank>,
         bank_config_opt: BankConfigFast,
@@ -170,8 +171,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank(ctx, bank_config_opt)
     }
 
-    /// Configure slow, timelocked governance bank parameters, including risk settings and
-    /// restoring a bank to Operational.
+    /// Configure slow, timelocked governance bank parameters, including risk settings,
+    /// freezing bank settings, and restoring a bank to Operational.
     pub fn lending_pool_configure_bank_gov(
         ctx: Context<LendingPoolConfigureBankGov>,
         bank_config_opt: BankConfigGov,

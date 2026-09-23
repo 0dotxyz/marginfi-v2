@@ -21,26 +21,45 @@ use marginfi_type_crate::{
     },
 };
 
+fn fast_admin_can_transition_bank_state(
+    current_state: BankOperationalState,
+    new_state: BankOperationalState,
+) -> bool {
+    match new_state {
+        // Pausing is always an allowed emergency action. Program-only states are still protected
+        // by the checks in BankImpl::configure.
+        BankOperationalState::Paused => true,
+        BankOperationalState::ReduceOnly => matches!(
+            current_state,
+            BankOperationalState::Operational
+                | BankOperationalState::ReduceOnly
+                | BankOperationalState::ReduceOnlyWithBorrowingPower
+        ),
+        BankOperationalState::ReduceOnlyWithBorrowingPower => {
+            matches!(
+                current_state,
+                BankOperationalState::Operational
+                    | BankOperationalState::ReduceOnlyWithBorrowingPower
+            )
+        }
+        _ => false,
+    }
+}
+
 pub fn lending_pool_configure_bank(
     ctx: Context<LendingPoolConfigureBank>,
     bank_config: BankConfigFast,
 ) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
-    check!(
-        matches!(
-            bank_config.operational_state,
-            None | Some(
-                BankOperationalState::Paused
-                    | BankOperationalState::ReduceOnly
-                    | BankOperationalState::ReduceOnlyWithBorrowingPower
-            )
-        ),
-        MarginfiError::InvalidFastBankOperationalState
-    );
-
     let group = ctx.accounts.group.load()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
+    if let Some(new_state) = bank_config.operational_state {
+        check!(
+            fast_admin_can_transition_bank_state(bank.config.operational_state, new_state),
+            MarginfiError::InvalidFastBankOperationalState
+        );
+    }
     configure_bank(
         &mut bank,
         &group,

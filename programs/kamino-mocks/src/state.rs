@@ -166,12 +166,14 @@ pub struct MinimalReserve {
     /// * A PDA
     pub collateral_supply_vault: Pubkey,
 
+    // Padding to completion of ReserveCollateral
     _padding8: [u8; 1024],
-
     _padding9: [u8; 1024],
     _padding10: [u8; 128],
     _padding11: [u8; 48],
+
     pub config: ReserveConfig,
+
     _padding12: [u8; 2048],
     _padding13: [u8; 512],
     _padding14: [u8; 256],
@@ -295,6 +297,13 @@ impl MinimalReserve {
         // Stale once the reserve's recorded slot falls behind the current slot; a `refresh_reserve`
         // in the same slot brings it current. Keepers reading a venue rate must refresh in-tx.
         self.slot < current_slot
+    }
+
+    /// True if Kamino put this reserve into emergency mode (`ReserveConfig.emergency_mode`). When
+    /// set, `refresh_reserve` clears the price status:
+    /// https://github.com/Kamino-Finance/klend/blob/release/v1.25.0/programs/klend/src/lending_market/lending_operations.rs#L67-L70
+    pub fn is_emergency_mode(&self) -> bool {
+        self.config.emergency_mode != 0
     }
 }
 

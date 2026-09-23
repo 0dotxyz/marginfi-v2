@@ -357,7 +357,6 @@ const hasFastBankConfig = (config: BankConfigOptRaw) =>
   config.interestRateConfig != null ||
   config.totalAssetValueInitLimit != null ||
   config.permissionlessBadDebtSettlement != null ||
-  config.freezeSettings != null ||
   config.liquidationLiquidatorFee != null ||
   config.liquidationInsuranceFee != null ||
   config.circuitBreakerEnabled != null ||
@@ -379,7 +378,8 @@ const hasGovBankConfig = (config: BankConfigOptRaw) =>
   config.assetTag != null ||
   config.oracleMaxConfidence != null ||
   config.oracleMaxAge != null ||
-  config.tokenlessRepaymentsAllowed != null;
+  config.tokenlessRepaymentsAllowed != null ||
+  config.freezeSettings != null;
 
 const fastBankConfig = (config: BankConfigOptRaw) => ({
   depositLimit: config.depositLimit,
@@ -390,7 +390,6 @@ const fastBankConfig = (config: BankConfigOptRaw) => ({
   interestRateConfig: config.interestRateConfig,
   totalAssetValueInitLimit: config.totalAssetValueInitLimit,
   permissionlessBadDebtSettlement: config.permissionlessBadDebtSettlement,
-  freezeSettings: config.freezeSettings,
   liquidationLiquidatorFee: config.liquidationLiquidatorFee,
   liquidationInsuranceFee: config.liquidationInsuranceFee,
   circuitBreakerEnabled: config.circuitBreakerEnabled,
@@ -416,6 +415,7 @@ const govBankConfig = (config: BankConfigOptRaw) => ({
   oracleMaxConfidence: config.oracleMaxConfidence,
   oracleMaxAge: config.oracleMaxAge,
   tokenlessRepaymentsAllowed: config.tokenlessRepaymentsAllowed,
+  freezeSettings: config.freezeSettings,
 });
 
 const configureFastBank = (
