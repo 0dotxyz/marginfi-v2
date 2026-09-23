@@ -395,53 +395,55 @@ impl<'info> BankAccountWithCache<'_, 'info> {
         remaining_ais: &'info [AccountInfo<'info>],
     ) -> MarginfiResult<Vec<BankAccountWithCache<'a, 'info>>> {
         let mut account_index = 0;
-        let active_balances: Vec<&Balance> = lending_account
+        let active_balance_count = lending_account
             .balances
             .iter()
             .filter(|balance| balance.is_active())
-            .collect();
-        let banks_only = remaining_ais.len() == active_balances.len();
+            .count();
+        let banks_only = remaining_ais.len() == active_balance_count;
 
-        active_balances
-            .into_iter()
-            .map(|balance| {
-                let bank_ai: Option<&AccountInfo<'info>> = remaining_ais.get(account_index);
-                if bank_ai.is_none() {
-                    msg!("Ran out of remaining accounts at {:?}", account_index);
-                    return err!(MarginfiError::InvalidBankAccount);
-                }
-                let bank_ai = bank_ai.unwrap();
-                let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-                let bank = bank_al.load()?;
+        let mut result = Vec::with_capacity(active_balance_count);
+        for balance in lending_account
+            .balances
+            .iter()
+            .filter(|balance| balance.is_active())
+        {
+            let Some(bank_ai) = remaining_ais.get(account_index) else {
+                msg!("Ran out of remaining accounts at {:?}", account_index);
+                return err!(MarginfiError::InvalidBankAccount);
+            };
+            let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+            let bank = bank_al.load()?;
 
-                let num_accounts = if banks_only {
-                    1
-                } else {
-                    get_remaining_accounts_per_bank(&bank)?
-                };
-                check_eq!(
-                    balance.bank_pk,
-                    *bank_ai.key,
-                    MarginfiError::InvalidBankAccount
+            let num_accounts = if banks_only {
+                1
+            } else {
+                get_remaining_accounts_per_bank(&bank)?
+            };
+            check_eq!(
+                balance.bank_pk,
+                *bank_ai.key,
+                MarginfiError::InvalidBankAccount
+            );
+
+            if !banks_only {
+                let end_idx = account_index + num_accounts;
+                require_gte!(
+                    remaining_ais.len(),
+                    end_idx,
+                    MarginfiError::WrongNumberOfOracleAccounts
                 );
+            }
 
-                if !banks_only {
-                    let end_idx = account_index + num_accounts;
-                    require_gte!(
-                        remaining_ais.len(),
-                        end_idx,
-                        MarginfiError::WrongNumberOfOracleAccounts
-                    );
-                }
+            account_index += num_accounts;
 
-                account_index += num_accounts;
+            result.push(BankAccountWithCache {
+                bank: bank_al.clone(),
+                balance,
+            });
+        }
 
-                Ok(BankAccountWithCache {
-                    bank: bank_al.clone(),
-                    balance,
-                })
-            })
-            .collect::<Result<Vec<_>>>()
+        Ok(result)
     }
 
     fn write_liquidation_price_cache_from(
