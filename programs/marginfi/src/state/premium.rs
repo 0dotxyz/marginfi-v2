@@ -49,6 +49,12 @@
 //! * **Crank-order variance** — [`BalancePremiumImpl::claim_premium`] uses the liability
 //!   amount at claim time, so claiming before vs. after interest accrual differs by a
 //!   second-order term.
+//! * **Zero-health collateral excluded from the mix** — Isolated and `asset_weight_maint == 0`
+//!   banks contribute no premium weight (they back no health, so they must not dilute the
+//!   rate). Emode-only (base 0/0) collateral therefore contributes none either.
+//! * **Ratchet on unpriceable withdraw passes** — see the `ratchet_on_incomplete` flag on
+//!   [`MarginfiAccountPremiumImpl::update_premium_snapshots`]: genuine outages overcharge
+//!   forward-only until the next clean refresh.
 
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -70,6 +76,10 @@ pub const SCRATCH_ASSET: u8 = 1 << 0;
 pub const SCRATCH_LIABILITY: u8 = 1 << 1;
 /// `PremiumScratchEntry.flags`: the liability's bank has `PREMIUM_ACTIVE` set.
 pub const SCRATCH_PREMIUM_ACTIVE: u8 = 1 << 2;
+/// `PremiumScratchEntry.flags`: a collateral leg whose premium price could not be derived
+/// (oracle adapter error, e.g. a caller-supplied wrong oracle account). Recorded with value 0;
+/// the ratchet fallback prices it punitively at its full configured pair rate.
+pub const SCRATCH_UNPRICEABLE: u8 = 1 << 3;
 
 /// Per-balance data collected during the health-check loop, enough to recompute premium
 /// snapshots afterwards without reloading banks or oracles.
@@ -104,6 +114,9 @@ impl PremiumScratchEntry {
     }
     pub fn is_premium_active(&self) -> bool {
         self.flags & SCRATCH_PREMIUM_ACTIVE != 0
+    }
+    pub fn is_unpriceable(&self) -> bool {
+        self.flags & SCRATCH_UNPRICEABLE != 0
     }
 }
 
@@ -268,12 +281,22 @@ pub trait MarginfiAccountPremiumImpl {
     /// The weighted rate for a liability is
     /// `Σ(collateral_usd_i × pair_rate(collateral_tag_i, liability_tag)) / Σ(collateral_usd_i)`,
     /// or zero when the account has no priced collateral or the matrix is disabled.
-    /// * No-op when the scratch is incomplete (partial health pass must never write rates).
+    ///
+    /// `ratchet_on_incomplete`: with `false`, an incomplete pass is a no-op (a partial health
+    /// pass must never write plain rates). With `true`, an incomplete pass ratchets instead:
+    /// each snapshot is rewritten to `max(previous, weighted rate of the priceable collateral,
+    /// highest pair rate among unpriceable legs)` — it can only ever move UP. This closes the
+    /// dilute-then-supply-a-bad-oracle rate freeze without blocking the action itself.
+    /// * Pass `true` ONLY from authority-signed handlers (the five withdraw paths and the
+    ///   gate-guarded borrow/flashloan-end). On a permissionless surface (pulse, liquidation,
+    ///   order/rebalance end) a hostile caller could feed a bad oracle and ratchet a victim's
+    ///   rate — those must pass `false`.
     fn update_premium_snapshots(
         &mut self,
         group: &MarginfiGroup,
         scratch: &PremiumScratch,
         now: u64,
+        ratchet_on_incomplete: bool,
     ) -> MarginfiResult;
 }
 
@@ -283,8 +306,9 @@ impl MarginfiAccountPremiumImpl for MarginfiAccount {
         group: &MarginfiGroup,
         scratch: &PremiumScratch,
         now: u64,
+        ratchet_on_incomplete: bool,
     ) -> MarginfiResult {
-        update_premium_snapshots_internal(self, group, scratch, now)
+        update_premium_snapshots_internal(self, group, scratch, now, ratchet_on_incomplete)
     }
 }
 
@@ -293,10 +317,14 @@ fn update_premium_snapshots_internal(
     group: &MarginfiGroup,
     scratch: &PremiumScratch,
     now: u64,
+    ratchet_on_incomplete: bool,
 ) -> MarginfiResult {
-    if !scratch.complete {
+    if !scratch.complete && !ratchet_on_incomplete {
         return Ok(());
     }
+    // Unpriceable legs were recorded with value 0, so on an incomplete pass
+    // `total_collateral_usd` naturally spans exactly the priceable collateral.
+    let ratcheting = !scratch.complete;
 
     let entries = &scratch.entries[..scratch.count];
 
@@ -367,6 +395,24 @@ fn update_premium_snapshots_internal(
             marginfi_type_crate::types::milli_to_u32(rate)
         } else {
             0
+        };
+
+        // Ratchet: an incomplete pass may never LOWER a rate (that is the dilute-then-break-
+        // the-oracle freeze), and every unpriceable leg is priced punitively at its full pair
+        // rate. Forward-only: the claim above already billed the elapsed window at the old
+        // rate, and the next clean refresh recomputes freely (down included).
+        // The milli encoding is monotone, so `u32::max` is rate-max.
+        let new_rate = if ratcheting {
+            let mut floor = new_rate.max(balance.premium_rate_snapshot);
+            for collateral in entries {
+                if collateral.is_asset() && collateral.is_unpriceable() {
+                    floor =
+                        floor.max(group.find_premium_rate(collateral.premium_tag, liability_tag));
+                }
+            }
+            floor
+        } else {
+            new_rate
         };
 
         balance.premium_rate_snapshot = new_rate;
@@ -598,7 +644,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.01), TOL);
         // 0 -> nonzero transition bumped the accrual clock (no retroactive projection)
@@ -607,6 +653,121 @@ mod tests {
             I80F48::from(account.lending_account.balances[0].premium_outstanding),
             I80F48::ZERO
         );
+    }
+
+    // ---------------- ratchet fallback (incomplete pass, withdraw paths) ----------------
+
+    fn unpriceable_entry(tag: u16) -> PremiumScratchEntry {
+        PremiumScratchEntry {
+            value: I80F48::ZERO,
+            activated_at: 0,
+            premium_tag: tag,
+            balance_index: 0,
+            flags: SCRATCH_ASSET | SCRATCH_UNPRICEABLE,
+        }
+    }
+
+    #[test]
+    fn ratchet_incomplete_takes_max_of_prev_known_and_unpriceable_pair() {
+        // prev 3%; the only priced collateral is untagged (known 0%); the unpriceable leg's
+        // pair is 4% -> ratchet writes 4%. The plain refresh must stay a no-op.
+        let group = group_with(&[(100, 200, 4.0)]);
+        let liab_pk = Pubkey::new_unique();
+        let mut account = account_with_liability(liab_pk, rate(3.0), 500);
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(1_000.0, 0));
+        scratch.push(unpriceable_entry(100));
+        scratch.push(liab_entry(0, 50.0, 200));
+        scratch.complete = false;
+        scratch.unpriceable_leg = true;
+
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
+            .unwrap();
+        assert_approx(snapshot_rate(&account), I80F48!(0.03), TOL);
+        assert_eq!(account.lending_account.balances[0].last_update, 500);
+
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000, true)
+            .unwrap();
+        assert_approx(snapshot_rate(&account), I80F48!(0.04), TOL);
+        // The elapsed 500s were claimed at the OLD 3% (punitive rate is forward-only).
+        assert_eq!(account.lending_account.balances[0].last_update, 1_000);
+        let expected_claim = I80F48!(50)
+            .checked_mul(I80F48!(0.03))
+            .unwrap()
+            .checked_mul(
+                I80F48::from_num(500u64)
+                    .checked_div(SECONDS_PER_YEAR)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_approx(
+            I80F48::from(account.lending_account.balances[0].premium_outstanding),
+            expected_claim,
+            TOL,
+        );
+    }
+
+    #[test]
+    fn ratchet_never_lowers_below_previous_snapshot() {
+        // prev 9% beats both the priced average (6%) and the unpriceable pair (4%).
+        let group = group_with(&[(100, 200, 4.0), (300, 200, 6.0)]);
+        let liab_pk = Pubkey::new_unique();
+        let mut account = account_with_liability(liab_pk, rate(9.0), 500);
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(1_000.0, 300));
+        scratch.push(unpriceable_entry(100));
+        scratch.push(liab_entry(0, 50.0, 200));
+        scratch.complete = false;
+        scratch.unpriceable_leg = true;
+
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000, true)
+            .unwrap();
+        assert_approx(snapshot_rate(&account), I80F48!(0.09), TOL);
+    }
+
+    #[test]
+    fn ratchet_takes_priced_average_when_it_is_highest() {
+        // Priced tagged collateral averages 6% > prev 3% > unpriceable pair 4%... max = 6%.
+        let group = group_with(&[(100, 200, 4.0), (300, 200, 6.0)]);
+        let liab_pk = Pubkey::new_unique();
+        let mut account = account_with_liability(liab_pk, rate(3.0), 500);
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(1_000.0, 300));
+        scratch.push(unpriceable_entry(100));
+        scratch.push(liab_entry(0, 50.0, 200));
+        scratch.complete = false;
+        scratch.unpriceable_leg = true;
+
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000, true)
+            .unwrap();
+        assert_approx(snapshot_rate(&account), I80F48!(0.06), TOL);
+    }
+
+    #[test]
+    fn ratchet_on_complete_pass_recomputes_freely_down() {
+        // A complete pass through the ratchet entrypoint behaves exactly like the plain
+        // refresh — it may LOWER the rate.
+        let group = group_with(&[(100, 200, 1.0)]);
+        let liab_pk = Pubkey::new_unique();
+        let mut account = account_with_liability(liab_pk, rate(5.0), 500);
+
+        let mut scratch = PremiumScratch::default();
+        scratch.push(asset_entry(500.0, 100));
+        scratch.push(asset_entry(500.0, 0));
+        scratch.push(liab_entry(0, 50.0, 200));
+        scratch.complete = true;
+
+        account
+            .update_premium_snapshots(&group, &scratch, 1_000, true)
+            .unwrap();
+        assert_approx(snapshot_rate(&account), I80F48!(0.005), TOL);
     }
 
     #[test]
@@ -623,7 +784,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_approx(snapshot_rate(&account), I80F48!(0.002), TOL);
     }
@@ -662,7 +823,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
 
         let rate_of = |i: usize| -> I80F48 {
@@ -685,7 +846,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_eq!(snapshot_rate(&account), I80F48::ZERO);
     }
@@ -702,7 +863,7 @@ mod tests {
         // complete deliberately left false (partial health pass)
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
         assert_eq!(account.lending_account.balances[0].last_update, 500);
@@ -723,7 +884,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, t0 + YEAR)
+            .update_premium_snapshots(&group, &scratch, t0 + YEAR, false)
             .unwrap();
 
         let balance = &account.lending_account.balances[0];
@@ -756,7 +917,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         let balance = &account.lending_account.balances[0];
         assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
@@ -791,7 +952,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
     }
@@ -825,7 +986,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
         assert_approx(
@@ -850,7 +1011,7 @@ mod tests {
         scratch.complete = true;
 
         account
-            .update_premium_snapshots(&group, &scratch, 1_000)
+            .update_premium_snapshots(&group, &scratch, 1_000, false)
             .unwrap();
         let balance = &account.lending_account.balances[0];
         assert_approx(

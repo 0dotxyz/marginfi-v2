@@ -310,6 +310,7 @@ pub fn juplend_withdraw<'info>(
                 &group,
                 &premium_scratch,
                 clock.unix_timestamp as u64,
+                true,
             )?;
 
             {

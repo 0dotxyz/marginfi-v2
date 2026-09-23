@@ -58,6 +58,17 @@ impl ArchiveRecord for MintSnapshotRecords {
         Self::VERSION_V1
     }
 
+    /// Returns `None` on Solana builds. `MintSnapshotRecords` is too large for an SBF stack frame.
+    ///
+    /// On-chain callers use the byte-oriented helpers below.
+    #[cfg(target_os = "solana")]
+    fn parse(_: &[u8]) -> Option<Self> {
+        None
+    }
+
+    /// Create an `ArchiveRecord` from bytes. NOTE: uses too much stack space to run in SBF, Solana
+    /// builds will instead use a stub that returns `None`
+    #[cfg(not(target_os = "solana"))]
     fn parse(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != Self::LEN_V1 || bytes[32] != Self::VERSION_V1 {
             return None;
@@ -295,10 +306,10 @@ impl MintSnapshotRecords {
 
     /// Load a mint snapshot record directly from an archive account.
     ///
-    /// This helper is intended for on-chain callers that already receive the
-    /// archive account as an input account and want typed access without
-    /// re-implementing byte parsing logic.
-    #[cfg(feature = "anchor")]
+    /// Host-only: parsing materializes a full `MintSnapshotRecords` value, which exceeds Solana's
+    /// SBF stack-frame limit. On-chain callers must instead fiddle with bytes (or use the
+    /// byte-oriented helpers above).
+    #[cfg(all(feature = "anchor", not(target_os = "solana")))]
     pub fn from_archive_account<'a, 'info, const INDEX_MAP_LEN: usize>(
         account_info: &'a AccountInfo<'info>,
         mint: Pubkey,

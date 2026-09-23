@@ -259,6 +259,7 @@ pub fn lending_account_withdraw<'info>(
             &group,
             &premium_scratch,
             clock.unix_timestamp as u64,
+            true,
         )?;
     }
 

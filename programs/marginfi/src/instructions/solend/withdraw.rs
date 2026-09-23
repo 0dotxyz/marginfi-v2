@@ -279,6 +279,7 @@ pub fn solend_withdraw<'info>(
                     &group,
                     &premium_scratch,
                     Clock::get()?.unix_timestamp as u64,
+                    true,
                 )?;
             }
 

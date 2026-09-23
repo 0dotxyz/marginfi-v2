@@ -316,6 +316,27 @@ export const resizeGroupAccount = (
     .instruction();
 };
 
+export type ResizeBankAccountArgs = {
+  bank: PublicKey;
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/** (permissionless) Resize a v1-sized bank account to the current struct size. */
+export const resizeBankAccount = (
+  program: Program<Marginfi>,
+  args: ResizeBankAccountArgs,
+) => {
+  return program.methods
+    .lendingPoolResizeBankAccount()
+    .accounts({
+      bank: args.bank,
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
 export type ResizeGlobalFeeStateArgs = {
   /** Funds the rent for the added account space. */
   payer: PublicKey;
