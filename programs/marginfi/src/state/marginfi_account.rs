@@ -24,8 +24,9 @@ use marginfi_type_crate::{
         BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
         OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -1053,6 +1054,8 @@ pub fn get_health_components<'info>(
         HealthPriceMode::Client(clock) => (false, None, clock),
     };
 
+    let in_deleverage = marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE);
+
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================
@@ -1140,7 +1143,7 @@ pub fn get_health_components<'info>(
 
             // Create oracle adapter (heap allocation happens here)
             let price_adapter_result =
-                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock, in_deleverage);
 
             // Premium weights reuse the biased health price computed inside the calc — no
             // extra adapter work (see the premium module docs for the accepted rate wobble).
@@ -1334,7 +1337,7 @@ pub fn get_tagged_account_health_components<'info>(
 
         let (asset_val, liab_val) = {
             let price_adapter_result =
-                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock, false);
 
             let (asset_val, liab_val, price, _err_code, _premium_price) =
                 calc_weighted_value_for_balance(

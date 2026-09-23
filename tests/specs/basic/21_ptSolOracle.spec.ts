@@ -4,17 +4,34 @@ import { Marginfi } from "../../../target/types/marginfi";
 import {
   addBank,
   configureBankOracle,
+  groupConfigure,
   groupInitialize,
   setFixedPrice,
 } from "../../utils/group-instructions";
-import { pulseBankPrice } from "../../utils/user-instructions";
+import {
+  accountInit,
+  borrowIx,
+  composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
+  depositIx,
+  endDeleverageIx,
+  initLiquidationRecordIx,
+  pulseBankPrice,
+  repayIx,
+  startDeleverageIx,
+  withdrawIx,
+} from "../../utils/user-instructions";
 import {
   bankrunContext,
   bankrunProgram,
   banksClient,
   ecosystem,
+  globalProgramAdmin,
   groupAdmin,
   oracles,
+  riskAdmin,
+  users,
 } from "../../rootHooks";
 import {
   assertI80F48Approx,
@@ -28,8 +45,10 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import { getBankrunTime } from "../../utils/tools";
+import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import { BN } from "@coral-xyz/anchor";
+import { createMintToInstruction } from "@solana/spl-token";
 import { assert } from "chai";
 
 const EXPONENT_PROGRAM = new PublicKey(
@@ -282,6 +301,208 @@ describe("PT-SOL internal oracle setup", () => {
       },
       "ExponentVaultValidationFailed",
       6137,
+    );
+  });
+
+
+  it("deleverages a bank whose vault is in emergency mode, which its owner cannot", async () => {
+    const borrower = users[0];
+    const lender = users[1];
+    const borrowerAcc = Keypair.generate();
+    const lenderAcc = Keypair.generate();
+    const debtBank = Keypair.generate();
+    const depeggedVault = Keypair.generate().publicKey;
+    const wsol = (n: number) => new BN(n * 10 ** ecosystem.wsolDecimals);
+    const usdc = (n: number) => new BN(n * 10 ** ecosystem.usdcDecimals);
+
+    await setPtsol(0.9, okVault);
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction()
+        .add(
+          await addBank(groupAdmin.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: ecosystem.usdcMint.publicKey,
+            bank: debtBank.publicKey,
+            config: defaultBankConfig(),
+          }),
+        )
+        .add(
+          await groupConfigure(groupAdmin.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            newRiskAdmin: riskAdmin.wallet.publicKey,
+          }),
+        ),
+      [groupAdmin.wallet, debtBank],
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+          bank: debtBank.publicKey,
+          type: ORACLE_SETUP_PYTH_PUSH,
+          oracle: oracles.usdcOracle.publicKey,
+        }),
+      ),
+      [groupAdmin.wallet],
+    );
+
+    const mintTo = (mint: PublicKey, account: PublicKey, amount: BN) =>
+      processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          createMintToInstruction(
+            mint,
+            account,
+            globalProgramAdmin.wallet.publicKey,
+            BigInt(amount.toString()),
+          ),
+        ),
+        [globalProgramAdmin.wallet],
+      );
+    await mintTo(ecosystem.wsolMint.publicKey, borrower.wsolAccount, wsol(2));
+    await mintTo(ecosystem.usdcMint.publicKey, lender.usdcAccount, usdc(1_000));
+    await mintTo(ecosystem.usdcMint.publicKey, riskAdmin.usdcAccount, usdc(100));
+
+    for (const [user, acc] of [
+      [borrower, borrowerAcc],
+      [lender, lenderAcc],
+    ] as const) {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await accountInit(user.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            marginfiAccount: acc.publicKey,
+            authority: user.wallet.publicKey,
+            feePayer: user.wallet.publicKey,
+          }),
+        ),
+        [user.wallet, acc],
+      );
+    }
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await depositIx(lender.mrgnBankrunProgram, {
+          marginfiAccount: lenderAcc.publicKey,
+          bank: debtBank.publicKey,
+          tokenAccount: lender.usdcAccount,
+          amount: usdc(1_000),
+        }),
+      ),
+      [lender.wallet],
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction()
+        .add(
+          await depositIx(borrower.mrgnBankrunProgram, {
+            marginfiAccount: borrowerAcc.publicKey,
+            bank: ptBank.publicKey,
+            tokenAccount: borrower.wsolAccount,
+            amount: wsol(2),
+          }),
+        )
+        .add(
+          await initLiquidationRecordIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: borrowerAcc.publicKey,
+            feePayer: riskAdmin.wallet.publicKey,
+          }),
+        ),
+      [borrower.wallet, riskAdmin.wallet],
+    );
+
+    const groupsFor = (vault: PublicKey) => [
+      [ptBank.publicKey, oracles.wsolOracle.publicKey, vault],
+      [debtBank.publicKey, oracles.usdcOracle.publicKey],
+    ];
+    const remaining = composeRemainingAccounts(groupsFor(okVault));
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await borrowIx(borrower.mrgnBankrunProgram, {
+          marginfiAccount: borrowerAcc.publicKey,
+          bank: debtBank.publicKey,
+          tokenAccount: borrower.usdcAccount,
+          remaining,
+          amount: usdc(50),
+        }),
+      ),
+      [borrower.wallet],
+    );
+
+    // The vault depegs, so the collateral can no longer be priced.
+    const now = await getBankrunTime(bankrunContext);
+    setVault(
+      depeggedVault,
+      makeVault(now - 5_000, 10_000, {
+        syRate: 2n * SY_RATE_PRECISION,
+        allTimeHigh: 3n * SY_RATE_PRECISION,
+      }),
+    );
+    await setPtsol(0.9, depeggedVault);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    const depegged = composeRemainingAccounts(groupsFor(depeggedVault));
+
+    const seize = (program: Program<Marginfi>, tokenAccount: PublicKey) =>
+      withdrawIx(program, {
+        marginfiAccount: borrowerAcc.publicKey,
+        bank: ptBank.publicKey,
+        tokenAccount,
+        remaining: depegged,
+        amount: wsol(0.1),
+      });
+
+    // The borrower's own risk check cannot price the depegged collateral, so the risk engine
+    // rejects the withdraw on an account that is otherwise healthy.
+    await expectFailedTxWithError(
+      async () => {
+        await processBankrunTransaction(
+          bankrunContext,
+          new Transaction().add(
+            await seize(borrower.mrgnBankrunProgram, borrower.wsolAccount),
+          ),
+          [borrower.wallet],
+        );
+      },
+      "RiskEngineInitRejected",
+      6009,
+    );
+
+    // The risk admin still unwinds it: seize collateral, pay down the debt.
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction()
+        .add(
+          await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: borrowerAcc.publicKey,
+            riskAdmin: riskAdmin.wallet.publicKey,
+            remaining: composeRemainingAccountsWriteableMeta(
+              groupsFor(depeggedVault),
+            ),
+          }),
+        )
+        .add(await seize(riskAdmin.mrgnBankrunProgram, riskAdmin.wsolAccount))
+        .add(
+          await repayIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: borrowerAcc.publicKey,
+            bank: debtBank.publicKey,
+            tokenAccount: riskAdmin.usdcAccount,
+            amount: usdc(25),
+          }),
+        )
+        .add(
+          await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: borrowerAcc.publicKey,
+            remaining: composeRemainingAccountsMetaBanksOnly(
+              groupsFor(depeggedVault),
+            ),
+          }),
+        ),
+      [riskAdmin.wallet],
     );
   });
 

@@ -283,8 +283,17 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
+        in_deleverage: bool,
     ) -> MarginfiResult<Self> {
-        Self::try_from_bank_with_max_age(bank, ais, clock, bank.config.get_oracle_max_age())
+        let context = Self::load_oracle_context_with_max_age(
+            bank,
+            ais,
+            clock,
+            bank.config.get_oracle_max_age(),
+            None,
+            in_deleverage,
+        )?;
+        Ok(context.adjusted_price_feed)
     }
 
     pub fn try_from_bank_with_max_age<'info>(
@@ -293,7 +302,8 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
     ) -> MarginfiResult<Self> {
-        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
+        let context =
+            Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None, false)?;
         Ok(context.adjusted_price_feed)
     }
 
@@ -303,6 +313,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
+        in_deleverage: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -1278,7 +1289,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_rate = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1308,7 +1319,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_price = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
                 let feed = FixedPriceFeed {
                     price: pt_price,
@@ -1343,6 +1354,7 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
+            false,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -2924,19 +2936,19 @@ mod tests {
 
         // Before start -> start_price; at/after maturity -> par (1.0)
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(500), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(500), start_price, false).unwrap(),
             start_price
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap(),
             I80F48::ONE
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(9_999), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(9_999), start_price, false).unwrap(),
             I80F48::ONE
         );
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
-        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
@@ -2953,29 +2965,29 @@ mod tests {
         // 0.4375 SY per PT * 2.0 asset per SY = 0.875, so the cap must beat par at maturity.
         let mut vault = fully_backed_vault(1_000, 1_000);
         vault.sy_for_pt = 437_500_000_000;
-        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(matured, I80F48::from_num(0.875));
 
         // Below the ceiling, the cap is inert: halfway from 0.5 to par is 0.75.
-        let early = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let early = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert_eq!(early, I80F48::from_num(0.75));
 
         vault.sy_for_pt = 125_000_000_000; // 0.25
-        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(broken, I80F48::from_num(0.25));
 
         // Degenerate vaults are rejected rather than priced at zero.
         let mut zero_supply = fully_backed_vault(1_000, 1_000);
         zero_supply.pt_supply = 0;
-        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price, false).is_err());
 
         let mut zero_rate = fully_backed_vault(1_000, 1_000);
         zero_rate.last_seen_sy_exchange_rate = [0; 4];
-        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price, false).is_err());
 
         let mut overflowed = fully_backed_vault(1_000, 1_000);
         overflowed.last_seen_sy_exchange_rate = [0, 1, 0, 0];
-        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price, false).is_err());
     }
 
     #[test]
@@ -2990,13 +3002,20 @@ mod tests {
         let mut healthy = fully_backed_vault(1_000, 1_000);
         healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
         assert!(!healthy.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&healthy, &at, start_price).is_ok());
+        assert!(pt_linear_multiplier(&healthy, &at, start_price, false).is_ok());
 
         // SY rate below its all-time high -> emergency mode -> refuse to price.
         let mut depegged = fully_backed_vault(1_000, 1_000);
         depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
         assert!(depegged.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&depegged, &at, start_price).is_err());
+        assert!(pt_linear_multiplier(&depegged, &at, start_price, false).is_err());
+
+        // Deleverage prices it anyway, at the same mark a healthy vault would carry, so the risk
+        // admin can unwind a position the depeg would otherwise strand.
+        assert_eq!(
+            pt_linear_multiplier(&depegged, &at, start_price, true).unwrap(),
+            pt_linear_multiplier(&healthy, &at, start_price, false).unwrap(),
+        );
     }
 
     #[test]
