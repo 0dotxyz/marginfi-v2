@@ -528,6 +528,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        false,
     )?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
