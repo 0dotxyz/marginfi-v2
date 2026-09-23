@@ -532,6 +532,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        false,
     )?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
@@ -625,7 +626,7 @@ pub struct CloseOrder<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -680,7 +681,7 @@ pub struct SetKeeperCloseFlags<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

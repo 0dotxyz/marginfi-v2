@@ -5,7 +5,7 @@ mod tests {
     use crate::state::rate_limiter::{BankRateLimiterImpl, RateLimitWindowImpl};
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
-    use kamino_mocks::state::{u68f60_to_i80f48, MinimalReserve};
+    use kamino_mocks::state::{u68f60_to_i80f48, MinimalReserve, ReserveConfig};
     use marginfi_type_crate::types::price::{
         mul_i128_by_i80f48, mul_i64_by_i80f48, mul_u64_by_i80f48,
     };
@@ -516,5 +516,15 @@ mod tests {
         // back: 2_500_000 liquidity → 2_500_000 * (50000/2500) = 50_000_000 collateral
         let col = r.liquidity_to_collateral(2_500_000).unwrap();
         assert!(50_000_000 - col < 2);
+    }
+
+    /// `config` sits behind long padding runs, so a wrong offset silently reads garbage. Kamino's
+    /// `ReserveConfig` starts at 4848 and `emergency_mode` is its 9th byte.
+    #[test]
+    fn minimal_reserve_field_offsets_match_kamino() {
+        assert_eq!(std::mem::offset_of!(MinimalReserve, config), 4848);
+        assert_eq!(std::mem::offset_of!(ReserveConfig, emergency_mode), 8);
+        assert_eq!(std::mem::offset_of!(MinimalReserve, price_status), 17);
+        assert_eq!(std::mem::offset_of!(MinimalReserve, lending_market), 24);
     }
 }

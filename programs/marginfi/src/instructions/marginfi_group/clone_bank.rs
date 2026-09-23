@@ -140,7 +140,7 @@ pub fn lending_pool_clone_bank(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: ctx.accounts.bank.key(),
         mint: ctx.accounts.bank_mint.key(),
@@ -152,14 +152,11 @@ pub fn lending_pool_clone_bank(
 #[derive(Accounts)]
 #[instruction(bank_seed: u64)]
 pub struct LendingPoolCloneBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

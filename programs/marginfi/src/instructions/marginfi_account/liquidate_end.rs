@@ -178,6 +178,7 @@ pub fn end_receivership<'info>(
         group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        false,
     )?;
 
     let seized: I80F48 = pre_assets_equity - post_assets_equity;

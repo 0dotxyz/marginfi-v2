@@ -259,6 +259,7 @@ pub fn lending_account_withdraw<'info>(
             &group,
             &premium_scratch,
             clock.unix_timestamp as u64,
+            true,
         )?;
     }
 
@@ -300,7 +301,7 @@ pub struct LendingAccountWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true, true)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), true, true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
