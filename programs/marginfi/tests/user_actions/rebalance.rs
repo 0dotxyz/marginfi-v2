@@ -415,6 +415,17 @@ async fn rebalance_borrowing_account_passes_health() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `end_rebalance` stamps the health cache it writes with the current clock.
+#[tokio::test]
+async fn rebalance_end_stamps_the_health_cache() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    assert_eq!(f.user.load().await.health_cache.timestamp, 1_000);
+    Ok(())
+}
+
 /// An unlimited order permits a partial fill (e.g. the destination is near its deposit cap): moving
 /// part of the position succeeds, leaves the remainder in the source, and conserves value.
 #[tokio::test]
@@ -1306,6 +1317,97 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A JupLend destination is priced on its rate curve at the post-deposit utilization, so a stale
+/// stored rate cannot carry a move past the improvement gate.
+#[tokio::test]
+async fn rebalance_prices_a_juplend_destination_on_its_curve() -> anyhow::Result<()> {
+    let f = setup_multi_venue_fixture().await?;
+    let src = f.drift_bank.key;
+    let dst = f.juplend_bank.key;
+
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    // Stored: 150% borrow rate at 90% utilization. The deposit lands at 81.81%, where the
+    // fixture's curve (10% at the 80% kink, 150% at 100%) pays 22.67%, an 18.5% supply rate.
+    f.stamp_juplend_reserve(
+        15_000,
+        9_000,
+        10 * VENUE_DEPOSIT_NATIVE,
+        9 * VENUE_DEPOSIT_NATIVE,
+    )
+    .await;
+
+    let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.5)).await?;
+
+    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+    let drift_crank = f
+        .user
+        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+        .await;
+    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
+    let ref_banks = vec![
+        RebalanceBankMeta::new(src, f.drift_slice().await),
+        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
+            .with_rewards(f.juplend_rewards().await),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_drift_withdraw_ix_with_authority(
+            f.keeper_token,
+            &f.drift_bank,
+            VENUE_DEPOSIT_NATIVE,
+            Some(true),
+            f.keeper.pubkey(),
+            None,
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_juplend_deposit_ix_with_authority(
+            f.keeper_token,
+            &f.juplend_bank,
+            VENUE_DEPOSIT_NATIVE - 1,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[
+            cu_ix,
+            drift_crank,
+            start_ix,
+            withdraw_ix,
+            deposit_ix,
+            end_ix,
+        ])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    Ok(())
+}
+
 /// The conservation tolerance tracks the size of a venue's accounting token: with the Drift source
 /// at a doubled exchange rate the bound is 6 native units, so a 4-unit shortfall that
 /// `rebalance_leak_just_over_dust_rejected` rejects at multiplier 1 is accepted here.
@@ -1504,8 +1606,9 @@ async fn rebalance_rejects_omitting_an_allowlisted_bank() -> anyhow::Result<()> 
 async fn rebalance_rejects_a_move_to_less_than_the_best_venue() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let dst2 = f.add_second_dst().await?;
-    // Dilute the second destination so the first strictly dominates it.
-    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    // Give the second destination more depth at a lower utilization (600 borrowed of 2000), so the
+    // first still pays more after either deposit.
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
 
     let ref_banks = vec![
         f.bank_meta(f.src_bank_f.key),
@@ -1871,8 +1974,7 @@ async fn rebalance_rejects_multi_move_when_one_not_improving() -> anyhow::Result
 
 // N->N coverage: untouched-balance guard, amount budget, tip denominator, dust
 
-/// The only adversarial exercise of `verify_others_unchanged`: a keeper does an honest src->dst move
-/// but also drains the user's UNREFERENCED SOL position to its own account. The snapshot catches it.
+/// A withdraw leg on the user's unreferenced SOL bank is rejected at start.
 #[tokio::test]
 async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
@@ -1926,8 +2028,6 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
             f.keeper.pubkey(),
         )
         .await;
-    // Loot part of the unreferenced SOL position (partial, so SOL stays active and the snapshot
-    // mismatch surfaces at `verify_others_unchanged` rather than the health-obs check).
     let steal_sol = f
         .user
         .make_withdraw_ix_with_authority(keeper_sol, sol_bank, 5.0, None, f.keeper.pubkey())
@@ -1945,13 +2045,11 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
     let res = f
         .process(&[start_ix, withdraw_usdc, deposit_usdc, steal_sol, end_ix])
         .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceForeignBankLeg);
     Ok(())
 }
 
-/// The move is honest, but the keeper also aims a deposit of their own tokens at a bank the
-/// rebalance never referenced, consuming a balance slot and attaching that bank's oracle to every
-/// later maintenance check. Only the untracked-balance count catches this.
+/// A deposit leg into a bank the rebalance never referenced is rejected at start.
 #[tokio::test]
 async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
@@ -2016,7 +2114,276 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
     let res = f
         .process(&[start_ix, withdraw_usdc, deposit_usdc, inject_sol, end_ix])
         .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUntrackedBalance);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceForeignBankLeg);
+    Ok(())
+}
+
+/// An unreferenced slot left active below `EMPTY_BALANCE_THRESHOLD` neither blocks the move nor
+/// changes.
+#[tokio::test]
+async fn rebalance_ignores_an_empty_unreferenced_slot() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    let user_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1.0)
+        .await;
+    f.user
+        .try_bank_deposit(user_sol.key, sol_bank, 1.0, None)
+        .await?;
+    let mut account = f.user.load().await;
+    let idx = account
+        .lending_account
+        .balances
+        .iter()
+        .position(|b| b.bank_pk == sol_bank.key)
+        .unwrap();
+    let scrap = I80F48::from_num(0.5);
+    account.lending_account.balances[idx].asset_shares = scrap.into();
+    f.user.set_account(&account).await?;
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src);
+    assert_eq!(f.asset_shares(sol_bank.key).await, scrap);
+    Ok(())
+}
+
+/// A whole move carries the order tag to the destination, and the keeper close of the stop-loss
+/// is still rejected.
+#[tokio::test]
+async fn rebalance_carries_the_order_tag_with_a_whole_move() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    assert_eq!(f.balance_tag(f.src_bank_f.key).await, Some(tag));
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_eq!(f.balance_tag(f.src_bank_f.key).await, None);
+    assert_eq!(f.balance_tag(f.dst_bank_f.key).await, Some(tag));
+    let res = f
+        .user
+        .try_keeper_close_order(order_pda, &f.keeper, f.keeper.pubkey())
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::LiquidatorOrderCloseNotAllowed
+    );
+    Ok(())
+}
+
+/// A partial move of a tagged balance is rejected at end.
+#[tokio::test]
+async fn rebalance_rejects_a_partial_move_of_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let half = DEPOSIT_USDC / 2.0;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            half,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, half, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// Splitting a tagged balance across two destinations is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_splitting_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let half = DEPOSIT_USDC / 2.0;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst1 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, half, None, f.keeper.pubkey())
+        .await;
+    let deposit_dst2 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, half, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_dst1, deposit_dst2, end_ix])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// A move into an order-tagged balance is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_a_move_into_a_tagged_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    f.place_stop_loss_on(&f.dst_bank_f).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// A tagged move into a bank the account already holds a balance in is rejected at start.
+#[tokio::test]
+async fn rebalance_rejects_a_tagged_move_into_a_held_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    f.place_stop_loss_on(&f.src_bank_f).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceTaggedBalanceSplit);
+    Ok(())
+}
+
+/// Cycling an untouched tagged referenced bank through withdraw-all and redeposit clears its tag
+/// and is rejected at end.
+#[tokio::test]
+async fn rebalance_rejects_clearing_the_tag_of_an_untouched_referenced_bank() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let src2 = f.add_second_src(100.0).await?;
+    f.place_stop_loss_on(&src2).await?;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(src2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let cycle_out = f
+        .user
+        .make_withdraw_ix_with_authority(f.keeper_usdc, &src2, 100.0, Some(true), f.keeper.pubkey())
+        .await;
+    let cycle_in = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &src2, 100.0, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[
+            start_ix,
+            withdraw_src,
+            deposit_dst,
+            cycle_out,
+            cycle_in,
+            end_ix,
+        ])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
     Ok(())
 }
 
@@ -2026,8 +2393,9 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
 async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let dst2 = f.add_second_dst().await?;
-    // Separate the two destinations' rates so one strictly dominates.
-    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    // Give the second destination more depth at a lower utilization (600 borrowed of 2000), so the
+    // first still pays more after either deposit.
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
 
     let ref_banks = vec![
         f.bank_meta(f.src_bank_f.key),
@@ -2052,14 +2420,106 @@ async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<(
     Ok(())
 }
 
+/// Every other bank is priced with the move's tokens added to its own inflow: sending both chunks
+/// to one of two identical banks is rejected: the second chunk would earn more in the other.
+#[tokio::test]
+async fn rebalance_judges_a_repeated_destination_against_its_untouched_twin() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    let chunk = 200.0;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let doubled = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, chunk), rebalance_move(0, 1, chunk)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[doubled]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotBestVenue);
+
+    // One chunk to each twin passes: each twin is priced with the other's chunk already counted.
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, chunk), rebalance_move(0, 2, chunk)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            2.0 * chunk,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst1 = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            chunk,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst2 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, chunk, None, f.keeper.pubkey())
+        .await;
+    // The source keeps its remainder, so it stays in the post-move observation set.
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_dst1, deposit_dst2, end_ix])
+        .await?;
+
+    let dst1_after = f.asset_shares(f.dst_bank_f.key).await;
+    let dst2_after = f.asset_shares(dst2.key).await;
+    assert_eq!(dst1_after, dst2_after, "each twin took one chunk");
+    assert_eq!(
+        f.asset_shares(f.src_bank_f.key).await + dst1_after + dst2_after,
+        old_src,
+        "same-mint shares conserved"
+    );
+    Ok(())
+}
+
 /// The dominant destination has no headroom left, so the move routes past it into the lower-rate
 /// bank.
 #[tokio::test]
 async fn rebalance_allows_overflow_past_a_full_higher_rate_bank() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let dst2 = f.add_second_dst().await?;
-    // Dilute the second destination so the first strictly dominates it on rate.
-    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    // Give the second destination more depth at a lower utilization (600 borrowed of 2000), so the
+    // first still pays more after either deposit.
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
     // Cap the dominant destination under its current assets, leaving it zero headroom.
     f.dst_bank_f
         .update_config(
@@ -2236,6 +2696,35 @@ async fn rebalance_rejects_empty_moves() -> anyhow::Result<()> {
         .await;
     let res = f.process(&[start_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+    Ok(())
+}
+
+/// A bank may not be both a source and a destination in one execution.
+#[tokio::test]
+async fn rebalance_rejects_a_bank_that_is_both_source_and_destination() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            vec![
+                f.bank_meta(f.src_bank_f.key),
+                f.bank_meta(f.dst_bank_f.key),
+                f.bank_meta(dst2.key),
+            ],
+            vec![rebalance_move(0, 1, 500.0), rebalance_move(1, 2, 500.0)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::RebalanceBankSourceAndDestination
+    );
     Ok(())
 }
 
@@ -2791,16 +3280,143 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
     Ok(())
 }
 
-/// A native bank's cached rate ignores the incoming deposit, so the start gate reads the destination
-/// undiluted and the end gate is what catches a move whose own deposit erases the advantage.
+/// The start gate prices a native destination as it would stand after the move's own deposit.
 #[tokio::test]
 async fn rebalance_rejects_a_move_whose_deposit_erases_the_improvement() -> anyhow::Result<()> {
-    // dst stands at util 0.5 (lending rate 0.300) and clears 0 + 0.1 at start. The arriving 1000
-    // halves its utilization to 0.25 (lending rate 0.075), which no longer clears the margin.
+    // dst sits at 50% utilization (lending rate 0.300), clearing the 0.1 margin over src's 0. The
+    // arriving 1000 halves that to 25% (lending rate 0.075), which no longer clears it.
     let f = setup(I80F48::from_num(0.1), 0).await?;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    Ok(())
+}
+
+/// The end gate prices the destination as it really stands, so a keeper cannot declare a small
+/// move and land a large one to dodge the dilution.
+#[tokio::test]
+async fn rebalance_end_rejects_a_deposit_beyond_the_declared_move() -> anyhow::Result<()> {
+    // A declared 1 USDC leaves dst near 50% utilization, clear of the 0.1 margin; the 1000 the legs
+    // actually move halve that (lending rate 0.075).
+    let f = setup(I80F48::from_num(0.1), 0).await?;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, 1.0)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceOvershoot);
+    Ok(())
+}
+
+/// Two moves into one destination are priced as one deposit of their combined amount.
+#[tokio::test]
+async fn rebalance_prices_a_destination_at_its_total_inflow() -> anyhow::Result<()> {
+    // Half the position leaves dst at 33% utilization (lending rate 0.133), clearing the 0.1
+    // margin; the whole position leaves it at 25% (0.075). Two halves are judged as the whole.
+    let f = setup(I80F48::from_num(0.1), 0).await?;
+    let half = DEPOSIT_USDC / 2.0;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let split = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 1, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[split]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, half)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            half,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, half, None, f.keeper.pubkey())
+        .await;
+    // The source keeps its other half, so it stays in the post-move observation set.
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
+
+    let src_after = f.asset_shares(f.src_bank_f.key).await;
+    let dst_after = f.asset_shares(f.dst_bank_f.key).await;
+    assert_eq!(src_after, dst_after, "the position split into equal halves");
+    assert_eq!(src_after + dst_after, old_src, "same-mint shares conserved");
     Ok(())
 }
 
@@ -3002,6 +3618,54 @@ async fn rebalance_close_allowed_while_tip_unsettled() -> anyhow::Result<()> {
     f.process(&[settle]).await?;
     assert_eq!(f.lamports_of(f.order_pda).await, 0, "order closed");
     assert_eq!(f.user.load().await.active_orders, 0);
+    Ok(())
+}
+
+/// A record outlives its account: after the authority closes the order, withdraws, drains the pool
+/// and closes the account, settlement still pays the recorded keeper the escrow and the rent.
+#[tokio::test]
+async fn rebalance_settle_after_account_closed() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.set_keeper_tip(200_000).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    // Build the settle instruction before the account is closed; the builder reads the account.
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+
+    let close_order = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    f.process_as_payer(&[close_order]).await?;
+    let dest = f.test_f.usdc_mint.create_empty_token_account().await;
+    f.user
+        .try_bank_withdraw(dest.key, &f.dst_bank_f, DEPOSIT_USDC, Some(true))
+        .await?;
+    let drain = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, payer, u64::MAX)
+        .await;
+    f.process_as_payer(&[drain]).await?;
+    f.user.try_close_account(0).await?;
+    assert_eq!(f.lamports_of(f.user.key).await, 0, "account closed");
+
+    f.advance_clock(601).await;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    f.process_as_payer(&[settle]).await?;
+
+    assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed");
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports,
+        "executor receives the escrowed tip plus the record rent"
+    );
     Ok(())
 }
 

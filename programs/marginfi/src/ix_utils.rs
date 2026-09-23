@@ -209,14 +209,13 @@ pub fn load_and_validate_instructions(
 }
 
 /// Tx-structure sandwich for rebalance: the end instruction must be last, start must be top-level
-/// (not CPI), and only an allowlisted set of instructions may appear: the marginfi
-/// rebalance/withdraw/deposit legs, plus each venue program's (non-mutating) refresh/crank ixs ONLY.
-/// Forbidding the venues' deposit/borrow/withdraw ops here is what stops an attacker-keeper from
-/// spiking a venue's utilization-derived supply rate inside the sandwich to pass the improvement gate
-/// and farm fees.
+/// (not CPI), only the marginfi rebalance/withdraw/deposit legs and each venue program's
+/// refresh/crank ixs may appear, and every withdraw/deposit leg acts on `marginfi_account` and on
+/// one of `banks`.
 pub fn validate_rebalance_instructions(
     sysvar: &AccountInfo,
     marginfi_account: &Pubkey,
+    banks: &[Pubkey],
 ) -> MarginfiResult {
     let allowed_programs = [
         id_crate::ID,
@@ -232,10 +231,7 @@ pub fn validate_rebalance_instructions(
     let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
     validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
 
-    // Bind every deposit/withdraw leg to the account being rebalanced. The supply-rate gate reads
-    // utilization, so a leg on a FOREIGN account (the attacker's own deposit) could spike a bank's rate
-    // to pass the gate and restore it before end, all with allowed discriminators. `marginfi_account`
-    // is meta index 1 (group, marginfi_account, authority, ...) on every native and venue leg.
+    // On every native and venue leg, `marginfi_account` is meta index 1 and `bank` is meta index 3.
     const MOVE_LEG_DISCRIMS: [[u8; 8]; 8] = [
         ixd::LENDING_ACCOUNT_WITHDRAW,
         ixd::LENDING_ACCOUNT_DEPOSIT,
@@ -252,9 +248,14 @@ pub fn validate_rebalance_instructions(
         }
         let discrim = &ix.data[0..8];
         if MOVE_LEG_DISCRIMS.iter().any(|d| &d[..] == discrim) {
+            let meta = |i: usize| ix.accounts.get(i).map(|m| m.pubkey);
             check!(
-                ix.accounts.len() > 1 && ix.accounts[1].pubkey == *marginfi_account,
+                meta(1) == Some(*marginfi_account),
                 MarginfiError::RebalanceForeignAccountLeg
+            );
+            check!(
+                meta(3).is_some_and(|bank| banks.contains(&bank)),
+                MarginfiError::RebalanceForeignBankLeg
             );
         }
     }
