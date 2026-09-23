@@ -110,7 +110,7 @@ pub fn lending_pool_add_bank_juplend(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(group.admin)
+            signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
@@ -124,11 +124,11 @@ pub fn lending_pool_add_bank_juplend(
 pub struct LendingPoolAddBankJuplend<'info> {
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized
+        has_one = governance_admin @ MarginfiError::Unauthorized
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

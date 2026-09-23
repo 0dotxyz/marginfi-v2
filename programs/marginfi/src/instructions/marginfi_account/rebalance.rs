@@ -1202,7 +1202,7 @@ fn check_rebalance_health_and_refresh_premium<'info>(
         &mut Some(health_cache),
         &mut Some(&mut premium_scratch),
     )?;
-    account.update_premium_snapshots(group, &premium_scratch, now)
+    account.update_premium_snapshots(group, &premium_scratch, now, false)
 }
 
 #[derive(Accounts)]

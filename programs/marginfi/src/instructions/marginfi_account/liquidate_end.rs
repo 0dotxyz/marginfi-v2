@@ -160,6 +160,7 @@ pub fn end_receivership<'info>(
         group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        false,
     )?;
 
     // health must not get worse

@@ -38,7 +38,7 @@ export interface AddSolendBankArgs {
  *
  * This instruction creates a marginfi bank that integrates with a Solend reserve.
  * It requires:
- * - group: The marginfi group to add the bank to (must be admin)
+ * - group: The marginfi group to add the bank to (the signer must be the slow governance admin)
  * - feePayer: Account that pays for the transaction
  * - bankMint: The token mint that matches the Solend reserve mint
  * - integrationAcc1: The Solend reserve account
