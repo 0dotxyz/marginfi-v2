@@ -702,7 +702,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
@@ -993,7 +993,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
@@ -1304,10 +1304,10 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
-    let copy_to_bank_admin = test_f.get_bank(&BankMint::Sol);
+    let copy_to_bank = test_f.get_bank(&BankMint::Sol);
     let copy_to_bank_emode_admin = test_f.get_bank(&BankMint::PyUSD);
 
-    let copy_to_before = copy_to_bank_admin.load().await;
+    let copy_to_before = copy_to_bank.load().await;
     assert_eq!(copy_to_before.emode.flags, 0);
     assert_eq!(copy_to_before.emode.emode_tag, 0);
 
@@ -1334,16 +1334,16 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     // Admin can clone emode settings.
     test_f
         .marginfi_group
-        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank_admin)
+        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank)
         .await?;
 
     let copy_from_after = copy_from_bank.load().await;
-    let copy_to_after = copy_to_bank_admin.load().await;
+    let copy_to_after = copy_to_bank.load().await;
 
     assert_eq!(copy_to_after.emode, copy_from_after.emode);
     assert_eq!(copy_to_after.config, copy_to_before.config);
 
-    // A dedicated emode admin can also clone emode settings.
+    // A dedicated eMode admin cannot clone eMode settings; this remains a slow-admin action.
     let group_before = test_f.marginfi_group.load().await;
     let new_emode_admin = Keypair::new();
     test_f
@@ -1359,17 +1359,19 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
         )
         .await?;
 
-    test_f
+    let err = test_f
         .marginfi_group
         .try_lending_pool_clone_emode_with_signer(
             &new_emode_admin,
             &copy_from_bank,
             &copy_to_bank_emode_admin,
         )
-        .await?;
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
 
     let copy_to_after = copy_to_bank_emode_admin.load().await;
-    assert_eq!(copy_to_after.emode, copy_from_after.emode);
+    assert_eq!(copy_to_after.emode, copy_to_before.emode);
 
     Ok(())
 }

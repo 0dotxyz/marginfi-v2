@@ -7,7 +7,6 @@ import {
   banksClient,
   ecosystem,
   EMODE_SEED,
-  emodeAdmin,
   emodeGroup,
   groupAdmin,
 } from "../../rootHooks";
@@ -152,11 +151,11 @@ describe("Emode Max Leverage Configuration", () => {
       await banksClient.processTransaction(tx);
     });
 
-    it("(emode admin) Configure bank emode with leverage within limit (5x) - should succeed", async () => {
+    it("(slow governance admin) Configure bank emode with leverage within limit (5x) - should succeed", async () => {
       // SOL bank has liability weights of 1.0/1.0 (init/maint)
       // To achieve 5x leverage: L = 1/(1-CW/LW) => 5 = 1/(1-CW/1.0) => CW = 0.8
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -171,19 +170,19 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       await banksClient.processTransaction(tx);
 
       const bank = await bankrunProgram.account.bank.fetch(solBank);
       assert.equal(bank.emode.emodeTag, EMODE_SOL_TAG);
     });
 
-    it("(emode admin) Configure bank emode exceeding init leverage limit (11x init) - should fail", async () => {
+    it("(slow governance admin) Configure bank emode exceeding init leverage limit (11x init) - should fail", async () => {
       // SOL bank has liability weights of 1.0/1.0 (init/maint)
       // To achieve 11x init leverage: L = 1/(1-CW/LW) => 11 = 1/(1-CW/1.0) => CW ≈ 0.9091
       // Group limit is 10x init, so this should fail
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -198,18 +197,18 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
       // 6074 (MaxInitLeverageExceeded)
       assertBankrunTxFailed(result, "0x17ba");
     });
 
-    it("(emode admin) Configure bank emode exceeding maint leverage limit (18x maint) - should fail", async () => {
+    it("(slow governance admin) Configure bank emode exceeding maint leverage limit (18x maint) - should fail", async () => {
       // SOL bank has liability weights of 1.0/1.0 (init/maint)
       // To achieve 18x maint leverage: L = 1/(1-CW/LW) => 18 = 1/(1-CW/1.0) => CW ≈ 0.9444
       // Group limit is 15x maint, so this should fail
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -224,20 +223,20 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
       // 6212 (MaxMaintLeverageExceeded)
       assertBankrunTxFailed(result, "0x1844");
     });
 
-    it("(emode admin) Configure bank emode with asset weight >= liability weight - should fail", async () => {
+    it("(slow governance admin) Configure bank emode with asset weight >= liability weight - should fail", async () => {
       // SOL bank has liability weights of 1.0/1.0 (init/maint)
       // Setting asset weight = 1.0 would cause division by zero in leverage calculation
       // L = 1/(1-CW/LW) => when CW = LW, denominator = 0 (infinite leverage)
       // Linux long-run workaround: warm up conversion before the 1.0 boundary case.
       bigNumberToWrappedI80F48(1.0);
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -252,17 +251,17 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
       // 6075 (BadEmodeConfig)
       assertBankrunTxFailed(result, "0x17bb");
     });
 
-    it("(emode admin) Configure bank emode with maint < init weight - should fail", async () => {
+    it("(slow governance admin) Configure bank emode with maint < init weight - should fail", async () => {
       // Asset maint weight must be >= asset init weight
       // This violates the fundamental constraint that maint is more lenient than init
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -277,16 +276,16 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
       // 6075 (BadEmodeConfig)
       assertBankrunTxFailed(result, "0x17bb");
     });
 
-    it("(emode admin) Configure bank emode with duplicate tags - should fail", async () => {
+    it("(slow governance admin) Configure bank emode with duplicate tags - should fail", async () => {
       // Multiple entries with the same collateral bank emode tag is not allowed
       const tx = new Transaction().add(
-        await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+        await configBankEmode(groupAdmin.mrgnBankrunProgram, {
           bank: solBank,
           tag: EMODE_SOL_TAG,
           entries: [
@@ -307,7 +306,7 @@ describe("Emode Max Leverage Configuration", () => {
       );
 
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
       // 6075 (BadEmodeConfig)
       assertBankrunTxFailed(result, "0x17bb");
