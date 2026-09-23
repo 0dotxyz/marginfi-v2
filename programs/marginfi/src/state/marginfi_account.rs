@@ -7,6 +7,7 @@ use crate::{
     state::premium::{
         accrued_premium_total, premium_elapsed_seconds, BalancePremiumImpl, PremiumScratch,
         PremiumScratchEntry, SCRATCH_ASSET, SCRATCH_LIABILITY, SCRATCH_PREMIUM_ACTIVE,
+        SCRATCH_UNPRICEABLE,
     },
     utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
@@ -102,11 +103,11 @@ pub trait MarginfiAccountImpl {
 /// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
 /// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
 /// 3. If `allow_order_execution` is true and the account is in order execution → `true`
-/// 4. If the account is frozen → `true` only if signer is the group admin
+/// 4. If the account is frozen → `true` only if signer is the governance admin (the slow authority)
 /// 5. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
-    group_admin: Pubkey,
+    frozen_account_admin: Pubkey,
     signer: Pubkey,
     allow_receivership: bool,
     allow_order_execution: bool,
@@ -129,7 +130,7 @@ pub fn is_signer_authorized(
     }
 
     if marginfi_account.get_flag(ACCOUNT_FROZEN) {
-        return group_admin == signer;
+        return frozen_account_admin == signer;
     }
 
     marginfi_account.authority == signer
@@ -351,6 +352,11 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.indexer_flags
             .sync_balance_derived(&self.lending_account.balances);
         self.indexer_flags.mark_active_now();
+        // Repaying the last liability clears the tag. Inside a receivership the tag is left for
+        // `tag_after_liquidation` at the end.
+        if self.indexer_flags.is_lending_only == 1 && !self.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+            self.liquidation_tagged_at = 0;
+        }
     }
 }
 
@@ -395,53 +401,55 @@ impl<'info> BankAccountWithCache<'_, 'info> {
         remaining_ais: &'info [AccountInfo<'info>],
     ) -> MarginfiResult<Vec<BankAccountWithCache<'a, 'info>>> {
         let mut account_index = 0;
-        let active_balances: Vec<&Balance> = lending_account
+        let active_balance_count = lending_account
             .balances
             .iter()
             .filter(|balance| balance.is_active())
-            .collect();
-        let banks_only = remaining_ais.len() == active_balances.len();
+            .count();
+        let banks_only = remaining_ais.len() == active_balance_count;
 
-        active_balances
-            .into_iter()
-            .map(|balance| {
-                let bank_ai: Option<&AccountInfo<'info>> = remaining_ais.get(account_index);
-                if bank_ai.is_none() {
-                    msg!("Ran out of remaining accounts at {:?}", account_index);
-                    return err!(MarginfiError::InvalidBankAccount);
-                }
-                let bank_ai = bank_ai.unwrap();
-                let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-                let bank = bank_al.load()?;
+        let mut result = Vec::with_capacity(active_balance_count);
+        for balance in lending_account
+            .balances
+            .iter()
+            .filter(|balance| balance.is_active())
+        {
+            let Some(bank_ai) = remaining_ais.get(account_index) else {
+                msg!("Ran out of remaining accounts at {:?}", account_index);
+                return err!(MarginfiError::InvalidBankAccount);
+            };
+            let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+            let bank = bank_al.load()?;
 
-                let num_accounts = if banks_only {
-                    1
-                } else {
-                    get_remaining_accounts_per_bank(&bank)?
-                };
-                check_eq!(
-                    balance.bank_pk,
-                    *bank_ai.key,
-                    MarginfiError::InvalidBankAccount
+            let num_accounts = if banks_only {
+                1
+            } else {
+                get_remaining_accounts_per_bank(&bank)?
+            };
+            check_eq!(
+                balance.bank_pk,
+                *bank_ai.key,
+                MarginfiError::InvalidBankAccount
+            );
+
+            if !banks_only {
+                let end_idx = account_index + num_accounts;
+                require_gte!(
+                    remaining_ais.len(),
+                    end_idx,
+                    MarginfiError::WrongNumberOfOracleAccounts
                 );
+            }
 
-                if !banks_only {
-                    let end_idx = account_index + num_accounts;
-                    require_gte!(
-                        remaining_ais.len(),
-                        end_idx,
-                        MarginfiError::WrongNumberOfOracleAccounts
-                    );
-                }
+            account_index += num_accounts;
 
-                account_index += num_accounts;
+            result.push(BankAccountWithCache {
+                bank: bank_al.clone(),
+                balance,
+            });
+        }
 
-                Ok(BankAccountWithCache {
-                    bank: bank_al.clone(),
-                    balance,
-                })
-            })
-            .collect::<Result<Vec<_>>>()
+        Ok(result)
     }
 
     fn write_liquidation_price_cache_from(
@@ -629,11 +637,13 @@ fn collect_premium_scratch_entry(
     bank: &Bank,
     premium_price: I80F48,
     balance_index: usize,
+    unpriceable: bool,
 ) -> MarginfiResult {
     match balance.get_side() {
         Some(BalanceSide::Assets) => {
             let usd_value = if premium_price > I80F48::ZERO
                 && !matches!(bank.config.risk_tier, RiskTier::Isolated)
+                && I80F48::from(bank.config.asset_weight_maint) > I80F48::ZERO
             {
                 calc_value(
                     bank.get_asset_amount(balance.asset_shares.into())?,
@@ -644,12 +654,16 @@ fn collect_premium_scratch_entry(
             } else {
                 I80F48::ZERO
             };
+            let mut flags = SCRATCH_ASSET;
+            if unpriceable {
+                flags |= SCRATCH_UNPRICEABLE;
+            }
             scratch.push(PremiumScratchEntry {
                 value: usd_value,
                 activated_at: 0,
                 premium_tag: bank.premium_tag,
                 balance_index: balance_index as u8,
-                flags: SCRATCH_ASSET,
+                flags,
             });
         }
         Some(BalanceSide::Liabilities) => {
@@ -1088,6 +1102,12 @@ pub fn get_health_components<'info>(
     let mut first_err_index = NO_INDEX_FOUND;
     let mut account_index = 0usize;
 
+    // Skips the per-balance weight comparison below entirely for accounts no entry can reach.
+    let emode_possible = matches!(requirement_type, RequirementType::Maintenance)
+        && (reconciled_emode_config.count > 0 || reconciled_emode_config.same_asset.is_enabled());
+    let mut collateral_seen = false;
+    let mut unboosted_collateral_seen = false;
+
     // `position_index` is the ordinal among ACTIVE balances (health-cache indexing);
     // `balance_index` is the raw array slot (premium scratch addressing — inactive holes must
     // not shift it).
@@ -1121,7 +1141,7 @@ pub fn get_health_components<'info>(
             get_remaining_accounts_per_bank(&bank)?
         };
 
-        let (asset_val, liab_val, price, err_code, premium_price) = if is_cached {
+        let (asset_val, liab_val, price, err_code, premium_price, leg_unpriceable) = if is_cached {
             let (asset_val, liab_val, price) = calc_weighted_value_cached_for_balance(
                 balance,
                 &bank,
@@ -1129,7 +1149,7 @@ pub fn get_health_components<'info>(
                 &reconciled_emode_config,
             )?;
             // Premium weights reuse the biased health price, same as the live branch.
-            (asset_val, liab_val, price, 0, price)
+            (asset_val, liab_val, price, 0, price, false)
         } else {
             // Load oracle (this is the heap-intensive operation)
             let oracle_ai_idx = account_index + 1;
@@ -1153,13 +1173,17 @@ pub fn get_health_components<'info>(
             let need_premium_price = premium_scratch.is_some()
                 && price_for_premium
                 && matches!(balance.get_side(), Some(BalanceSide::Assets))
-                && !matches!(bank.config.risk_tier, RiskTier::Isolated);
+                && !matches!(bank.config.risk_tier, RiskTier::Isolated)
+                && I80F48::from(bank.config.asset_weight_maint) > I80F48::ZERO;
 
             // A countable collateral leg the premium weighting cannot price. The health pass
             // may not flag this itself (ReduceOnly + Initial soft-zeroes; stale-skip only
             // sets err_code), so mark the scratch directly — an incomplete pass must never
-            // write rates.
-            if need_premium_price && price_adapter_result.is_err() {
+            // plainly write rates (the withdraw paths ratchet instead). Zero-weight legs
+            // (`need_premium_price == false`) can't affect the mix, so their broken oracle
+            // doesn't taint the pass.
+            let leg_unpriceable = need_premium_price && price_adapter_result.is_err();
+            if leg_unpriceable {
                 if let Some(scratch) = premium_scratch.as_mut() {
                     scratch.unpriceable_leg = true;
                 }
@@ -1178,17 +1202,37 @@ pub fn get_health_components<'info>(
             }
 
             // Calculate weighted value for this position
-            calc_weighted_value_for_balance(
-                balance,
-                &bank,
-                &price_adapter_result,
-                requirement_type,
-                &reconciled_emode_config,
-                &mut liq_cache,
-                position_index,
-                need_premium_price,
-            )?
+            let (asset_val, liab_val, price, err_code, premium_price) =
+                calc_weighted_value_for_balance(
+                    balance,
+                    &bank,
+                    &price_adapter_result,
+                    requirement_type,
+                    &reconciled_emode_config,
+                    &mut liq_cache,
+                    position_index,
+                    need_premium_price,
+                )?;
+            (
+                asset_val,
+                liab_val,
+                price,
+                err_code,
+                premium_price,
+                leg_unpriceable,
+            )
         };
+
+        if emode_possible && !balance.is_empty(BalanceSide::Assets) {
+            collateral_seen = true;
+            if bank.get_asset_weight(requirement_type, &reconciled_emode_config)
+                <= bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+            {
+                unboosted_collateral_seen = true;
+            }
+        }
 
         // Record error index if applicable
         if err_code != 0 && first_err_index == NO_INDEX_FOUND {
@@ -1211,7 +1255,14 @@ pub fn get_health_components<'info>(
         let liab_premium_val =
             calc_premium_liab_value(balance, &bank, requirement_type, price, now)?;
         if let Some(scratch) = premium_scratch.as_mut() {
-            collect_premium_scratch_entry(scratch, balance, &bank, premium_price, balance_index)?;
+            collect_premium_scratch_entry(
+                scratch,
+                balance,
+                &bank,
+                premium_price,
+                balance_index,
+                leg_unpriceable,
+            )?;
         }
 
         debug!(
@@ -1254,6 +1305,7 @@ pub fn get_health_components<'info>(
             RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
+                cache.set_emode_boosted(collateral_seen && !unboosted_collateral_seen);
             }
             RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();
@@ -1632,6 +1684,43 @@ fn check_account_health<'info>(
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)
+}
+
+/// Runs `check_account_init_health`, then clears the account's premium-growth tag if the account
+/// is also healthy at maintenance weights and real-time prices (the init pass uses EMA prices).
+/// Inside a flashloan, where risk checks are skipped, the tag is left alone.
+pub fn check_account_init_health_and_clear_tag<'info>(
+    marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+    premium_scratch: &mut Option<&mut PremiumScratch>,
+) -> MarginfiResult {
+    check_account_init_health(
+        marginfi_account,
+        group,
+        remaining_ais,
+        health_cache,
+        premium_scratch,
+    )?;
+    if marginfi_account.liquidation_tagged_at == 0
+        || marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN)
+    {
+        return Ok(());
+    }
+    let (assets, liabs) = get_health_components(
+        marginfi_account,
+        group,
+        remaining_ais,
+        RequirementType::Maintenance,
+        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
+        &mut None,
+    )?;
+    if assets > liabs {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+    Ok(())
 }
 
 /// Initial health check: errors if initial health is negative.
@@ -2612,12 +2701,13 @@ impl<'a> BankAccountWrapper<'a> {
         // Below EMPTY_BALANCE_THRESHOLD health treats the liability as empty, so clear the
         // premium too — otherwise a book-transfer that leaves dust (liquidation) strands a
         // receivable that health never projects.
-        // INVARIANT: any reachable state where this fires during liquidation must revert
-        // upstream — `check_post_liquidation_conditions` rejects a fully-closed liability with
-        // `ExhaustedLiability` via the SAME `Balance::is_empty` predicate, which is what makes
-        // this write-off safe (it can only commit where the receivable was already settled or
-        // legitimately forgiven). If full close ever becomes legal in liquidation, premium must
-        // settle first — receivership's `repay_all` path is the model.
+        // INVARIANT: every liquidation path that can close a liability settles premium BEFORE
+        // this fires. The liquidatee's liab_bank leg cannot close (`ExhaustedLiability` uses
+        // the SAME `Balance::is_empty` predicate); the LIQUIDATOR's asset_bank leg — the one
+        // reachable full close — settles via `settle_premium` in `lending_account_liquidate`
+        // before the credit lands here; receivership's `repay_all` settles likewise. So this
+        // write-off only ever clears a receivable that was already settled or legitimately
+        // forgiven (bankruptcy / tokenless repayment / asset-side flips).
         if had_liabs && balance.is_empty(BalanceSide::Liabilities) {
             balance.write_off_premium();
         }

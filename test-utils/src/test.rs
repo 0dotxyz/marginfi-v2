@@ -1445,7 +1445,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankKamino {
             group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
+            governance_admin: test_f.payer(),
             fee_payer: test_f.payer(),
             bank_mint: reserve_mint.key,
             bank: bank_key,
@@ -1681,7 +1681,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
             group: self.marginfi_group.key,
-            admin: self.payer(),
+            governance_admin: self.payer(),
             fee_payer: self.payer(),
             bank_mint: mint.key,
             bank: bank_key,
@@ -2144,7 +2144,7 @@ impl TestFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolAddBankJuplend {
                 group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                governance_admin: test_f.payer(),
                 fee_payer: test_f.payer(),
                 bank_mint: mint,
                 bank: bank_key,

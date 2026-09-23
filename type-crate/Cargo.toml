@@ -17,6 +17,9 @@ staging = ["id-crate/staging"]
 stagingalt = ["id-crate/stagingalt"]
 devnet = ["id-crate/devnet"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
 [dependencies]
 id-crate = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }

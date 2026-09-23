@@ -376,6 +376,13 @@ Banks are usually placed in this mode when they are going to be sunset. Users ar
 withdraw from Reduce-Only banks as soon as possible before more drastic measures are taken to
 deleverage these banks, such as reducing Asset Weights.
 
+### Reduce-Only With Borrowing Power
+
+Banks in this mode have the same user-operation restrictions as Reduce-Only banks, but their
+assets continue to count toward initial borrowing power. They are useful for a staged wind-down:
+the fast admin can move an Operational bank into this state, then later tighten it further to
+Reduce-Only.
+
 ### Paused
 
 Banks in a "Paused" Operational Mode cannot deposit, withdraw, borrow, or repay. This mode is

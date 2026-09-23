@@ -65,10 +65,11 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 ### Frozen (Bit 6)
 
 - **Flag**: `ACCOUNT_FROZEN` (value 64)
-- **Set by**: Group admin via `MarginfiAccountSetFreeze`
-- **Cleared by**: Group admin via `MarginfiAccountSetFreeze`
-- **Effect**: The account's authority is completely blocked. Only the group admin can perform
-  operations on the account. This is used for compliance, investigations, or protecting accounts.
+- **Set by**: Fast group `admin` via `MarginfiAccountSetFreeze`
+- **Cleared by**: Slow `governance_admin` via `MarginfiAccountSetFreeze`
+- **Effect**: The account's authority is completely blocked. Only the slow `governance_admin` can
+  perform operations on the account. This is used for compliance, investigations, or protecting
+  accounts.
 
 A frozen account's positions continue to accrue interest and can still be liquidated if unhealthy.
 The freeze only blocks the authority from interacting.

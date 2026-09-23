@@ -116,7 +116,7 @@ pub fn lending_pool_set_oracle_price(
     emit!(LendingPoolBankSetOraclePriceEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(*ctx.accounts.admin.key),
+            signer: Some(*ctx.accounts.governance_admin.key),
         },
         bank: ctx.accounts.bank.key(),
         price,
@@ -127,12 +127,10 @@ pub fn lending_pool_set_oracle_price(
 
 #[derive(Accounts)]
 pub struct LendingPoolSetOraclePrice<'info> {
-    #[account(
-        has_one = admin
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,

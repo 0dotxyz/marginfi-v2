@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Account is already tagged for liquidation")] // 6054
+    AccountAlreadyTagged,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -282,6 +282,17 @@ pub enum MarginfiError {
     InvalidPtStartPrice, // 6138
     #[msg("Stake pool balance has not been updated recently enough")]
     StakePoolStale, // 6139
+
+    #[msg("Deprecated: bank configuration now uses explicit fast and governance instructions")]
+    MixedBankConfigAuthority, // 6140
+    #[msg("Governance admin cannot be set to the default pubkey (all zeros); this would disable slow-authority operations")]
+    InvalidGovernanceAdmin, // 6141
+    #[msg("Deprecated: group configuration now uses explicit fast and governance instructions")]
+    MixedGroupConfigAuthority, // 6142
+    #[msg("Fast bank configuration may only make a risk-reducing operational-state transition")]
+    InvalidFastBankOperationalState, // 6143
+    #[msg("Governance bank configuration may only transition a bank to Operational")]
+    InvalidGovernanceBankOperationalState, // 6144
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -604,7 +615,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::AccountAlreadyTagged,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -685,10 +696,16 @@ impl From<u32> for MarginfiError {
             6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6135 => MarginfiError::SlippageTooHigh,
             6136 => MarginfiError::MarinadeStateValidationFailed,
             6137 => MarginfiError::ExponentVaultValidationFailed,
             6138 => MarginfiError::InvalidPtStartPrice,
             6139 => MarginfiError::StakePoolStale,
+            6140 => MarginfiError::MixedBankConfigAuthority,
+            6141 => MarginfiError::InvalidGovernanceAdmin,
+            6142 => MarginfiError::MixedGroupConfigAuthority,
+            6143 => MarginfiError::InvalidFastBankOperationalState,
+            6144 => MarginfiError::InvalidGovernanceBankOperationalState,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

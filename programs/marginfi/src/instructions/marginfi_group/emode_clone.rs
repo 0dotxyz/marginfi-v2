@@ -1,4 +1,6 @@
-use crate::{check, ix_utils, MarginfiError, MarginfiResult};
+use crate::state::bank::BankImpl;
+use crate::state::emode::EmodeSettingsImpl;
+use crate::{ix_utils, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
 
@@ -7,16 +9,20 @@ pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> Marginfi
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let group = ctx.accounts.group.load()?;
-
-    check!(
-        ctx.accounts.signer.key() == group.admin || ctx.accounts.signer.key() == group.emode_admin,
-        MarginfiError::Unauthorized
-    );
-
     let source_bank = ctx.accounts.copy_from_bank.load()?;
     let mut destination_bank = ctx.accounts.copy_to_bank.load_mut()?;
 
     destination_bank.emode = source_bank.emode;
+    // Copied entries are validated against the destination's own liability weights and fee.
+    let total_liquidation_fee = destination_bank.total_liquidation_fee();
+    destination_bank
+        .emode
+        .validate_entries_with_liability_weights(
+            &destination_bank.config,
+            total_liquidation_fee,
+            group.emode_max_init_leverage,
+            group.emode_max_maint_leverage,
+        )?;
 
     msg!(
         "emode settings copied from {:?} to {:?}",
@@ -29,9 +35,10 @@ pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> Marginfi
 
 #[derive(Accounts)]
 pub struct LendingPoolCloneEmode<'info> {
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub signer: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         has_one = group @ MarginfiError::InvalidGroup

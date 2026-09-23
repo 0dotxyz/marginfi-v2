@@ -338,6 +338,15 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn try_set_freeze(&self, frozen: bool) -> std::result::Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_set_freeze_with_signer(frozen, &payer).await
+    }
+
+    pub async fn try_set_freeze_with_signer(
+        &self,
+        frozen: bool,
+        signer: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
         let ix = Instruction {
@@ -345,7 +354,7 @@ impl MarginfiAccountFixture {
             accounts: marginfi::accounts::SetAccountFreeze {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
+                admin: signer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
@@ -353,8 +362,12 @@ impl MarginfiAccountFixture {
         };
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers = vec![&payer];
+        if signer.pubkey() != payer.pubkey() {
+            signers.push(signer);
+        }
         let tx =
-            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
 
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
@@ -1743,6 +1756,21 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountCloseLiqRecord {}.data(),
         }
+    }
+
+    pub async fn make_tag_liquidation_record_ix(&self) -> Instruction {
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::TagLiquidationRecord {
+                marginfi_account: self.key,
+                group: self.load().await.group,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountTagLiqRecord {}.data(),
+        };
+        ix.accounts
+            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        ix
     }
 
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {

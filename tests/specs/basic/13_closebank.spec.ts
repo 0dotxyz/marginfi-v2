@@ -2,9 +2,8 @@ import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "../../utils/litesvm";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
-import * as fs from "fs";
-import * as path from "path";
 import {
+  BANK_ACCOUNT_LEN,
   bankKeypairA,
   bankKeypairUsdc,
   bankrunContext,
@@ -12,6 +11,7 @@ import {
   bankRunProvider,
   ecosystem,
   groupAdmin,
+  loadJsonFixture,
   marginfiGroup,
   oracles,
   users,
@@ -68,7 +68,7 @@ describe("Close bank", () => {
           .accountsPartial({
             group: marginfiGroup.publicKey,
             bank: bankKey,
-            admin: groupAdmin.wallet.publicKey,
+            governanceAdmin: groupAdmin.wallet.publicKey,
           })
           .remainingAccounts([
             {
@@ -108,7 +108,9 @@ describe("Close bank", () => {
         await groupAdmin.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
             await closeBank(groupAdmin.mrgnProgram, {
+              marginfiGroup: marginfiGroup.publicKey,
               bank: bankKey,
+              admin: groupAdmin.wallet.publicKey,
             })
           )
         );
@@ -155,7 +157,9 @@ describe("Close bank", () => {
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await closeBank(groupAdmin.mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
           bank: bankKey,
+          admin: groupAdmin.wallet.publicKey,
         })
       )
     );
@@ -178,19 +182,11 @@ describe("Close bank", () => {
     );
 
     before(() => {
-      const fixture = JSON.parse(
-        fs.readFileSync(
-          path.resolve(__dirname, "../../fixtures/mainnet_force_close_bank.json"),
-          "utf8"
-        )
+      const fixture = loadJsonFixture(
+        "tests/fixtures/mainnet_force_close_bank.json",
+        BANK_ACCOUNT_LEN
       );
-      bankrunContext.setAccount(new PublicKey(fixture.pubkey), {
-        lamports: Number(fixture.account.lamports),
-        owner: new PublicKey(fixture.account.owner),
-        executable: fixture.account.executable,
-        rentEpoch: Number(fixture.account.rentEpoch ?? 0),
-        data: Buffer.from(fixture.account.data[0], "base64"),
-      });
+      bankrunContext.setAccount(fixture.address, fixture.info);
     });
 
     it("rejects a normal close (CLOSE_ENABLED_FLAG unset)", async () => {
@@ -201,7 +197,11 @@ describe("Close bank", () => {
         async () => {
           await groupAdmin.mrgnProgram.provider.sendAndConfirm(
             new Transaction().add(
-              await closeBank(groupAdmin.mrgnProgram, { bank: FORCE_BANK })
+              await closeBank(groupAdmin.mrgnProgram, {
+                marginfiGroup: marginfiGroup.publicKey,
+                bank: FORCE_BANK,
+                admin: groupAdmin.wallet.publicKey,
+              })
             )
           );
         },
@@ -219,8 +219,10 @@ describe("Close bank", () => {
       await groupAdmin.mrgnProgram.provider.sendAndConfirm(
         new Transaction().add(
           await closeBank(groupAdmin.mrgnProgram, {
+            marginfiGroup: marginfiGroup.publicKey,
             bank: FORCE_BANK,
             forceClose: true,
+            admin: groupAdmin.wallet.publicKey,
           })
         )
       );

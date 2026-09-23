@@ -106,7 +106,7 @@ describe("k21: Scope-priced Kamino bank", () => {
     setScopeFeed(
       bankrunContext,
       feed,
-      makeScopePrices([{ ...ENTRY, timestamp: now - ageSeconds }])
+      makeScopePrices([{ ...ENTRY, timestamp: now - ageSeconds }]),
     );
   };
 
@@ -119,12 +119,12 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await pulseBankPrice(user.mrgnBankrunProgram, {
         bank: scopeKaminoBank,
         remaining,
-      })
+      }),
     );
     return processBankrunTransaction(ctx, tx, [user.wallet], trySend);
   };
@@ -132,7 +132,7 @@ describe("k21: Scope-priced Kamino bank", () => {
   const scopeConfigure = async (
     entryIndex: number,
     remaining: PublicKey[],
-    trySend = false
+    trySend = false,
   ) => {
     const tx = new Transaction().add(
       await configureBankOracleScope(groupAdmin.mrgnBankrunProgram, {
@@ -140,7 +140,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         oracle: feed,
         entryIndex,
         remaining,
-      })
+      }),
     );
     return processBankrunTransaction(ctx, tx, [groupAdmin.wallet], trySend);
   };
@@ -164,7 +164,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
@@ -185,14 +185,14 @@ describe("k21: Scope-priced Kamino bank", () => {
           kaminoMarket: market,
           oracle: feed,
         },
-        { config, seed: SCOPE_SEED }
-      )
+        { config, seed: SCOPE_SEED },
+      ),
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true
+      true,
     );
     assertBankrunTxFailed(result, 6211);
   });
@@ -202,7 +202,7 @@ describe("k21: Scope-priced Kamino bank", () => {
       bankrunProgram.programId,
       kaminoGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      SCOPE_SEED
+      SCOPE_SEED,
     );
     scopeKaminoBank = bankKey;
 
@@ -220,14 +220,14 @@ describe("k21: Scope-priced Kamino bank", () => {
         {
           config: defaultKaminoBankConfig(oracles.usdcOracle.publicKey),
           seed: SCOPE_SEED,
-        }
-      )
+        },
+      ),
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
     const [authority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      scopeKaminoBank
+      scopeKaminoBank,
     );
     const [obligation] = deriveBaseObligation(authority, market);
     scopeKaminoObligation = obligation;
@@ -243,8 +243,8 @@ describe("k21: Scope-priced Kamino bank", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        new BN(100)
-      )
+        new BN(100),
+      ),
     );
     await processBankrunTransaction(ctx, initObligationTx, [users[3].wallet]);
   });
@@ -256,13 +256,13 @@ describe("k21: Scope-priced Kamino bank", () => {
         type: ORACLE_SETUP_SCOPE_KAMINO,
         oracle: feed,
         remaining: [usdcReserve],
-      })
+      }),
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true
+      true,
     );
     // UseConfigureBankOracleScope
     assertBankrunTxFailed(result, 6803);
@@ -314,7 +314,7 @@ describe("k21: Scope-priced Kamino bank", () => {
     setScopeFeed(
       bankrunContext,
       impostor,
-      makeScopePrices([{ ...ENTRY, timestamp: now }])
+      makeScopePrices([{ ...ENTRY, timestamp: now }]),
     );
     const result = await pulse([impostor, usdcReserve], true);
     assertBankrunTxFailed(result, 6052);
@@ -326,7 +326,7 @@ describe("k21: Scope-priced Kamino bank", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(scopeKaminoBank);
     const reserveRaw = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     const reserve = { ...reserveRaw } as Reserve;
 
@@ -336,7 +336,7 @@ describe("k21: Scope-priced Kamino bank", () => {
     assertI80F48Approx(
       bank.cache.priceMultiplier,
       getLiquidityExchangeRate(reserve).toNumber(),
-      0.000001
+      0.000001,
     );
   });
 
@@ -359,7 +359,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, initAdminTx, [
       groupAdmin.wallet,
@@ -370,7 +370,7 @@ describe("k21: Scope-priced Kamino bank", () => {
       bankrunProgram.programId,
       kaminoGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      BORROW_SEED
+      BORROW_SEED,
     );
     borrowBank = bankKey;
 
@@ -385,7 +385,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
         seed: BORROW_SEED,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -394,7 +394,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         bank: borrowBank,
         type: ORACLE_SETUP_PYTH_PUSH,
         oracle: oracles.tokenAOracle.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, configOracleTx, [groupAdmin.wallet]);
 
@@ -404,7 +404,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         bank: borrowBank,
         tokenAccount: groupAdmin.tokenAAccount,
         amount: new BN(100 * 10 ** ecosystem.tokenADecimals),
-      })
+      }),
     );
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
@@ -415,7 +415,7 @@ describe("k21: Scope-priced Kamino bank", () => {
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     userUsdcStart = userUsdcBefore;
 
@@ -424,13 +424,13 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         scopeKaminoObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -441,14 +441,14 @@ describe("k21: Scope-priced Kamino bank", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        DEPOSIT_AMOUNT
-      )
+        DEPOSIT_AMOUNT,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     assert.equal(userUsdcBefore - userUsdcAfter, DEPOSIT_AMOUNT.toNumber());
   });
@@ -460,7 +460,7 @@ describe("k21: Scope-priced Kamino bank", () => {
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount
+      user.tokenAAccount,
     );
 
     const tx = new Transaction().add(
@@ -468,7 +468,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
@@ -479,13 +479,13 @@ describe("k21: Scope-priced Kamino bank", () => {
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
         amount: BORROW_AMOUNT,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount
+      user.tokenAAccount,
     );
     assert.equal(userTokenAAfter - userTokenABefore, BORROW_AMOUNT.toNumber());
   });
@@ -500,7 +500,7 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
@@ -508,7 +508,7 @@ describe("k21: Scope-priced Kamino bank", () => {
           [scopeKaminoBank, feed, usdcReserve],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -516,10 +516,10 @@ describe("k21: Scope-priced Kamino bank", () => {
       await bankrunProgram.account.marginfiAccount.fetch(userAccount)
     ).healthCache;
     const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue
+      cache.assetValue,
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue
+      cache.liabilityValue,
     ).toNumber();
 
     // The collateral balance is stored in cTokens (liquidity / (liq/col rate)); the
@@ -533,12 +533,12 @@ describe("k21: Scope-priced Kamino bank", () => {
     assert.approximately(
       actualAssetValue,
       expectedAssetValue,
-      expectedAssetValue * 0.005
+      expectedAssetValue * 0.005,
     );
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      expectedLiabilityValue * 0.005
+      expectedLiabilityValue * 0.005,
     );
   });
 
@@ -550,7 +550,7 @@ describe("k21: Scope-priced Kamino bank", () => {
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
 
     const tx = new Transaction().add(
@@ -558,13 +558,13 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         scopeKaminoObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoWithdrawIx(
         user.mrgnBankrunProgram,
@@ -584,28 +584,26 @@ describe("k21: Scope-priced Kamino bank", () => {
             [scopeKaminoBank, feed, usdcReserve],
             [borrowBank, oracles.tokenAOracle.publicKey],
           ]),
-        }
-      )
+        },
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
-    // The withdraw amount is in cTokens, and the reserve has accrued since it was seeded, so the
-    // liquidity out is that amount redeemed at the reserve's current rate.
-    const reserveAfter = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+    // withdraw amount is in cTokens; the liquidity out follows the refreshed reserve's rate
+    const reserveRaw = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve,
     );
-    const expectedLiquidity =
-      withdrawAmount.toNumber() *
-      getLiquidityExchangeRate({ ...reserveAfter } as Reserve).toNumber();
-    assert.approximately(
-      userUsdcAfter - userUsdcBefore,
-      expectedLiquidity,
-      expectedLiquidity * 0.01
-    );
+    // @ts-ignore
+    const expectedWithdraw = getLiquidityExchangeRate({
+      ...reserveRaw,
+    } as Reserve)
+      .mul(withdrawAmount.toNumber())
+      .toNumber();
+    assert.approximately(userUsdcAfter - userUsdcBefore, expectedWithdraw, 2);
   });
 
   it("(user 3) repay and withdraw all - gets the initial deposit back", async () => {
@@ -624,7 +622,7 @@ describe("k21: Scope-priced Kamino bank", () => {
           [scopeKaminoBank, feed, usdcReserve],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
-      })
+      }),
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
@@ -633,13 +631,13 @@ describe("k21: Scope-priced Kamino bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         scopeKaminoObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoWithdrawIx(
         user.mrgnBankrunProgram,
@@ -658,14 +656,14 @@ describe("k21: Scope-priced Kamino bank", () => {
           remaining: composeRemainingAccounts([
             [borrowBank, oracles.tokenAOracle.publicKey],
           ]),
-        }
-      )
+        },
+      ),
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     // Note: you lose 1-2 lamports for Kamino withdraws
     assert.approximately(userUsdcAfter, userUsdcStart, 2);
