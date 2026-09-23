@@ -5,10 +5,11 @@ use crate::state::emode::{
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{basis_to_u32, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY};
 use marginfi_type_crate::{
     constants::DAILY_RESET_INTERVAL,
-    types::{MarginfiGroup, PROGRAM_FEES_ENABLED},
+    types::{
+        basis_to_u32, MarginfiGroup, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY, PROGRAM_FEES_ENABLED,
+    },
 };
 use std::fmt::Debug;
 
@@ -22,6 +23,7 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
@@ -39,6 +41,8 @@ pub trait MarginfiGroupImpl {
         current_timestamp: i64,
     ) -> MarginfiResult;
     fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32;
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -149,12 +153,27 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey) {
+        if self.governance_admin == new_governance_admin {
+            msg!("No change to governance admin: {:?}", new_governance_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set governance admin from {:?} to {:?}",
+                self.governance_admin,
+                new_governance_admin
+            );
+            self.governance_admin = new_governance_admin;
+        }
+    }
+
     /// Set the group parameters when initializing a group.
     /// This should be called only when the group is first initialized.
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
         self.delegate_flow_admin = admin_pk;
+        self.governance_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
@@ -275,6 +294,16 @@ impl MarginfiGroupImpl for MarginfiGroup {
             .map(|i| self.premium_entries[i].rate)
             .unwrap_or(0)
     }
+
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
+
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.governance_admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
 }
 
 trait MarginfiGroupDeleverageLimitExt {
@@ -328,9 +357,16 @@ mod tests {
         assert_eq!(size_of::<MarginfiGroup>(), 9248);
         assert_eq!(offset_of!(MarginfiGroup, premium_settings), 512);
         assert_eq!(offset_of!(MarginfiGroup, premium_entries), 544);
-        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`);
-        // `_padding_2` (the 0.1.10 resize region) starts at the v1 struct end.
-        assert_eq!(offset_of!(MarginfiGroup, _padding_2), MarginfiGroup::V1_LEN);
+        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`).
+        // The dedicated governance admin begins in the post-v1 extension.
+        assert_eq!(
+            offset_of!(MarginfiGroup, governance_admin),
+            MarginfiGroup::V1_LEN
+        );
+        assert_eq!(
+            offset_of!(MarginfiGroup, _padding_2),
+            MarginfiGroup::V1_LEN + 32
+        );
 
         // PremiumSettings internals: 8 + 2 + 2 + 4 + 16 = 32, 8-aligned, no implicit padding
         // (Pod derive would reject implicit padding at compile time; these pin the EXPLICIT

@@ -78,7 +78,7 @@ export const genericMultiBankTestSetup = async (
   numberOfKaminoBanks: number = 0,
   numberOfDriftBanks: number = 0,
   oracleMode: "pyth" | "switchboard" = "pyth",
-  oracleMaxConfidence?: number,
+  oracleMaxConfidence?: number
 ): Promise<{
   banks: PublicKey[];
   kaminoBanks: PublicKey[];
@@ -99,7 +99,7 @@ export const genericMultiBankTestSetup = async (
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, throwawayGroup);
@@ -137,7 +137,7 @@ export const genericMultiBankTestSetup = async (
         bankrunProgram.programId,
         throwawayGroup.publicKey,
         ecosystem.lstAlphaMint.publicKey,
-        new BN(seed),
+        new BN(seed)
       );
       banks.push(bankPk);
     }
@@ -162,14 +162,14 @@ export const genericMultiBankTestSetup = async (
       new BN(seed),
       verbose ? `*init Token A #${seed}:` : undefined,
       farmState ? farmState : null,
-      oracleMode,
+      oracleMode
     );
 
     const [bankPk] = deriveBankWithSeed(
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      new BN(seed),
+      new BN(seed)
     );
     kaminoBanks.push(bankPk);
   }
@@ -182,12 +182,12 @@ export const genericMultiBankTestSetup = async (
 
     for (let i = 0; i < numberOfDriftBanks; i++) {
       const seed = new BN(
-        startingSeed + numberOfBanks + numberOfKaminoBanks + i,
+        startingSeed + numberOfBanks + numberOfKaminoBanks + i
       );
       const defaultConfig = defaultDriftBankConfig(
         oracleMode === "switchboard"
           ? oracles.tokenAOracleSwb.publicKey
-          : oracles.tokenAOracle.publicKey,
+          : oracles.tokenAOracle.publicKey
       );
       if (oracleMode === "switchboard") {
         defaultConfig.oracleSetup = { driftSwitchboardPull: {} };
@@ -205,8 +205,8 @@ export const genericMultiBankTestSetup = async (
                 ? oracles.tokenAOracleSwb.publicKey
                 : oracles.tokenAOracle.publicKey,
           },
-          { config: defaultConfig, seed },
-        ),
+          { config: defaultConfig, seed }
+        )
       );
       await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
 
@@ -217,8 +217,8 @@ export const genericMultiBankTestSetup = async (
           ecosystem.tokenAMint.publicKey,
           groupAdmin.tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          initUserAmount.toNumber(),
-        ),
+          initUserAmount.toNumber()
+        )
       );
       await processBankrunTransaction(ctx, fundTx, [globalProgramAdmin.wallet]);
 
@@ -226,7 +226,7 @@ export const genericMultiBankTestSetup = async (
         bankrunProgram.programId,
         throwawayGroup.publicKey,
         ecosystem.tokenAMint.publicKey,
-        new BN(seed),
+        new BN(seed)
       );
       const initUserTx = new Transaction().add(
         await makeInitDriftUserIx(
@@ -238,8 +238,8 @@ export const genericMultiBankTestSetup = async (
             driftOracle,
           },
           { amount: initUserAmount },
-          TOKEN_A_MARKET_INDEX,
-        ),
+          TOKEN_A_MARKET_INDEX
+        )
       );
       await processBankrunTransaction(ctx, initUserTx, [groupAdmin.wallet]);
 
@@ -259,14 +259,14 @@ export const genericMultiBankTestSetup = async (
           ecosystem.lstAlphaMint.publicKey,
           u.lstAlphaAccount,
           payer.publicKey,
-          10_000 * 10 ** ecosystem.lstAlphaDecimals,
+          10_000 * 10 ** ecosystem.lstAlphaDecimals
         ),
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           u.tokenAAccount,
           payer.publicKey,
-          10_000 * 10 ** ecosystem.tokenADecimals,
-        ),
+          10_000 * 10 ** ecosystem.tokenADecimals
+        )
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(payer);
@@ -279,14 +279,14 @@ export const genericMultiBankTestSetup = async (
         ecosystem.lstAlphaMint.publicKey,
         groupAdmin.lstAlphaAccount,
         payer.publicKey,
-        10_000 * 10 ** ecosystem.lstAlphaDecimals,
+        10_000 * 10 ** ecosystem.lstAlphaDecimals
       ),
       createMintToInstruction(
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         payer.publicKey,
-        10_000 * 10 ** ecosystem.tokenADecimals,
-      ),
+        10_000 * 10 ** ecosystem.tokenADecimals
+      )
     );
     txAdmin.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     txAdmin.sign(payer);
@@ -310,7 +310,7 @@ export const genericMultiBankTestSetup = async (
             marginfiAccount: kp.publicKey,
             authority: u.wallet.publicKey,
             feePayer: u.wallet.publicKey,
-          }),
+          })
         );
         tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
         tx.sign(u.wallet, kp);
@@ -331,7 +331,7 @@ export const genericMultiBankTestSetup = async (
           marginfiAccount: adminKp.publicKey,
           authority: groupAdmin.wallet.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
-        }),
+        })
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(groupAdmin.wallet, adminKp);
@@ -368,7 +368,7 @@ async function addGenericBank(
     // Function to adjust the seed (for example, seed.addn(1))
     seed: BN;
     verboseMessage: string;
-  },
+  }
 ) {
   const {
     assetTag,
@@ -403,7 +403,7 @@ async function addGenericBank(
     bankrunProgram.programId,
     throwawayGroup.publicKey,
     bankMint,
-    seed,
+    seed
   );
 
   const setupType =
@@ -415,7 +415,7 @@ async function addGenericBank(
     .accountsPartial({
       group: throwawayGroup.publicKey,
       bank: bankKey,
-      admin: groupAdmin.wallet.publicKey,
+      governanceAdmin: groupAdmin.wallet.publicKey,
     })
     .remainingAccounts([oracleMeta])
     .instruction();
@@ -459,7 +459,7 @@ async function addGenericKaminoBank(
   seed: BN,
   verboseMessage: string,
   farmState: PublicKey | null,
-  oracleMode: "pyth" | "switchboard" = "pyth",
+  oracleMode: "pyth" | "switchboard" = "pyth"
 ) {
   const config = defaultKaminoBankConfig(oracle);
   if (oracleMode === "switchboard") {
@@ -469,7 +469,7 @@ async function addGenericKaminoBank(
     bankrunProgram.programId,
     throwawayGroup.publicKey,
     mint,
-    seed,
+    seed
   );
   let initBankTx = new Transaction().add(
     await makeAddKaminoBankIx(
@@ -482,19 +482,19 @@ async function addGenericKaminoBank(
         kaminoMarket: market,
         oracle: oracle,
       },
-      { config: config, seed },
-    ),
+      { config: config, seed }
+    )
   );
 
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     bankrunProgram.programId,
-    bankKey,
+    bankKey
   );
   const [obligation] = deriveBaseObligation(liquidityVaultAuthority, market);
   const [userState] = farmState
     ? PublicKey.findProgramAddressSync(
         [Buffer.from("user"), farmState.toBuffer(), obligation.toBuffer()],
-        FARMS_PROGRAM_ID,
+        FARMS_PROGRAM_ID
       )
     : [null];
   // console.log("farm state passed: " + farmState + " user " + userState);

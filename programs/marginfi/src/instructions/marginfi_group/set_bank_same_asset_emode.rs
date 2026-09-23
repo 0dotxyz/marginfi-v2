@@ -22,13 +22,6 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
 ) -> MarginfiResult {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
-    let group = ctx.accounts.group.load()?;
-
-    check!(
-        ctx.accounts.signer.key() == group.admin || ctx.accounts.signer.key() == group.emode_admin,
-        MarginfiError::Unauthorized
-    );
-
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     check!(!bank.get_flag(FREEZE_SETTINGS), MarginfiError::Unauthorized);
@@ -64,7 +57,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     emit!(LendingPoolBankSetSameAssetEmodeEligibilityEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(ctx.accounts.signer.key()),
+            signer: Some(ctx.accounts.governance_admin.key()),
         },
         bank: ctx.accounts.bank.key(),
         mint: bank.mint,
@@ -148,9 +141,10 @@ fn remove_bank_from_registry(registry: &mut SameAssetEmodeRegistry, bank_key: Pu
 
 #[derive(Accounts)]
 pub struct LendingPoolSetBankSameAssetEmodeEligibility<'info> {
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub signer: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,
