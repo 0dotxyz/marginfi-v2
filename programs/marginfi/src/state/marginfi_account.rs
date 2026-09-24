@@ -17,8 +17,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, KAMINO_MARKET_EMERGENCY, MAX_COSTLY_POSITIONS,
-        ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS,
+        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
@@ -1947,10 +1947,8 @@ fn calc_weighted_asset_value_standalone(
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
             // Worth nothing for new borrows, but keeps Maintenance value for liquidation. As with
-            // Paused/ReduceOnly above, the premium scratch still counts this collateral. The
-            // market-level flag is cached on the bank because the Kamino market account never
-            // reaches this path.
-            if (!price_feed.has_borrow_power() || bank.get_flag(KAMINO_MARKET_EMERGENCY))
+            // Paused/ReduceOnly above, the premium scratch still counts this collateral.
+            if !price_feed.has_borrow_power()
                 && matches!(requirement_type, RequirementType::Initial)
             {
                 debug!("Bank without borrow power is worth 0 for Initial margin");

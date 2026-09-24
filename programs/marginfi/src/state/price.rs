@@ -2,6 +2,7 @@ use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID,
     SVSP_PHANTOM_TOKEN_AMOUNT, SWITCHBOARD_PULL_ID,
 };
+use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::state::lst_stake_price::{
     expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
@@ -20,7 +21,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, KAMINO_MARKET_EMERGENCY,
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -142,6 +143,13 @@ pub(crate) fn load_kamino_reserve<'info>(
     let reserve_loader: AccountLoader<MinimalReserve> = AccountLoader::try_from(reserve_info)
         .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
     Ok(reserve_loader)
+}
+
+/// Whether a Kamino bank's collateral can still back new borrows. The reserve carries its own
+/// emergency flag; the market's is cached on the bank by `propagate_kamino_market_emergency`,
+/// because the market account never reaches the pricing path.
+fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
+    !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
 }
 
 fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
@@ -398,6 +406,8 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
+
                 // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
                 price_feed.price = price_feed
                     .price
@@ -569,7 +579,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -613,7 +623,7 @@ impl OraclePriceFeedAdapter {
                     clock.unix_timestamp,
                     max_age,
                 )?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(
                         price_type,
@@ -909,7 +919,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                        has_borrow_power: !reserve.is_emergency_mode(),
+                        has_borrow_power: kamino_borrow_power(bank, &reserve),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1114,7 +1124,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1221,7 +1231,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the LST/SOL rate first so the cached raw price is the LST/USD price.
                 apply_i80f48_multiplier(&mut price_feed, lst_rate)?;
@@ -2027,6 +2037,7 @@ impl OraclePriceFeedAdapter {
 pub struct ScopePriceFeed {
     pub price: I80F48,
     pub last_updated_timestamp: u64,
+    has_borrow_power: bool,
 }
 
 impl ScopePriceFeed {
@@ -2072,6 +2083,7 @@ impl ScopePriceFeed {
         Ok(Self {
             price,
             last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power: true,
         })
     }
 
@@ -2104,7 +2116,7 @@ impl ScopePriceFeed {
 
 impl PriceAdapter for ScopePriceFeed {
     fn has_borrow_power(&self) -> bool {
-        true
+        self.has_borrow_power
     }
 
     fn get_price_of_type(
