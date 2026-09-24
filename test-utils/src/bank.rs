@@ -74,7 +74,8 @@ impl BankFixture {
                     .unwrap();
 
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
-                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default(), false).unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default(), false)
+                    .unwrap()
             }
         };
 

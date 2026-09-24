@@ -339,7 +339,9 @@ impl KaminoBankSetup {
     }
 
     /// Permissionlessly copy the market's emergency flag onto the bank.
-    pub async fn try_propagate_market_emergency(&self) -> std::result::Result<(), BanksClientError> {
+    pub async fn try_propagate_market_emergency(
+        &self,
+    ) -> std::result::Result<(), BanksClientError> {
         let reserve_key = self.bank_f.load().await.config.oracle_keys[1];
         let lending_market = self.load_reserve().await.lending_market;
         let ctx = self.test_f.context.borrow_mut();
