@@ -77,7 +77,7 @@ import {
 // clock drift varies by multiple days between runs, which made CI failures (kfarms reward-tally
 // overflow, accrual divergence) irreproducible locally. Seed Math.random once, globally, so every
 // run replays the identical sequence. mulberry32 keeps the uniform [0, 1) contract.
-const mulberry32 = (seed: number) => {
+export const mulberry32 = (seed: number) => {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -216,6 +216,8 @@ export const STAKED_BACKFILL_VOTE_SAMPLE = new PublicKey(
 export const MAINNET_GROUP = new PublicKey(
   "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8",
 );
+/** Current bank layout size (8-byte discriminator + Bank::LEN) */
+export const BANK_ACCOUNT_LEN = 8 + 3904;
 
 /** Banks in the emode test suite use this seed */
 export const EMODE_SEED = 44;
@@ -324,7 +326,7 @@ export const A_TREASURY_VAULTS_AUTHORITY = "TREASURY_VAULTS_AUTHORITY";
  *
  * This is only required for the staked-collateral test suite (s01-s10).
  */
-async function createValidatorBankrun(index: number): Promise<Validator> {
+export async function createValidatorBankrun(index: number): Promise<Validator> {
   const voteAccount = Keypair.generate();
   const node = Keypair.generate();
   const authorized = validatorAdmin.wallet.publicKey;
@@ -384,7 +386,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
 /**
  * Initialize a SPL single pool for a given validator vote account.
  */
-async function createSplStakePoolBankrun(
+export async function createSplStakePoolBankrun(
   validator: Validator,
 ): Promise<Validator> {
   // SinglePoolProgram.initialize returns a ready-to-send Transaction.
@@ -433,11 +435,19 @@ async function createSplStakePoolBankrun(
 }
 
 /**
- * Load a JSON fixture file as an AddedAccount for startAnchor genesis.
+ * Load a JSON fixture file as an AddedAccount for startAnchor genesis. `minLen` zero-extends
+ * the account data to that length.
  */
-function loadJsonFixture(filepath: string): AddedAccount {
+export function loadJsonFixture(
+  filepath: string,
+  minLen: number = 0,
+): AddedAccount {
   const fullPath = path.resolve(__dirname, "..", filepath);
   const json = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+  let data = Buffer.from(json.account.data[0], json.account.data[1]);
+  if (data.length < minLen) {
+    data = Buffer.concat([data, Buffer.alloc(minLen - data.length)]);
+  }
   return {
     address: new PublicKey(json.pubkey),
     info: {
@@ -445,7 +455,7 @@ function loadJsonFixture(filepath: string): AddedAccount {
       owner: new PublicKey(json.account.owner),
       executable: json.account.executable,
       rentEpoch: Number(json.account.rentEpoch ?? 0),
-      data: Buffer.from(json.account.data[0], json.account.data[1]),
+      data,
     },
   };
 }
@@ -477,15 +487,15 @@ const extraPrograms: AddedProgram[] = [
   },
   // JupLend programs
   {
-    name: "juplend_lending",
+    name: "juplend_earn",
     programId: new PublicKey("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"),
   },
   {
-    name: "juplend_liquidity",
+    name: "liquidity",
     programId: new PublicKey("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"),
   },
   {
-    name: "juplend_rewards_rate_model",
+    name: "lending_reward_rate_model",
     programId: new PublicKey("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"),
   },
   {
@@ -499,11 +509,11 @@ const extraPrograms: AddedProgram[] = [
  */
 function getGenesisAccounts(): AddedAccount[] {
   return [
-    loadJsonFixture("tests/fixtures/bonk_bank.json"),
-    loadJsonFixture("tests/fixtures/cloud_bank.json"),
-    loadJsonFixture("tests/fixtures/pyusd_bank.json"),
+    loadJsonFixture("tests/fixtures/bonk_bank.json", BANK_ACCOUNT_LEN),
+    loadJsonFixture("tests/fixtures/cloud_bank.json", BANK_ACCOUNT_LEN),
+    loadJsonFixture("tests/fixtures/pyusd_bank.json", BANK_ACCOUNT_LEN),
     loadJsonFixture("tests/fixtures/pyusd_mint.json"),
-    loadJsonFixture("tests/fixtures/corvus.json"),
+    loadJsonFixture("tests/fixtures/corvus.json", BANK_ACCOUNT_LEN),
     loadJsonFixture("tests/fixtures/corvus_mint.json"),
     loadJsonFixture("tests/fixtures/localnet_usdc.json"),
     loadJsonFixture("tests/fixtures/gappy_user3.json"),
@@ -511,9 +521,17 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
-    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_bank.json"),
+    loadJsonFixture(
+      "tests/fixtures/mainnet_staked_backfill_bank.json",
+      BANK_ACCOUNT_LEN,
+    ),
     loadJsonFixture("tests/fixtures/mainnet_staked_backfill_vote_blank.json"),
     loadJsonFixture("tests/fixtures/kamino_global_config.json"),
+    loadJsonFixture("tests/fixtures/marinade_msol_state.json"),
+    loadJsonFixture("tests/fixtures/bsol_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/sanctum_spl_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/jupsol_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/exponent_pt_vault.json"),
   ];
 }
 

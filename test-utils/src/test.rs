@@ -307,6 +307,23 @@ impl KaminoBankSetup {
             .await
     }
 
+    /// Put the reserve into emergency mode, in the state a later `refresh_reserve` leaves it:
+    /// current slot, not stale, price status cleared.
+    pub async fn set_reserve_emergency_mode(&self) {
+        let slot = self.test_f.get_clock().await.slot;
+        let reserve_key = self.bank_f.load().await.integration_acc_1;
+        let mut account = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut account.data[8..]);
+        reserve.config.emergency_mode = 1;
+        reserve.slot = slot;
+        reserve.stale = 0;
+        reserve.price_status = 0;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
     pub async fn load_user_accounted_collateral(
         &self,
         user: &MarginfiAccountFixture,
@@ -727,10 +744,10 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift", drift_mocks::drift::ID, None);
-            program.add_program("juplend_lending", juplend_mocks::ID, None);
-            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program("juplend_earn", juplend_mocks::ID, None);
+            program.add_program("liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
-                "juplend_rewards_rate_model",
+                "lending_reward_rate_model",
                 juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
@@ -1227,31 +1244,17 @@ impl TestFixture {
             .unwrap()
     }
 
-    /// Refresh the cached blockhash in the test context.
-    /// Call this in long-running tests to prevent BlockhashNotFound errors.
-    pub async fn refresh_blockhash(&self) {
-        let blockhash = self
-            .context
-            .borrow_mut()
-            .banks_client
-            .get_latest_blockhash()
-            .await
-            .unwrap();
-        self.context.borrow_mut().last_blockhash = blockhash;
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
+        // Never sign with the context's cached `last_blockhash`: it is captured once at startup and
+        // falls out of the bank's recent-blockhash queue as slots advance, which surfaces as
+        // `BlockhashNotFound` on slower machines.
+        let blockhash = ctx.borrow_mut().banks_client.get_latest_blockhash().await?;
         let tx = {
             let c = ctx.borrow();
-            Transaction::new_signed_with_payer(
-                ixs,
-                Some(&c.payer.pubkey()),
-                &[&c.payer],
-                c.last_blockhash,
-            )
+            Transaction::new_signed_with_payer(ixs, Some(&c.payer.pubkey()), &[&c.payer], blockhash)
         };
         ctx.borrow_mut()
             .banks_client
@@ -1401,7 +1404,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankKamino {
             group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
+            governance_admin: test_f.payer(),
             fee_payer: test_f.payer(),
             bank_mint: reserve_mint.key,
             bank: bank_key,
@@ -1427,6 +1430,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: reserve_mint.token_program,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -1490,8 +1494,6 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-
-        test_f.refresh_blockhash().await;
 
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
@@ -1638,7 +1640,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
             group: self.marginfi_group.key,
-            admin: self.payer(),
+            governance_admin: self.payer(),
             fee_payer: self.payer(),
             bank_mint: mint.key,
             bank: bank_key,
@@ -1665,6 +1667,7 @@ impl TestFixture {
             fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
             token_program: spl_token::ID,
             system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         };
         let mut add_bank_ix = Instruction {
             program_id: marginfi::ID,
@@ -2100,7 +2103,7 @@ impl TestFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolAddBankJuplend {
                 group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                governance_admin: test_f.payer(),
                 fee_payer: test_f.payer(),
                 bank_mint: mint,
                 bank: bank_key,
@@ -2135,6 +2138,7 @@ impl TestFixture {
                 integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
                 system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolAddBankJuplend {

@@ -71,7 +71,20 @@ export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
 export const ORACLE_SETUP_FIXED = 8;
 export const ORACLE_SETUP_FIXED_KAMINO = 13;
 export const ORACLE_SETUP_FIXED_DRIFT = 14;
+export const ORACLE_SETUP_JUPLEND_PYTH_PULL = 15;
+export const ORACLE_SETUP_JUPLEND_SWITCHBOARD_PULL = 16;
 export const ORACLE_SETUP_FIXED_JUPLEND = 17;
+export const ORACLE_SETUP_SCOPE = 18;
+export const ORACLE_SETUP_PYTH_MSOL = 19;
+export const ORACLE_SETUP_KAMINO_MSOL = 20;
+export const ORACLE_SETUP_JUPLEND_MSOL = 21;
+export const ORACLE_SETUP_PYTH_LST = 22;
+export const ORACLE_SETUP_KAMINO_LST = 23;
+export const ORACLE_SETUP_JUPLEND_LST = 24;
+export const ORACLE_SETUP_PT_PYTH = 25;
+export const ORACLE_SETUP_PT_FIXED = 26;
+export const ORACLE_SETUP_SCOPE_KAMINO = 27;
+export const ORACLE_SETUP_SCOPE_JUPLEND = 28;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;
@@ -206,7 +219,7 @@ export const blankBankConfigOptRaw = () => {
     totalAssetValueInitLimit: null,
     interestRateConfig: null,
     operationalState: null,
-    oracleMaxConfidence: 0,
+    oracleMaxConfidence: null,
     oracleMaxAge: null,
     permissionlessBadDebtSettlement: null,
     freezeSettings: null,
@@ -513,3 +526,78 @@ export function newEmodeEntry(
     assetWeightMaint,
   };
 }
+
+export type SplitBankConfig = {
+  riskConfig: BankConfigOptRaw;
+  adminConfig: BankConfigOptRaw;
+  operationalConfig: BankConfigOptRaw;
+};
+
+export const splitBankConfig = (config: BankConfigOptRaw): SplitBankConfig => {
+  const riskConfig = blankBankConfigOptRaw();
+  riskConfig.assetWeightInit = config.assetWeightInit;
+  riskConfig.assetWeightMaint = config.assetWeightMaint;
+  riskConfig.liabilityWeightInit = config.liabilityWeightInit;
+  riskConfig.liabilityWeightMaint = config.liabilityWeightMaint;
+  riskConfig.riskTier = config.riskTier;
+  riskConfig.assetTag = config.assetTag;
+  riskConfig.oracleMaxAge = config.oracleMaxAge;
+  riskConfig.oracleMaxConfidence = config.oracleMaxConfidence;
+  riskConfig.tokenlessRepaymentsAllowed = config.tokenlessRepaymentsAllowed;
+
+  const adminConfig = blankBankConfigOptRaw();
+  adminConfig.depositLimit = config.depositLimit;
+  adminConfig.borrowLimit = config.borrowLimit;
+  adminConfig.totalAssetValueInitLimit = config.totalAssetValueInitLimit;
+  adminConfig.interestRateConfig = config.interestRateConfig;
+  adminConfig.liquidationLiquidatorFee = config.liquidationLiquidatorFee;
+  adminConfig.liquidationInsuranceFee = config.liquidationInsuranceFee;
+  adminConfig.permissionlessBadDebtSettlement = config.permissionlessBadDebtSettlement;
+  adminConfig.freezeSettings = config.freezeSettings;
+  adminConfig.circuitBreakerEnabled = config.circuitBreakerEnabled;
+  adminConfig.cbDeviationBpsTiers = config.cbDeviationBpsTiers;
+  adminConfig.cbTierDurationsSeconds = config.cbTierDurationsSeconds;
+  adminConfig.cbEscalationWindowMult = config.cbEscalationWindowMult;
+  adminConfig.cbEmaAlphaBps = config.cbEmaAlphaBps;
+  adminConfig.cbWindowSeconds = config.cbWindowSeconds;
+  adminConfig.cbWindowMaxUpBps = config.cbWindowMaxUpBps;
+  adminConfig.cbWindowMaxDownBps = config.cbWindowMaxDownBps;
+
+  const operationalConfig = blankBankConfigOptRaw();
+  operationalConfig.operationalState = config.operationalState;
+
+  const _exhaustivenessCheck: Record<keyof BankConfigOptRaw, true> = {
+    assetWeightInit: true,
+    assetWeightMaint: true,
+    liabilityWeightInit: true,
+    liabilityWeightMaint: true,
+    depositLimit: true,
+    borrowLimit: true,
+    riskTier: true,
+    assetTag: true,
+    totalAssetValueInitLimit: true,
+    interestRateConfig: true,
+    operationalState: true,
+    oracleMaxConfidence: true,
+    oracleMaxAge: true,
+    permissionlessBadDebtSettlement: true,
+    freezeSettings: true,
+    tokenlessRepaymentsAllowed: true,
+    liquidationLiquidatorFee: true,
+    liquidationInsuranceFee: true,
+    circuitBreakerEnabled: true,
+    cbDeviationBpsTiers: true,
+    cbTierDurationsSeconds: true,
+    cbEscalationWindowMult: true,
+    cbEmaAlphaBps: true,
+    cbWindowSeconds: true,
+    cbWindowMaxUpBps: true,
+    cbWindowMaxDownBps: true,
+  };
+
+  return {
+    riskConfig,
+    adminConfig,
+    operationalConfig,
+  };
+};

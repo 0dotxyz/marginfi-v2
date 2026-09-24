@@ -1,4 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankPremiumConfigureEvent};
+use crate::ix_utils;
 use crate::MarginfiError;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
@@ -7,7 +8,7 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiGroup},
 };
 
-/// (emode admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
+/// (fast group admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
 ///
 /// # Deactivation is destructive — it is a LAZY premium amnesty
 ///
@@ -25,11 +26,12 @@ pub fn lending_pool_configure_bank_premium(
     premium_tag: u16,
     active: bool,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     bank.premium_tag = premium_tag;
-    // Note: not part of `GROUP_FLAGS` (this flag is emode-admin-gated, not group-admin-gated),
-    // so it is set directly rather than through `update_flag`.
+    // Note: not part of `GROUP_FLAGS`, so it is set directly rather than through `update_flag`.
     let was_active = bank.flags & PREMIUM_ACTIVE != 0;
     if active {
         bank.flags |= PREMIUM_ACTIVE;
@@ -55,7 +57,7 @@ pub fn lending_pool_configure_bank_premium(
     emit!(LendingPoolBankPremiumConfigureEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(ctx.accounts.emode_admin.key()),
+            signer: Some(ctx.accounts.admin.key()),
         },
         bank: ctx.accounts.bank.key(),
         mint: bank.mint,
@@ -68,16 +70,18 @@ pub fn lending_pool_configure_bank_premium(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankPremium<'info> {
-    #[account(
-        has_one = emode_admin @ MarginfiError::Unauthorized
-    )]
+    #[account(has_one = admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub emode_admin: Signer<'info>,
+    pub admin: Signer<'info>,
 
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

@@ -234,14 +234,18 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 ///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
-/// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
-///   limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
-///   liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
-///   + reserve/spot-market), so they share the same limit.
+/// Maximum number of expensive positions per account. Integration (Kamino + Drift + Solend +
+///   JupLend) and staked balances share this cap: they never mix on an account, and both cost 3-5
+///   remaining accounts per position against the 64 accounts a transaction may lock.
+///
+/// At 4, classic liquidation covers a full 16-balance account in one transaction even in the worst
+///   case (JupLend). Receivership covers 3 of the 4 in one transaction, and all 4 with the venue
+///   refreshes moved to a separate same-slot transaction. See `m03`/`m05` for the measured
+///   thresholds.
 ///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 ///   eventually get rid of this limit altogether.
-pub const MAX_INTEGRATION_POSITIONS: usize = 8;
+pub const MAX_INTEGRATION_POSITIONS: usize = 4;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 //   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 //   live in prod.
@@ -254,6 +258,7 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const HISTORY_ARCHIVE: [u8; 8] = [16, 196, 77, 220, 174, 253, 214, 94];
     pub const REBALANCE_ORDER: [u8; 8] = [51, 5, 186, 251, 144, 119, 75, 197];
     pub const REBALANCE_RECORD: [u8; 8] = [190, 69, 228, 114, 34, 217, 70, 102];
     pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];

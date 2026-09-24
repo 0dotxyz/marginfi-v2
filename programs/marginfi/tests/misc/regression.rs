@@ -56,7 +56,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account._pad0, [0u8; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -137,7 +138,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_flags, 0);
     assert_eq!(account.last_update, 0);
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -223,7 +225,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account._pad0, [0; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(!balance_1.is_active());
@@ -684,7 +687,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.config.cb_window_seconds, 0);
     assert_eq!(bank.config.total_asset_value_init_limit, 0);
     assert_eq!(bank.config.oracle_max_age, 300);
-    assert_eq!(bank.config._padding0, [0; 2]);
+    // Reclaimed from the former `_padding0: [u8; 2]`; legacy banks read 0 (unused unless the
+    // bank is `OracleSetup::Scope`).
+    assert_eq!(bank.config.scope_entry_index, 0);
     // Note: legacy banks that have a 0 value here will use 10%
     assert_eq!(bank.config.oracle_max_confidence, 0);
     assert_eq!(bank.config.fixed_price, I80F48::ZERO.into());

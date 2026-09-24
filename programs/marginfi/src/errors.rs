@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Vacated3")] // 6054
-    Vacated3,
+    #[msg("Account is already tagged for liquidation")] // 6054
+    AccountAlreadyTagged,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -266,14 +266,33 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
-    #[msg("Use set_fixed_oracle_price instead")] // 6132
-    UseSetFixedOraclePrice,
+    #[msg("Use set_oracle_price instead")] // 6132
+    UseSetOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
     BankUninitialized,
     #[msg("Max slippage exceeds the allowed cap")] // 6135
     SlippageTooHigh,
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed, // 6136
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed, // 6137
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice, // 6138
+    #[msg("Stake pool balance has not been updated recently enough")]
+    StakePoolStale, // 6139
+
+    #[msg("Deprecated: bank configuration now uses explicit fast and governance instructions")]
+    MixedBankConfigAuthority, // 6140
+    #[msg("Governance admin cannot be set to the default pubkey (all zeros); this would disable slow-authority operations")]
+    InvalidGovernanceAdmin, // 6141
+    #[msg("Deprecated: group configuration now uses explicit fast and governance instructions")]
+    MixedGroupConfigAuthority, // 6142
+    #[msg("Fast bank configuration may only make a risk-reducing operational-state transition")]
+    InvalidFastBankOperationalState, // 6143
+    #[msg("Governance bank configuration may only transition a bank to Operational")]
+    InvalidGovernanceBankOperationalState, // 6144
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -448,6 +467,11 @@ pub enum MarginfiError {
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
 
+    // ************** BEGIN ADMIN GUARD ERRORS (starting at 6605)
+    #[msg("Durable nonce cannot be used for this instruction")]
+    DurableNonceNotAllowed = 605, // 6605
+    // ************** END ADMIN GUARD ERRORS
+
     // ************** BEGIN PREMIUM ERRORS (starting at 6610)
     #[msg("Premium entry has a zero collateral or liability tag")]
     PremiumEntryInvalid = 610, // 6610
@@ -503,7 +527,17 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
-                                 // ************** END AUTO-REBALANCE ERRORS
+    // ************** END AUTO-REBALANCE ERRORS
+    // ************** BEGIN SCOPE ERRORS (starting at 6800)
+    #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
+    ScopeInvalidAccount = 800, // 6800
+    #[msg("Scope entry is out of range, never refreshed, or dated in the future")]
+    ScopeInvalidEntry, // 6801
+    #[msg("Scope price is stale")]
+    ScopeStalePrice, // 6802
+    #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
+    UseConfigureBankOracleScope, // 6803
+                                 // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -581,7 +615,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::Vacated3,
+            6054 => MarginfiError::AccountAlreadyTagged,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -659,9 +693,19 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
-            6132 => MarginfiError::UseSetFixedOraclePrice,
+            6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6135 => MarginfiError::SlippageTooHigh,
+            6136 => MarginfiError::MarinadeStateValidationFailed,
+            6137 => MarginfiError::ExponentVaultValidationFailed,
+            6138 => MarginfiError::InvalidPtStartPrice,
+            6139 => MarginfiError::StakePoolStale,
+            6140 => MarginfiError::MixedBankConfigAuthority,
+            6141 => MarginfiError::InvalidGovernanceAdmin,
+            6142 => MarginfiError::MixedGroupConfigAuthority,
+            6143 => MarginfiError::InvalidFastBankOperationalState,
+            6144 => MarginfiError::InvalidGovernanceBankOperationalState,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -748,6 +792,7 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::DurableNonceNotAllowed,
             6700 => MarginfiError::RebalanceVenueUnsupported,
             6701 => MarginfiError::RebalanceCooldown,
             6702 => MarginfiError::RebalanceIncompleteMove,
@@ -775,6 +820,12 @@ impl From<u32> for MarginfiError {
             6614 => MarginfiError::PremiumEntryNotFound,
             6615 => MarginfiError::PremiumSnapshotUnavailable,
 
+            // Scope-Oracle-specific errors (starting at 6610)
+            6800 => MarginfiError::ScopeInvalidAccount,
+            6801 => MarginfiError::ScopeInvalidEntry,
+            6802 => MarginfiError::ScopeStalePrice,
+            6803 => MarginfiError::UseConfigureBankOracleScope,
+
             _ => MarginfiError::InternalLogicError,
         }
     }
@@ -800,6 +851,9 @@ impl MarginfiError {
                 | MarginfiError::WrongOracleAccountKeys
                 | MarginfiError::PythPushStalePrice
                 | MarginfiError::SwitchboardStalePrice
+                | MarginfiError::ScopeInvalidAccount
+                | MarginfiError::ScopeInvalidEntry
+                | MarginfiError::ScopeStalePrice
                 | MarginfiError::StakePoolValidationFailed
                 | MarginfiError::InvalidBankAccount
                 | MarginfiError::MissingBankAccount
@@ -808,7 +862,10 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidWindowSize
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
+                | MarginfiError::ExponentVaultValidationFailed
+                | MarginfiError::MarinadeStateValidationFailed
                 // Lending protocol staleness errors - stale exchange rates mean unreliable prices
+                | MarginfiError::StakePoolStale // SPL / Sanctum stake pools
                 | MarginfiError::ReserveStale // Kamino
                 | MarginfiError::SolendReserveStale
                 | MarginfiError::DriftSpotMarketStale

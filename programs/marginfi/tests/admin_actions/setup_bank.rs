@@ -20,9 +20,9 @@ use marginfi_type_crate::{
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
-        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
+        centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
+        BankMetadata, BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
+        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -75,6 +75,7 @@ fn make_write_bank_metadata_ix(
             bank,
             metadata_admin,
             metadata,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
@@ -699,14 +700,16 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
         let ctx = test_f.context.borrow_mut();
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
+            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetFixedOraclePrice {
+            data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: price_wrapped,
+                setup: OracleSetup::Fixed as u8,
             }
             .data(),
         };
@@ -753,7 +756,7 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
 
     let set_fixed_ix = test_f
         .marginfi_group
-        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
     let set_fixed_res = {
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
@@ -776,7 +779,7 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
 
     let set_fixed_ix = test_f
         .marginfi_group
-        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
     // Warp a slot first: this transaction is byte-identical to the earlier rejected set-fixed, and
     // with the same blockhash it would be signature-deduped by BanksClient into that cached failure.
     test_f.context.borrow_mut().warp_to_slot(100).unwrap();
@@ -803,6 +806,69 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
         .await;
     assert!(fixed_res.is_err());
     assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn configure_bank_oracle_clears_a_stale_fixed_price() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let process_ix = |ix: Instruction| {
+        let ctx = test_f.context.clone();
+        async move {
+            let ctx = ctx.borrow_mut();
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            );
+            ctx.banks_client.process_transaction(tx).await
+        }
+    };
+
+    // Park the bank on a fixed price, which stamps `fixed_price`.
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
+    process_ix(set_fixed_ix).await?;
+    let after_fixed = usdc_bank.load().await;
+    assert_eq!(after_fixed.config.oracle_setup, OracleSetup::Fixed);
+    assert_eq!(I80F48::from(after_fixed.config.fixed_price), I80F48!(1));
+
+    // Switching back to a live feed must not leave the fixed price behind: same-asset e-mode
+    // compares it as part of a bank's identity, so a leftover would silently stop this bank
+    // pairing with an otherwise identical peer that was never fixed.
+    let restore_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::PythPushOracle as u8,
+            PYTH_USDC_FEED,
+            None,
+        );
+    process_ix(restore_ix).await?;
+
+    let after_restore = usdc_bank.load().await;
+    assert_eq!(
+        after_restore.config.oracle_setup,
+        OracleSetup::PythPushOracle
+    );
+    assert_eq!(after_restore.config.oracle_keys[0], PYTH_USDC_FEED);
+    assert_eq!(
+        I80F48::from(after_restore.config.fixed_price),
+        I80F48::ZERO,
+        "stale fixed_price must be cleared when leaving a fixed/PT setup"
+    );
 
     Ok(())
 }
@@ -925,14 +991,16 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
         let ctx = test_f.context.borrow();
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
+            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetFixedOraclePrice {
+            data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: new_price_wrapped,
+                setup: OracleSetup::Fixed as u8,
             }
             .data(),
         };
@@ -1236,10 +1304,10 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
-    let copy_to_bank_admin = test_f.get_bank(&BankMint::Sol);
+    let copy_to_bank = test_f.get_bank(&BankMint::Sol);
     let copy_to_bank_emode_admin = test_f.get_bank(&BankMint::PyUSD);
 
-    let copy_to_before = copy_to_bank_admin.load().await;
+    let copy_to_before = copy_to_bank.load().await;
     assert_eq!(copy_to_before.emode.flags, 0);
     assert_eq!(copy_to_before.emode.emode_tag, 0);
 
@@ -1266,16 +1334,16 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     // Admin can clone emode settings.
     test_f
         .marginfi_group
-        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank_admin)
+        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank)
         .await?;
 
     let copy_from_after = copy_from_bank.load().await;
-    let copy_to_after = copy_to_bank_admin.load().await;
+    let copy_to_after = copy_to_bank.load().await;
 
     assert_eq!(copy_to_after.emode, copy_from_after.emode);
     assert_eq!(copy_to_after.config, copy_to_before.config);
 
-    // A dedicated emode admin can also clone emode settings.
+    // A dedicated eMode admin cannot clone eMode settings; this remains a slow-admin action.
     let group_before = test_f.marginfi_group.load().await;
     let new_emode_admin = Keypair::new();
     test_f
@@ -1291,17 +1359,19 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
         )
         .await?;
 
-    test_f
+    let err = test_f
         .marginfi_group
         .try_lending_pool_clone_emode_with_signer(
             &new_emode_admin,
             &copy_from_bank,
             &copy_to_bank_emode_admin,
         )
-        .await?;
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
 
     let copy_to_after = copy_to_bank_emode_admin.load().await;
-    assert_eq!(copy_to_after.emode, copy_from_after.emode);
+    assert_eq!(copy_to_after.emode, copy_to_before.emode);
 
     Ok(())
 }
@@ -2336,6 +2406,50 @@ async fn configure_bank_oracle_min_age_validation() -> anyhow::Result<()> {
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
     assert_eq!(bank_after.config.oracle_max_age, 30);
+
+    Ok(())
+}
+
+/// The fee and the leverage it has to clear are validated from whichever side moves.
+#[tokio::test]
+async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let collateral = test_f.get_bank(&BankMint::Sol);
+    let debt = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(collateral, 1, &[])
+        .await?;
+    // 0.9 against the 1.0 USDC liability weight is 10x, so both cuts together must stay under 10%
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            debt,
+            2,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: 1,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+
+    let raise_fees = |liquidator: f64, insurance: f64| BankConfigOpt {
+        liquidation_liquidator_fee: Some(centi_to_u32(I80F48::from_num(liquidator))),
+        liquidation_insurance_fee: Some(centi_to_u32(I80F48::from_num(insurance))),
+        ..Default::default()
+    };
+    // 4% + 5% still clears 10x
+    debt.update_config(raise_fees(0.04, 0.05), None).await?;
+    // 5% + 6% does not
+    let res = debt.update_config(raise_fees(0.05, 0.06), None).await;
+    assert_custom_error!(
+        res.unwrap_err().downcast::<BanksClientError>().unwrap(),
+        MarginfiError::MaxMaintLeverageExceeded
+    );
 
     Ok(())
 }

@@ -11,6 +11,7 @@ import {
   addBank,
   addBankPermissionless,
   backfillStakedBankValidatorVoteAccount,
+  configureBankOracle,
   disableStakedOracles,
   enableStakedOracleOnramp,
   groupInitialize,
@@ -41,6 +42,7 @@ import {
   assertI80F48Equal,
   assertKeyDefault,
   assertKeysEqual,
+  expectFailedTxWithMessage,
 } from "../../utils/genericTests";
 import {
   ASSET_TAG_DEFAULT,
@@ -51,6 +53,7 @@ import {
   defaultBankConfig,
   defaultStakedInterestSettings,
   makeRatePoints,
+  ORACLE_SETUP_PYTH_LST,
   ORACLE_SETUP_PYTH_PUSH,
   STAKED_ORACLE_PRICE_USES_ONRAMP,
   STAKED_ORACLE_DISABLED,
@@ -201,7 +204,7 @@ describe("Init group and add banks with asset category flags", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        governanceAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();
@@ -247,7 +250,7 @@ describe("Init group and add banks with asset category flags", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        governanceAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();
@@ -273,6 +276,24 @@ describe("Init group and add banks with asset category flags", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
     assert.equal(bank.config.assetTag, ASSET_TAG_SOL);
+  });
+
+  it("(admin) Tries to configure LST oracle setup on the SOL bank - should fail", async () => {
+    let tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: bankKeypairSol.publicKey,
+        type: ORACLE_SETUP_PYTH_LST,
+        oracle: oracles.wsolOracle.publicKey,
+        remaining: [Keypair.generate().publicKey],
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    // InvalidOracleSetup
+    assertBankrunTxFailed(
+      await banksClient.tryProcessTransaction(tx),
+      "0x1789",
+    );
   });
 
   it("(admin) Tries to add staked bank WITH permission - should fail", async () => {
@@ -663,6 +684,23 @@ describe("Init group and add banks with asset category flags", () => {
     // assert.approximately(now, bank.lastUpdate.toNumber(), 2);
   });
 
+  it("(admin) Tries to configure a plain Pyth feed on a staked bank - should fail", async () => {
+    let tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        type: ORACLE_SETUP_PYTH_PUSH,
+        oracle: oracles.wsolOracle.publicKey,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    // InvalidOracleSetup
+    assertBankrunTxFailed(
+      await banksClient.tryProcessTransaction(tx),
+      "0x1789",
+    );
+  });
+
   it("(permissionless) Add staked collateral bank (validator 1) - happy path", async () => {
     const [bankKey] = deriveBankWithSeed(
       program.programId,
@@ -796,17 +834,17 @@ describe("Init group and add banks with asset category flags", () => {
       await disableStakedOracles(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
       ),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
-    const result = await banksClient.tryProcessTransaction(tx);
-    // Unauthorized
-    assertBankrunTxFailed(result, 6042);
+    await expectFailedTxWithMessage(
+      () => banksClient.tryProcessTransaction(tx).then(() => undefined),
+      "Missing signature for",
+    );
   });
 
-  it("(admin) Disables stakes oracles - happy path", async () => {
+  it("(governance admin) Disables stakes oracles - happy path", async () => {
     let tx = new Transaction();
     tx.add(
       await disableStakedOracles(
@@ -873,17 +911,17 @@ describe("Init group and add banks with asset category flags", () => {
       await enableStakedOracleOnramp(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
       ),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
-    const result = await banksClient.tryProcessTransaction(tx);
-    // Unauthorized
-    assertBankrunTxFailed(result, 6042);
+    await expectFailedTxWithMessage(
+      () => banksClient.tryProcessTransaction(tx).then(() => undefined),
+      "Missing signature for",
+    );
   });
 
-  it("(admin) Enables staked on-ramp oracle pricing - happy path", async () => {
+  it("(governance admin) Enables staked on-ramp oracle pricing - happy path", async () => {
     const [settingsKey] = deriveStakedSettings(
       program.programId,
       marginfiGroup.publicKey,

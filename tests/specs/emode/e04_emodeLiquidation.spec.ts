@@ -13,7 +13,6 @@ import {
   EMODE_INIT_RATE_LST_TO_LST,
   EMODE_MAINT_RATE_LST_TO_LST,
   EMODE_SEED,
-  emodeAdmin,
   emodeGroup,
   groupAdmin,
   oracles,
@@ -235,9 +234,9 @@ describe("Emode liquidation", () => {
   // which is done rarely or never because it can trigger user liquidations. In rare instances where
   // this must be done outside for security concerns or assets in freefall, it should be done
   // carefully and slowly!
-  it("(emode admin) Reduces LST A emode settings", async () => {
+  it("(slow governance admin) Reduces LST A emode settings", async () => {
     let tx = new Transaction().add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: lstABank,
         tag: EMODE_LST_TAG,
         entries: [
@@ -259,7 +258,7 @@ describe("Emode liquidation", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
   });
 

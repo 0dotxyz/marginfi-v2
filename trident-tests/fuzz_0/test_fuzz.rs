@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use fixed::types::I80F48;
 use fuzz_accounts::*;
 use trident_fuzz::fuzzing::*;
 
-use crate::invariants::{AccountDataSnapshot, BankBaseline};
+use crate::invariants::AccountDataSnapshot;
+use crate::invariants::BankBaseline;
 
 use crate::bank::Currency;
 use crate::bank::FuzzTestBank;
@@ -59,6 +61,16 @@ struct FuzzTest {
     users: Vec<User>,
     // ================================================================================================
     // Kamino integration accounts
+    // Fork-time Unix timestamp captured once in `new()`. Trident's per-
+    // iteration reset restores accounts but NOT the Clock sysvar, so the
+    // `forward_in_time` drift from `flow9` (100..100_000 s per call) and
+    // `#[end]` (3_600 s) accumulates across every iteration a worker thread
+    // runs. After ~19K iterations the virtual clock passes `u32::MAX`
+    // (~Feb 2106) and Kamino's `LastUpdate::update` panics
+    // ("time too far into the future") in `refresh_reserves_batch`, so
+    // every `KaminoInitObligation` in `#[init]` fails for the rest of the
+    // campaign. `#[init]` warps back to this base each iteration.
+    base_timestamp: i64,
     kamino_main_lending_market: Pubkey,
     kamino_usdc_reserve_liquidity_supply: Pubkey,
     kamino_usdc_reserve_collateral_mint: Pubkey,
@@ -304,9 +316,11 @@ impl FuzzTest {
         // Mainnet Slot
         let slot = utils::get_slot();
         trident.warp_to_slot(slot);
+        let base_timestamp = trident.get_current_timestamp();
 
         Self {
             trident,
+            base_timestamp,
             payer,
             liquidator,
             seeder,
@@ -350,6 +364,10 @@ impl FuzzTest {
 
     #[init]
     fn start(&mut self) {
+        // Bound the virtual clock: see `base_timestamp`. Accounts were
+        // just reset to fork state, so rewinding the Clock is consistent.
+        self.trident.warp_to_timestamp(self.base_timestamp);
+
         // ================================================================================================
         // Initialization
         self.init_foundation();
@@ -474,7 +492,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Deposit - USDC
-    #[flow(weight = 7)]
+    #[flow(weight = 6)]
     fn flow1(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -490,7 +508,7 @@ impl FuzzTest {
 
     // ================================================================================================
     // Withdraw - USDC
-    #[flow(weight = 10)]
+    #[flow(weight = 9)]
     fn flow2(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -505,7 +523,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Borrow - ETH
-    #[flow(weight = 11)]
+    #[flow(weight = 10)]
     fn flow3(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -520,7 +538,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Repay - ETH
-    #[flow(weight = 12)]
+    #[flow(weight = 11)]
     fn flow4(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -592,9 +610,7 @@ impl FuzzTest {
         let _ = self.lending_flashloan(
             &user,
             vec![borrow_eth, borrow_btc, repay_btc, repay_eth],
-            Some(
-                format!("Multi-bank flashloan (ETH+BTC) for {}", user.name).as_str(),
-            ),
+            Some(format!("Multi-bank flashloan (ETH+BTC) for {}", user.name).as_str()),
             Some(vec![self.eth_bank.address, self.btc_bank.address]),
         );
     }
@@ -897,6 +913,50 @@ impl FuzzTest {
     }
 
     // ================================================================================================
+    // Tag liquidation record: permissionless premium-growth tag.
+    // Half the calls first crash the ETH oracle so the target is
+    // actually unhealthy (tag sets), then revert the price; the other
+    // half fire at baseline prices, where the target is usually
+    // healthy (HealthyAccount rejection, or clearing a tag left by an
+    // earlier crash-path call). A set tag intentionally persists past
+    // the flow so later liquidation flows run against a grown premium
+    // cap and exercise the tag-reset rules.
+    #[flow(weight = 3)]
+    fn flow_tag_liq_record(&mut self) {
+        let user = self.get_random_user();
+        if coin_toss!(self) {
+            let eth_oracle = constants::WETH_PYTH_PUSH;
+            let numerator: i64 = self.trident.random_from_range(1000..=1_000_000);
+            self.scale_pyth_push_oracle_prices(&eth_oracle, numerator, 1);
+            self.marginfi_account_tag_liq_record(
+                user.marginfi_account,
+                Some(format!("Tag liquidation record (crashed oracle): {}", user.name).as_str()),
+            );
+            self.scale_pyth_push_oracle_prices(&eth_oracle, 1, numerator);
+        } else {
+            self.marginfi_account_tag_liq_record(
+                user.marginfi_account,
+                Some(format!("Tag liquidation record: {}", user.name).as_str()),
+            );
+        }
+    }
+
+    // ================================================================================================
+    // Close + re-init the liquidation record. Closing succeeds while
+    // tagged (the tag lives on the account); a successful close is
+    // immediately followed by a re-init so every user keeps a record,
+    // an assumption baked into the legacy-liquidate and receivership
+    // helpers.
+    #[flow(weight = 1)]
+    fn flow_close_liq_record(&mut self) {
+        let user = self.get_random_user();
+        self.marginfi_account_close_liq_record_and_reinit(
+            user.marginfi_account,
+            Some(format!("Close+reinit liquidation record: {}", user.name).as_str()),
+        );
+    }
+
+    // ================================================================================================
     // Deposit to Kamino Obligation - USDC
     #[flow(weight = 6)]
     fn flow10(&mut self) {
@@ -1051,7 +1111,10 @@ impl FuzzTest {
             .users
             .iter()
             .map(|u| u.marginfi_account)
-            .chain([self.seeder.marginfi_account, self.liquidator.marginfi_account])
+            .chain([
+                self.seeder.marginfi_account,
+                self.liquidator.marginfi_account,
+            ])
             .collect();
         invariants::assert_bank_position_counts(&mut self.trident, &banks, &marginfi_accounts);
 

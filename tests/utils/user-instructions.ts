@@ -108,6 +108,7 @@ export const transferAccountAuthorityIx = (
 export type SetAccountFreezeArgs = {
   group: PublicKey;
   marginfiAccount: PublicKey;
+  /** Fast admin when `frozen` is true; governance admin when it is false. */
   admin: PublicKey;
   frozen: boolean;
 };
@@ -244,6 +245,28 @@ export const withdrawIx = (
     .instruction();
 
   return ix;
+};
+
+export type CloseBalanceIxArgs = {
+  marginfiAccount: PublicKey;
+  bank: PublicKey;
+};
+
+/**
+ * Close an empty balance, freeing its slot on the account.
+ * * `authority` - MarginfiAccount's authority must sign
+ */
+export const closeBalanceIx = (
+  program: Program<Marginfi>,
+  args: CloseBalanceIxArgs,
+) => {
+  return program.methods
+    .lendingAccountCloseBalance()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      bank: args.bank,
+    })
+    .instruction();
 };
 
 export type RepayIxArgs = {
@@ -454,6 +477,25 @@ export const endLiquidationIx = (
       // globalFeeWallet: // implied from feeState
       // systemProgram: // hard coded key
       feePayer: args.feePayer ?? null, // null => optional account omitted (receiver pays)
+    })
+    .remainingAccounts(oracleMeta)
+    .instruction();
+};
+
+export type TagLiquidationRecordArgs = {
+  marginfiAccount: PublicKey;
+  remaining: PublicKey[] | AccountMeta[];
+};
+
+export const tagLiquidationRecordIx = (
+  program: Program<Marginfi>,
+  args: TagLiquidationRecordArgs
+) => {
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  return program.methods
+    .marginfiAccountTagLiqRecord()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
     })
     .remainingAccounts(oracleMeta)
     .instruction();

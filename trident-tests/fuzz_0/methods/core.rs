@@ -10,9 +10,8 @@ use crate::user::User;
 use crate::FuzzTest;
 
 impl FuzzTest {
-    /// Submit a `LendingPoolConfigureBank` ix that flips only the bank's
-    /// `operational_state`, leaving every other field at its prior value
-    /// (`BankConfigOpt` with all-`None` except `operational_state`).
+    /// Submit the explicit fast or governance bank-config ix that flips only the bank's
+    /// `operational_state`, leaving every other field at its prior value.
     ///
     /// Marginfi rejects new deposits when `Paused` and new borrows when
     /// `ReduceOnly` — the harness's existing deposit/borrow/withdraw/repay
@@ -27,46 +26,64 @@ impl FuzzTest {
         state: types::marginfi::BankOperationalState,
         msg: Option<&str>,
     ) {
-        let config = types::marginfi::BankConfigOpt {
-            asset_weight_init: None,
-            asset_weight_maint: None,
-            liability_weight_init: None,
-            liability_weight_maint: None,
-            deposit_limit: None,
-            borrow_limit: None,
-            operational_state: Some(state),
-            interest_rate_config: None,
-            risk_tier: None,
-            asset_tag: None,
-            total_asset_value_init_limit: None,
-            oracle_max_confidence: None,
-            oracle_max_age: None,
-            permissionless_bad_debt_settlement: None,
-            freeze_settings: None,
-            tokenless_repayments_allowed: None,
-            liquidation_liquidator_fee: None,
-            liquidation_insurance_fee: None,
-            circuit_breaker_enabled: None,
-            cb_deviation_bps_tiers: None,
-            cb_tier_durations_seconds: None,
-            cb_escalation_window_mult: None,
-            cb_ema_alpha_bps: None,
-            cb_window_seconds: None,
-            cb_window_max_up_bps: None,
-            cb_window_max_down_bps: None,
-        };
+        let ix = if matches!(state, types::marginfi::BankOperationalState::Operational) {
+            let config = types::marginfi::BankConfigGov {
+                asset_weight_init: None,
+                asset_weight_maint: None,
+                liability_weight_init: None,
+                liability_weight_maint: None,
+                operational_state: Some(state),
+                risk_tier: None,
+                asset_tag: None,
+                oracle_max_confidence: None,
+                oracle_max_age: None,
+                tokenless_repayments_allowed: None,
+                freeze_settings: None,
+            };
 
-        let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(
-            types::marginfi::LendingPoolConfigureBankInstructionData::new(config),
-        )
-        .accounts(
-            types::marginfi::LendingPoolConfigureBankInstructionAccounts::new(
-                self.marginfi_group,
-                self.payer.pubkey(),
-                bank,
-            ),
-        )
-        .instruction();
+            types::marginfi::LendingPoolConfigureBankGovInstruction::data(
+                types::marginfi::LendingPoolConfigureBankGovInstructionData::new(config),
+            )
+            .accounts(
+                types::marginfi::LendingPoolConfigureBankGovInstructionAccounts::new(
+                    self.marginfi_group,
+                    self.payer.pubkey(),
+                    bank,
+                ),
+            )
+            .instruction()
+        } else {
+            let config = types::marginfi::BankConfigFast {
+                deposit_limit: None,
+                borrow_limit: None,
+                operational_state: Some(state),
+                interest_rate_config: None,
+                total_asset_value_init_limit: None,
+                permissionless_bad_debt_settlement: None,
+                liquidation_liquidator_fee: None,
+                liquidation_insurance_fee: None,
+                circuit_breaker_enabled: None,
+                cb_deviation_bps_tiers: None,
+                cb_tier_durations_seconds: None,
+                cb_escalation_window_mult: None,
+                cb_ema_alpha_bps: None,
+                cb_window_seconds: None,
+                cb_window_max_up_bps: None,
+                cb_window_max_down_bps: None,
+            };
+
+            types::marginfi::LendingPoolConfigureBankInstruction::data(
+                types::marginfi::LendingPoolConfigureBankInstructionData::new(config),
+            )
+            .accounts(
+                types::marginfi::LendingPoolConfigureBankInstructionAccounts::new(
+                    self.marginfi_group,
+                    self.payer.pubkey(),
+                    bank,
+                ),
+            )
+            .instruction()
+        };
 
         // Most calls succeed (admin-signed, valid ix); a few may fail in
         // late-sequence states (e.g. KilledByBankruptcy is set
@@ -883,6 +900,8 @@ impl FuzzTest {
         let liab_layout = self.bank_layout(liab_bank.address);
         let liab_mint_data = self.trident.get_account(&liab_bank.currency.mint);
         let liab_token_program = *liab_mint_data.owner();
+        let tagged_at_before =
+            invariants::read_tagged_at(&mut self.trident, liquidatee_marginfi_account);
         let (remaining_accounts, liquidatee_accounts, liquidator_accounts) = self
             .remaining_accounts_for_liquidation(
                 asset_bank.address,
@@ -941,6 +960,12 @@ impl FuzzTest {
             invariants::assert_liquidation_success_share_invariants(&snap, &after, asset_amount);
             invariants::assert_balances_packed(&mut self.trident, liquidator_marginfi_account);
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+            invariants::assert_tag_cleared_or_advanced(
+                &mut self.trident,
+                liquidatee_marginfi_account,
+                tagged_at_before,
+                "legacy liquidation",
+            );
             self.bump_accrue(&[asset_bank.address, liab_bank.address]);
 
             // Couple the bankruptcy ix to every successful liquidation, the
@@ -973,6 +998,8 @@ impl FuzzTest {
         msg: Option<&str>,
     ) {
         let record = self.liquidation_record_pda(liquidatee_marginfi_account);
+        let tagged_at_before =
+            invariants::read_tagged_at(&mut self.trident, liquidatee_marginfi_account);
         let liq_banks = self.get_marginfi_account_banks(liquidatee_marginfi_account, None);
         let health_remaining_start = self.remaining_accounts_for_bank_risk_only(liq_banks.clone());
         let health_remaining_end = self.remaining_accounts_for_bank_risk_banks_only(liq_banks);
@@ -1015,8 +1042,87 @@ impl FuzzTest {
                 &mut self.trident,
                 liquidatee_marginfi_account,
                 record,
+                tagged_at_before,
             );
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+        }
+    }
+
+    /// Submit `MarginfiAccountTagLiqRecord` (permissionless premium-growth tag) for the given
+    /// account. On success the tag must have toggled: set when it was clear (account unhealthy),
+    /// cleared when it was set (account healthy again / no liabilities). On failure the record
+    /// must be unchanged.
+    pub fn marginfi_account_tag_liq_record(&mut self, marginfi_account: Pubkey, msg: Option<&str>) {
+        let banks = self.get_marginfi_account_banks(marginfi_account, None);
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_only(banks);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, marginfi_account);
+
+        let ix = types::marginfi::MarginfiAccountTagLiqRecordInstruction::data(
+            types::marginfi::MarginfiAccountTagLiqRecordInstructionData::new(),
+        )
+        .accounts(
+            types::marginfi::MarginfiAccountTagLiqRecordInstructionAccounts::new(
+                marginfi_account,
+                self.marginfi_group,
+            ),
+        )
+        .remaining_accounts(remaining_accounts)
+        .instruction();
+
+        let res = self.trident.process_transaction(&[ix], msg);
+        let tagged_at_after = invariants::read_tagged_at(&mut self.trident, marginfi_account);
+        if res.is_success() {
+            invariant!(
+                (tagged_at_before == 0) != (tagged_at_after == 0),
+                "tag ix success must toggle tagged_at. before: {}, after: {}",
+                tagged_at_before,
+                tagged_at_after
+            );
+        } else {
+            invariant!(
+                tagged_at_after == tagged_at_before,
+                "failed tag ix must leave tagged_at unchanged. before: {}, after: {}",
+                tagged_at_before,
+                tagged_at_after
+            );
+        }
+    }
+
+    /// Attempt `MarginfiAccountCloseLiqRecord` for the account, then re-init the record on
+    /// success so the harness assumption (every user has a record) keeps holding. Closing must
+    /// never disturb the account's premium-growth tag.
+    pub fn marginfi_account_close_liq_record_and_reinit(
+        &mut self,
+        marginfi_account: Pubkey,
+        msg: Option<&str>,
+    ) {
+        let record = self.liquidation_record_pda(marginfi_account);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, marginfi_account);
+
+        let ix = types::marginfi::MarginfiAccountCloseLiqRecordInstruction::data(
+            types::marginfi::MarginfiAccountCloseLiqRecordInstructionData::new(),
+        )
+        .accounts(
+            types::marginfi::MarginfiAccountCloseLiqRecordInstructionAccounts::new(
+                marginfi_account,
+                record,
+                self.payer.pubkey(),
+            ),
+        )
+        .instruction();
+
+        let res = self.trident.process_transaction(&[ix], msg);
+        invariant!(
+            invariants::read_tagged_at(&mut self.trident, marginfi_account) == tagged_at_before,
+            "close_liq_record must leave tagged_at untouched. tagged_at was: {}",
+            tagged_at_before
+        );
+        if res.is_success() {
+            self.marginfi_account_init_liquidation_record(
+                marginfi_account,
+                self.payer.pubkey(),
+                Some("Re-init liquidation record after close"),
+            );
         }
     }
 

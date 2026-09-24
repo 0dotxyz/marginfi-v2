@@ -50,6 +50,6 @@ types:
 	# bare `"address":` regex would also clobber every per-account
 	# `address` (system_program at indent 10+, etc.) and bake the
 	# marginfi program ID into every account-meta slot.
-	sed -i '' 's|^  "address": "[^"]*"|  "address": "$(MARGINFI_PROGRAM_ID)"|' ../target/idl/marginfi.json
-	sed -i '' 's|^  "address": "[^"]*"|  "address": "$(MOCKS_PROGRAM_ID)"|'    ../target/idl/mocks.json
+	perl -0pi -e 's/\A  "address": "[^"]*"/  "address": "$(MARGINFI_PROGRAM_ID)"/' ../target/idl/marginfi.json
+	perl -0pi -e 's/\A  "address": "[^"]*"/  "address": "$(MOCKS_PROGRAM_ID)"/'    ../target/idl/mocks.json
 	trident fuzz refresh fuzz_0 -s

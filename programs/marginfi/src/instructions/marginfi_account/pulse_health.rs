@@ -58,6 +58,7 @@ pub fn lending_account_pulse_health<'info>(
         &group,
         &premium_scratch,
         clock.unix_timestamp as u64,
+        false,
     )?;
 
     match engine_result {
@@ -147,6 +148,10 @@ pub fn lending_account_pulse_health<'info>(
         }
     } else {
         equity_flags_decisive = true;
+    }
+
+    if liquidatable_flag_update == Some(0) {
+        marginfi_account.liquidation_tagged_at = 0;
     }
 
     let equity_assets: I80F48 = health_cache.asset_value_equity.into();

@@ -59,7 +59,7 @@ pub struct LendingPoolBankConfigureOracleEvent {
 }
 
 #[event]
-pub struct LendingPoolBankSetFixedOraclePriceEvent {
+pub struct LendingPoolBankSetOraclePriceEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
     pub price: WrappedI80F48,
@@ -71,6 +71,13 @@ pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub enabled: bool,
+}
+
+#[event]
+pub struct SetGovernanceAdminEvent {
+    pub header: GroupEventHeader,
+    pub previous_governance_admin: Pubkey,
+    pub new_governance_admin: Pubkey,
 }
 
 #[event]
@@ -411,6 +418,13 @@ pub struct DeleverageEvent {
     pub risk_admin: Pubkey,
     pub deleveragee_assets_seized: f64,
     pub deleveragee_liability_repaid: f64,
+}
+
+#[event]
+pub struct LiquidationTagEvent {
+    pub marginfi_account: Pubkey,
+    /// 0 when the tag was cleared
+    pub tagged_at: i64,
 }
 
 // Rate limit events

@@ -1136,6 +1136,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.health_cache = health_cache;
+        account.liquidation_tagged_at = 0;
         account.unset_flag(ACCOUNT_IN_REBALANCE, false);
         account.lending_account.sort_balances();
         account.sync_indexer_flags();
@@ -1202,7 +1203,7 @@ fn check_rebalance_health_and_refresh_premium<'info>(
         &mut Some(health_cache),
         &mut Some(&mut premium_scratch),
     )?;
-    account.update_premium_snapshots(group, &premium_scratch, now)
+    account.update_premium_snapshots(group, &premium_scratch, now, false)
 }
 
 #[derive(Accounts)]

@@ -1,3 +1,4 @@
+use crate::ix_utils;
 // Adds a Drift type bank to a group with sane defaults. Used to integrate with Drift
 // allowing users to interact with Drift spot markets through marginfi
 use crate::{
@@ -28,6 +29,8 @@ pub fn lending_pool_add_bank_drift(
     bank_config: DriftConfigCompact,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // Note: Drift banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
     let LendingPoolAddBankDrift {
@@ -99,7 +102,7 @@ pub fn lending_pool_add_bank_drift(
 
     bank.config.validate()?;
     bank.config
-        .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+        .validate_oracle_setup(bank_mint.key(), ctx.remaining_accounts, None, None, None)?;
 
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
@@ -116,13 +119,10 @@ pub fn lending_pool_add_bank_drift(
 #[derive(Accounts)]
 #[instruction(bank_config: DriftConfigCompact, bank_seed: u64)]
 pub struct LendingPoolAddBankDrift<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,
@@ -249,4 +249,8 @@ pub struct LendingPoolAddBankDrift<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

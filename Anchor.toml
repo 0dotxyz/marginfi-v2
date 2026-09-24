@@ -4,7 +4,7 @@ solana_version = "3.1.13"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
-members = ["programs/marginfi", "programs/mocks", "programs/kamino-mocks", "programs/test_transfer_hook"]
+members = ["programs/marginfi", "programs/mocks", "programs/kamino-mocks", "programs/scope-mocks", "programs/test_transfer_hook"]
 # exclude = [
 #   "programs/test_transfer_hook",
 # ]
@@ -58,8 +58,8 @@ orders-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/
 # Use: anchor run kamino-tests
 kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/kamino/k*.spec.ts tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Basic tests (01-19)
-basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/0*.spec.ts tests/specs/basic/1*.spec.ts --exit --require tests/rootHooks.ts"
+# Basic tests (01-20)
+basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/0*.spec.ts tests/specs/basic/1*.spec.ts tests/specs/basic/2*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Emode tests (e01-e09)
 emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/emode/e*.spec.ts tests/e*.spec.ts --exit --require tests/rootHooks.ts"
@@ -70,7 +70,7 @@ premium-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests
 # Pyth pull tests (p01)
 pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/pyth/p*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Multi-limits tests (m01-m05)
+# Multi-limits tests (m01-m06)
 limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/limits/m*.spec.ts tests/m*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Drift tests (d01-d16)
@@ -170,15 +170,15 @@ program = "tests/fixtures/solend.so"
 
 [[test.genesis]]
 address = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
-program = "tests/fixtures/juplend_lending.so"
+program = "tests/fixtures/juplend_earn.so"
 
 [[test.genesis]]
 address = "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
-program = "tests/fixtures/juplend_liquidity.so"
+program = "tests/fixtures/liquidity.so"
 
 [[test.genesis]]
 address = "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"
-program = "tests/fixtures/juplend_rewards_rate_model.so"
+program = "tests/fixtures/lending_reward_rate_model.so"
 
 [[test.genesis]]
 address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
