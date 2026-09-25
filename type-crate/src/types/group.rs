@@ -63,10 +63,10 @@ pub struct MarginfiGroup {
     pub metadata_admin: Pubkey,
 
     /// Maximum leverage allowed for emode positions (initial margin), stored as u32 basis.
-    /// Use `u32_to_basis` to convert to I80F48. Range: 1-100.
+    /// Use `u32_to_basis` to convert to I80F48. Range: 1-100; 0 is unset and bounds nothing.
     pub emode_max_init_leverage: u32,
     /// Maximum leverage allowed for emode positions (maintenance margin), stored as u32 basis.
-    /// Must be > emode_max_init_leverage. Range: 1-100.
+    /// Must be > emode_max_init_leverage. Range: 1-100; 0 is unset and bounds nothing.
     pub emode_max_maint_leverage: u32,
 
     /// Encoded same-asset automatic emode leverage for initial margin.
@@ -75,6 +75,9 @@ pub struct MarginfiGroup {
     pub same_asset_emode_init_leverage: u32,
     /// Encoded same-asset automatic emode leverage for maintenance margin.
     /// Decode with `u32_to_basis`. Ordering is validated in decoded space.
+    /// Eligible banks have their liquidation fees checked against this value only when they opt in
+    /// while it is enabled or when they change fees. Enabling or raising it does not re-check them,
+    /// so verify every eligible bank off-chain first.
     pub same_asset_emode_maint_leverage: u32,
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.

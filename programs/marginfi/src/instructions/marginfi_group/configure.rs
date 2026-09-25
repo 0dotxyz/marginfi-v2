@@ -32,8 +32,10 @@ fn validate_and_apply_emode_leverage(
 /// Configure fast-admin margin group roles.
 ///
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
-/// with `configure_group_fee`. `new_emissions_admin` is deprecated and currently has no on-chain
-/// effect.
+/// with `configure_group_fee`.
+/// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
+///
+/// Admin only
 pub fn configure(
     ctx: Context<MarginfiGroupConfigure>,
     new_admin: Option<Pubkey>,
@@ -75,6 +77,10 @@ pub fn configure(
 
 /// Configure slow, timelocked margin group governance roles, the fast admin, and e-mode leverage
 /// caps.
+///
+/// Note: enabling or raising `same_asset_emode_maint_leverage` does not re-check the liquidation
+/// fees of banks already opted into same-asset e-mode, and a bank opted in while it was disabled
+/// was never checked. Verify every eligible bank off-chain first.
 pub fn configure_gov(
     ctx: Context<MarginfiGroupConfigureGov>,
     new_admin: Option<Pubkey>,
@@ -110,8 +116,19 @@ pub fn configure_gov(
     let emode_init_leverage = u32_to_basis(marginfi_group.emode_max_init_leverage);
     let emode_maint_leverage = u32_to_basis(marginfi_group.emode_max_maint_leverage);
 
+    let emode_caps_set =
+        marginfi_group.emode_max_init_leverage != 0 || marginfi_group.emode_max_maint_leverage != 0;
+
+    if emode_caps_set
+        && (marginfi_group.emode_max_init_leverage == 0
+            || marginfi_group.emode_max_maint_leverage == 0)
+    {
+        msg!("emode init and maint leverage must both be set or both be unset");
+        return Err(error!(MarginfiError::BadEmodeConfig));
+    }
+
     // Validate that init < maint
-    if emode_init_leverage >= emode_maint_leverage {
+    if emode_caps_set && emode_init_leverage >= emode_maint_leverage {
         msg!(
             "emode init leverage ({:.6}) must be < maint leverage ({:.6})",
             i80f48_to_f64(emode_init_leverage),

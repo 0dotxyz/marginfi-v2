@@ -25,6 +25,7 @@ mod premium;
 mod rebalance;
 mod repay;
 mod same_asset_emode;
+mod tag_liquid_record;
 mod transfer_account_pda;
 mod withdraw;
 

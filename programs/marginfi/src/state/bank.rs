@@ -29,11 +29,11 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
-        FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
+        DEFAULT_LIQUIDATION_FEE, FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
+        u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
         OraclePriceWithConfidence,
     },
 };
@@ -158,6 +158,16 @@ fn sol_log_compute_units() {
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
 
+    /// The liquidator's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn liquidator_fee(&self) -> I80F48;
+    /// The insurance fund's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn insurance_fee(&self) -> I80F48;
+    /// Both liquidation cuts combined, the share of the seized collateral a liquidation must be
+    /// able to give up.
+    fn total_liquidation_fee(&self) -> I80F48;
+
     #[allow(clippy::too_many_arguments)]
     fn init(
         &mut self,
@@ -248,7 +258,28 @@ pub trait BankImpl {
     fn decrement_borrowing_position_count(&mut self);
 }
 
+/// A stored 0 falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
+        DEFAULT_LIQUIDATION_FEE
+    } else {
+        u32_to_centi(fee)
+    }
+}
+
 impl BankImpl for Bank {
+    fn liquidator_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_liquidator_fee)
+    }
+
+    fn insurance_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_insurance_fee)
+    }
+
+    fn total_liquidation_fee(&self) -> I80F48 {
+        self.liquidator_fee() + self.insurance_fee()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn init(
         &mut self,

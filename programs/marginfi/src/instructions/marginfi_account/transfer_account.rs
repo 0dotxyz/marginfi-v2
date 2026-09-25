@@ -34,6 +34,7 @@ fn initialize_migrated_account(
     new_account.account_flags = old_account.account_flags;
     new_account.migrated_from = old_account_key;
     new_account.indexer_flags = old_account.indexer_flags;
+    new_account.liquidation_tagged_at = old_account.liquidation_tagged_at;
     new_account.sync_indexer_flags();
 }
 
