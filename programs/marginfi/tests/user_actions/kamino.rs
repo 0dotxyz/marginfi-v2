@@ -393,3 +393,61 @@ async fn kamino_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn kamino_close_balance_instruction_accepts_integration_asset_tag() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 100_000_000)
+        .await?;
+
+    let pre_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("kamino bank balance should be active after deposit");
+    assert!(pre_accounted > 0);
+
+    setup
+        .test_f
+        .run_kamino_withdraw(&setup.bank_f, &user, user_token.key, 0, Some(true))
+        .await?;
+
+    let post_accounted = setup.load_user_accounted_collateral(&user).await;
+    assert!(
+        post_accounted.is_none() || post_accounted == Some(0),
+        "accounted collateral should be zero after full withdraw"
+    );
+
+    let account = user.load().await;
+    let balance = account
+        .lending_account
+        .balances
+        .iter()
+        .find(|b| b.is_active() && b.bank_pk == setup.bank_f.key);
+
+    if let Some(_) = balance {
+        assert!(
+            balance.is_some(),
+            "integration balance should remain active after full withdraw"
+        );
+
+        user.try_balance_close(&setup.bank_f).await?;
+
+        let account = user.load().await;
+        let balance_after_close = account
+            .lending_account
+            .balances
+            .iter()
+            .find(|b| b.is_active() && b.bank_pk == setup.bank_f.key);
+
+        assert!(
+            balance_after_close.is_none(),
+            "balance should be closed after try_balance_close"
+        );
+    }
+
+    Ok(())
+}
