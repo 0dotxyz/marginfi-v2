@@ -515,6 +515,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         is_healthy,
     )?;
 
+    if is_healthy {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+
     // At this point we know that all non order balances were not touched and the order
     // balances that were touched:
     // 1) Is still above or equal to the trigger price (in equity terms).
