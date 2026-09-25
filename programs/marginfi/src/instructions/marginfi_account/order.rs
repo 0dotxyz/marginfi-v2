@@ -10,6 +10,7 @@ use crate::state::marginfi_account::{
     account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
     is_signer_authorized, run_cb_price_gate,
 };
+use crate::state::premium::{MarginfiAccountPremiumImpl, PremiumScratch};
 use crate::{
     check,
     prelude::*,
@@ -289,6 +290,7 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
     let mut order = order_loader.load_mut()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
         get_tagged_account_health_components(
@@ -368,6 +370,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     let mut health_cache = HealthCache::zeroed();
     let group = ctx.accounts.group.load()?;
+    let mut premium_scratch = PremiumScratch::default();
     let (
         (order_assets_in_equity, _order_liabs_in_equity, _order_asset_count, order_liab_count),
         is_healthy,
@@ -379,6 +382,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
+            &mut Some(&mut premium_scratch),
         )?;
 
         let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -511,11 +515,25 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         is_healthy,
     )?;
 
+    if is_healthy {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+
     // At this point we know that all non order balances were not touched and the order
     // balances that were touched:
     // 1) Is still above or equal to the trigger price (in equity terms).
     // 2) Did not make the account less healthy and if at all we did, the account is
     //    still healthy overall.
+
+    // Withdraw defers its snapshot refresh while ACCOUNT_IN_ORDER_EXECUTION is set, so this
+    // handler owns it: claim at old rates and re-weight surviving liabilities against the
+    // post-order collateral mix.
+    marginfi_account.update_premium_snapshots(
+        &group,
+        &premium_scratch,
+        Clock::get()?.unix_timestamp as u64,
+        false,
+    )?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
     marginfi_account.decrement_active_orders()?;
@@ -608,7 +626,7 @@ pub struct CloseOrder<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -663,7 +681,7 @@ pub struct SetKeeperCloseFlags<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

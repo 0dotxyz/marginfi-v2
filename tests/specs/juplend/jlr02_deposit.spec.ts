@@ -277,7 +277,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
 
     assertI80F48Equal(userBalanceAfter.liabilityShares, 0);
-    assertI80F48Equal(userBalanceAfter.emissionsOutstanding, 0);
+    assertI80F48Equal(userBalanceAfter.premiumOutstanding, 0);
     assert.equal(
       bankAfter.lendingPositionCount,
       bankBefore.lendingPositionCount + 1,

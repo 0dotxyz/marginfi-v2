@@ -7,10 +7,12 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, check_account_init_health_and_clear_tag,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -212,16 +214,36 @@ pub fn lending_account_borrow<'info>(
 
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
-    check_account_init_health(
-        &marginfi_account,
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health_and_clear_tag(
+        &mut marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        &mut Some(&mut premium_scratch),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
 
+    // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
+    // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+
     // Revert if any involved bank's oracle price has jumped past the breach threshold.
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+
+    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+    // the post-borrow collateral mix. Ratchet on incomplete is unreachable today (the gate
+    // above reverts first) — `true` is defense-in-depth so this owner-signed path can never
+    // regress to a rate freeze if that gate is ever relaxed.
+    marginfi_account.update_premium_snapshots(
+        &group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
+        true,
+    )?;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
@@ -275,7 +297,7 @@ pub struct LendingAccountBorrow<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

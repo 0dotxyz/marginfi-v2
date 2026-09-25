@@ -57,6 +57,7 @@ pub struct MarginfiFuzzContext<'info> {
     pub marginfi_accounts: Vec<UserAccount<'info>>,
     pub owner: AccountInfo<'info>,
     pub system_program: AccountInfo<'info>,
+    pub instruction_sysvar: AccountInfo<'info>,
     pub last_sysvar_current_timestamp: RwLock<u64>,
     pub metrics: Arc<RwLock<Metrics>>,
     pub state: &'info AccountsState,
@@ -91,6 +92,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             banks: vec![],
             owner: admin,
             system_program,
+            instruction_sysvar: state.new_instruction_sysvar_account(),
             marginfi_accounts: vec![],
             last_sysvar_current_timestamp: RwLock::new(
                 SystemTime::now()
@@ -244,7 +246,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &mut marginfi::instructions::LendingPoolAddBank {
                         marginfi_group: AccountLoader::try_from(airls(&self.marginfi_group))
                             .unwrap(),
-                        admin: Signer::try_from(airls(&self.owner)).unwrap(),
+                        governance_admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_payer: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_state: AccountLoader::try_from(airls(&self.fee_state)).unwrap(),
                         global_fee_wallet: uails(&self.fee_state_wallet),
@@ -263,6 +265,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                         fee_vault: Box::new(InterfaceAccount::try_from(airls(&fee_vault)).unwrap()),
                         token_program: Interface::try_from(airls(&token_program)).unwrap(),
                         system_program: Program::try_from(airls(&self.system_program)).unwrap(),
+                        instruction_sysvar: uails(&self.instruction_sysvar),
                     },
                     &[],
                     add_bank_bumps,
@@ -316,9 +319,10 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &marginfi::ID,
                     &mut marginfi::instructions::LendingPoolConfigureBankOracle {
                         group: AccountLoader::try_from(airls(&self.marginfi_group)).unwrap(),
-                        admin: Signer::try_from(airls(&self.owner)).unwrap(),
+                        governance_admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         bank: AccountLoader::try_from_unchecked(&marginfi::ID, airls(&bank))
                             .unwrap(),
+                        instruction_sysvar: uails(&self.instruction_sysvar),
                     },
                     &[ails(oracle.clone())],
                     configure_bumps,
@@ -855,11 +859,13 @@ impl<'state> MarginfiFuzzContext<'state> {
                 MarginfiError::ZeroAssetPrice.into(),
                 MarginfiError::ZeroLiabilityPrice.into(),
                 MarginfiError::OperationRepayOnly.into(),
+                MarginfiError::IllegalBalanceState.into(),
                 // Note: because updates in 1.5 allow liquidation of underwater banks, it is now
                 // possible for a bank's liquidity value to become empty in the fuzz suite, which
                 // leads to the `liquidatee_liab_bank_account.withdraw_spl_transfer` failing. This
                 // is probably benign but certainly rare-or-nonexistent in prod.
                 ProgramError::Custom(TokenError::InsufficientFunds as u32).into(),
+                MarginfiError::IllegalBalanceState.into(),
             ];
 
             // Log full context on unexpected error
@@ -961,6 +967,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                 ))?),
                 insurance_vault_authority: uails(&bank.insurance_vault_authority),
                 token_program: Interface::try_from(airls(&bank.token_program))?,
+                instruction_sysvar: uails(&self.instruction_sysvar),
             },
             aisls(&remaining_accounts),
             Default::default(),
@@ -1041,16 +1048,17 @@ fn initialize_marginfi_group<'a>(
     let program_id = marginfi::ID;
     let marginfi_group =
         state.new_owned_account(size_of::<MarginfiGroup>(), program_id, Rent::free());
+    let instruction_sysvar = state.new_instruction_sysvar_account();
 
     marginfi::instructions::marginfi_group::initialize_group(Context::new(
         &marginfi::ID,
         &mut marginfi::instructions::MarginfiGroupInitialize {
-            // Unchecked because we are initializing the account.
             marginfi_group: AccountLoader::try_from_unchecked(&program_id, airls(&marginfi_group))
                 .unwrap(),
             admin: Signer::try_from(airls(&admin)).unwrap(),
             fee_state: AccountLoader::try_from_unchecked(&program_id, airls(&fee_state)).unwrap(),
             system_program: Program::try_from(airls(&system_program)).unwrap(),
+            instruction_sysvar: uails(&instruction_sysvar),
         },
         &[],
         Default::default(),
@@ -1059,6 +1067,7 @@ fn initialize_marginfi_group<'a>(
 
     set_discriminator::<MarginfiGroup>(marginfi_group.clone());
 
+    let instruction_sysvar = state.new_instruction_sysvar_account();
     marginfi::instructions::marginfi_group::configure(
         Context::new(
             &marginfi::ID,
@@ -1069,22 +1078,43 @@ fn initialize_marginfi_group<'a>(
                 )
                 .unwrap(),
                 admin: Signer::try_from(airls(&admin)).unwrap(),
+                instruction_sysvar: uails(&instruction_sysvar),
             },
             &[],
             Default::default(),
         ),
         Some(admin.key()), // admin
-        Some(admin.key()), // emode_admin
         Some(admin.key()), // curve_admin
         Some(admin.key()), // limit_admin
         Some(admin.key()), // flow_admin
         Some(admin.key()), // emissions_admin
         Some(admin.key()), // metadata_admin
+    )
+    .unwrap();
+
+    let instruction_sysvar = state.new_instruction_sysvar_account();
+    marginfi::instructions::marginfi_group::configure_gov(
+        Context::new(
+            &marginfi::ID,
+            &mut marginfi::instructions::MarginfiGroupConfigureGov {
+                marginfi_group: AccountLoader::try_from_unchecked(
+                    &program_id,
+                    airls(&marginfi_group),
+                )
+                .unwrap(),
+                governance_admin: Signer::try_from(airls(&admin)).unwrap(),
+                instruction_sysvar: uails(&instruction_sysvar),
+            },
+            &[],
+            Default::default(),
+        ),
+        None, // admin
+        Some(admin.key()), // emode_admin
         Some(admin.key()), // risk_admin
-        None,              // emode_max_init_leverage
-        None,              // emode_max_maint_leverage
-        None,              // same_asset_emode_init_leverage
-        None,              // same_asset_emode_maint_leverage
+        None,
+        None,
+        None,
+        None,
     )
     .unwrap();
 
@@ -1188,13 +1218,21 @@ mod tests {
 
         {
             let marginfi_account = marginfi_account_ai.load().unwrap();
+            let asset_balance = marginfi_account
+                .lending_account
+                .get_balance(&a.banks[0].bank.key())
+                .unwrap();
+            let liability_balance = marginfi_account
+                .lending_account
+                .get_balance(&a.banks[1].bank.key())
+                .unwrap();
 
             assert_eq!(
-                I80F48::from(marginfi_account.lending_account.balances[0].asset_shares),
+                I80F48::from(asset_balance.asset_shares),
                 I80F48!(1000)
             );
             assert_eq!(
-                I80F48::from(marginfi_account.lending_account.balances[1].liability_shares),
+                I80F48::from(liability_balance.liability_shares),
                 I80F48!(100)
             );
         }
@@ -1203,9 +1241,13 @@ mod tests {
             .unwrap();
 
         let marginfi_account = marginfi_account_ai.load().unwrap();
+        let liability_balance = marginfi_account
+            .lending_account
+            .get_balance(&a.banks[1].bank.key())
+            .unwrap();
 
         assert_eq!(
-            I80F48::from(marginfi_account.lending_account.balances[1].liability_shares),
+            I80F48::from(liability_balance.liability_shares),
             I80F48!(0)
         );
     }
@@ -1255,6 +1297,7 @@ mod tests {
                 RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
+                &mut None,
             )
             .unwrap();
         }
@@ -1272,9 +1315,13 @@ mod tests {
         .unwrap();
 
         let marginfi_account = marginfi_account_ai.load().unwrap();
+        let asset_balance = marginfi_account
+            .lending_account
+            .get_balance(&a.banks[0].bank.key())
+            .unwrap();
 
         assert_eq!(
-            I80F48::from(marginfi_account.lending_account.balances[0].asset_shares),
+            I80F48::from(asset_balance.asset_shares),
             I80F48!(950)
         );
     }
@@ -1321,6 +1368,7 @@ mod tests {
                 RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
+                &mut None,
             )
             .unwrap();
         }

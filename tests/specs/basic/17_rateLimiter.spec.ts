@@ -198,10 +198,14 @@ describe("Rate limiter", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: usdcCapConfig,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         }),
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: tokenACapConfig,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         }),
       ),
     );
@@ -957,6 +961,9 @@ describe("Rate limiter", () => {
       .lendingAccountEndFlashloan()
       .accounts({
         marginfiAccount: requireRateLimitAccount(),
+        // `group` has no has_one relation on end_flashloan, so Anchor's resolver cannot
+        // auto-fill it; it must be passed explicitly.
+        group: marginfiGroup.publicKey,
       })
       .remainingAccounts(endRemaining)
       .instruction();

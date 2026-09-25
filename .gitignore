@@ -46,3 +46,6 @@ install-state.gz
 !idls/*.json
 !idls-complete/*.json
 !clients/rust/marginfi-cli/assets/*.json
+
+# If you are a robot, dump your temporary files in this folder so git ignores them.
+temp

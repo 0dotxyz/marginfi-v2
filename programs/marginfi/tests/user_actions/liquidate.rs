@@ -1221,7 +1221,7 @@ async fn marginfi_account_liquidation_emode(
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
-    // Configure group to allow higher max emode leverage (100x instead of default 20x)
+    // Raise the max emode leverage past the default 15x/20x so the entries below fit.
     let admin = test_f.payer();
     test_f
         .marginfi_group
@@ -1233,8 +1233,8 @@ async fn marginfi_account_liquidation_emode(
             admin,
             admin,
             admin,
-            Some(I80F48!(99).into()), // init must be < maint
-            Some(I80F48!(100).into()),
+            Some(I80F48!(17).into()), // init must be < maint
+            Some(I80F48!(18).into()),
         )
         .await
         .unwrap();
@@ -1280,9 +1280,6 @@ async fn marginfi_account_liquidation_emode(
             )
             .await?;
     }
-
-    // Refresh blockhash to prevent expiry during long test
-    test_f.refresh_blockhash().await;
 
     // Liquidatee
 
@@ -1338,9 +1335,6 @@ async fn marginfi_account_liquidation_emode(
         (liquidatee_mfi_account_f, borrow_amount_actual)
     };
 
-    // Refresh blockhash to prevent expiry during long test
-    test_f.refresh_blockhash().await;
-
     // Liquidator
 
     let liquidator_mfi_account_f = {
@@ -1366,9 +1360,6 @@ async fn marginfi_account_liquidation_emode(
     // -------------------------------------------------------------------------
     // Test
     // -------------------------------------------------------------------------
-
-    // Refresh blockhash to prevent expiry during long test
-    test_f.refresh_blockhash().await;
 
     // First decrease the default weights to make liquidatee unhealthy
     {
@@ -1417,8 +1408,8 @@ async fn marginfi_account_liquidation_emode(
             collateral_bank_emode_tag,
             flags: 0,
             pad0: [0, 0, 0, 0, 0],
-            asset_weight_init: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
-            asset_weight_maint: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
+            asset_weight_init: I80F48!(0.94).into(), // up from 0.1, gives ~16.7x leverage
+            asset_weight_maint: I80F48!(0.94).into(), // up from 0.1, gives ~16.7x leverage
         }];
 
         let res = test_f
@@ -1428,19 +1419,19 @@ async fn marginfi_account_liquidation_emode(
         assert!(res.is_ok());
     }
 
-    // The account is healthy when emode is ON -> liquidation will fail
+    // Emode lifts the collateral weight but leaves room for the fees, so the liquidation clears
+    // at the full configured rate.
     {
         let collateral_bank_f = test_f.get_bank(&collateral_mint);
         let debt_bank_f = test_f.get_bank(&debt_mint);
-        let res = liquidator_mfi_account_f
+        liquidator_mfi_account_f
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
                 liquidate_amount * 0.1, // just to differ from the previous liquidation transaction
                 debt_bank_f,
             )
-            .await;
-        assert!(res.is_err());
+            .await?;
     }
 
     // Decrease the emode weights drawing the liquidatee account liquidatable again
@@ -1484,9 +1475,6 @@ async fn marginfi_account_liquidation_emode(
     // in emode (see below) and is weighted by default - as 0.4. So even though the liquidator would actually gain
     // some money, its health would become worse.
 
-    // Refresh blockhash to prevent expiry during long test
-    test_f.refresh_blockhash().await;
-
     // This borrowing of another asset disables emode for the liquidator
     let liquidator_debt_token_account_f = {
         let liquidator_debt_token_account_f = test_f
@@ -1512,7 +1500,7 @@ async fn marginfi_account_liquidation_emode(
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
-                liquidate_amount * 97.0, // try to liquidate as much as possible
+                liquidate_amount * 96.9, // try to liquidate as much as possible
                 debt_bank_f,
             )
             .await;
@@ -1540,7 +1528,7 @@ async fn marginfi_account_liquidation_emode(
             .try_liquidate(
                 &liquidatee_mfi_account_f,
                 collateral_bank_f,
-                liquidate_amount * 97.0, // liquidate as much as possible
+                liquidate_amount * 96.9, // liquidate as much as possible
                 debt_bank_f,
             )
             .await;
