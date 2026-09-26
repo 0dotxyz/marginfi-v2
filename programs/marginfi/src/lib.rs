@@ -1148,6 +1148,15 @@ pub mod marginfi {
         kamino::lending_pool_add_bank_kamino(ctx, bank_config, bank_seed)
     }
 
+    /// (permissionless) Copy the emergency flag of a Kamino lending market onto a bank in that
+    /// market. While set, the bank backs no new borrowing, exactly as a bank on a reserve in
+    /// emergency mode does. Clearing the flag works the same way, once Kamino resumes the market.
+    pub fn propagate_kamino_market_emergency(
+        ctx: Context<PropagateKaminoMarketEmergency>,
+    ) -> MarginfiResult {
+        kamino::propagate_kamino_market_emergency(ctx)
+    }
+
     /// (permissionless) Harvest the specified reward index from the Kamino Farm attached to this
     /// bank. Rewards are always sent to the global fee wallet's canonical ATA.
     ///

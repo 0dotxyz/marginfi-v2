@@ -249,6 +249,7 @@ pub fn lending_account_liquidate<'info>(
             &asset_bank,
             &clock,
             ctx.remaining_accounts,
+            false,
         )?;
         check!(asset_price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
 
@@ -257,7 +258,8 @@ pub fn lending_account_liquidate<'info>(
         let liab_price: I80F48 = {
             let oracle_ais = &ctx.remaining_accounts[asset_bank_remaining_accounts_len
                 ..(asset_bank_remaining_accounts_len + liab_bank_remaining_accounts_len)];
-            let liab_pf = OraclePriceFeedAdapter::try_from_bank(&liab_bank, oracle_ais, &clock)?;
+            let liab_pf =
+                OraclePriceFeedAdapter::try_from_bank(&liab_bank, oracle_ais, &clock, false)?;
             liab_pf.get_price_of_type(
                 OraclePriceType::RealTime,
                 Some(PriceBias::High),

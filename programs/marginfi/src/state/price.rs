@@ -2,6 +2,7 @@ use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID,
     SVSP_PHANTOM_TOKEN_AMOUNT, SWITCHBOARD_PULL_ID,
 };
+use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::state::lst_stake_price::{
     expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
@@ -20,7 +21,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, KAMINO_MARKET_EMERGENCY,
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -142,6 +143,13 @@ pub(crate) fn load_kamino_reserve<'info>(
     let reserve_loader: AccountLoader<MinimalReserve> = AccountLoader::try_from(reserve_info)
         .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
     Ok(reserve_loader)
+}
+
+/// Whether a Kamino bank's collateral can still back new borrows. The reserve carries its own
+/// emergency flag; the market's is cached on the bank by `propagate_kamino_market_emergency`,
+/// because the market account never reaches the pricing path.
+fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
+    !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
 }
 
 fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
@@ -283,8 +291,17 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
+        in_deleverage: bool,
     ) -> MarginfiResult<Self> {
-        Self::try_from_bank_with_max_age(bank, ais, clock, bank.config.get_oracle_max_age())
+        let context = Self::load_oracle_context_with_max_age(
+            bank,
+            ais,
+            clock,
+            bank.config.get_oracle_max_age(),
+            None,
+            in_deleverage,
+        )?;
+        Ok(context.adjusted_price_feed)
     }
 
     pub fn try_from_bank_with_max_age<'info>(
@@ -293,7 +310,8 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
     ) -> MarginfiResult<Self> {
-        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
+        let context =
+            Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None, false)?;
         Ok(context.adjusted_price_feed)
     }
 
@@ -303,6 +321,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
+        in_deleverage: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -386,6 +405,8 @@ impl OraclePriceFeedAdapter {
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
                 price_feed.price = price_feed
@@ -558,7 +579,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -602,7 +623,7 @@ impl OraclePriceFeedAdapter {
                     clock.unix_timestamp,
                     max_age,
                 )?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(
                         price_type,
@@ -898,7 +919,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                        has_borrow_power: !reserve.is_emergency_mode(),
+                        has_borrow_power: kamino_borrow_power(bank, &reserve),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1103,7 +1124,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1210,7 +1231,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !reserve.is_emergency_mode();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the LST/SOL rate first so the cached raw price is the LST/USD price.
                 apply_i80f48_multiplier(&mut price_feed, lst_rate)?;
@@ -1278,7 +1299,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_rate = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1308,7 +1329,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_price = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
                 let feed = FixedPriceFeed {
                     price: pt_price,
@@ -1343,6 +1364,7 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
+            false,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -2015,6 +2037,7 @@ impl OraclePriceFeedAdapter {
 pub struct ScopePriceFeed {
     pub price: I80F48,
     pub last_updated_timestamp: u64,
+    has_borrow_power: bool,
 }
 
 impl ScopePriceFeed {
@@ -2060,6 +2083,7 @@ impl ScopePriceFeed {
         Ok(Self {
             price,
             last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power: true,
         })
     }
 
@@ -2092,7 +2116,7 @@ impl ScopePriceFeed {
 
 impl PriceAdapter for ScopePriceFeed {
     fn has_borrow_power(&self) -> bool {
-        true
+        self.has_borrow_power
     }
 
     fn get_price_of_type(
@@ -2924,19 +2948,19 @@ mod tests {
 
         // Before start -> start_price; at/after maturity -> par (1.0)
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(500), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(500), start_price, false).unwrap(),
             start_price
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap(),
             I80F48::ONE
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(9_999), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(9_999), start_price, false).unwrap(),
             I80F48::ONE
         );
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
-        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
@@ -2953,29 +2977,29 @@ mod tests {
         // 0.4375 SY per PT * 2.0 asset per SY = 0.875, so the cap must beat par at maturity.
         let mut vault = fully_backed_vault(1_000, 1_000);
         vault.sy_for_pt = 437_500_000_000;
-        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(matured, I80F48::from_num(0.875));
 
         // Below the ceiling, the cap is inert: halfway from 0.5 to par is 0.75.
-        let early = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let early = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert_eq!(early, I80F48::from_num(0.75));
 
         vault.sy_for_pt = 125_000_000_000; // 0.25
-        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(broken, I80F48::from_num(0.25));
 
         // Degenerate vaults are rejected rather than priced at zero.
         let mut zero_supply = fully_backed_vault(1_000, 1_000);
         zero_supply.pt_supply = 0;
-        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price, false).is_err());
 
         let mut zero_rate = fully_backed_vault(1_000, 1_000);
         zero_rate.last_seen_sy_exchange_rate = [0; 4];
-        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price, false).is_err());
 
         let mut overflowed = fully_backed_vault(1_000, 1_000);
         overflowed.last_seen_sy_exchange_rate = [0, 1, 0, 0];
-        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price, false).is_err());
     }
 
     #[test]
@@ -2990,13 +3014,20 @@ mod tests {
         let mut healthy = fully_backed_vault(1_000, 1_000);
         healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
         assert!(!healthy.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&healthy, &at, start_price).is_ok());
+        assert!(pt_linear_multiplier(&healthy, &at, start_price, false).is_ok());
 
         // SY rate below its all-time high -> emergency mode -> refuse to price.
         let mut depegged = fully_backed_vault(1_000, 1_000);
         depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
         assert!(depegged.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&depegged, &at, start_price).is_err());
+        assert!(pt_linear_multiplier(&depegged, &at, start_price, false).is_err());
+
+        // Deleverage prices it anyway, at the same mark a healthy vault would carry, so the risk
+        // admin can unwind a position the depeg would otherwise strand.
+        assert_eq!(
+            pt_linear_multiplier(&depegged, &at, start_price, true).unwrap(),
+            pt_linear_multiplier(&healthy, &at, start_price, false).unwrap(),
+        );
     }
 
     #[test]

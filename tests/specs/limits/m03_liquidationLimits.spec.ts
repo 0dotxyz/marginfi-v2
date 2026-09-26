@@ -100,7 +100,7 @@ import {
   deriveLiquidityVaultAuthority,
 } from "../../utils/pdas";
 
-/** Mirrors the program's `MAX_INTEGRATION_POSITIONS`. */
+/** Mirrors the program's `MAX_COSTLY_POSITIONS`. */
 const CAP = 4;
 /** Swept past the cap so the log still shows where each path actually tops out. */
 const PROBE = 8;

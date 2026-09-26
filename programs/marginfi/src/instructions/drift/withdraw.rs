@@ -95,6 +95,7 @@ pub fn drift_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
+                marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE),
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles

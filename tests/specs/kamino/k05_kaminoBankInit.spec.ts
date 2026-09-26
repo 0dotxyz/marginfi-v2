@@ -1,5 +1,10 @@
 import { BN } from "@coral-xyz/anchor";
-import { ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  ComputeBudgetProgram,
+  PublicKey,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+  Transaction,
+} from "@solana/web3.js";
 import {
   ecosystem,
   groupAdmin,
@@ -52,6 +57,7 @@ import {
   ASSET_TAG_KAMINO,
   BANK_SEED_KNOWN_FLAG,
   CLOSE_ENABLED_FLAG,
+  KAMINO_MARKET_EMERGENCY_FLAG,
   KLEND_PROGRAM_ID,
 } from "../../utils/types";
 
@@ -476,5 +482,56 @@ describe("k05: Init Kamino banks", () => {
     let result2 = await processBankrunTransaction(ctx, tx2, [usr.wallet], true);
     // KaminoReserveMintAddressMismatch
     assertBankrunTxFailed(result2, 6203);
+  });
+  /** `UpdateLendingMarketMode::UpdateEmergencyMode`. */
+  const UPDATE_EMERGENCY_MODE = 1;
+
+  it("(permissionless) propagates the market's emergency mode to the bank", async () => {
+    const market = kaminoAccounts.get(MARKET);
+    const reserve = kaminoAccounts.get(USDC_RESERVE);
+    const bank = kaminoAccounts.get(KAMINO_USDC_BANK);
+
+    const setMarketEmergency = async (on: boolean) => {
+      const value = Array.from({ length: 72 }, (_, i) => (i === 0 && on ? 1 : 0));
+      await processBankrunTransaction(
+        ctx,
+        new Transaction().add(
+          await klendBankrunProgram.methods
+            .updateLendingMarket(new BN(UPDATE_EMERGENCY_MODE), value)
+            .accounts({
+              signer: groupAdmin.wallet.publicKey,
+              lendingMarket: market,
+              instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+            })
+            .instruction(),
+        ),
+        [groupAdmin.wallet],
+      );
+    };
+
+    const propagate = async () => {
+      await processBankrunTransaction(
+        ctx,
+        new Transaction().add(
+          await groupAdmin.mrgnBankrunProgram.methods
+            .propagateKaminoMarketEmergency()
+            .accounts({ reserve, lendingMarket: market, bank })
+            .instruction(),
+        ),
+        [groupAdmin.wallet],
+      );
+    };
+
+    const bankFlags = async () =>
+      (await bankrunProgram.account.bank.fetch(bank)).flags.toNumber() &
+      KAMINO_MARKET_EMERGENCY_FLAG;
+
+    await setMarketEmergency(true);
+    await propagate();
+    assert.equal(await bankFlags(), KAMINO_MARKET_EMERGENCY_FLAG);
+
+    await setMarketEmergency(false);
+    await propagate();
+    assert.equal(await bankFlags(), 0);
   });
 });

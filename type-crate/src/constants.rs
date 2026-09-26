@@ -136,6 +136,12 @@ pub const BANK_SAME_ASSET_EMODE_ELIGIBLE: u64 = 1 << 12;
 /// premium and project it in health checks.
 pub const PREMIUM_ACTIVE: u64 = 1 << 13;
 
+/// Kamino-bank flag: the reserve's lending market is in emergency mode. Cached here because the
+/// market account is not passed on the health path, and refreshed permissionlessly by
+/// `propagate_kamino_market_emergency`. Worth zero for Initial margin, exactly like a reserve in
+/// emergency mode.
+pub const KAMINO_MARKET_EMERGENCY: u64 = 1 << 14;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
@@ -234,7 +240,7 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 ///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
-/// Maximum number of expensive positions per account. Integration (Kamino + Drift + Solend +
+/// Maximum number of costly positions per account. Integration (Kamino + Drift + Solend +
 ///   JupLend) and staked balances share this cap: they never mix on an account, and both cost 3-5
 ///   remaining accounts per position against the 64 accounts a transaction may lock.
 ///
@@ -245,7 +251,7 @@ pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 ///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 ///   eventually get rid of this limit altogether.
-pub const MAX_INTEGRATION_POSITIONS: usize = 4;
+pub const MAX_COSTLY_POSITIONS: usize = 4;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 //   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 //   live in prod.
