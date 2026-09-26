@@ -120,15 +120,15 @@ pub fn centi_to_u32(value: I80F48) -> u32 {
 /// Inverse of `milli_to_u32`.
 /// Example: u32::MAX -> 10.0 (1000%), u32::MAX/10 -> ~1.0 (100%)
 pub fn u32_to_milli(rate: u32) -> I80F48 {
-    let ratio: I80F48 = I80F48::from_num(rate) / I80F48::from_num(u32::MAX);
-    ratio * I80F48::from_num(10.0)
+    I80F48::from_bits(u32_to_centi(rate).to_bits() * 10)
 }
 
 /// Converts a utilization u32 (0-100% range) to I80F48 decimal.
 /// Inverse of `centi_to_u32`.
 /// Example: u32::MAX -> 1.0 (100%), u32::MAX/2 -> ~0.5 (50%)
+/// Computed on the raw bits: exactly the truncated I80F48 division `util / u32::MAX`.
 pub fn u32_to_centi(util: u32) -> I80F48 {
-    I80F48::from_num(util) / I80F48::from_num(u32::MAX)
+    I80F48::from_bits((i128::from(util) << I80F48::FRAC_NBITS) / i128::from(u32::MAX))
 }
 
 /// Useful when converting an I80F48 (e.g. leverage) into a value from 0-100. Clamps to 100 if
@@ -228,6 +228,22 @@ impl From<InterestRateConfig> for InterestRateConfigCompact {
             zero_util_rate: ir_config.zero_util_rate,
             hundred_util_rate: ir_config.hundred_util_rate,
             points: ir_config.points,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn u32_conversions_match_fixed_division() {
+        let max = I80F48::from_num(u32::MAX);
+        let edges = [0, 1, 2, u32::MAX / 10, u32::MAX / 2, u32::MAX - 1, u32::MAX];
+        for v in edges.into_iter().chain((0..=u32::MAX).step_by(9_973)) {
+            let centi = I80F48::from_num(v) / max;
+            assert_eq!(u32_to_centi(v), centi);
+            assert_eq!(u32_to_milli(v), centi * I80F48::from_num(10));
         }
     }
 }
