@@ -413,7 +413,7 @@ fn load_juplend_rate_model(ai: &AccountInfo) -> MarginfiResult<RateModel> {
         MarginfiError::JuplendLendingValidationFailed
     );
     RateModel::from_account_data(&ai.try_borrow_data()?)
-        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed).into())
+        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))
 }
 
 /// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance

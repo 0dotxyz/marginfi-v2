@@ -710,7 +710,10 @@ mod rate_tests {
 
         let decoded = TokenReserve::from_account_data(&buf).unwrap();
         assert_eq!(decoded.borrow_rate, 442);
-        assert_eq!(u64::from_le_bytes(decoded.last_update_timestamp), 1_700_000_000);
+        assert_eq!(
+            u64::from_le_bytes(decoded.last_update_timestamp),
+            1_700_000_000
+        );
 
         let mut wrong_discriminator = buf.clone();
         wrong_discriminator[0] ^= 0xFF;
