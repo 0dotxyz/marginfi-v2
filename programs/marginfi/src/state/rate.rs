@@ -356,7 +356,7 @@ fn juplend_supply_apr<'info>(
         MarginfiError::JuplendLendingStale
     );
     let rate_model = match rewards.rate_model {
-        Some(ai) => Some(load_juplend_rate_model(ai, &reserve.mint)?),
+        Some(ai) => Some(load_juplend_rate_model(ai)?),
         None => None,
     };
     let base = reserve
@@ -405,22 +405,15 @@ fn juplend_supply_apr<'info>(
     Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
 }
 
-/// JupLend's `RateModel` for `mint`: the liquidity program keys one per mint, so an account it owns
-/// with the model discriminator and this mint is that one.
-fn load_juplend_rate_model(ai: &AccountInfo, mint: &Pubkey) -> MarginfiResult<RateModel> {
+/// JupLend's `RateModel` from `ai`, whose address the caller has already bound to the bank's mint.
+fn load_juplend_rate_model(ai: &AccountInfo) -> MarginfiResult<RateModel> {
     require_keys_eq!(
         *ai.owner,
         JUPLEND_LIQUIDITY_PROGRAM_ID,
         MarginfiError::JuplendLendingValidationFailed
     );
-    let model = RateModel::from_account_data(&ai.try_borrow_data()?)
-        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))?;
-    require_keys_eq!(
-        model.mint,
-        *mint,
-        MarginfiError::JuplendLendingValidationFailed
-    );
-    Ok(model)
+    RateModel::from_account_data(&ai.try_borrow_data()?)
+        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed).into())
 }
 
 /// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance

@@ -81,6 +81,7 @@ use marginfi_type_crate::{
         REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
         REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
+    pdas::derive_juplend_rate_model,
     types::{
         BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
@@ -626,12 +627,14 @@ struct ParsedBank<'info> {
 /// Parse the referenced-bank prefix of the rebalance remaining-accounts stream: exactly `bank_count`
 /// blocks, each `[bank] [token_reserve (JupLend only)] [rewards] [oracles]`, deduped (each bank
 /// appears once and moves reference it by index). Returns the parsed banks and the untouched tail
-/// (empty for `start`; the post-move health observation set for `end`).
+/// (empty for `start`; the post-move health observation set for `end`). JupLend's `RateModel` is
+/// bound to the bank's mint and returned only `with_rate_model`; otherwise it is skipped.
 fn parse_rebalance_banks<'info>(
     remaining: &'info [AccountInfo<'info>],
     group: &Pubkey,
     bank_count: usize,
     with_rewards: bool,
+    with_rate_model: bool,
 ) -> MarginfiResult<(Vec<ParsedBank<'info>>, &'info [AccountInfo<'info>])> {
     let mut cursor = 0usize;
     let mut banks: Vec<ParsedBank> = Vec::with_capacity(bank_count);
@@ -650,12 +653,13 @@ fn parse_rebalance_banks<'info>(
         let loader = AccountLoader::<Bank>::try_from(bank_ai)
             .map_err(|_| error!(MarginfiError::InvalidBankAccount))?;
         cursor += 1;
-        let (tag, oracle_n) = {
+        let (tag, oracle_n, mint) = {
             let b = loader.load()?;
             require_keys_eq!(b.group, *group, MarginfiError::InvalidGroup);
             (
                 b.config.asset_tag,
                 get_remaining_accounts_per_bank(&b)?.saturating_sub(1),
+                b.mint,
             )
         };
         // Venue extras precede the oracles: JupLend's `TokenReserve`, then the accounts each venue
@@ -681,12 +685,24 @@ fn parse_rebalance_banks<'info>(
                     lending_market: Some(take(&mut cursor)?),
                     ..Default::default()
                 },
-                ASSET_TAG_JUPLEND => RewardsAccounts {
-                    rewards_model: Some(take(&mut cursor)?),
-                    ftoken_mint: Some(take(&mut cursor)?),
-                    rate_model: Some(take(&mut cursor)?),
-                    ..Default::default()
-                },
+                ASSET_TAG_JUPLEND => {
+                    let rewards_model = Some(take(&mut cursor)?);
+                    let ftoken_mint = Some(take(&mut cursor)?);
+                    let rate_model = take(&mut cursor)?;
+                    if with_rate_model {
+                        require_keys_eq!(
+                            *rate_model.key,
+                            derive_juplend_rate_model(&mint).0,
+                            MarginfiError::JuplendLendingValidationFailed
+                        );
+                    }
+                    RewardsAccounts {
+                        rewards_model,
+                        ftoken_mint,
+                        rate_model: with_rate_model.then_some(rate_model),
+                        ..Default::default()
+                    }
+                }
                 _ => RewardsAccounts::default(),
             }
         } else {
@@ -785,7 +801,7 @@ pub fn start_rebalance<'info>(
     let allowed = &order.allowed_banks[..bank_count];
     let min_imp = I80F48::from(order.min_improvement);
 
-    let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count, true)?;
+    let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count, true, true)?;
     check!(tail.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
 
     // Freshen native banks before reading their rates (integration banks were refreshed by the
@@ -1071,7 +1087,8 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
     // Remaining layout: [referenced bank blocks][post-move health observation set]. Parse exactly the
     // recorded banks (order and identity must match the record's indices); the tail is the health set.
-    let (banks, health_obs) = parse_rebalance_banks(remaining, &group_key, ref_keys.len(), true)?;
+    let (banks, health_obs) =
+        parse_rebalance_banks(remaining, &group_key, ref_keys.len(), true, false)?;
     for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }
@@ -1386,7 +1403,8 @@ pub fn settle_rebalance_tip<'info>(
         MarginfiError::RebalanceSettleTooEarly
     );
 
-    let (banks, _tail) = parse_rebalance_banks(remaining, &group_key, ref_keys.len(), false)?;
+    let (banks, _tail) =
+        parse_rebalance_banks(remaining, &group_key, ref_keys.len(), false, false)?;
     for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }

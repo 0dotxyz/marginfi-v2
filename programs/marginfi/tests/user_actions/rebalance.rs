@@ -4116,6 +4116,71 @@ async fn rebalance_rejects_decoy_juplend_reserve() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A JupLend referenced bank's `RateModel` must sit at the mint's PDA: a byte-identical copy at
+/// another address, owned by the liquidity program, is rejected when the accounts are parsed.
+#[tokio::test]
+async fn rebalance_rejects_decoy_juplend_rate_model() -> anyhow::Result<()> {
+    let f = setup_multi_venue_fixture().await?;
+    let src = f.drift_bank.key;
+    let dst = f.juplend_bank.key;
+
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    f.set_juplend_rate_high().await;
+    let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.0001)).await?;
+
+    let mut rewards = f.juplend_rewards().await;
+    let model = f.test_f.try_load(&rewards[2]).await?.unwrap();
+    let decoy = Pubkey::new_unique();
+    f.test_f
+        .context
+        .borrow_mut()
+        .set_account(&decoy, &model.into());
+    rewards[2] = decoy;
+
+    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+    let drift_crank = f
+        .user
+        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+        .await;
+    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
+    let ref_banks = vec![
+        RebalanceBankMeta::new(src, f.drift_slice().await),
+        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
+            .with_rewards(rewards),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[cu_ix, drift_crank, start_ix, end_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    Ok(())
+}
+
 /// A liability in an allowlisted bank is rejected at placement: that bank can never receive, yet
 /// still blocks lower-rate destinations in the best-venue scan.
 #[tokio::test]
