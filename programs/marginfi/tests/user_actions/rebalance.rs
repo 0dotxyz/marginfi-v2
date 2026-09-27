@@ -2420,6 +2420,46 @@ async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<(
     Ok(())
 }
 
+/// A higher-rate bank with room for only part of a move is priced at that room, not the whole move:
+/// sending everything past it is rejected while its remaining room still pays more.
+#[tokio::test]
+async fn rebalance_rejects_passing_over_a_partly_full_higher_rate_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    // The second destination lands at 30% utilization after the move (900 borrowed of 3000). The
+    // first sits at 25% with the whole move but ~33% with just its ~500 of room (500 of ~1500).
+    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    f.dst_bank_f
+        .update_config(
+            BankConfigOpt {
+                deposit_limit: Some(1_500_000_000),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            vec![
+                f.bank_meta(f.src_bank_f.key),
+                f.bank_meta(f.dst_bank_f.key),
+                f.bank_meta(dst2.key),
+            ],
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotBestVenue);
+    Ok(())
+}
+
 /// Every other bank is priced with the move's tokens added to its own inflow: sending both chunks
 /// to one of two identical banks is rejected: the second chunk would earn more in the other.
 #[tokio::test]

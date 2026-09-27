@@ -936,7 +936,8 @@ pub fn start_rebalance<'info>(
                     .ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
         );
-        let amount_native = to_native(mint_decimals, I80F48::from(m.amount))?;
+        let amount = I80F48::from(m.amount);
+        let amount_native = to_native(mint_decimals, amount)?;
         // Skip banks this execution already fills to capacity, and native banks already at or below
         // the destination's rate with their own inflow (more deposits only lower a native rate).
         for i in 0..banks.len() {
@@ -944,9 +945,19 @@ pub fn start_rebalance<'info>(
             {
                 continue;
             }
-            let extra_native = inflow_native[i]
-                .checked_add(amount_native)
-                .ok_or_else(math_error!())?;
+            // A bank with less room than this move is priced full: the most of these tokens it holds.
+            let extra_native =
+                if inflow[i].checked_add(amount).ok_or_else(math_error!())? <= capacity[i] {
+                    inflow_native[i]
+                        .checked_add(amount_native)
+                        .ok_or_else(math_error!())?
+                } else {
+                    to_native(mint_decimals, capacity[i])?
+                };
+            // Room under one native unit takes none of these tokens.
+            if extra_native == inflow_native[i] {
+                continue;
+            }
             let candidate = rate_after(i, extra_native)?;
             check!(candidate <= landed[d], MarginfiError::RebalanceNotBestVenue);
         }
