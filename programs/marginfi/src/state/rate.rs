@@ -356,7 +356,7 @@ fn juplend_supply_apr<'info>(
         MarginfiError::JuplendLendingStale
     );
     let rate_model = match rewards.rate_model {
-        Some(ai) => Some(load_juplend_rate_model(ai, &{ reserve.mint })?),
+        Some(ai) => Some(load_juplend_rate_model(ai, &reserve.mint)?),
         None => None,
     };
     let base = reserve
@@ -416,7 +416,7 @@ fn load_juplend_rate_model(ai: &AccountInfo, mint: &Pubkey) -> MarginfiResult<Ra
     let model = RateModel::from_account_data(&ai.try_borrow_data()?)
         .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))?;
     require_keys_eq!(
-        { model.mint },
+        model.mint,
         *mint,
         MarginfiError::JuplendLendingValidationFailed
     );

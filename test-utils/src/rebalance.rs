@@ -941,11 +941,11 @@ impl MultiVenueFixture {
         tr.borrow_rate = borrow_rate;
         tr.last_utilization = last_utilization;
         tr.fee_on_interest = 0;
-        tr.supply_exchange_price = 1_000_000_000_000;
-        tr.borrow_exchange_price = 1_000_000_000_000;
+        tr.supply_exchange_price = 1_000_000_000_000u64.to_le_bytes();
+        tr.borrow_exchange_price = 1_000_000_000_000u64.to_le_bytes();
         tr.total_supply_with_interest = total_supply;
         tr.total_borrow_with_interest = total_borrow;
-        tr.last_update_timestamp = now;
+        tr.last_update_timestamp = now.to_le_bytes();
         self.test_f
             .context
             .borrow_mut()
