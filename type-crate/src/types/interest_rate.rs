@@ -142,8 +142,7 @@ pub fn basis_to_u32(value: I80F48) -> u32 {
 
 /// Converts u32 back to leverage value (0-100 range)
 pub fn u32_to_basis(value: u32) -> I80F48 {
-    let ratio: I80F48 = I80F48::from_num(value) / I80F48::from_num(u32::MAX);
-    ratio * I80F48::from_num(100.0)
+    I80F48::from_bits(u32_to_centi(value).to_bits() * 100)
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
@@ -244,6 +243,7 @@ mod tests {
             let centi = I80F48::from_num(v) / max;
             assert_eq!(u32_to_centi(v), centi);
             assert_eq!(u32_to_milli(v), centi * I80F48::from_num(10));
+            assert_eq!(u32_to_basis(v), centi * I80F48::from_num(100));
         }
     }
 }
