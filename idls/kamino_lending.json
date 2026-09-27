@@ -2,7 +2,7 @@
   "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
   "metadata": {
     "name": "kamino_lending",
-    "version": "1.14.0",
+    "version": "1.25.0",
     "spec": "0.1.0",
     "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
   },
@@ -1205,7 +1205,7 @@
     {
       "code": 6123,
       "name": "OrderIndexOutOfBounds",
-      "msg": "Obligation order of the given index cannot exist"
+      "msg": "Order of the given index cannot exist"
     },
     {
       "code": 6124,
@@ -1361,6 +1361,161 @@
       "code": 6154,
       "name": "WithdrawTicketValueTooSmall",
       "msg": "Withdraw ticket's value would be below the market-configured minimum"
+    },
+    {
+      "code": 6155,
+      "name": "InvalidWithdrawTicketProgressCallbackConfig",
+      "msg": "Invalid configuration or required custom accounts for the requested withdraw ticket callback type"
+    },
+    {
+      "code": 6156,
+      "name": "WithdrawTicketProgressCallbackAccountsMissing",
+      "msg": "One or more accounts required by the ticket's configured progress callback are missing"
+    },
+    {
+      "code": 6157,
+      "name": "BorrowRolloverConfigurationDisabled",
+      "msg": "Configuring auto-rollover on loans is disabled by market owner"
+    },
+    {
+      "code": 6158,
+      "name": "InvalidObligationConfigUpdateSubject",
+      "msg": "Invalid specification of the Obligation's part to be configured"
+    },
+    {
+      "code": 6159,
+      "name": "BorrowRolloverLiquidityMintMismatch",
+      "msg": "Auto-rollover must use a target reserve of the same token"
+    },
+    {
+      "code": 6160,
+      "name": "ObligationBorrowRolloverNotApplicable",
+      "msg": "The given borrow is not fixed-term and does not require rolling over"
+    },
+    {
+      "code": 6161,
+      "name": "ObligationBorrowOutsideRolloverWindow",
+      "msg": "The given borrow is outside the corresponding market-configured rollover window"
+    },
+    {
+      "code": 6162,
+      "name": "ObligationBorrowRolloverNotEnabledByOwner",
+      "msg": "Obligation's owner did not opt-in for auto-rollover of the given borrow"
+    },
+    {
+      "code": 6163,
+      "name": "ObligationBorrowRolloverTargetReserveMismatch",
+      "msg": "Obligation's owner did not allow to roll over into terms offered by the given reserve"
+    },
+    {
+      "code": 6164,
+      "name": "BorrowRolloverExecutionDisabled",
+      "msg": "Executing auto-rollover is disabled by market owner"
+    },
+    {
+      "code": 6165,
+      "name": "ObligationAccountingMismatch",
+      "msg": "Obligation internal state accounting has been unexpectedly modified"
+    },
+    {
+      "code": 6166,
+      "name": "PartialRolloverValueTooSmall",
+      "msg": "Partial rollover amount is below the market-configured minimum value"
+    },
+    {
+      "code": 6167,
+      "name": "ObligationBorrowRolloverConfigMismatch",
+      "msg": "Pre-existing rollover configuration of the loan cannot be overwritten by the operation"
+    },
+    {
+      "code": 6168,
+      "name": "ObligationBorrowRolloverMustProlongDebtTerm",
+      "msg": "Rollover into existing borrow must prolong the remaining debt term"
+    },
+    {
+      "code": 6169,
+      "name": "RolloverNotSupportedInElevationGroup",
+      "msg": "Rollover is not supported for obligations in an elevation group"
+    },
+    {
+      "code": 6170,
+      "name": "WithdrawTicketCancellationDisabled",
+      "msg": "Cancelling withdraw tickets is disabled by the market"
+    },
+    {
+      "code": 6171,
+      "name": "WithdrawTicketFullyCancelled",
+      "msg": "Cannot use ticket that was already fully-cancelled"
+    },
+    {
+      "code": 6172,
+      "name": "CloneSourceReserveDisabled",
+      "msg": "Cannot clone config from a reserve that is disabled"
+    },
+    {
+      "code": 6173,
+      "name": "CloneTargetReserveAlreadyInUse",
+      "msg": "Cannot clone config into a reserve that has been in use"
+    },
+    {
+      "code": 6174,
+      "name": "ClonedReserveLiquidityMintMismatch",
+      "msg": "Cannot clone config between reserves of different mints"
+    },
+    {
+      "code": 6175,
+      "name": "ReserveEmergencyMode",
+      "msg": "Reserve emergency mode is enabled"
+    },
+    {
+      "code": 6176,
+      "name": "ObligationOwnershipTransferInProgress",
+      "msg": "Obligation ownership transfer is in progress"
+    },
+    {
+      "code": 6177,
+      "name": "ObligationOwnershipTransferNotInInitiatedState",
+      "msg": "Obligation ownership transfer is not in initiated state"
+    },
+    {
+      "code": 6178,
+      "name": "ObligationPendingOwnerNotSet",
+      "msg": "Obligation pending owner not set"
+    },
+    {
+      "code": 6179,
+      "name": "ObligationInvalidPendingOwner",
+      "msg": "Invalid pending owner address"
+    },
+    {
+      "code": 6180,
+      "name": "ObligationOwnershipTransferNotApproved",
+      "msg": "Obligation ownership transfer not approved by admin"
+    },
+    {
+      "code": 6181,
+      "name": "ObligationHasActiveBorrowOrders",
+      "msg": "Obligation has active borrow orders"
+    },
+    {
+      "code": 6182,
+      "name": "OnlyComputeBudgetCompanionIxsAllowed",
+      "msg": "Only ComputeBudget instructions may accompany this instruction"
+    },
+    {
+      "code": 6183,
+      "name": "MissingPermissioner",
+      "msg": "Required permissioning account is missing"
+    },
+    {
+      "code": 6184,
+      "name": "ReserveRewardsDisabled",
+      "msg": "Reserve rewards are disabled on this market (reserve_rewards_max_apr_bps is 0)"
+    },
+    {
+      "code": 6185,
+      "name": "TransactionIncludesNonceInstruction",
+      "msg": "Transaction includes a nonce instruction, which is not allowed for admin operations"
     }
   ],
   "types": [

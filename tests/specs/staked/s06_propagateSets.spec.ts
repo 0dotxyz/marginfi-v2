@@ -50,7 +50,7 @@ describe("Edit and propagate staked settings", () => {
     );
   });
 
-  it("(admin) edits some settings - happy path", async () => {
+  it("(governance admin) edits some settings - happy path", async () => {
     const settings: StakedSettingsEdit = {
       oracle: oracles.usdcOracle.publicKey,
       assetWeightInit: bigNumberToWrappedI80F48(0.2),
@@ -67,7 +67,7 @@ describe("Edit and propagate staked settings", () => {
         .editStakedSettings(settings)
         .accountsPartial({
           marginfiGroup: marginfiGroup.publicKey,
-          admin: groupAdmin.wallet.publicKey,
+          governanceAdmin: groupAdmin.wallet.publicKey,
           stakedSettings: settingsKey,
         })
         .instruction()
@@ -115,7 +115,7 @@ describe("Edit and propagate staked settings", () => {
     assert.equal(config.configFlags, PYTH_PULL_MIGRATED);
   });
 
-  it("(admin) sets a bad oracle - fails at propagation", async () => {
+  it("(governance admin) sets a bad oracle - fails at propagation", async () => {
     const settings: StakedSettingsEdit = {
       oracle: oracles.wsolOracle.publicKey,
       assetWeightInit: null,
@@ -130,7 +130,7 @@ describe("Edit and propagate staked settings", () => {
         .editStakedSettings(settings)
         .accountsPartial({
           marginfiGroup: marginfiGroup.publicKey,
-          admin: groupAdmin.wallet.publicKey,
+          governanceAdmin: groupAdmin.wallet.publicKey,
           stakedSettings: settingsKey,
         })
         .instruction()
@@ -160,7 +160,7 @@ describe("Edit and propagate staked settings", () => {
     assertBankrunTxFailed(result, 6052);
   });
 
-  it("(admin) restores default settings - happy path", async () => {
+  it("(governance admin) restores default settings - happy path", async () => {
     const defaultSettings = defaultStakedInterestSettings(
       oracles.wsolOracle.publicKey
     );
@@ -180,7 +180,7 @@ describe("Edit and propagate staked settings", () => {
         .editStakedSettings(settings)
         .accountsPartial({
           marginfiGroup: marginfiGroup.publicKey,
-          admin: groupAdmin.wallet.publicKey,
+          governanceAdmin: groupAdmin.wallet.publicKey,
           stakedSettings: settingsKey,
         })
         .instruction(),

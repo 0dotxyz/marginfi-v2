@@ -1,4 +1,4 @@
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{ix_utils, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::SAME_ASSET_EMODE_REGISTRY_SEED,
@@ -12,12 +12,7 @@ use marginfi_type_crate::{
 pub fn lending_pool_init_same_asset_emode_registry(
     ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
 ) -> MarginfiResult {
-    let group = ctx.accounts.group.load()?;
-
-    check!(
-        ctx.accounts.signer.key() == group.admin || ctx.accounts.signer.key() == group.emode_admin,
-        MarginfiError::Unauthorized
-    );
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let mut registry = ctx.accounts.same_asset_emode_registry.load_init()?;
     registry.key = ctx.accounts.same_asset_emode_registry.key();
@@ -31,10 +26,11 @@ pub fn lending_pool_init_same_asset_emode_registry(
 
 #[derive(Accounts)]
 pub struct LendingPoolInitSameAssetEmodeRegistry<'info> {
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(mut)]
-    pub signer: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         init,
@@ -43,10 +39,14 @@ pub struct LendingPoolInitSameAssetEmodeRegistry<'info> {
             group.key().as_ref()
         ],
         bump,
-        payer = signer,
+        payer = governance_admin,
         space = 8 + SameAssetEmodeRegistry::LEN,
     )]
     pub same_asset_emode_registry: AccountLoader<'info, SameAssetEmodeRegistry>,
 
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

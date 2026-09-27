@@ -1,3 +1,4 @@
 pub use crate::{
-    marginfi_account::RebalanceBankMeta, marginfi_group::*, spl::*, test::*, utils::*,
+    assert_custom_error, marginfi_account::RebalanceBankMeta, marginfi_group::*, spl::*, test::*,
+    utils::*,
 };

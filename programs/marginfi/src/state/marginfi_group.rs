@@ -5,10 +5,9 @@ use crate::state::emode::{
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{basis_to_u32, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY};
 use marginfi_type_crate::{
     constants::DAILY_RESET_INTERVAL,
-    types::{MarginfiGroup, PROGRAM_FEES_ENABLED},
+    types::{basis_to_u32, MarginfiGroup, MAX_PREMIUM_ENTRIES, PROGRAM_FEES_ENABLED},
 };
 use std::fmt::Debug;
 
@@ -22,6 +21,7 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
@@ -38,7 +38,8 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
-    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32;
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -149,12 +150,27 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey) {
+        if self.governance_admin == new_governance_admin {
+            msg!("No change to governance admin: {:?}", new_governance_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set governance admin from {:?} to {:?}",
+                self.governance_admin,
+                new_governance_admin
+            );
+            self.governance_admin = new_governance_admin;
+        }
+    }
+
     /// Set the group parameters when initializing a group.
     /// This should be called only when the group is first initialized.
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
         self.delegate_flow_admin = admin_pk;
+        self.governance_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
@@ -259,21 +275,14 @@ impl MarginfiGroupImpl for MarginfiGroup {
         Ok(())
     }
 
-    /// Look up the variable-borrow premium rate (milli-u32 encoding) for a (collateral tag,
-    /// liability tag) pair. Missing pairs and untagged (0) banks pay no premium.
-    /// * The SOLE accessor for `premium_entries`. Entries are stored sorted by
-    ///   (collateral_tag, liability_tag) — every config path preserves this.
-    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32 {
-        if collateral_tag == PREMIUM_TAG_EMPTY || liability_tag == PREMIUM_TAG_EMPTY {
-            return 0;
-        }
-        let n = (self.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);
-        self.premium_entries[..n]
-            .binary_search_by_key(&(collateral_tag, liability_tag), |e| {
-                (e.collateral_tag, e.liability_tag)
-            })
-            .map(|i| self.premium_entries[i].rate)
-            .unwrap_or(0)
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
+
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.governance_admin, signer, MarginfiError::Unauthorized);
+        Ok(())
     }
 }
 
@@ -328,9 +337,16 @@ mod tests {
         assert_eq!(size_of::<MarginfiGroup>(), 9248);
         assert_eq!(offset_of!(MarginfiGroup, premium_settings), 512);
         assert_eq!(offset_of!(MarginfiGroup, premium_entries), 544);
-        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`);
-        // `_padding_2` (the 0.1.10 resize region) starts at the v1 struct end.
-        assert_eq!(offset_of!(MarginfiGroup, _padding_2), MarginfiGroup::V1_LEN);
+        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`).
+        // The dedicated governance admin begins in the post-v1 extension.
+        assert_eq!(
+            offset_of!(MarginfiGroup, governance_admin),
+            MarginfiGroup::V1_LEN
+        );
+        assert_eq!(
+            offset_of!(MarginfiGroup, _padding_2),
+            MarginfiGroup::V1_LEN + 32
+        );
 
         // PremiumSettings internals: 8 + 2 + 2 + 4 + 16 = 32, 8-aligned, no implicit padding
         // (Pod derive would reject implicit padding at compile time; these pin the EXPLICIT
@@ -367,7 +383,7 @@ mod tests {
     /// the circuit-breaker block stay at their 0.1.10 positions.
     #[test]
     fn bank_premium_field_layout() {
-        assert_eq!(size_of::<Bank>(), 1856);
+        assert_eq!(size_of::<Bank>(), 3904);
         assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
         assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
         assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
@@ -377,6 +393,7 @@ mod tests {
         assert_eq!(offset_of!(Bank, premium_tag), 1840);
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
+        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and
@@ -390,50 +407,5 @@ mod tests {
         assert_eq!(offset_of!(Balance, premium_rate_snapshot), 36);
         assert_eq!(offset_of!(Balance, premium_outstanding), 72);
         assert_eq!(offset_of!(Balance, last_update), 88);
-    }
-
-    fn group_with_entries(entries: &[(u16, u16, u32)]) -> MarginfiGroup {
-        let mut group = MarginfiGroup::zeroed();
-        for (i, (c, l, r)) in entries.iter().enumerate() {
-            group.premium_entries[i] = PremiumEntry {
-                collateral_tag: *c,
-                liability_tag: *l,
-                rate: *r,
-            };
-        }
-        group.premium_settings.entry_count = entries.len() as u16;
-        group
-    }
-
-    #[test]
-    fn find_premium_rate_hit_and_miss() {
-        let group = group_with_entries(&[(100, 200, 7), (100, 300, 9), (150, 200, 11)]);
-        assert_eq!(group.find_premium_rate(100, 200), 7);
-        assert_eq!(group.find_premium_rate(100, 300), 9);
-        assert_eq!(group.find_premium_rate(150, 200), 11);
-        // Missing pair defaults to 0
-        assert_eq!(group.find_premium_rate(150, 300), 0);
-        assert_eq!(group.find_premium_rate(999, 999), 0);
-    }
-
-    #[test]
-    fn find_premium_rate_tag_zero_never_matches() {
-        // A pathological entry with tag 0 (rejected by config validation, but belt-and-braces)
-        let group = group_with_entries(&[(0, 200, 7), (100, 0, 9)]);
-        assert_eq!(group.find_premium_rate(0, 200), 0);
-        assert_eq!(group.find_premium_rate(100, 0), 0);
-        assert_eq!(group.find_premium_rate(0, 0), 0);
-    }
-
-    #[test]
-    fn find_premium_rate_respects_count() {
-        let mut group = group_with_entries(&[(100, 200, 7), (100, 300, 9)]);
-        // Entries past entry_count are ignored
-        group.premium_settings.entry_count = 1;
-        assert_eq!(group.find_premium_rate(100, 300), 0);
-        assert_eq!(group.find_premium_rate(100, 200), 7);
-        // count 0 => matrix off => everything is 0
-        group.premium_settings.entry_count = 0;
-        assert_eq!(group.find_premium_rate(100, 200), 0);
     }
 }

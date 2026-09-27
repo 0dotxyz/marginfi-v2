@@ -1,4 +1,4 @@
-use crate::{state::marginfi_group::MarginfiGroupImpl, MarginfiError, MarginfiResult};
+use crate::{ix_utils, state::marginfi_group::MarginfiGroupImpl, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
@@ -20,9 +20,15 @@ pub struct ConfigGroupFee<'info> {
         has_one = global_fee_admin @ MarginfiError::Unauthorized
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 pub fn config_group_fee(ctx: Context<ConfigGroupFee>, enable_program_fee: bool) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut marginfi_group = ctx.accounts.marginfi_group.load_mut()?;
     let flag_before = marginfi_group.group_flags;
 

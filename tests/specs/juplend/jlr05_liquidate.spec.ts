@@ -69,6 +69,7 @@ import {
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
   ORACLE_CONF_INTERVAL,
+  blankBankConfigOptRaw,
   defaultBankConfigOptRaw,
 } from "../../utils/types";
 import {
@@ -283,7 +284,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
    * - Liability is 2.5 TokenB debt, ~$50
    */
   it("(user 0) partially liquidates user 1 after TokenB liability reweight - happy path", async () => {
-    const reweightConfig = defaultBankConfigOptRaw();
+    const reweightConfig = blankBankConfigOptRaw();
     reweightConfig.liabilityWeightInit =
       bigNumberToWrappedI80F48(LIAB_WEIGHT_INDUCED);
     reweightConfig.liabilityWeightMaint =

@@ -81,8 +81,8 @@ export type ConfigGroupPremiumArgs = {
 };
 
 /**
- * (emode admin) Set one pair of the group's premium matrix (like emode, one pair per
- * instruction). The signer (provider wallet) must be the group's `emode_admin`.
+ * (fast group admin) Set one pair of the group's premium matrix (like emode, one pair per
+ * instruction). The signer (provider wallet) must be the group's `admin`.
  */
 export const configGroupPremium = (
   program: Program<Marginfi>,
@@ -96,7 +96,7 @@ export const configGroupPremium = (
     )
     .accounts({
       group: args.group,
-      // emodeAdmin: signer, implied from provider wallet (checked has_one against group)
+      // admin: signer, implied from provider wallet (checked has_one against group)
     })
     .instruction();
 };
@@ -108,8 +108,8 @@ export type ConfigBankPremiumArgs = {
 };
 
 /**
- * (emode admin) Set a bank's premium tag and toggle premium accrual for its borrowers. The signer
- * (provider wallet) must be the group's `emode_admin`.
+ * (fast group admin) Set a bank's premium tag and toggle premium accrual for its borrowers. The
+ * signer (provider wallet) must be the group's `admin`.
  */
 export const configBankPremium = (
   program: Program<Marginfi>,
@@ -119,7 +119,7 @@ export const configBankPremium = (
     .lendingPoolConfigureBankPremium(args.premiumTag, args.active)
     .accounts({
       // group: implied from bank
-      // emodeAdmin: signer, implied from provider wallet
+      // admin: signer, implied from provider wallet
       bank: args.bank,
     })
     .instruction();

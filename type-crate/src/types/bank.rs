@@ -21,7 +21,7 @@ use fixed::types::I80F48;
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
 
-assert_struct_size!(Bank, 1856);
+assert_struct_size!(Bank, 3904);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -245,11 +245,16 @@ pub struct Bank {
     /// can never charge for (or health-project) the deactivated window.
     /// * 0 on banks that never activated premium.
     pub premium_activated_at: i64,
+
+    pub _padding_1: [[u64; 8]; 32],
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+    /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
+    /// `_padding_1` existed, and a byte-identical prefix of the current layout.
+    pub const V1_LEN: usize = 1856;
 
     #[inline]
     pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {
@@ -404,6 +409,8 @@ pub enum OracleSetup {
     JuplendLST,             // 24
     PTPyth,                 // 25
     PTFixed,                // 26
+    ScopeKamino,            // 27
+    ScopeJuplend,           // 28
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -438,6 +445,8 @@ impl OracleSetup {
             24 => Some(Self::JuplendLST),
             25 => Some(Self::PTPyth),
             26 => Some(Self::PTFixed),
+            27 => Some(Self::ScopeKamino),
+            28 => Some(Self::ScopeJuplend),
             _ => None,
         }
     }
@@ -486,8 +495,11 @@ impl OracleSetup {
             | Self::FixedDrift
             | Self::FixedJuplend
             // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
-            // covers `oracle_keys[0]` cannot express that, so Scope banks never pair.
+            // covers `oracle_keys[0]` cannot express that, so Scope banks (venue-wrapped or not)
+            // never pair.
             | Self::Scope
+            | Self::ScopeKamino
+            | Self::ScopeJuplend
             | Self::PTFixed => None,
         }
     }
@@ -544,6 +556,19 @@ mod feed_family_tests {
             OracleSetup::FixedDrift,
             OracleSetup::FixedJuplend,
             OracleSetup::PTFixed,
+        ] {
+            assert_eq!(setup.feed_family(), None);
+        }
+    }
+
+    /// A Scope bank is identified by `(oracle_keys[0], scope_entry_index)`, which no family can
+    /// express, so neither the plain setup nor its venue wrappers may ever pair with anything.
+    #[test]
+    fn scope_setups_have_no_feed_family() {
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
         ] {
             assert_eq!(setup.feed_family(), None);
         }

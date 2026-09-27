@@ -137,6 +137,7 @@ pub fn basis_to_u32(value: I80F48) -> u32 {
     let max_value: I80F48 = I80F48::from_num(100.0); // 0-100 range
     let clamped: I80F48 = value.min(max_value).max(I80F48::ZERO);
     let ratio: I80F48 = clamped / max_value;
+    // Truncating, so `u32_to_basis` decodes a hair below the value encoded here.
     (ratio * I80F48::from_num(u32::MAX)).to_num::<u32>()
 }
 

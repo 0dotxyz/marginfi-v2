@@ -4,6 +4,7 @@ import {
   Keypair,
   Transaction,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
 import {
@@ -179,6 +180,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmsVaultAuthority,
           rent: SYSVAR_RENT_PUBKEY,
           systemProgram: SystemProgram.programId,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .instruction(),
     );

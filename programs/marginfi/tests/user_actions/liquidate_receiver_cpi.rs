@@ -321,9 +321,13 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
     };
 
     let mut metas = create_handle_bankruptcy_cpi_metas(&cpi_accounts);
-    let remaining = attacker_acc
+    let mut remaining = attacker_acc
         .load_observation_account_metas(vec![], vec![])
         .await;
+    remaining.insert(
+        0,
+        AccountMeta::new_readonly(solana_instructions_sysvar::id(), false),
+    );
 
     metas.extend_from_slice(&remaining);
 

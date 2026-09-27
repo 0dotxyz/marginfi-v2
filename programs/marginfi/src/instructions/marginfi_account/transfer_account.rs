@@ -34,6 +34,7 @@ fn initialize_migrated_account(
     new_account.account_flags = old_account.account_flags;
     new_account.migrated_from = old_account_key;
     new_account.indexer_flags = old_account.indexer_flags;
+    new_account.liquidation_tagged_at = old_account.liquidation_tagged_at;
     new_account.sync_indexer_flags();
 }
 
@@ -150,7 +151,7 @@ pub struct TransferToNewAccount<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -314,7 +315,7 @@ pub struct TransferToNewAccountPda<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,

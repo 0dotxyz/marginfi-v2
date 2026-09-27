@@ -1751,12 +1751,13 @@ async fn premium_reopened_liability_pays_nothing_for_debt_free_gap() -> anyhow::
     Ok(())
 }
 
-/// Withdrawing during an oracle outage is NOT blocked: the premium refresh no-ops on the
-/// incomplete pass and the old rate persists (re-priced later by pulse). Blocking would let a
-/// dead-oracle collateral freeze a healthy withdraw; keeping a stale rate is safe since premium
-/// is still charged and projected.
+/// Withdrawing during an oracle outage is NOT blocked — but since the pass is incomplete, the
+/// snapshot RATCHETS: the unpriceable leg is priced at its full pair rate and the rate can only
+/// move up (never diluted down). This closes the "withdraw the cheap collateral while the
+/// tagged leg's oracle is out" freeze; a later clean refresh re-prices freely (down included),
+/// so honest outages overcharge forward-only for roughly one pulse interval.
 #[tokio::test]
-async fn premium_withdraw_keeps_old_rate_when_collateral_oracle_stale() -> anyhow::Result<()> {
+async fn premium_withdraw_during_oracle_outage_ratchets_not_blocked() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -1834,20 +1835,20 @@ async fn premium_withdraw_keeps_old_rate_when_collateral_oracle_stale() -> anyho
     let rate_before = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
     assert!((rate_before - 0.5).abs() < 0.001);
 
-    // Tagged SOL oracle goes stale; the withdraw soft-skips it and still passes on the untagged
-    // SolEq. The premium refresh can't run (incomplete pass), but the withdraw is NOT blocked.
+    // Tagged SOL oracle goes stale; the withdraw soft-skips it for health and still passes on
+    // the untagged SolEq. The withdraw is NOT blocked — the snapshot ratchets to the
+    // unpriceable SOL leg's full pair rate instead of silently keeping the diluted 0.5%.
     advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
 
     borrower
         .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
         .await?;
 
-    // The snapshot is untouched (old rate kept, not zeroed) — premium keeps being charged.
     let account = borrower.load().await;
     let rate_after = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
     assert!(
-        (rate_after - rate_before).abs() < 1e-9,
-        "rate should be unchanged: {} -> {}",
+        (rate_after - 1.0).abs() < 0.001,
+        "rate should ratchet {} -> 1.0%, got {}",
         rate_before,
         rate_after
     );
@@ -3079,5 +3080,324 @@ async fn premium_reactivation_before_touch_retains_materialized_receivable() -> 
         I80F48!(100)
     );
 
+    Ok(())
+}
+
+/// Finding: a Collateral-tier bank with 0/0 asset weights backs no health, so it must not
+/// tilt the premium mix either (pre-fix its raw USD diluted the rate at zero health cost).
+#[tokio::test]
+async fn premium_zero_weight_collateral_does_not_dilute_the_mix() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            // Collateral tier, but weightless: legal per config validation.
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(0).into(),
+                    asset_weight_maint: I80F48!(0).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+    let group_f = &test_f.marginfi_group;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(test_f.get_bank(&BankMint::Sol), TAG_SOL, true)
+        .await?;
+
+    let (_lender, borrower, _) = setup_borrower(&test_f, 1_000.0).await;
+
+    // Equal USD of 0/0-weight collateral: pre-fix this halved the rate to 0.5%.
+    let sol_eq_account = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(sol_eq_account.key, sol_eq_bank_f, 999, None)
+        .await?;
+    borrower.try_lending_account_pulse_health().await?;
+
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        (rate - 1.0).abs() < 0.0001,
+        "0/0-weight collateral must not dilute: {} != 1.0%",
+        rate
+    );
+    Ok(())
+}
+
+/// Finding: the liquidator's seized-collateral credit settles their accrued premium in the
+/// asset bank (vault-backed, like a repay) instead of writing it off when the credit closes
+/// their principal.
+#[tokio::test]
+async fn premium_liquidation_settles_liquidator_premium_instead_of_write_off() -> anyhow::Result<()>
+{
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // (stable -> sol) = 5%: a USDC-collateralized SOL borrow pays 5%.
+    group_f
+        .try_configure_group_premium(entry(TAG_STABLE, TAG_SOL, 5.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    // Liquidity for both borrow legs
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 10_000, None)
+        .await?;
+    let lender_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_sol.key, sol_bank_f, 10_000, None)
+        .await?;
+
+    // Liquidator: USDC collateral, 100 SOL premium-active debt at 5%.
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(2_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc.key, usdc_bank_f, 2_000, None)
+        .await?;
+    let liquidator_sol = test_f.sol_mint.create_empty_token_account().await;
+    liquidator
+        .try_bank_borrow(liquidator_sol.key, sol_bank_f, 100)
+        .await?;
+    let account = liquidator.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &sol_bank_f.key)) - 5.0).abs() < 0.001);
+
+    // Victim: SOL collateral, USDC debt.
+    let victim = test_f.create_marginfi_account().await;
+    let victim_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    victim
+        .try_bank_deposit(victim_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let victim_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    victim
+        .try_bank_borrow(victim_usdc.key, usdc_bank_f, 3_000)
+        .await?;
+
+    // One year of premium on the liquidator's 100 SOL debt: P = 5 SOL.
+    advance_clock(&test_f, YEAR).await;
+
+    // Crush SOL collateral weights so the victim is liquidatable (the liquidator's SOL is a
+    // liability, so this leaves the liquidator untouched).
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    let collected_before: I80F48 = sol_bank_f.load().await.collected_premium_outstanding.into();
+    assert_eq!(collected_before, I80F48::ZERO);
+
+    // Seize 120 SOL: covers the 100 SOL principal + 5 SOL premium, remainder deposits.
+    liquidator
+        .try_liquidate(&victim, sol_bank_f, 120, usdc_bank_f)
+        .await?;
+
+    // The premium was settled into the bank's swept-premium counter, NOT written off.
+    let collected_after: I80F48 = sol_bank_f.load().await.collected_premium_outstanding.into();
+    assert_eq_noise!(
+        collected_after,
+        I80F48::from(native!(5, "SOL")),
+        I80F48!(10_000) // rate-encoding granularity on 5e9 native units
+    );
+
+    // Liquidator's SOL leg: principal closed, premium cleared by SETTLEMENT, remainder
+    // (120 - 100 - 5 = 15 SOL) landed as a deposit.
+    let account = liquidator.load().await;
+    let sol_balance = usdc_balance(&account, &sol_bank_f.key);
+    assert_eq!(I80F48::from(sol_balance.premium_outstanding), I80F48::ZERO);
+    assert_eq_noise!(
+        I80F48::from(sol_balance.asset_shares), // share value 1 (zero interest)
+        I80F48::from(native!(15, "SOL")),
+        I80F48!(10_000)
+    );
+    Ok(())
+}
+
+/// Finding: a withdraw that supplies a wrong oracle for a premium-tagged collateral leg used
+/// to freeze the (diluted) snapshot. Now it ratchets to the unpriceable leg's full pair rate.
+#[tokio::test]
+async fn premium_withdraw_with_bad_oracle_ratchets_instead_of_freezing() -> anyhow::Result<()> {
+    use solana_sdk::transaction::Transaction;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+    let group_f = &test_f.marginfi_group;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(test_f.get_bank(&BankMint::Sol), TAG_SOL, true)
+        .await?;
+
+    // Tagged SOL + equal untagged SolEq -> diluted 0.5% snapshot.
+    let (_lender, borrower, _) = setup_borrower(&test_f, 1_000.0).await;
+    let sol_eq_account = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(sol_eq_account.key, sol_eq_bank_f, 999, None)
+        .await?;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 0.5).abs() < 0.001);
+
+    // Withdraw 1 SolEq while passing a WRONG oracle account for the tagged SOL leg. Health
+    // soft-zeroes SOL and still passes on SolEq; pre-fix the premium refresh silently
+    // no-opped and the 0.5% survived.
+    let payer = test_f.payer();
+    let withdraw_dest = test_f
+        .sol_equivalent_mint
+        .create_empty_token_account()
+        .await;
+    let mut ix = borrower
+        .make_withdraw_ix_with_authority(withdraw_dest.key, sol_eq_bank_f, 1.0, None, payer)
+        .await;
+    let mut tampered = 0;
+    for meta in ix.accounts.iter_mut() {
+        if meta.pubkey == PYTH_SOL_FEED {
+            meta.pubkey = Pubkey::new_unique();
+            tampered += 1;
+        }
+    }
+    assert_eq!(tampered, 1, "expected exactly one SOL oracle meta");
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+
+    // Ratcheted to the unpriceable SOL leg's full pair rate.
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        (rate - 1.0).abs() < 0.001,
+        "bad-oracle withdraw must ratchet to 1.0%, got {}",
+        rate
+    );
+
+    // A clean permissionless pulse recomputes freely back down to the true weighted rate.
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        (rate - 0.5).abs() < 0.001,
+        "clean pulse must restore the true rate, got {}",
+        rate
+    );
     Ok(())
 }

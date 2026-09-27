@@ -24,17 +24,16 @@ use anchor_spl::token::spl_token;
 #[cfg(not(feature = "client"))]
 use anchor_spl::token::{transfer, Transfer};
 use anchor_spl::token_interface::Mint;
-use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
-        FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
+        DEFAULT_LIQUIDATION_FEE, FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
+        u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
         OraclePriceWithConfidence,
     },
 };
@@ -159,24 +158,16 @@ fn sol_log_compute_units() {
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
 
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        marginfi_group_pk: Pubkey,
-        config: BankConfig,
-        mint: Pubkey,
-        mint_decimals: u8,
-        liquidity_vault: Pubkey,
-        insurance_vault: Pubkey,
-        fee_vault: Pubkey,
-        current_timestamp: i64,
-        liquidity_vault_bump: u8,
-        liquidity_vault_authority_bump: u8,
-        insurance_vault_bump: u8,
-        insurance_vault_authority_bump: u8,
-        fee_vault_bump: u8,
-        fee_vault_authority_bump: u8,
-        bank_seed: u64,
-    ) -> Self;
+    /// The liquidator's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn liquidator_fee(&self) -> I80F48;
+    /// The insurance fund's share of a classic liquidation, as a fraction. A stored 0 means the
+    /// `DEFAULT_LIQUIDATION_FEE` default.
+    fn insurance_fee(&self) -> I80F48;
+    /// Both liquidation cuts combined, the share of the seized collateral a liquidation must be
+    /// able to give up.
+    fn total_liquidation_fee(&self) -> I80F48;
+
     #[allow(clippy::too_many_arguments)]
     fn init(
         &mut self,
@@ -267,66 +258,26 @@ pub trait BankImpl {
     fn decrement_borrowing_position_count(&mut self);
 }
 
+/// A stored 0 falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
+        DEFAULT_LIQUIDATION_FEE
+    } else {
+        u32_to_centi(fee)
+    }
+}
+
 impl BankImpl for Bank {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        marginfi_group_pk: Pubkey,
-        config: BankConfig,
-        mint: Pubkey,
-        mint_decimals: u8,
-        liquidity_vault: Pubkey,
-        insurance_vault: Pubkey,
-        fee_vault: Pubkey,
-        current_timestamp: i64,
-        liquidity_vault_bump: u8,
-        liquidity_vault_authority_bump: u8,
-        insurance_vault_bump: u8,
-        insurance_vault_authority_bump: u8,
-        fee_vault_bump: u8,
-        fee_vault_authority_bump: u8,
-        bank_seed: u64,
-    ) -> Self {
-        Self {
-            mint,
-            mint_decimals,
-            group: marginfi_group_pk,
-            asset_share_value: I80F48::ONE.into(),
-            liability_share_value: I80F48::ONE.into(),
-            liquidity_vault,
-            liquidity_vault_bump,
-            liquidity_vault_authority_bump,
-            insurance_vault,
-            insurance_vault_bump,
-            insurance_vault_authority_bump,
-            collected_insurance_fees_outstanding: I80F48::ZERO.into(),
-            fee_vault,
-            fee_vault_bump,
-            fee_vault_authority_bump,
-            collected_group_fees_outstanding: I80F48::ZERO.into(),
-            total_liability_shares: I80F48::ZERO.into(),
-            total_asset_shares: I80F48::ZERO.into(),
-            last_update: current_timestamp,
-            config,
-            flags: CLOSE_ENABLED_FLAG,
-            emissions_rate: 0,
-            emissions_remaining: I80F48::ZERO.into(),
-            emissions_mint: Pubkey::default(),
-            collected_program_fees_outstanding: I80F48::ZERO.into(),
-            emode: EmodeSettings::zeroed(),
-            fees_destination_account: Pubkey::default(),
-            lending_position_count: 0,
-            borrowing_position_count: 0,
-            liquidation_liquidator_fee: 0,
-            liquidation_insurance_fee: 0,
-            _padding_0: [0; 8],
-            premium_tag: 0,
-            _pad3: [0; 6],
-            premium_activated_at: 0,
-            integration_acc_1: Pubkey::default(),
-            integration_acc_2: Pubkey::default(),
-            bank_seed,
-            ..Default::default()
-        }
+    fn liquidator_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_liquidator_fee)
+    }
+
+    fn insurance_fee(&self) -> I80F48 {
+        liquidation_fee_fraction(self.liquidation_insurance_fee)
+    }
+
+    fn total_liquidation_fee(&self) -> I80F48 {
+        self.liquidator_fee() + self.insurance_fee()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -429,13 +380,12 @@ impl BankImpl for Bank {
         bypass_deposit_limit: bool,
     ) -> MarginfiResult {
         let total_asset_shares: I80F48 = self.total_asset_shares.into();
-        self.total_asset_shares = total_asset_shares
+        let new_total_shares = total_asset_shares
             .checked_add(shares)
-            .ok_or_else(math_error!())?
-            .into();
+            .ok_or_else(math_error!())?;
 
         if shares.is_positive() && self.config.is_deposit_limit_active() && !bypass_deposit_limit {
-            let total_deposits_amount = self.get_asset_amount(self.total_asset_shares.into())?;
+            let total_deposits_amount = self.get_asset_amount(new_total_shares)?;
 
             // For Drift banks, deposit_limit is in native decimals but total_deposits_amount
             // is in 9-decimal (DRIFT_SCALED_BALANCE_DECIMALS). We Scale deposit_limit to match.
@@ -452,6 +402,8 @@ impl BankImpl for Bank {
                 return err!(MarginfiError::BankAssetCapacityExceeded);
             }
         }
+
+        self.total_asset_shares = new_total_shares.into();
 
         Ok(())
     }

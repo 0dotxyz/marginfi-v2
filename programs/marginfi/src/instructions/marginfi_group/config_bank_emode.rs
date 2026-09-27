@@ -1,3 +1,5 @@
+use crate::ix_utils;
+use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiError;
 use crate::MarginfiResult;
@@ -9,8 +11,11 @@ pub fn lending_pool_configure_bank_emode(
     emode_tag: u16,
     entries: [EmodeEntry; MAX_EMODE_ENTRIES],
 ) -> MarginfiResult {
-    let mut bank = ctx.accounts.bank.load_mut()?;
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let group = ctx.accounts.group.load()?;
+
+    let mut bank = ctx.accounts.bank.load_mut()?;
 
     let mut sorted_entries = entries;
     sorted_entries.sort_by_key(|e| e.collateral_bank_emode_tag);
@@ -26,8 +31,10 @@ pub fn lending_pool_configure_bank_emode(
     bank.emode.emode_config.entries = sorted_entries;
     bank.emode.timestamp = Clock::get()?.unix_timestamp;
 
+    let total_liquidation_fee = bank.total_liquidation_fee();
     bank.emode.validate_entries_with_liability_weights(
         &bank.config,
+        total_liquidation_fee,
         group.emode_max_init_leverage,
         group.emode_max_maint_leverage,
     )?;
@@ -51,16 +58,18 @@ pub fn lending_pool_configure_bank_emode(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankEmode<'info> {
-    #[account(
-        has_one = emode_admin @ MarginfiError::Unauthorized
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub emode_admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

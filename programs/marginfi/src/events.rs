@@ -74,6 +74,13 @@ pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
 }
 
 #[event]
+pub struct SetGovernanceAdminEvent {
+    pub header: GroupEventHeader,
+    pub previous_governance_admin: Pubkey,
+    pub new_governance_admin: Pubkey,
+}
+
+#[event]
 pub struct LendingPoolBankConfigureFrozenEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
@@ -411,6 +418,13 @@ pub struct DeleverageEvent {
     pub risk_admin: Pubkey,
     pub deleveragee_assets_seized: f64,
     pub deleveragee_liability_repaid: f64,
+}
+
+#[event]
+pub struct LiquidationTagEvent {
+    pub marginfi_account: Pubkey,
+    /// 0 when the tag was cleared
+    pub tagged_at: i64,
 }
 
 // Rate limit events

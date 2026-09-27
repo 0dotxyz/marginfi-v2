@@ -2,7 +2,7 @@ use crate::{
     check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
-    log_pool_info,
+    ix_utils, log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
@@ -21,6 +21,8 @@ pub fn lending_pool_clone_bank(
     ctx: Context<LendingPoolCloneBank>,
     bank_seed: u64,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
         panic!("Staging or localnet only!");
     }
@@ -138,7 +140,7 @@ pub fn lending_pool_clone_bank(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: ctx.accounts.bank.key(),
         mint: ctx.accounts.bank_mint.key(),
@@ -150,14 +152,11 @@ pub fn lending_pool_clone_bank(
 #[derive(Accounts)]
 #[instruction(bank_seed: u64)]
 pub struct LendingPoolCloneBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,
@@ -253,4 +252,8 @@ pub struct LendingPoolCloneBank<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

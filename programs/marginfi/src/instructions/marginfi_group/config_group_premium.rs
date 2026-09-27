@@ -1,5 +1,6 @@
 use crate::check;
 use crate::events::{GroupEventHeader, LendingPoolGroupPremiumConfigureEvent};
+use crate::ix_utils;
 use crate::MarginfiError;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
@@ -8,7 +9,7 @@ use marginfi_type_crate::types::{
     MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES, MAX_PREMIUM_RATE, PREMIUM_TAG_EMPTY,
 };
 
-/// (emode admin only) Set one pair of the group's variable-borrow premium matrix.
+/// (fast group admin only) Set one pair of the group's variable-borrow premium matrix.
 ///
 /// `rate > 0` inserts or updates the (collateral_tag, liability_tag) pair; `rate == 0` removes
 /// it, erroring if the pair is not in the matrix so operator typos fail loudly. One pair per
@@ -20,6 +21,8 @@ pub fn lending_pool_configure_group_premium(
     liability_tag: u16,
     rate: u32,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // Zero (untagged) never matches a lookup, so storing it would create a dead entry.
     check!(
         collateral_tag != PREMIUM_TAG_EMPTY && liability_tag != PREMIUM_TAG_EMPTY,
@@ -87,7 +90,7 @@ pub fn lending_pool_configure_group_premium(
     emit!(LendingPoolGroupPremiumConfigureEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(ctx.accounts.emode_admin.key()),
+            signer: Some(ctx.accounts.admin.key()),
         },
         collateral_tag,
         liability_tag,
@@ -100,11 +103,12 @@ pub fn lending_pool_configure_group_premium(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureGroupPremium<'info> {
-    #[account(
-        mut,
-        has_one = emode_admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub emode_admin: Signer<'info>,
+    pub admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

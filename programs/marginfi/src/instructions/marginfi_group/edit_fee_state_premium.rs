@@ -1,4 +1,5 @@
 // Global fee admin calls this to edit the variable-borrow premium fields on the fee state.
+use crate::ix_utils;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{constants::FEE_STATE_SEED, types::FeeState};
@@ -7,6 +8,8 @@ pub fn edit_fee_state_premium(
     ctx: Context<EditFeeStatePremium>,
     premium_wallet: Pubkey,
 ) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
     msg!(
         "Updating premium_wallet: {:?} -> {:?}",
@@ -31,4 +34,8 @@ pub struct EditFeeStatePremium<'info> {
         has_one = global_fee_admin @ MarginfiError::Unauthorized
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

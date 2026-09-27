@@ -1,4 +1,5 @@
 use crate::check;
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::utils::NumTraitsWithTolerance;
 use crate::{MarginfiError, MarginfiResult};
@@ -8,7 +9,6 @@ use marginfi_type_crate::{
     constants::{CLOSE_ENABLED_FLAG, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiGroup},
 };
-
 /// * force_close - (admin escape hatch) when `Some(true)`, skips the `CLOSE_ENABLED_FLAG` and
 ///   open-position checks. Intended for legacy pre-0.1.4 banks whose position count is
 ///   non-authoritative. The zero-shares/zero-emissions checks are always enforced, so a bank still
@@ -17,6 +17,8 @@ pub fn lending_pool_close_bank(
     ctx: Context<LendingPoolCloseBank>,
     force_close: Option<bool>,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut group = ctx.accounts.group.load_mut()?;
     // Note: Groups created prior to 0.1.2 have a non-authoritative count here, so subtraction
     // without saturation could reduce the count below zero.
@@ -50,9 +52,6 @@ pub fn lending_pool_close_bank(
     );
 
     drop(bank);
-
-    // Bank will now be closed by anchor
-
     Ok(())
 }
 
@@ -67,10 +66,14 @@ pub struct LendingPoolCloseBank<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        close = admin
+        close = admin,
     )]
     pub bank: AccountLoader<'info, Bank>,
 
     #[account(mut)]
     pub admin: Signer<'info>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

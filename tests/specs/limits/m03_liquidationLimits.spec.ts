@@ -1,1058 +1,705 @@
 import { BN } from "@coral-xyz/anchor";
 import {
-  AddressLookupTableAccount,
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
+import {
   ComputeBudgetProgram,
+  Keypair,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { assert } from "chai";
+import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
-  groupAdmin,
   bankrunContext,
-  banksClient,
   bankrunProgram,
-  ecosystem,
+  banksClient,
+  globalProgramAdmin,
+  groupAdmin,
+  klendBankrunProgram,
   oracles,
   users,
-  globalProgramAdmin,
-  klendBankrunProgram,
-  MARKET,
-  TOKEN_A_RESERVE,
-  kaminoAccounts,
-  farmAccounts,
-  A_FARM_STATE,
-  FARMS_PROGRAM_ID,
-  driftAccounts,
-  driftBankrunProgram,
-  DRIFT_TOKEN_A_PULL_ORACLE,
-  DRIFT_TOKEN_A_SPOT_MARKET,
 } from "../../rootHooks";
-import { configureBank } from "../../utils/group-instructions";
-import { defaultBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
+import {
+  configureBank,
+  configureBankOracle,
+} from "../../utils/group-instructions";
+import {
+  blankBankConfigOptRaw,
+  MAX_BALANCES,
+  ORACLE_SETUP_JUPLEND_LST,
+  ORACLE_SETUP_JUPLEND_MSOL,
+  ORACLE_SETUP_KAMINO_LST,
+  ORACLE_SETUP_KAMINO_MSOL,
+} from "../../utils/types";
 import {
   borrowIx,
-  closeLiquidationRecordIx,
   composeRemainingAccounts,
   composeRemainingAccountsMetaBanksOnly,
   composeRemainingAccountsWriteableMeta,
   depositIx,
-  liquidateIx,
-  initLiquidationRecordIx,
-  startLiquidationIx,
   endLiquidationIx,
+  initLiquidationRecordIx,
+  liquidateIx,
   repayIx,
+  startLiquidationIx,
+  withdrawIx,
 } from "../../utils/user-instructions";
-import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
-  createLut,
-  dumpBankrunLogs,
+  countTxAccountLocks,
+  createLookupTableForInstructions,
   getBankrunBlockhash,
+  mintToTokenAccount,
   processBankrunTransaction,
+  processBankrunV0Transaction,
+  quiet,
+  TX_ACCOUNT_LOCK_LIMIT,
 } from "../../utils/tools";
 import { genericMultiBankTestSetup } from "../../genericSetups";
-import { refreshPullOracles } from "../../utils/pyth-pull-mocks";
+import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
+import { createMintBankrun } from "../../utils/mocks";
 import {
+  defaultKaminoBankConfig,
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "../../utils/kamino-utils";
 import {
+  createKaminoMarket,
+  createReserve,
+} from "../../utils/kamino-reserve-setup";
+import {
+  makeAddKaminoBankIx,
+  makeInitObligationIx,
   makeKaminoDepositIx,
-  makeKaminoWithdrawIx,
 } from "../../utils/kamino-instructions";
 import {
-  makeDriftDepositIx,
-  makeDriftWithdrawIx,
-} from "../../utils/drift-instructions";
-import { TOKEN_A_MARKET_INDEX, refreshDriftOracles } from "../../utils/drift-utils";
-import { makeUpdateSpotMarketCumulativeInterestIx } from "../../utils/drift-sdk";
-import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
+  configureJuplendProtocolPermissions,
+  initJuplendGlobals,
+  initJuplendPool,
+} from "../../utils/juplend/jlr-pool-setup";
 import {
-  makeJuplendWithdrawSimpleIx,
-  refreshJupSimple,
-} from "../../utils/juplend/shorthand-instructions";
-import { JuplendPoolKeys } from "../../utils/juplend/types";
+  addJuplendBankIx,
+  makeJuplendInitPositionIx,
+} from "../../utils/juplend/group-instructions";
+import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
+import { refreshJupSimple } from "../../utils/juplend/shorthand-instructions";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
 import {
+  defaultJuplendBankConfig,
+  DEFAULT_BORROW_CONFIG_MIN,
+  JuplendPoolKeys,
+} from "../../utils/juplend/types";
+import { deriveJuplendGlobalKeys } from "../../utils/juplend/juplend-pdas";
+import {
+  deriveBankWithSeed,
   deriveBaseObligation,
-  deriveLiquidationRecord,
   deriveLiquidityVaultAuthority,
 } from "../../utils/pdas";
-import { assert } from "chai";
-import {
-  assertBankrunTxFailed,
-  assertKeyDefault,
-  assertKeysEqual,
-} from "../../utils/genericTests";
-import { ensureMultiSuiteIntegrationsSetup } from "../../utils/multi-limits-setup";
-import { addJuplendBanksForGroup } from "../../utils/multi-limits-juplend-setup";
-import { dummyIx, getEpochAndSlot } from "../../utils/bankrunConnection";
-import { refreshSwitchboardPullOracleBankrun } from "../../utils/bankrun-oracles";
 
-const startingSeed: number = 42;
+/** Mirrors the program's `MAX_INTEGRATION_POSITIONS`. */
+const CAP = 4;
+/** Swept past the cap so the log still shows where each path actually tops out. */
+const PROBE = 8;
+const DECIMALS = 9;
+const TOKENS = (n: number) => new BN(n * 10 ** DECIMALS);
 
-/** Always one P0 (regular) debt bank). */
-const P0_BORROWS = 1;
+/** Real mainnet pricing accounts loaded at genesis; cloned with the bank's mint patched in. */
+const SANCTUM_SPL_POOL = new PublicKey(
+  "9mhGNSPArRMHpLDMSmxAvuoizBqtBGqYdT8WGuqgxNdn",
+);
+const MSOL_STATE = new PublicKey(
+  "8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC",
+);
 
-const SCENARIOS: Array<{
-  kaminoDeposits: number;
-  driftDeposits: number;
-  juplendDeposits: number;
-}> = [
-  { kaminoDeposits: 0, driftDeposits: 15, juplendDeposits: 0 },
-  { kaminoDeposits: 1, driftDeposits: 14, juplendDeposits: 0 },
-  { kaminoDeposits: 8, driftDeposits: 7, juplendDeposits: 0 },
-  { kaminoDeposits: 15, driftDeposits: 0, juplendDeposits: 0 },
-  { kaminoDeposits: 0, driftDeposits: 0, juplendDeposits: 15 },
-  { kaminoDeposits: 5, driftDeposits: 5, juplendDeposits: 5 },
+type Venue = "kamino" | "juplend";
+
+const VENUES: Array<{ venue: Venue; groupSeed: string }> = [
+  { venue: "juplend", groupSeed: "MARGINFI_GROUP_SEED_12340000M300" },
+  { venue: "kamino", groupSeed: "MARGINFI_GROUP_SEED_12340000M301" },
 ];
 
-function groupSeedForScenario(index: number): Buffer {
-  return Buffer.from(
-    `MARGINFI_GROUP_SEED_12340000M3${index.toString().padStart(2, "0")}`,
-  );
-}
+type VenueBank = {
+  bank: PublicKey;
+  mint: PublicKey;
+  reserve?: PublicKey;
+  pool?: JuplendPoolKeys;
+  /** bank, SOL/USD feed, venue state, LST/mSOL pricing account. */
+  group: PublicKey[];
+};
 
-function userAccountNameForScenario(index: number, modeSuffix: string): string {
-  return `throwaway_account_m3_${modeSuffix}_${index}`;
-}
+VENUES.forEach(({ venue, groupSeed }) => {
+  describe(`m03: Liquidation limits, ${venue} collateral + native (LST/mSOL setups)`, () => {
+    const ACCOUNT = `throwaway_account_m3_${venue}`;
+    const venueBanks: VenueBank[] = [];
+    let debtBank: PublicKey;
+    let debtGroup: PublicKey[];
+    /** The seized position. A capped account always holds plain collateral to take instead. */
+    let nativeBank: PublicKey;
+    let nativeGroup: PublicKey[];
+    let market: PublicKey;
 
-function scenarioName(
-  oracleMode: "pyth" | "switchboard",
-  kaminoDeposits: number,
-  driftDeposits: number,
-  juplendDeposits: number,
-) {
-  return `m03: Limits [${oracleMode}] (Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits}, RegularDebt=${P0_BORROWS})`;
-}
+    const liquidatee = () => users[0];
+    const liquidator = () => groupAdmin;
+    const ata = (mint: PublicKey, owner: PublicKey) =>
+      getAssociatedTokenAddressSync(mint, owner);
+    const wsolOracle = () => oracles.wsolOracle.publicKey;
+    const active = (n: number) => venueBanks.slice(0, n);
+    let padGroups: PublicKey[][] = [];
+    const liquidateeGroups = (n: number) => [
+      ...active(n).map((b) => b.group),
+      nativeGroup,
+      ...padGroups,
+      debtGroup,
+    ];
+    /** Fills the account to its 16-balance maximum, each pad bank on its own oracle. */
+    const padToFullAccount = (n: number) => {
+      padGroups = Array.from({ length: MAX_BALANCES - 2 - n }, () => [
+        PublicKey.unique(),
+        PublicKey.unique(),
+      ]);
+    };
+    const obligationOf = (b: VenueBank) =>
+      deriveBaseObligation(
+        deriveLiquidityVaultAuthority(bankrunProgram.programId, b.bank)[0],
+        market,
+      )[0];
 
-const ORACLE_MODES: Array<"pyth" | "switchboard"> = ["pyth", "switchboard"];
+    /** Venue state the health check reads must be fresh in the same slot. */
+    const refreshIxs = async (n: number): Promise<TransactionInstruction[]> =>
+      venue === "kamino"
+        ? [
+            await klendBankrunProgram.methods
+              .refreshReservesBatch(true)
+              .remainingAccounts(
+                active(n).flatMap((b) => [
+                  { pubkey: b.reserve!, isSigner: false, isWritable: true },
+                  { pubkey: market, isSigner: false, isWritable: false },
+                ]),
+              )
+              .instruction(),
+          ]
+        : Promise.all(
+            active(n).map((b) =>
+              refreshJupSimple(getJuplendPrograms().lending, { pool: b.pool! }),
+            ),
+          );
 
-ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
-  SCENARIOS.forEach(
-    ({ kaminoDeposits, driftDeposits, juplendDeposits }, scenarioIndex) => {
-      const totalDeposits = kaminoDeposits + driftDeposits + juplendDeposits;
+    const classicIxs = async (n: number, bundled = true) => {
+      const liquidateeAccounts = composeRemainingAccounts(liquidateeGroups(n));
+      const liquidatorAccounts = composeRemainingAccounts([
+        debtGroup,
+        nativeGroup,
+      ]);
+      return [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        ...(bundled ? await refreshIxs(n) : []),
+        await liquidateIx(liquidator().mrgnBankrunProgram, {
+          assetBankKey: nativeBank,
+          liabilityBankKey: debtBank,
+          liquidatorMarginfiAccount: liquidator().accounts.get(ACCOUNT),
+          liquidateeMarginfiAccount: liquidatee().accounts.get(ACCOUNT),
+          remaining: [
+            ...nativeGroup.slice(1),
+            ...debtGroup.slice(1),
+            ...liquidatorAccounts,
+            ...liquidateeAccounts,
+          ],
+          amount: TOKENS(0.1),
+          liquidateeAccounts: liquidateeAccounts.length,
+          liquidatorAccounts: liquidatorAccounts.length,
+        }),
+      ];
+    };
 
-      if (totalDeposits !== MAX_BALANCES - P0_BORROWS) {
-        throw new Error(
-          `Invalid scenario: Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits} must total ${
-            MAX_BALANCES - P0_BORROWS
-          }.`
+    const receivershipIxs = async (n: number, bundled = true) => {
+      const program = liquidator().mrgnBankrunProgram;
+      const marginfiAccount = liquidatee().accounts.get(ACCOUNT);
+      const groups = liquidateeGroups(n);
+      return [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        ...(bundled ? await refreshIxs(n) : []),
+        await startLiquidationIx(program, {
+          marginfiAccount,
+          liquidationReceiver: liquidator().wallet.publicKey,
+          remaining: composeRemainingAccountsWriteableMeta(groups),
+        }),
+        await withdrawIx(program, {
+          marginfiAccount,
+          bank: nativeBank,
+          tokenAccount: liquidator().lstAlphaAccount,
+          remaining: nativeGroup,
+          amount: TOKENS(0.01),
+        }),
+        await repayIx(program, {
+          marginfiAccount,
+          bank: debtBank,
+          tokenAccount: liquidator().lstAlphaAccount,
+          amount: TOKENS(0.01),
+        }),
+        await endLiquidationIx(program, {
+          marginfiAccount,
+          remaining: composeRemainingAccountsMetaBanksOnly(groups),
+        }),
+      ];
+    };
+
+    const sendV0 = async (ixs: TransactionInstruction[], signer: Keypair) => {
+      const lut = await createLookupTableForInstructions(signer, ixs);
+      await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+      const message = new TransactionMessage({
+        payerKey: signer.publicKey,
+        recentBlockhash: await getBankrunBlockhash(bankrunContext),
+        instructions: ixs,
+      }).compileToV0Message([lut]);
+      await processBankrunV0Transaction(
+        bankrunContext,
+        new VersionedTransaction(message),
+        [signer],
+        false,
+        true,
+      );
+    };
+
+    /** Refresh in its own transaction, then liquidate. Both must land in the same slot, so the
+     * lookup table (which warps to activate, and which the refresh needs for size) is built first. */
+    const sendSplit = async (ixs: TransactionInstruction[], n: number) => {
+      const signer = liquidator().wallet;
+      const refresh = await refreshIxs(n);
+      const lut = await createLookupTableForInstructions(signer, [
+        ...refresh,
+        ...ixs,
+      ]);
+      await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+      for (const batch of [refresh, ixs]) {
+        const message = new TransactionMessage({
+          payerKey: signer.publicKey,
+          recentBlockhash: await getBankrunBlockhash(bankrunContext),
+          instructions: batch,
+        }).compileToV0Message([lut]);
+        await processBankrunV0Transaction(
+          bankrunContext,
+          new VersionedTransaction(message),
+          [signer],
+          false,
+          true,
         );
       }
+    };
 
-      const groupBuff = groupSeedForScenario(
-        scenarioIndex + oracleModeIndex * 50
-      );
-      const USER_ACCOUNT_THROWAWAY = userAccountNameForScenario(
-        scenarioIndex,
-        oracleMode,
-      );
+    /** Copies a real pricing account, repointing the mint it validates against at `mint`. */
+    const cloneWithMint = async (
+      source: PublicKey,
+      mintOffset: number,
+      mint: PublicKey,
+    ) => {
+      const acc = (await banksClient.getAccount(source))!;
+      const data = Buffer.from(acc.data);
+      mint.toBuffer().copy(data, mintOffset);
+      const key = Keypair.generate().publicKey;
+      bankrunContext.setAccount(key, { ...acc, data });
+      return key;
+    };
 
-      describe(
-        scenarioName(
-          oracleMode,
-          kaminoDeposits,
-          driftDeposits,
-          juplendDeposits
+    const addVenueState = async (
+      group: PublicKey,
+      seed: BN,
+      mint: PublicKey,
+      out: VenueBank,
+    ) => {
+      const admin = liquidator();
+      if (venue === "kamino") {
+        const reserve = Keypair.generate();
+        await createReserve(
+          reserve,
+          market,
+          mint,
+          `m03_reserve_${seed}`,
+          DECIMALS,
+          wsolOracle(),
+          ata(mint, admin.wallet.publicKey),
+        );
+        out.reserve = reserve.publicKey;
+        await processBankrunTransaction(
+          bankrunContext,
+          new Transaction().add(
+            await simpleRefreshReserve(
+              klendBankrunProgram,
+              out.reserve,
+              market,
+              wsolOracle(),
+            ),
+            await makeAddKaminoBankIx(
+              admin.mrgnBankrunProgram,
+              {
+                group,
+                feePayer: admin.wallet.publicKey,
+                bankMint: mint,
+                kaminoReserve: out.reserve,
+                kaminoMarket: market,
+                oracle: wsolOracle(),
+              },
+              { config: defaultKaminoBankConfig(wsolOracle()), seed },
+            ),
+          ),
+          [admin.wallet],
+        );
+        await processBankrunTransaction(
+          bankrunContext,
+          new Transaction().add(
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+            await makeInitObligationIx(
+              admin.mrgnBankrunProgram,
+              {
+                feePayer: admin.wallet.publicKey,
+                bank: out.bank,
+                signerTokenAccount: ata(mint, admin.wallet.publicKey),
+                lendingMarket: market,
+                reserve: out.reserve,
+              },
+              TOKENS(1),
+            ),
+          ),
+          [admin.wallet],
+        );
+        return out.reserve;
+      }
+
+      const pool = await initJuplendPool({
+        admin: admin.wallet,
+        mint,
+        symbol: `m03_${seed}`,
+        decimals: DECIMALS,
+      });
+      await configureJuplendProtocolPermissions({
+        admin: admin.wallet,
+        mint,
+        lending: pool.lending,
+        rateModel: pool.rateModel,
+        tokenReserve: pool.tokenReserve,
+        supplyPositionOnLiquidity: pool.supplyPositionOnLiquidity,
+        borrowPositionOnLiquidity: pool.borrowPositionOnLiquidity,
+        tokenProgram: pool.tokenProgram,
+        borrowConfig: DEFAULT_BORROW_CONFIG_MIN,
+      });
+      out.pool = pool;
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await addJuplendBankIx(admin.mrgnBankrunProgram, {
+            group,
+            feePayer: admin.wallet.publicKey,
+            bankMint: mint,
+            bankSeed: seed,
+            oracle: wsolOracle(),
+            jupLendingState: pool.lending,
+            fTokenMint: pool.fTokenMint,
+            config: defaultJuplendBankConfig(wsolOracle(), DECIMALS),
+            tokenProgram: pool.tokenProgram,
+          }),
         ),
-        () => {
-          const getTokenAOraclePk = () =>
-            oracleMode === "switchboard"
-              ? oracles.tokenAOracleSwb.publicKey
-              : oracles.tokenAOracle.publicKey;
-          const getLstOraclePk = () =>
-            oracleMode === "switchboard"
-              ? oracles.lstAlphaOracleSwb.publicKey
-              : oracles.pythPullLst.publicKey;
-          let banks: PublicKey[] = [];
-          let kaminoBanks: PublicKey[] = [];
-          let driftBanks: PublicKey[] = [];
-          let juplendBanks: PublicKey[] = [];
-          let lendingMarket: PublicKey;
-          let reserveFarmState: PublicKey;
-          let tokenAReserve: PublicKey;
-          let juplendPool: JuplendPoolKeys | null = null;
-          let juplendPrograms: ReturnType<typeof getJuplendPrograms> | null =
-            null;
-          let liquidateeRemainingAccounts: PublicKey[] = [];
-          let liquidateeRemainingGroups: PublicKey[][] = [];
-          let liquidatorRemainingAccounts: PublicKey[] = [];
-          let driftSpotMarket: PublicKey;
-          let lookupTable: PublicKey;
-
-          const buildReceivershipInstructions = async (
-            liquidator: any,
-            liquidateeAccount: PublicKey
-          ) => {
-            const startRemainingMetas = composeRemainingAccountsWriteableMeta(
-              liquidateeRemainingGroups
-            );
-            const endRemainingMetas = composeRemainingAccountsMetaBanksOnly(
-              liquidateeRemainingGroups
-            );
-            const withdrawTokenAAmount = new BN(
-              1 * 10 ** ecosystem.tokenADecimals
-            );
-            const repayLstAmount = new BN(
-              0.1 * 10 ** ecosystem.lstAlphaDecimals
-            );
-            // Note: Kamino's withdraw function is most costly in CU, so we'll use that one if a Kamino
-            // reserve is available to represent the worst-case example.
-            const useKaminoWithdraw = kaminoBanks.length > 0;
-            const useDriftWithdraw =
-              !useKaminoWithdraw && driftBanks.length > 0;
-            const useJuplendWithdraw =
-              !useKaminoWithdraw &&
-              !useDriftWithdraw &&
-              juplendBanks.length > 0;
-
-            const preInstructions = [
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
-            ];
-            const withdrawInstructions = [];
-
-            if (useKaminoWithdraw) {
-              const bank = kaminoBanks[0];
-              const kaminoRemaining = composeRemainingAccounts([
-                [bank, getTokenAOraclePk(), tokenAReserve],
-              ]);
-              const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
-                bankrunProgram.programId,
-                bank
-              );
-              const [obligation] = deriveBaseObligation(
-                lendingVaultAuthority,
-                lendingMarket
-              );
-              const [obligationFarmUserState] =
-                PublicKey.findProgramAddressSync(
-                  [
-                    Buffer.from("user"),
-                    reserveFarmState.toBuffer(),
-                    obligation.toBuffer(),
-                  ],
-                  FARMS_PROGRAM_ID
-                );
-
-              preInstructions.push(
-                await simpleRefreshReserve(
-                  klendBankrunProgram,
-                  tokenAReserve,
-                  lendingMarket,
-                  oracles.tokenAOracle.publicKey
-                ),
-                await simpleRefreshObligation(
-                  klendBankrunProgram,
-                  lendingMarket,
-                  obligation,
-                  [tokenAReserve]
-                )
-              );
-
-              withdrawInstructions.push(
-                await makeKaminoWithdrawIx(
-                  liquidator.mrgnBankrunProgram,
-                  {
-                    marginfiAccount: liquidateeAccount,
-                    authority: liquidator.wallet.publicKey,
-                    bank,
-                    mint: ecosystem.tokenAMint.publicKey,
-                    destinationTokenAccount: liquidator.tokenAAccount,
-                    lendingMarket,
-                    reserve: tokenAReserve,
-                    obligationFarmUserState,
-                    reserveFarmState,
-                  },
-                  {
-                    amount: withdrawTokenAAmount,
-                    isWithdrawAll: false,
-                    remaining: kaminoRemaining,
-                  }
-                )
-              );
-            }
-
-            if (useDriftWithdraw) {
-              const bank = driftBanks[0];
-              const driftRemaining = composeRemainingAccounts([
-                [bank, getTokenAOraclePk(), driftSpotMarket],
-              ]);
-              preInstructions.push(
-                await makeUpdateSpotMarketCumulativeInterestIx(
-                  driftBankrunProgram,
-                  { oracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE) },
-                  TOKEN_A_MARKET_INDEX
-                )
-              );
-              withdrawInstructions.push(
-                await makeDriftWithdrawIx(
-                  liquidator.mrgnBankrunProgram,
-                  {
-                    marginfiAccount: liquidateeAccount,
-                    bank,
-                    destinationTokenAccount: liquidator.tokenAAccount,
-                    driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
-                  },
-                  {
-                    amount: withdrawTokenAAmount,
-                    withdrawAll: false,
-                    remaining: driftRemaining,
-                  },
-                  driftBankrunProgram
-                )
-              );
-            }
-
-            if (useJuplendWithdraw) {
-              if (!juplendPool || !juplendPrograms) {
-                throw new Error(
-                  "Juplend withdraw path requested without Juplend setup"
-                );
-              }
-              const bank = juplendBanks[0];
-              const juplendRemaining = composeRemainingAccounts([
-                [bank, getTokenAOraclePk(), juplendPool.lending],
-              ]);
-              preInstructions.push(
-                await refreshJupSimple(juplendPrograms.lending, {
-                  pool: juplendPool,
-                })
-              );
-              withdrawInstructions.push(
-                await makeJuplendWithdrawSimpleIx(
-                  liquidator.mrgnBankrunProgram,
-                  {
-                    marginfiAccount: liquidateeAccount,
-                    destinationTokenAccount: liquidator.tokenAAccount,
-                    bank,
-                    pool: juplendPool,
-                    amount: withdrawTokenAAmount,
-                    withdrawAll: false,
-                    remainingAccounts: juplendRemaining,
-                  }
-                )
-              );
-            }
-
-            const instructions = [
-              ...preInstructions,
-              await startLiquidationIx(liquidator.mrgnBankrunProgram, {
-                marginfiAccount: liquidateeAccount,
-                liquidationReceiver: liquidator.wallet.publicKey,
-                remaining: startRemainingMetas,
-              }),
-              ...withdrawInstructions,
-              await repayIx(liquidator.mrgnBankrunProgram, {
-                marginfiAccount: liquidateeAccount,
-                bank: banks[0], // regular debt bank
-                tokenAccount: liquidator.lstAlphaAccount,
-                amount: repayLstAmount,
-              }),
-              await endLiquidationIx(liquidator.mrgnBankrunProgram, {
-                marginfiAccount: liquidateeAccount,
-                remaining: endRemainingMetas,
-              }),
-            ];
-
-            return instructions;
-          };
-
-          const refreshScenarioOracles = async () => {
-            const clock = await banksClient.getClock();
-            await refreshPullOracles(
-              oracles,
-              globalProgramAdmin.wallet,
-              new BN(Number(clock.slot)),
-              Number(clock.unixTimestamp),
-              bankrunContext,
-              false,
-            );
-            if (oracleMode === "switchboard") {
-              await refreshSwitchboardPullOracleBankrun(
-                bankrunContext,
-                banksClient,
-                oracles.tokenAOracleSwb.publicKey,
-              );
-              await refreshSwitchboardPullOracleBankrun(
-                bankrunContext,
-                banksClient,
-                oracles.lstAlphaOracleSwb.publicKey,
-              );
-            }
-          };
-
-          before(async () => {
-            await ensureMultiSuiteIntegrationsSetup();
-            if (juplendDeposits > 0) {
-              juplendPrograms = getJuplendPrograms();
-            }
-            console.log(
-              `Running the scenario with ${kaminoDeposits} Kamino banks, ${driftDeposits} Drift banks, ${juplendDeposits} Juplend banks, ${P0_BORROWS} regular debt bank`
-            );
-          });
-
-          it("init group, init banks, and fund banks", async () => {
-            const result = await genericMultiBankTestSetup(
-              P0_BORROWS,
-              USER_ACCOUNT_THROWAWAY,
-              groupBuff,
-              startingSeed,
-              kaminoDeposits,
-              driftDeposits,
-              oracleMode
-            );
-            banks = result.banks;
-            kaminoBanks = result.kaminoBanks;
-            driftBanks = result.driftBanks;
-            lendingMarket = kaminoAccounts.get(MARKET);
-            tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
-            reserveFarmState = farmAccounts.get(A_FARM_STATE);
-            driftSpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
-
-            if (juplendDeposits > 0) {
-              const created = await addJuplendBanksForGroup({
-                group: result.throwawayGroup.publicKey,
-                numberOfBanks: juplendDeposits,
-                startingSeed: 20_000 + scenarioIndex * 100,
-                oracleMode,
-              });
-              juplendBanks = created.juplendBanks;
-              juplendPool = created.pool;
-            }
-          });
-
-          it("Refresh oracles", async () => {
-            await refreshScenarioOracles();
-          });
-
-          it("(admin) Seeds liquidity in all banks - happy path", async () => {
-            const user = groupAdmin;
-            const marginfiAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
-            const depositLstAmount = new BN(
-              10 * 10 ** ecosystem.lstAlphaDecimals
-            );
-            const depositTokenAAmount = new BN(
-              100 * 10 ** ecosystem.tokenADecimals
-            );
-
-            const remainingAccounts: PublicKey[][] = [];
-
-            // regular banks
-            for (let i = 0; i < banks.length; i += 1) {
-              const bank = banks[i];
-              const tx = new Transaction();
-              tx.add(
-                await depositIx(user.mrgnBankrunProgram, {
-                  marginfiAccount,
-                  bank,
-                  tokenAccount: user.lstAlphaAccount,
-                  amount: depositLstAmount,
-                  depositUpToLimit: false,
-                })
-              );
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-              remainingAccounts.push([bank, getLstOraclePk()]);
-            }
-
-            // kamino banks
-            for (let i = 0; i < kaminoBanks.length; i += 1) {
-              const bank = kaminoBanks[i];
-              const tx = new Transaction();
-              const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
-                bankrunProgram.programId,
-                bank
-              );
-              const [obligation] = deriveBaseObligation(
-                lendingVaultAuthority,
-                lendingMarket
-              );
-              const [obligationFarmUserState] =
-                PublicKey.findProgramAddressSync(
-                  [
-                    Buffer.from("user"),
-                    reserveFarmState.toBuffer(),
-                    obligation.toBuffer(),
-                  ],
-                  FARMS_PROGRAM_ID
-                );
-
-              tx.add(
-                await simpleRefreshReserve(
-                  klendBankrunProgram,
-                  tokenAReserve,
-                  lendingMarket,
-                  oracles.tokenAOracle.publicKey
-                ),
-                await simpleRefreshObligation(
-                  klendBankrunProgram,
-                  lendingMarket,
-                  obligation,
-                  [tokenAReserve]
-                ),
-                await makeKaminoDepositIx(
-                  user.mrgnBankrunProgram,
-                  {
-                    marginfiAccount,
-                    bank,
-                    signerTokenAccount: user.tokenAAccount,
-                    lendingMarket,
-                    reserve: tokenAReserve,
-                    obligationFarmUserState,
-                    reserveFarmState,
-                  },
-                  depositTokenAAmount
-                )
-              );
-
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                tokenAReserve,
-              ]);
-            }
-
-            // drift banks
-            for (let i = 0; i < driftBanks.length; i += 1) {
-              const bank = driftBanks[i];
-              const tx = new Transaction();
-              tx.add(
-                await makeDriftDepositIx(
-                  user.mrgnBankrunProgram,
-                  {
-                    marginfiAccount,
-                    bank,
-                    signerTokenAccount: user.tokenAAccount,
-                    driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
-                  },
-                  depositTokenAAmount,
-                  TOKEN_A_MARKET_INDEX
-                )
-              );
-
-              await processBankrunTransaction(
-                bankrunContext,
-                tx,
-                [user.wallet],
-                false,
-                true
-              );
-
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                driftSpotMarket,
-              ]);
-            }
-
-            // juplend banks
-            for (let i = 0; i < juplendBanks.length; i += 1) {
-              if (!juplendPool) {
-                throw new Error("Juplend banks exist without a Juplend pool");
-              }
-              const bank = juplendBanks[i];
-              const tx = new Transaction().add(
-                await makeJuplendDepositIx(user.mrgnBankrunProgram, {
-                  marginfiAccount,
-                  signerTokenAccount: user.tokenAAccount,
-                  bank,
-                  pool: juplendPool,
-                  amount: depositTokenAAmount,
-                })
-              );
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                juplendPool.lending,
-              ]);
-            }
-
-            liquidatorRemainingAccounts =
-              composeRemainingAccounts(remainingAccounts);
-          });
-
-          it("(user 0) Deposits to all integration banks and borrows from a regular one - happy path", async () => {
-            const user = users[0];
-            const marginfiAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
-            const depositTokenAAmount = new BN(
-              10 * 10 ** ecosystem.tokenADecimals
-            );
-            const borrowLstAmount = new BN(
-              1 * 10 ** ecosystem.lstAlphaDecimals
-            );
-
-            const remainingAccounts: PublicKey[][] = [];
-
-            for (let i = 0; i < kaminoBanks.length; i += 1) {
-              const bank = kaminoBanks[i];
-              const tx = new Transaction();
-
-              const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
-                bankrunProgram.programId,
-                bank
-              );
-              const [obligation] = deriveBaseObligation(
-                lendingVaultAuthority,
-                lendingMarket
-              );
-              const [obligationFarmUserState] =
-                PublicKey.findProgramAddressSync(
-                  [
-                    Buffer.from("user"),
-                    reserveFarmState.toBuffer(),
-                    obligation.toBuffer(),
-                  ],
-                  FARMS_PROGRAM_ID
-                );
-
-              tx.add(
-                await simpleRefreshReserve(
-                  klendBankrunProgram,
-                  tokenAReserve,
-                  lendingMarket,
-                  oracles.tokenAOracle.publicKey
-                ),
-                await simpleRefreshObligation(
-                  klendBankrunProgram,
-                  lendingMarket,
-                  obligation,
-                  [tokenAReserve]
-                ),
-                await makeKaminoDepositIx(
-                  user.mrgnBankrunProgram,
-                  {
-                    marginfiAccount,
-                    bank,
-                    signerTokenAccount: user.tokenAAccount,
-                    lendingMarket,
-                    reserve: tokenAReserve,
-                    obligationFarmUserState,
-                    reserveFarmState,
-                  },
-                  depositTokenAAmount
-                )
-              );
-
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                tokenAReserve,
-              ]);
-
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-            }
-
-            for (let i = 0; i < driftBanks.length; i += 1) {
-              const bank = driftBanks[i];
-              const tx = new Transaction();
-
-              tx.add(
-                await makeDriftDepositIx(
-                  user.mrgnBankrunProgram,
-                  {
-                    marginfiAccount,
-                    bank,
-                    signerTokenAccount: user.tokenAAccount,
-                    driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
-                  },
-                  depositTokenAAmount,
-                  TOKEN_A_MARKET_INDEX
-                )
-              );
-
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                driftSpotMarket,
-              ]);
-
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-            }
-
-            for (let i = 0; i < juplendBanks.length; i += 1) {
-              if (!juplendPool) {
-                throw new Error("Juplend banks exist without a Juplend pool");
-              }
-              const bank = juplendBanks[i];
-              const tx = new Transaction().add(
-                await makeJuplendDepositIx(user.mrgnBankrunProgram, {
-                  marginfiAccount,
-                  signerTokenAccount: user.tokenAAccount,
-                  bank,
-                  pool: juplendPool,
-                  amount: depositTokenAAmount,
-                })
-              );
-
-              remainingAccounts.push([
-                bank,
-                getTokenAOraclePk(),
-                juplendPool.lending,
-              ]);
-
-              await processBankrunTransaction(bankrunContext, tx, [
-                user.wallet,
-              ]);
-            }
-
-            remainingAccounts.push([banks[0], getLstOraclePk()]);
-            liquidateeRemainingGroups = remainingAccounts;
-            liquidateeRemainingAccounts =
-              composeRemainingAccounts(remainingAccounts);
-
-            const tx = new Transaction();
-            tx.add(
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-              ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: 50_000,
-              }),
-              await borrowIx(user.mrgnBankrunProgram, {
-                marginfiAccount,
-                bank: banks[0], // there is only one regular bank
-                tokenAccount: user.lstAlphaAccount,
-                remaining: liquidateeRemainingAccounts,
-                amount: borrowLstAmount,
-              }),
-            );
-
-            await processBankrunTransaction(
-              bankrunContext,
-              tx,
-              [user.wallet],
-              false,
-              true,
-            );
-          });
-
-          it("(admin) Vastly increases regular bank liability ratio to make user 0 unhealthy", async () => {
-            const config = defaultBankConfigOptRaw();
-            config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
-            config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
-
-            const tx = new Transaction().add(
-              await configureBank(groupAdmin.mrgnBankrunProgram, {
-                bank: banks[0],
-                bankConfigOpt: config,
-              }),
-            );
-
-            await processBankrunTransaction(bankrunContext, tx, [
-              groupAdmin.wallet,
-            ]);
-          });
-
-          it("(admin) Liquidates user 0", async () => {
-            const liquidatee = users[0];
-            const liquidateeAccount = liquidatee.accounts.get(
-              USER_ACCOUNT_THROWAWAY
-            );
-            const liquidator = groupAdmin;
-            const liquidatorAccount = liquidator.accounts.get(
-              USER_ACCOUNT_THROWAWAY
-            );
-            const liquidateAmount = new BN(
-              0.1 * 10 ** ecosystem.lstAlphaDecimals
-            );
-
-            if (kaminoBanks.length > 0) {
-              const kaminoTx = new Transaction().add(
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-                await liquidateIx(liquidator.mrgnBankrunProgram, {
-                  assetBankKey: kaminoBanks[0],
-                  liabilityBankKey: banks[0],
-                  liquidatorMarginfiAccount: liquidatorAccount,
-                  liquidateeMarginfiAccount: liquidateeAccount,
-                  remaining: [
-                    getTokenAOraclePk(), // asset oracle
-                    tokenAReserve, // Kamino-specific "oracle"
-                    getLstOraclePk(), // liab oracle
-                    ...liquidatorRemainingAccounts,
-                    ...liquidateeRemainingAccounts,
-                  ],
-                  amount: liquidateAmount,
-                  liquidateeAccounts: liquidateeRemainingAccounts.length,
-                  liquidatorAccounts: liquidatorRemainingAccounts.length,
-                })
-              );
-
-              await processBankrunTransaction(bankrunContext, kaminoTx, [
-                groupAdmin.wallet,
-              ]);
-            }
-
-            if (driftBanks.length > 0) {
-              const driftTx = new Transaction().add(
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-                await liquidateIx(liquidator.mrgnBankrunProgram, {
-                  assetBankKey: driftBanks[0],
-                  liabilityBankKey: banks[0],
-                  liquidatorMarginfiAccount: liquidatorAccount,
-                  liquidateeMarginfiAccount: liquidateeAccount,
-                  remaining: [
-                    getTokenAOraclePk(), // asset oracle
-                    driftSpotMarket, // Drift-specific "oracle"
-                    getLstOraclePk(), // liab oracle
-                    ...liquidatorRemainingAccounts,
-                    ...liquidateeRemainingAccounts,
-                  ],
-                  amount: liquidateAmount,
-                  liquidateeAccounts: liquidateeRemainingAccounts.length,
-                  liquidatorAccounts: liquidatorRemainingAccounts.length,
-                })
-              );
-
-              await processBankrunTransaction(bankrunContext, driftTx, [
-                groupAdmin.wallet,
-              ]);
-            }
-
-            if (juplendBanks.length > 0) {
-              if (!juplendPool || !juplendPrograms) {
-                throw new Error(
-                  "Juplend liquidation path requested without setup"
-                );
-              }
-              const refreshTx = new Transaction().add(
-                await refreshJupSimple(juplendPrograms.lending, {
-                  pool: juplendPool,
-                })
-              );
-              await processBankrunTransaction(bankrunContext, refreshTx, [
-                groupAdmin.wallet,
-              ]);
-              const juplendTx = new Transaction().add(
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-                await liquidateIx(liquidator.mrgnBankrunProgram, {
-                  assetBankKey: juplendBanks[0],
-                  liabilityBankKey: banks[0],
-                  liquidatorMarginfiAccount: liquidatorAccount,
-                  liquidateeMarginfiAccount: liquidateeAccount,
-                  remaining: [
-                    getTokenAOraclePk(), // asset oracle
-                    juplendPool.lending, // Juplend-specific "oracle"
-                    getLstOraclePk(), // liab oracle
-                    ...liquidatorRemainingAccounts,
-                    ...liquidateeRemainingAccounts,
-                  ],
-                  amount: liquidateAmount,
-                  liquidateeAccounts: liquidateeRemainingAccounts.length,
-                  liquidatorAccounts: liquidatorRemainingAccounts.length,
-                })
-              );
-
-              await processBankrunTransaction(bankrunContext, juplendTx, [
-                groupAdmin.wallet,
-              ]);
-            }
-          });
-
-          it("(admin) Creates LUT", async () => {
-            const liquidator = groupAdmin;
-            const liquidateeAccount = users[0].accounts.get(
-              USER_ACCOUNT_THROWAWAY
-            );
-            const receiverInstructions = await buildReceivershipInstructions(
-              liquidator,
-              liquidateeAccount,
-            );
-            const lutAddresses: PublicKey[] = [];
-            const seen = new Set<string>();
-            const addAddress = (address: PublicKey) => {
-              const key = address.toBase58();
-              if (!seen.has(key)) {
-                seen.add(key);
-                lutAddresses.push(address);
-              }
-            };
-
-            for (const ix of receiverInstructions) {
-              addAddress(ix.programId);
-              for (const keyMeta of ix.keys) {
-                addAddress(keyMeta.pubkey);
-              }
-            }
-
-            const account = await createLut(liquidator.wallet, lutAddresses);
-            lookupTable = account.key;
-
-            // We must advance the bankrun slot to allow the lut to activate
-            const ONE_MINUTE = 60;
-            const slotsToAdvance = ONE_MINUTE * 0.4;
-            let { epoch: _, slot } = await getEpochAndSlot(banksClient);
-            bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
-
-            // Refresh oracles in case we advanced into staleness
-            await refreshScenarioOracles();
-          });
-
-          it("(permissionless) closes liquidation record and resets account field", async () => {
-            const liquidatee = users[0];
-            const initializer = groupAdmin;
-            const caller = users[1];
-            const liquidateeAccount = liquidatee.accounts.get(
-              USER_ACCOUNT_THROWAWAY
-            );
-            const [liqRecordPk] = deriveLiquidationRecord(
-              bankrunProgram.programId,
-              liquidateeAccount,
-            );
-
-            const accountBefore =
-              await bankrunProgram.account.marginfiAccount.fetch(
-                liquidateeAccount
-              );
-            assertKeyDefault(accountBefore.liquidationRecord);
-
-            await processBankrunTransaction(
-              bankrunContext,
-              new Transaction().add(
-                await initLiquidationRecordIx(initializer.mrgnBankrunProgram, {
-                  marginfiAccount: liquidateeAccount,
-                  feePayer: initializer.wallet.publicKey,
-                })
-              ),
-              [initializer.wallet]
-            );
-
-            const accountAfterInit =
-              await bankrunProgram.account.marginfiAccount.fetch(
-                liquidateeAccount
-              );
-            assertKeysEqual(accountAfterInit.liquidationRecord, liqRecordPk);
-
-            const wrongPayerCloseResult = await processBankrunTransaction(
-              bankrunContext,
-              new Transaction().add(
-                await closeLiquidationRecordIx(caller.mrgnBankrunProgram, {
-                  marginfiAccount: liquidateeAccount,
-                  liquidationRecord: liqRecordPk,
-                  recordPayer: caller.wallet.publicKey,
-                })
-              ),
-              [caller.wallet],
-              true
-            );
-            assertBankrunTxFailed(wrongPayerCloseResult, 6042); // Unauthorized
-
-            const recordAfterWrongPayer = await banksClient.getAccount(
-              liqRecordPk
-            );
-            assert.ok(recordAfterWrongPayer !== null);
-
-            await processBankrunTransaction(
-              bankrunContext,
-              new Transaction().add(
-                await closeLiquidationRecordIx(caller.mrgnBankrunProgram, {
-                  marginfiAccount: liquidateeAccount,
-                  liquidationRecord: liqRecordPk,
-                  recordPayer: initializer.wallet.publicKey,
-                })
-              ),
-              [caller.wallet]
-            );
-
-            const recordAfterClose = await banksClient.getAccount(liqRecordPk);
-            assert.isNull(recordAfterClose);
-
-            const accountAfterClose =
-              await bankrunProgram.account.marginfiAccount.fetch(
-                liquidateeAccount
-              );
-
-            assertKeyDefault(accountAfterClose.liquidationRecord);
-          });
-
-          it("(admin) Receivership liquidates user 0 with start/end (Kamino/Drift/Juplend)", async () => {
-            const liquidatee = users[0];
-            const liquidator = groupAdmin;
-            const liquidateeAccount = liquidatee.accounts.get(
-              USER_ACCOUNT_THROWAWAY
-            );
-
-            if (
-              kaminoBanks.length === 0 &&
-              driftBanks.length === 0 &&
-              juplendBanks.length === 0
-            ) {
-              return;
-            }
-
-            if (
-              kaminoBanks.length === 0 &&
-              juplendBanks.length === 0 &&
-              driftBanks.length > 0
-            ) {
-              await refreshDriftOracles(
-                oracles,
-                driftAccounts,
-                bankrunContext,
-                banksClient
-              );
-            }
-
-            const initTx = new Transaction().add(
-              dummyIx(liquidator.wallet.publicKey, liquidatee.wallet.publicKey),
-              await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
-                marginfiAccount: liquidateeAccount,
-                feePayer: liquidator.wallet.publicKey,
-              })
-            );
-            await processBankrunTransaction(bankrunContext, initTx, [
-              liquidator.wallet,
-            ]);
-
-            const receiverInstructions = await buildReceivershipInstructions(
-              liquidator,
-              liquidateeAccount
-            );
-            const tx = new Transaction().add(...receiverInstructions);
-
-            const blockhash = await getBankrunBlockhash(bankrunContext);
-            const lutRaw = await banksClient.getAccount(lookupTable);
-            const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
-            const lutAccount = new AddressLookupTableAccount({
-              key: lookupTable,
-              state: lutState,
-            });
-            const messageV0 = new TransactionMessage({
-              payerKey: liquidator.wallet.publicKey,
-              recentBlockhash: blockhash,
-              instructions: [...tx.instructions],
-            }).compileToV0Message([lutAccount]);
-            const versionedTx = new VersionedTransaction(messageV0);
-            versionedTx.sign([liquidator.wallet]);
-            // await banksClient.processTransaction(versionedTx);
-            let result = await banksClient.tryProcessTransaction(versionedTx);
-            let lastLog =
-              result.meta.logMessages[result.meta.logMessages.length - 1];
-            if (lastLog.includes("failed")) {
-              if (lastLog.includes("exceeded CUs meter at BPF instruction")) {
-                console.error("❌ Failed due to CU limits ❌");
-                dumpBankrunLogs(result);
-                assert.ok(false);
-              } else {
-                console.error("Failed due to something other than CU limits");
-                dumpBankrunLogs(result);
-                assert.ok(false);
-              }
-            } else {
-              // passed, log nothing...
-            }
-          });
-        },
+        [admin.wallet],
       );
-    },
-  );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            admin.wallet.publicKey,
+            (
+              await bankrunProgram.account.bank.fetch(out.bank)
+            ).integrationAcc3,
+            deriveLiquidityVaultAuthority(
+              bankrunProgram.programId,
+              out.bank,
+            )[0],
+            mint,
+            pool.tokenProgram,
+          ),
+          await makeJuplendInitPositionIx(admin.mrgnBankrunProgram, {
+            feePayer: admin.wallet.publicKey,
+            signerTokenAccount: ata(mint, admin.wallet.publicKey),
+            bank: out.bank,
+            pool,
+            seedDepositAmount: TOKENS(1),
+            tokenProgram: pool.tokenProgram,
+          }),
+        ),
+        [admin.wallet],
+      );
+      return pool.lending;
+    };
+
+    const addVenueBank = async (group: PublicKey, seed: BN, isLst: boolean) => {
+      const admin = liquidator();
+      const mintKp = Keypair.generate();
+      const mint = mintKp.publicKey;
+      await createMintBankrun(
+        bankrunContext,
+        globalProgramAdmin.wallet,
+        DECIMALS,
+        mintKp,
+      );
+      for (const owner of [
+        admin.wallet.publicKey,
+        liquidatee().wallet.publicKey,
+      ]) {
+        await processBankrunTransaction(
+          bankrunContext,
+          new Transaction().add(
+            createAssociatedTokenAccountIdempotentInstruction(
+              admin.wallet.publicKey,
+              ata(mint, owner),
+              owner,
+              mint,
+            ),
+          ),
+          [admin.wallet],
+        );
+        await mintToTokenAccount(mint, ata(mint, owner), TOKENS(1_000));
+      }
+
+      const [bank] = deriveBankWithSeed(
+        bankrunProgram.programId,
+        group,
+        mint,
+        seed,
+      );
+      const out: VenueBank = { bank, mint, group: [] };
+      const venueState = await addVenueState(group, seed, mint, out);
+
+      const pricing = isLst
+        ? await cloneWithMint(SANCTUM_SPL_POOL, 162, mint)
+        : await cloneWithMint(MSOL_STATE, 8, mint);
+      const type =
+        venue === "kamino"
+          ? isLst
+            ? ORACLE_SETUP_KAMINO_LST
+            : ORACLE_SETUP_KAMINO_MSOL
+          : isLst
+          ? ORACLE_SETUP_JUPLEND_LST
+          : ORACLE_SETUP_JUPLEND_MSOL;
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await configureBankOracle(admin.mrgnBankrunProgram, {
+            bank,
+            type,
+            oracle: wsolOracle(),
+            remaining: [venueState, pricing],
+          }),
+        ),
+        [admin.wallet],
+      );
+
+      out.group = [bank, wsolOracle(), venueState, pricing];
+      venueBanks.push(out);
+    };
+
+    const venueDeposit = async (b: VenueBank, amount: BN) => {
+      const user = liquidatee();
+      const marginfiAccount = user.accounts.get(ACCOUNT);
+      const source = ata(b.mint, user.wallet.publicKey);
+      const ixs =
+        venue === "kamino"
+          ? [
+              await simpleRefreshReserve(
+                klendBankrunProgram,
+                b.reserve!,
+                market,
+                wsolOracle(),
+              ),
+              await simpleRefreshObligation(
+                klendBankrunProgram,
+                market,
+                obligationOf(b),
+                [b.reserve!],
+              ),
+              await makeKaminoDepositIx(
+                user.mrgnBankrunProgram,
+                {
+                  marginfiAccount,
+                  bank: b.bank,
+                  signerTokenAccount: source,
+                  lendingMarket: market,
+                  reserve: b.reserve!,
+                },
+                amount,
+              ),
+            ]
+          : [
+              await makeJuplendDepositIx(user.mrgnBankrunProgram, {
+                marginfiAccount,
+                signerTokenAccount: source,
+                bank: b.bank,
+                pool: b.pool!,
+                amount,
+              }),
+            ];
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(...ixs),
+        [user.wallet],
+        false,
+        true,
+      );
+    };
+
+    before(async () => {
+      market = await createKaminoMarket(Array(32).fill(0));
+      const globals = deriveJuplendGlobalKeys();
+      if (!(await banksClient.getAccount(globals.liquidity)))
+        await initJuplendGlobals({ admin: groupAdmin.wallet });
+    });
+
+    it(`(admin) inits a debt bank, a plain bank and ${CAP} unique ${venue} LST/mSOL banks`, async () => {
+      await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+      const admin = liquidator();
+      const { banks, throwawayGroup } = await quiet(() =>
+        genericMultiBankTestSetup(2, ACCOUNT, Buffer.from(groupSeed), 1_000),
+      );
+      debtBank = banks[0];
+      nativeBank = banks[1];
+      debtGroup = [debtBank, oracles.pythPullLst.publicKey];
+      nativeGroup = [nativeBank, oracles.pythPullLst.publicKey];
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await depositIx(admin.mrgnBankrunProgram, {
+            marginfiAccount: admin.accounts.get(ACCOUNT),
+            bank: debtBank,
+            tokenAccount: admin.lstAlphaAccount,
+            amount: TOKENS(10),
+          }),
+        ),
+        [admin.wallet],
+      );
+
+      await quiet(async () => {
+        for (let i = 0; i < PROBE; i++)
+          await addVenueBank(
+            throwawayGroup.publicKey,
+            new BN(1_001 + i),
+            i % 2 === 0,
+          );
+      });
+    });
+
+    it("(user 0) fills the account to the venue cap and borrows the debt", async () => {
+      const user = liquidatee();
+      for (const b of active(CAP)) await venueDeposit(b, TOKENS(10));
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await depositIx(user.mrgnBankrunProgram, {
+            marginfiAccount: user.accounts.get(ACCOUNT),
+            bank: nativeBank,
+            tokenAccount: user.lstAlphaAccount,
+            amount: TOKENS(10),
+          }),
+        ),
+        [user.wallet],
+      );
+      await sendV0(
+        [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+          ...(await refreshIxs(CAP)),
+          await borrowIx(user.mrgnBankrunProgram, {
+            marginfiAccount: user.accounts.get(ACCOUNT),
+            bank: debtBank,
+            tokenAccount: user.lstAlphaAccount,
+            remaining: composeRemainingAccounts(liquidateeGroups(CAP)),
+            amount: TOKENS(1),
+          }),
+        ],
+        user.wallet,
+      );
+
+      const config = blankBankConfigOptRaw();
+      config.liabilityWeightInit = bigNumberToWrappedI80F48(210);
+      config.liabilityWeightMaint = bigNumberToWrappedI80F48(200);
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await configureBank(liquidator().mrgnBankrunProgram, {
+            bank: debtBank,
+            bankConfigOpt: config,
+          }),
+        ),
+        [liquidator().wallet],
+      );
+    });
+
+    it("reports how many positions each liquidation path covers on a full account", async () => {
+      const payer = liquidator().wallet.publicKey;
+      const locks = async (ixs: TransactionInstruction[]) =>
+        countTxAccountLocks(payer, ixs);
+      const fits = { classic: 0, recv: 0, classicSplit: 0, recvSplit: 0 };
+      let refreshAtCap = 0;
+      console.log(
+        `\n${venue} + native, ${MAX_BALANCES} balances, limit ${TX_ACCOUNT_LOCK_LIMIT} locks:`,
+      );
+      for (let n = 1; n <= PROBE; n++) {
+        padToFullAccount(n);
+        const row = {
+          classic: await locks(await classicIxs(n)),
+          recv: await locks(await receivershipIxs(n)),
+          classicSplit: await locks(await classicIxs(n, false)),
+          recvSplit: await locks(await receivershipIxs(n, false)),
+        };
+        const refresh = await locks(await refreshIxs(n));
+        if (n === CAP) refreshAtCap = refresh;
+        console.log(
+          `  ${String(n).padStart(2)} + ${MAX_BALANCES - n}: classic ${String(
+            row.classic,
+          ).padStart(2)} (${String(row.classicSplit).padStart(
+            2,
+          )} split), receivership ${String(row.recv).padStart(2)} (${String(
+            row.recvSplit,
+          ).padStart(2)} split), refresh tx ${refresh}`,
+        );
+        for (const k of Object.keys(fits) as Array<keyof typeof fits>)
+          if (fits[k] === n - 1 && row[k] <= TX_ACCOUNT_LOCK_LIMIT) fits[k] = n;
+      }
+      padGroups = [];
+      console.log(
+        `  covers: classic ${fits.classic}, receivership ${fits.recv}; with the refresh split out ${fits.classicSplit} and ${fits.recvSplit} (cap ${CAP})`,
+      );
+      assert.isAtLeast(
+        fits.classic,
+        CAP,
+        "classic no longer covers the cap in one transaction",
+      );
+      assert.isAtLeast(
+        fits.recvSplit,
+        CAP,
+        "receivership no longer covers the cap, even with the refresh split out",
+      );
+      assert.isAtMost(
+        refreshAtCap,
+        TX_ACCOUNT_LOCK_LIMIT,
+        "the refresh no longer fits one transaction",
+      );
+    });
+
+    it("(admin) classic liquidation, refresh in its own transaction", async () => {
+      await sendSplit(await classicIxs(CAP, false), CAP);
+    });
+
+    it("(admin) receivership, refresh in its own transaction", async () => {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await initLiquidationRecordIx(liquidator().mrgnBankrunProgram, {
+            marginfiAccount: liquidatee().accounts.get(ACCOUNT),
+            feePayer: liquidator().wallet.publicKey,
+          }),
+        ),
+        [liquidator().wallet],
+      );
+      await sendSplit(await receivershipIxs(CAP, false), CAP);
+    });
+  });
 });

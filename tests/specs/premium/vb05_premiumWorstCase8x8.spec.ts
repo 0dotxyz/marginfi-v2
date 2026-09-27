@@ -15,7 +15,6 @@ import {
   bankrunProgram,
   banksClient,
   ecosystem,
-  emodeAdmin,
   groupAdmin,
   oracles,
   users,
@@ -24,7 +23,6 @@ import {
 import {
   addBankWithSeed,
   configureBank,
-  groupConfigure,
   groupInitialize,
 } from "../../utils/group-instructions";
 import {
@@ -43,8 +41,8 @@ import {
 } from "../../utils/premium-instructions";
 import {
   BankConfig,
+  blankBankConfigOptRaw,
   defaultBankConfig,
-  defaultBankConfigOptRaw,
   I80F48_ONE,
   I80F48_ZERO,
   makeRatePoints,
@@ -143,7 +141,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
   };
 
   it("init group, fund LST", async () => {
-    // Group + emode admin
+    // Group initialization; premium settings are controlled by the fast group admin.
     let tx = new Transaction().add(
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: group8x8.publicKey,
@@ -153,14 +151,6 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, group8x8);
     await banksClient.processTransaction(tx);
-
-    tx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: group8x8.publicKey,
-        newEmodeAdmin: emodeAdmin.wallet.publicKey,
-      }),
-    );
-    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     // Fund borrower + lender with LST.
     const payer = bankrunContext.payer;
@@ -189,7 +179,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     if (verbose) console.log("*added " + banks.length + " banks");
   });
 
-  it("(emode admin) configure 64 distinct matrix entries + 16 bank tags", async () => {
+  it("(fast admin) configure 64 distinct matrix entries + 16 bank tags", async () => {
     const entries = [];
     for (let i = 0; i < N; i++) {
       for (let j = 0; j < N; j++) {
@@ -208,13 +198,13 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
       const tx = new Transaction();
       for (const entry of entries.slice(start, start + 32)) {
         tx.add(
-          await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+          await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
             group: group8x8.publicKey,
             entry,
           }),
         );
       }
-      await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+      await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     }
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
@@ -224,13 +214,13 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
 
     // The matrix is full: a 65th pair -> PremiumMatrixFull (6611)
     const overfullTx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: group8x8.publicKey,
         entry: newPremiumEntry(999, 999, 0.01),
       }),
     );
     overfullTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    overfullTx.sign(emodeAdmin.wallet);
+    overfullTx.sign(groupAdmin.wallet);
     assertBankrunTxFailed(
       await banksClient.tryProcessTransaction(overfullTx),
       "0x19d3",
@@ -240,7 +230,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     const tagIxs = [];
     for (let i = 0; i < N; i++) {
       tagIxs.push(
-        await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+        await configBankPremium(groupAdmin.mrgnBankrunProgram, {
           bank: banks[i],
           premiumTag: COLLATERAL_TAG_BASE + i,
           active: true,
@@ -249,7 +239,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     }
     for (let j = 0; j < N; j++) {
       tagIxs.push(
-        await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+        await configBankPremium(groupAdmin.mrgnBankrunProgram, {
           bank: banks[N + j],
           premiumTag: LIABILITY_TAG_BASE + j,
           active: true,
@@ -260,7 +250,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
       await processBankrunTransaction(
         bankrunContext,
         new Transaction().add(...tagIxs.slice(k, k + 4)),
-        [emodeAdmin.wallet],
+        [groupAdmin.wallet],
       );
     }
   });
@@ -451,7 +441,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     for (let i = 0; i < N; i += 2) {
       const crushTx = new Transaction();
       for (let k = i; k < Math.min(i + 2, N); k++) {
-        const config = defaultBankConfigOptRaw();
+        const config = blankBankConfigOptRaw();
         config.assetWeightInit = bigNumberToWrappedI80F48(0.01);
         config.assetWeightMaint = bigNumberToWrappedI80F48(0.02);
         crushTx.add(
@@ -465,7 +455,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
         groupAdmin.wallet,
       ]);
     }
-    const raiseConfig = defaultBankConfigOptRaw();
+    const raiseConfig = blankBankConfigOptRaw();
     raiseConfig.liabilityWeightInit = bigNumberToWrappedI80F48(210);
     raiseConfig.liabilityWeightMaint = bigNumberToWrappedI80F48(200);
     tx = new Transaction().add(
