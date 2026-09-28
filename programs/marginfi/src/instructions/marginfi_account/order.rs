@@ -13,6 +13,7 @@ use crate::state::marginfi_account::{
 use crate::state::premium::{MarginfiAccountPremiumImpl, PremiumScratch};
 use crate::{
     check,
+    constants::PROGRAM_VERSION,
     prelude::*,
     state::{
         marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
@@ -369,6 +370,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let fee_state = fee_state_loader.load()?;
 
     let mut health_cache = HealthCache::zeroed();
+    health_cache.timestamp = Clock::get()?.unix_timestamp;
     let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
     let (
@@ -390,6 +392,8 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         let is_healthy = account_health >= I80F48::ZERO;
 
         health_cache.set_healthy(is_healthy);
+        health_cache.program_version = PROGRAM_VERSION;
+        health_cache.set_engine_ok(true);
 
         (
             get_tagged_account_health_components(

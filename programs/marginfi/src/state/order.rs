@@ -144,6 +144,9 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
             if balance.tag != 0 && order_tags.contains(&balance.tag) {
                 continue;
             }
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
 
             check!(
                 idx < self.balance_states.len(),
@@ -157,10 +160,6 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 shares,
                 ..
             } = &mut self.balance_states[idx];
-
-            let side = balance
-                .get_side()
-                .ok_or_else(|| error!(MarginfiError::IllegalBalanceState))?;
 
             *bank = balance.bank_pk;
             *tag = balance.tag;
@@ -220,6 +219,8 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 MarginfiError::IllegalBalanceState
             );
 
+            check_eq!(record.tag, balance.tag, MarginfiError::IllegalBalanceState);
+
             let expected_shares = match side {
                 BalanceSide::Assets => balance.asset_shares,
                 BalanceSide::Liabilities => balance.liability_shares,
@@ -249,6 +250,7 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
 #[cfg(test)]
 mod tests {
     use super::ExecuteOrderRecordImpl;
+    use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
@@ -296,5 +298,60 @@ mod tests {
             result.is_ok(),
             "initialize should succeed when only non-order balances are recorded"
         );
+    }
+
+    /// An active non-order slot below `EMPTY_BALANCE_THRESHOLD` is left out of the record.
+    #[test]
+    fn execute_order_record_ignores_an_empty_slot() {
+        let mut account = MarginfiAccount::zeroed();
+        let order_tags = [111u16, 222u16];
+        account.lending_account.balances[0] = balance_with_bank_and_tag(1u8, order_tags[0]);
+        let mut empty = balance_with_bank_and_tag(2u8, 0);
+        empty.asset_shares = I80F48::from_num(0.5).into();
+        account.lending_account.balances[1] = empty;
+
+        let mut record = ExecuteOrderRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                &account,
+                &order_tags,
+                &I80F48::ZERO,
+            )
+            .unwrap();
+        assert_eq!(record.active_balance_count, 0);
+        assert!(record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .is_ok());
+    }
+
+    /// The record pins each non-order balance's tag alongside its side and shares.
+    #[test]
+    fn execute_order_record_rejects_a_cleared_tag() {
+        let mut account = MarginfiAccount::zeroed();
+        let order_tags = [111u16, 222u16];
+        account.lending_account.balances[0] = balance_with_bank_and_tag(1u8, order_tags[0]);
+        account.lending_account.balances[1] = balance_with_bank_and_tag(2u8, 7);
+
+        let mut record = ExecuteOrderRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                &account,
+                &order_tags,
+                &I80F48::ZERO,
+            )
+            .unwrap();
+        assert!(record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .is_ok());
+
+        account.lending_account.balances[1].tag = 0;
+        let err = record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .unwrap_err();
+        assert_eq!(err, MarginfiError::IllegalBalanceState.into());
     }
 }

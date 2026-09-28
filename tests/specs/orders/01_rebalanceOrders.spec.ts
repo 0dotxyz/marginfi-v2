@@ -1297,7 +1297,7 @@ type VenueLeg = {
   tail: PublicKey[];
   /** JupLend TokenReserve for the start/end ix arg; null for Kamino/Drift. */
   tokenReserve: PublicKey | null;
-  /** Venue accounts the supply rate needs to price reward emissions; empty when the venue has none. */
+  /** Venue accounts the supply rate needs to price a deposit and its emissions; empty when none. */
   rewards: PublicKey[];
 };
 
@@ -2368,7 +2368,11 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
           cranks: await juplendCranks(),
           tail: juplendTail(),
           tokenReserve: juplendPool.tokenReserve,
-          rewards: [juplendPool.lendingRewardsRateModel, juplendPool.fTokenMint],
+          rewards: [
+            juplendPool.lendingRewardsRateModel,
+            juplendPool.fTokenMint,
+            juplendPool.rateModel,
+          ],
         },
         deposit: await juplendDstDeposit(),
       },

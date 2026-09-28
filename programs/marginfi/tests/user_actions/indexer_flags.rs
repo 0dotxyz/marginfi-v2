@@ -2,7 +2,7 @@ use fixtures::{assert_custom_error, marginfi_account::MarginfiAccountFixture, pr
 use marginfi::errors::MarginfiError;
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::{clock::Clock, signature::Keypair, signer::Signer};
+use solana_sdk::{clock::Clock, signature::Keypair, signer::Signer, transaction::Transaction};
 
 #[tokio::test]
 async fn indexer_flags_new_account_defaults() -> anyhow::Result<()> {
@@ -377,6 +377,44 @@ async fn admin_close_account_fails_with_active_balances() -> anyhow::Result<()> 
     account.indexer_flags.was_active_30d = 0;
     account.indexer_flags.was_active_60d = 0;
     user_f.set_account(&account).await?;
+
+    let global_fee_wallet = test_f.marginfi_group.fee_wallet;
+    let res = user_f.try_admin_close_account(global_fee_wallet).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn admin_close_account_fails_with_funded_fee_pool() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let authority = Keypair::new();
+
+    let user_f = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
+
+    // Leave keeper-tip SOL in the fee pool, then age the account past the inactivity window.
+    let payer = test_f.payer();
+    let top_up = user_f
+        .make_top_up_rebalance_fee_pool_ix(payer, 1_000_000)
+        .await;
+    {
+        let blockhash = test_f.get_latest_blockhash().await;
+        let ctx = test_f.context.borrow_mut();
+        let tx =
+            Transaction::new_signed_with_payer(&[top_up], Some(&payer), &[&ctx.payer], blockhash);
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp += 60 * 24 * 60 * 60 + 1;
+        ctx.set_sysvar(&clock);
+    }
 
     let global_fee_wallet = test_f.marginfi_group.fee_wallet;
     let res = user_f.try_admin_close_account(global_fee_wallet).await;

@@ -5,12 +5,12 @@ use marginfi_type_crate::{
     constants::SECONDS_PER_YEAR,
     types::{
         u32_to_centi, u32_to_milli, InterestRateConfig, InterestRateConfigOpt, MarginfiGroup,
-        RatePoint, INTEREST_CURVE_LEGACY, INTEREST_CURVE_SEVEN_POINT,
+        RatePoint, CURVE_POINTS, INTEREST_CURVE_LEGACY, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 
 use crate::{
-    debug,
+    check, debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -244,28 +244,15 @@ impl InterestRateCalc {
     /// * Points defined as 1: (0, Y1), 2-6: (X2-6, Y2-6), 7: (100, Y7), where 0 < X2-6 < 100
     #[inline]
     fn interest_rate_multipoint_curve(&self, ur: I80F48) -> Option<I80F48> {
-        let zero_rate: I80F48 = u32_to_milli(self.zero_util_rate);
-        let hundred_rate: I80F48 = u32_to_milli(self.hundred_util_rate);
-
-        // The first point is at (0, zero_rate)
-        let mut prev_util: I80F48 = I80F48::ZERO;
-        let mut prev_rate: I80F48 = zero_rate;
-        // Sanity check: clamp the UR in case we somehow exceeded 100% or went negative
-        let ur: I80F48 = ur.max(I80F48::ZERO).min(I80F48::ONE);
-
-        for point in self.points.iter().filter(|point| point.util() != 0) {
-            let point_util: I80F48 = u32_to_centi(point.util());
-            let point_rate: I80F48 = u32_to_milli(point.rate());
-
-            if ur <= point_util {
-                return Self::lerp(prev_util, prev_rate, point_util, point_rate, ur);
-            }
-
-            prev_util = point_util;
-            prev_rate = point_rate;
-        }
-
-        Self::lerp(prev_util, prev_rate, I80F48::ONE, hundred_rate, ur)
+        multipoint_curve(
+            u32_to_milli(self.zero_util_rate),
+            u32_to_milli(self.hundred_util_rate),
+            self.points
+                .iter()
+                .filter(|point| point.util() != 0)
+                .map(|point| (u32_to_centi(point.util()), u32_to_milli(point.rate()))),
+            ur,
+        )
     }
 
     /// Given two points (start_x, start_y) and (end_x, end_y), and a target x between start_x and
@@ -322,6 +309,75 @@ impl InterestRateCalc {
             protocol_fee_rate,
             protocol_fee_fixed,
         }
+    }
+}
+
+/// The rate at utilization `ur` on the piecewise linear curve through (0, `zero_rate`), `points` in
+/// ascending utilization, and (100%, `hundred_rate`).
+#[inline]
+fn multipoint_curve(
+    zero_rate: I80F48,
+    hundred_rate: I80F48,
+    points: impl Iterator<Item = (I80F48, I80F48)>,
+    ur: I80F48,
+) -> Option<I80F48> {
+    let mut prev_util: I80F48 = I80F48::ZERO;
+    let mut prev_rate: I80F48 = zero_rate;
+    // Sanity check: clamp the UR in case we somehow exceeded 100% or went negative
+    let ur: I80F48 = ur.max(I80F48::ZERO).min(I80F48::ONE);
+
+    for (point_util, point_rate) in points {
+        if ur <= point_util {
+            return InterestRateCalc::lerp(prev_util, prev_rate, point_util, point_rate, ur);
+        }
+        prev_util = point_util;
+        prev_rate = point_rate;
+    }
+
+    InterestRateCalc::lerp(prev_util, prev_rate, I80F48::ONE, hundred_rate, ur)
+}
+
+/// A bank's seven-point interest curve with its points converted to I80F48 once, for repeated
+/// lookups at different utilizations.
+pub struct LendingCurve {
+    zero_rate: I80F48,
+    hundred_rate: I80F48,
+    points: [(I80F48, I80F48); CURVE_POINTS],
+    used: usize,
+}
+
+impl LendingCurve {
+    pub fn new(config: &InterestRateConfig) -> MarginfiResult<Self> {
+        check!(
+            config.curve_type == INTEREST_CURVE_SEVEN_POINT,
+            MarginfiError::InvalidConfig
+        );
+        let mut points = [(I80F48::ZERO, I80F48::ZERO); CURVE_POINTS];
+        let mut used = 0;
+        for point in config.points.iter().filter(|point| point.util() != 0) {
+            points[used] = (u32_to_centi(point.util()), u32_to_milli(point.rate()));
+            used += 1;
+        }
+        Ok(Self {
+            zero_rate: u32_to_milli(config.zero_util_rate),
+            hundred_rate: u32_to_milli(config.hundred_util_rate),
+            points,
+            used,
+        })
+    }
+
+    /// The lending rate at `utilization`: the curve's base rate times the utilization. Fees do not
+    /// enter it.
+    pub fn lending_rate(&self, utilization: I80F48) -> MarginfiResult<I80F48> {
+        multipoint_curve(
+            self.zero_rate,
+            self.hundred_rate,
+            self.points[..self.used].iter().copied(),
+            utilization,
+        )
+        .and_then(|base_rate| base_rate.checked_mul(utilization))
+        .ok_or_else(math_error!())
+        .map_err(Into::into)
     }
 }
 
@@ -623,6 +679,35 @@ mod tests {
             .calc_interest_rate(I80F48!(0.4))
             .expect("computed rate");
         assert_eq_with_tolerance!(base_rate_apr, I80F48!(0.125), I80F48!(0.0001));
+    }
+
+    /// The precomputed curve returns exactly the lending rate the accrual calculator computes.
+    #[test]
+    fn lending_curve_matches_calc_interest_rate() {
+        let calc = sample_multipoint_calc();
+        let curve = LendingCurve::new(&InterestRateConfig {
+            zero_util_rate: apr_to_u32(0.05),
+            hundred_util_rate: apr_to_u32(0.40),
+            points: make_points(&[
+                RatePoint::new(util_to_u32(0.20), apr_to_u32(0.10)),
+                RatePoint::new(util_to_u32(0.60), apr_to_u32(0.15)),
+            ]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        })
+        .expect("seven-point curve");
+        for util in [
+            I80F48::ZERO,
+            I80F48!(0.2),
+            I80F48!(0.4),
+            I80F48!(0.9),
+            I80F48::ONE,
+        ] {
+            assert_eq!(
+                curve.lending_rate(util).unwrap(),
+                calc.calc_interest_rate(util).unwrap().lending_rate_apr
+            );
+        }
     }
 
     /// The auto-rebalance order compares integration supply APRs against native bank rates, so they
