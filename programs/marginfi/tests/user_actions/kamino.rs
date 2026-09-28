@@ -2,9 +2,11 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token::error::TokenError;
 use fixed::types::I80F48;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
+use marginfi::state::bank::BankImpl;
 use marginfi::{
     assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
 };
+use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
 use solana_program_test::*;
 use solana_sdk::{
     clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
@@ -390,6 +392,52 @@ async fn kamino_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
         err.contains("Custom(6175)"),
         "expected Kamino ReserveEmergencyMode, got: {err}"
     );
+
+    Ok(())
+}
+
+/// Kamino halting a whole market stops its own instructions but keeps serving `refresh_reserve`,
+/// so nothing upstream stops users borrowing against collateral parked there. The market account
+/// never reaches our health path, so a permissionless ix caches the flag on the bank.
+#[tokio::test]
+async fn kamino_market_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    setup.set_market_emergency_mode(true).await;
+
+    // The market flag alone changes nothing, since health checks never load that account.
+    user.try_lending_account_pulse_health().await?;
+    let unpropagated = user.load().await.health_cache;
+    assert!(I80F48::from(unpropagated.asset_value) > I80F48::ZERO);
+
+    setup.try_propagate_market_emergency().await?;
+    assert!(setup.bank_f.load().await.get_flag(KAMINO_MARKET_EMERGENCY));
+
+    user.try_lending_account_pulse_health().await?;
+    let halted = user.load().await.health_cache;
+    assert_eq!(
+        I80F48::from(halted.asset_value),
+        I80F48::ZERO,
+        "collateral in a halted market must back no new borrowing"
+    );
+    assert!(
+        I80F48::from(halted.asset_value_maint) > I80F48::ZERO,
+        "Maintenance value must survive"
+    );
+
+    // Kamino resuming the market restores borrowing power, through the same permissionless ix.
+    setup.set_market_emergency_mode(false).await;
+    setup.try_propagate_market_emergency().await?;
+    assert!(!setup.bank_f.load().await.get_flag(KAMINO_MARKET_EMERGENCY));
+
+    user.try_lending_account_pulse_health().await?;
+    let resumed = user.load().await.health_cache;
+    assert!(I80F48::from(resumed.asset_value) > I80F48::ZERO);
 
     Ok(())
 }

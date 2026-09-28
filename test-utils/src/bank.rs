@@ -60,7 +60,7 @@ impl BankFixture {
         let bank = self.load().await;
         let oracle_adapter = match bank.config.oracle_setup {
             OracleSetup::Fixed => {
-                OraclePriceFeedAdapter::try_from_bank(&bank, &[], &Clock::default()).unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[], &Clock::default(), false).unwrap()
             }
             _ => {
                 let oracle_key = bank.config.oracle_keys[0];
@@ -74,7 +74,8 @@ impl BankFixture {
                     .unwrap();
 
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
-                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default(), false)
+                    .unwrap()
             }
         };
 

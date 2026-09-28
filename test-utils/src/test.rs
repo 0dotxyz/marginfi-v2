@@ -17,7 +17,7 @@ use juplend_mocks::lending_reward_rate_model::client as juplend_rewards;
 use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
-use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use kamino_mocks::state::{MinimalLendingMarket, MinimalObligation, MinimalReserve};
 use marginfi::state::{
     bank::BankImpl, drift::DriftConfigCompact, juplend::JuplendConfigCompact,
     kamino::KaminoConfigCompact,
@@ -322,6 +322,49 @@ impl KaminoBankSetup {
             .context
             .borrow_mut()
             .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
+    /// Flip `LendingMarket.emergency_mode` on the market behind this bank, as Kamino's
+    /// `update_lending_market` would. Writes the one byte directly: the rest of the account is
+    /// real klend state the mock must keep.
+    pub async fn set_market_emergency_mode(&self, on: bool) {
+        let market_key = self.load_reserve().await.lending_market;
+        let mut account = self.test_f.try_load(&market_key).await.unwrap().unwrap();
+        let offset = 8 + std::mem::offset_of!(MinimalLendingMarket, emergency_mode);
+        account.data[offset] = u8::from(on);
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&market_key, &AccountSharedData::from(account));
+    }
+
+    /// Permissionlessly copy the market's emergency flag onto the bank.
+    pub async fn try_propagate_market_emergency(
+        &self,
+    ) -> std::result::Result<(), BanksClientError> {
+        let reserve_key = self.bank_f.load().await.config.oracle_keys[1];
+        let lending_market = self.load_reserve().await.lending_market;
+        let ctx = self.test_f.context.borrow_mut();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PropagateKaminoMarketEmergency {
+                reserve: reserve_key,
+                lending_market,
+                bank: self.bank_f.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::PropagateKaminoMarketEmergency {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        ctx.banks_client.process_transaction(tx).await
     }
 
     pub async fn load_user_accounted_collateral(

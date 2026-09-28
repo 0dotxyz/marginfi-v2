@@ -2391,10 +2391,13 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     await closeOrder(order);
   });
   const MAX_BALANCES = 16;
-  /** `MAX_INTEGRATION_POSITIONS`, the most integration balances an account may hold. */
+  /** `MAX_COSTLY_POSITIONS`, the most integration balances an account may hold. */
   const INTEGRATION_BALANCES = 4;
   const WORST_CASE_SEED_BASE = 7_710;
-  /** Measures ~923k. A bound rather than the figure, which every program edit shifts. */
+  /**
+   * Measures ~914k at `INTEGRATION_BALANCES` integration positions. A bound rather than the
+   * figure, which every program edit shifts.
+   */
   const CU_CEILING = 1_100_000;
 
   /** A Drift bank on the shared mint, on its own spot market, with its mrgn-side drift user. */

@@ -185,18 +185,40 @@ pub struct MinimalReserve {
 #[account(zero_copy, discriminator = &LENDING_MARKET_DISCRIMINATOR)]
 #[repr(C)]
 pub struct MinimalLendingMarket {
+    _version: u64,
+    _bump_seed: u64,
+    _lending_market_owner: Pubkey,
+    _lending_market_owner_cached: Pubkey,
+    _quote_currency: [u8; 32],
+    _referral_fee_bps: u16,
+    /// Non-zero when Kamino has halted the entire market, the market-wide counterpart of
+    /// `ReserveConfig.emergency_mode`.
+    pub emergency_mode: u8,
     _padding1: [u8; 2048],
     _padding2: [u8; 1024],
-    _padding3: [u8; 256],
-    _padding4: [u8; 22],
+    _padding3: [u8; 128],
+    _padding4: [u8; 32],
+    _padding5: [u8; 2],
+    _padding6: [u8; 1],
     /// Ceiling on the APR a reserve may emit as rewards, in bps.
     pub reserve_rewards_max_apr_bps: u16,
-    _padding5: [u8; 1024],
-    _padding6: [u8; 256],
-    _padding7: [u8; 24],
+    _padding7: [u8; 1024],
+    _padding8: [u8; 256],
+    _padding9: [u8; 24],
 }
 
 const _: () = assert!(core::mem::size_of::<MinimalLendingMarket>() == 4656);
+const _: () = assert!(core::mem::offset_of!(MinimalLendingMarket, emergency_mode) == 114);
+const _: () =
+    assert!(core::mem::offset_of!(MinimalLendingMarket, reserve_rewards_max_apr_bps) == 3350);
+
+impl MinimalLendingMarket {
+    /// True if Kamino put the whole market into emergency mode. Its own instructions then fail, but
+    /// `refresh_reserve` keeps working, so nothing upstream stops us lending against the collateral.
+    pub fn is_emergency_mode(&self) -> bool {
+        self.emergency_mode != 0
+    }
+}
 
 // Notable Kamino naming conventions:
 // * `mint_total_supply` aka `total_col` - total amount of collateral tokens that exist
