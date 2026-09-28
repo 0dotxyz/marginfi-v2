@@ -886,6 +886,7 @@ pub fn start_rebalance<'info>(
     }
 
     // An order-tagged balance moves whole, alone, into a bank the account holds nothing in.
+    let mut tagged_dst = vec![false; banks.len()];
     for m in moves.iter() {
         let (s, d) = (m.src_index as usize, m.dst_index as usize);
         check!(
@@ -893,6 +894,7 @@ pub fn start_rebalance<'info>(
             MarginfiError::RebalanceTaggedBalanceSplit
         );
         if ref_banks[s].tag != 0 {
+            tagged_dst[d] = true;
             // Every move out of `s` targets `d`, and every move into `d` comes from `s`.
             check!(
                 account.lending_account.get_balance(&banks[d].key).is_none()
@@ -952,12 +954,29 @@ pub fn start_rebalance<'info>(
                     .ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
         );
-        let amount = I80F48::from(m.amount);
-        let amount_native = to_native(mint_decimals, amount)?;
-        // Skip banks this execution already fills to capacity, and native banks already at or below
-        // the destination's rate with their own inflow (more deposits only lower a native rate).
+        // A tagged balance is priced as its whole pile, the destination's entire inflow.
+        let tagged = ref_banks[m.src_index as usize].tag != 0;
+        let (amount, amount_native) = if tagged {
+            (inflow[d], inflow_native[d])
+        } else {
+            let amount = I80F48::from(m.amount);
+            (amount, to_native(mint_decimals, amount)?)
+        };
+        // Skip full banks, native banks at or below the destination's rate with their own inflow
+        // (more deposits only lower a native rate), and banks these tokens cannot legally enter.
         for i in 0..banks.len() {
-            if i == d || inflow[i] >= capacity[i] || (models[i].is_some() && landed[i] <= landed[d])
+            if i == d
+                || inflow[i] >= capacity[i]
+                || (models[i].is_some() && landed[i] <= landed[d])
+                || ref_banks[i].tag != 0
+                || tagged_dst[i]
+            {
+                continue;
+            }
+            if tagged
+                && (inflow[i] > I80F48::ZERO
+                    || amount > capacity[i]
+                    || account.lending_account.get_balance(&banks[i].key).is_some())
             {
                 continue;
             }

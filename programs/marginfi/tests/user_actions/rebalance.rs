@@ -2510,6 +2510,398 @@ async fn rebalance_rejects_passing_over_a_partly_full_higher_rate_bank() -> anyh
     Ok(())
 }
 
+/// A higher-rate bank with room for only part of a tagged balance does not block moving the whole
+/// balance into another bank.
+#[tokio::test]
+async fn rebalance_tagged_move_ignores_a_partly_full_better_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    f.dst_bank_f
+        .update_config(
+            BankConfigOpt {
+                deposit_limit: Some(1_500_000_000),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key, f.dst_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
+
+    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO);
+    assert_eq!(f.asset_shares(dst2.key).await, old_src);
+    assert_eq!(f.balance_tag(dst2.key).await, Some(tag));
+    Ok(())
+}
+
+/// A higher-rate bank the account already holds does not block a tagged balance's move.
+#[tokio::test]
+async fn rebalance_tagged_move_ignores_a_held_better_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let old_dst = f.asset_shares(f.dst_bank_f.key).await;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
+
+    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO);
+    assert_eq!(f.asset_shares(dst2.key).await, old_src);
+    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_dst);
+    assert_eq!(f.balance_tag(dst2.key).await, Some(tag));
+    Ok(())
+}
+
+/// A higher-rate bank already receiving another move does not block a tagged balance's move.
+#[tokio::test]
+async fn rebalance_tagged_move_ignores_a_better_bank_already_getting_inflow() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
+    let src2 = f.add_second_src(1.0).await?;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let update_ix = f
+        .user
+        .make_update_rebalance_order_ix(
+            f.order_pda,
+            payer,
+            Some(vec![f.src_bank_f.key, f.dst_bank_f.key, src2.key, dst2.key]),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    f.process_as_payer(&[update_ix]).await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let old_src2 = f.asset_shares(src2.key).await;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(src2.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![
+                rebalance_move(2, 1, 1.0),
+                rebalance_move(0, 3, DEPOSIT_USDC),
+            ],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src2 = f
+        .user
+        .make_withdraw_ix_with_authority(f.keeper_usdc, &src2, 1.0, Some(true), f.keeper.pubkey())
+        .await;
+    let deposit_dst = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, 1.0, None, f.keeper.pubkey())
+        .await;
+    let deposit_dst2 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key, src2.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[
+        start_ix,
+        withdraw_src,
+        withdraw_src2,
+        deposit_dst,
+        deposit_dst2,
+        end_ix,
+    ])
+    .await?;
+
+    assert_eq!(f.asset_shares(dst2.key).await, old_src);
+    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src2);
+    assert_eq!(f.balance_tag(dst2.key).await, Some(tag));
+    Ok(())
+}
+
+/// A higher-rate bank holding a tagged balance does not block an untagged move.
+#[tokio::test]
+async fn rebalance_untagged_move_ignores_a_tagged_better_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
+    f.deposit_usdc(&f.dst_bank_f, 100.0).await?;
+    f.place_stop_loss_on(&f.dst_bank_f).await?;
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
+
+    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO);
+    assert_eq!(f.asset_shares(dst2.key).await, old_src);
+    Ok(())
+}
+
+/// A higher-rate bank receiving a tagged balance does not block an untagged move elsewhere.
+#[tokio::test]
+async fn rebalance_untagged_move_ignores_a_better_bank_getting_tagged_inflow() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    // The tagged pile's destination still out-earns dst2 with the pile in it (1400/3000 vs 600/2000).
+    drive_utilization(&f.test_f, &f.dst_bank_f, 900.0, 200.0).await?;
+    drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
+    let src2 = f.add_second_src(1.0).await?;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let update_ix = f
+        .user
+        .make_update_rebalance_order_ix(
+            f.order_pda,
+            payer,
+            Some(vec![f.src_bank_f.key, f.dst_bank_f.key, src2.key, dst2.key]),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    f.process_as_payer(&[update_ix]).await?;
+    let order_pda = f.place_stop_loss_on(&f.src_bank_f).await?;
+    let tag = f.user.load_order(order_pda).await.tags[0];
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let old_src2 = f.asset_shares(src2.key).await;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(src2.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![
+                rebalance_move(0, 1, DEPOSIT_USDC),
+                rebalance_move(2, 3, 1.0),
+            ],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_src2 = f
+        .user
+        .make_withdraw_ix_with_authority(f.keeper_usdc, &src2, 1.0, Some(true), f.keeper.pubkey())
+        .await;
+    let deposit_dst = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_dst2 = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, 1.0, None, f.keeper.pubkey())
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key, src2.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[
+        start_ix,
+        withdraw_src,
+        withdraw_src2,
+        deposit_dst,
+        deposit_dst2,
+        end_ix,
+    ])
+    .await?;
+
+    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src);
+    assert_eq!(f.asset_shares(dst2.key).await, old_src2);
+    assert_eq!(f.balance_tag(f.dst_bank_f.key).await, Some(tag));
+    Ok(())
+}
+
 /// Every other bank is priced with the move's tokens added to its own inflow: sending both chunks
 /// to one of two identical banks is rejected: the second chunk would earn more in the other.
 #[tokio::test]
