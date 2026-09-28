@@ -3401,3 +3401,207 @@ async fn premium_withdraw_with_bad_oracle_ratchets_instead_of_freezing() -> anyh
     );
     Ok(())
 }
+
+/// The liquidator signs for their own account and picks the oracle accounts, so their refresh
+/// must RATCHET on an incomplete pass exactly like a withdraw: a bad oracle for one of their
+/// tagged legs may not preserve a stale, cheaper snapshot on any of their pre-existing debts.
+/// (The liab-bank debt grown by the liquidation is separately seeded; this test targets a
+/// debt on a different bank, which only the ratchet covers.)
+#[tokio::test]
+async fn premium_liquidator_bad_oracle_ratchets_own_snapshots() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            // Victim's debt bank (premium-inactive: the liquidation-grown liability carries no
+            // premium, so the liquidator-side seed has nothing to touch) and the liquidator's
+            // health backbone as a deposit.
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    asset_weight_init: I80F48!(1).into(),
+                    asset_weight_maint: I80F48!(1).into(),
+                    ..*DEFAULT_PYUSD_TEST_BANK_CONFIG
+                }),
+            },
+            // The liquidator's TAGGED leg — the one whose oracle gets hidden. Not involved in
+            // the liquidation itself, so its oracle appears only in the liquidator's
+            // observation set.
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            // Untagged dilution collateral for the liquidator; the victim's seized collateral.
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock_with_feeds(
+        &test_f,
+        1_700_000_000,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_PYUSD_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+        ],
+    )
+    .await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; SolEq and PyUSD stay untagged (0% legs).
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+    let lender_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_pyusd.key, pyusd_bank_f, 100_000, None)
+        .await?;
+
+    // Liquidator: $9,990 tagged SOL, $9,990 untagged SolEq, $5,000 untagged PyUSD; USDC debt
+    // at the diluted 9990 / 24980 = 0.4%.
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidator_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let liquidator_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(5_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_pyusd.key, pyusd_bank_f, 5_000, None)
+        .await?;
+    let liquidator_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidator
+        .try_bank_borrow(liquidator_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+    let account = liquidator.load().await;
+    let rate_before = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    let expected_before = 9990.0 / (9990.0 + 9990.0 + 5000.0);
+    assert!(
+        (rate_before - expected_before).abs() < 0.005,
+        "diluted rate {} != {}",
+        rate_before,
+        expected_before
+    );
+
+    // Victim: SolEq collateral, PyUSD debt.
+    let victim = test_f.create_marginfi_account().await;
+    let victim_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    victim
+        .try_bank_deposit(victim_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let victim_pyusd = test_f.pyusd_mint.create_empty_token_account().await;
+    victim
+        .try_bank_borrow(victim_pyusd.key, pyusd_bank_f, 3_000)
+        .await?;
+
+    // Crush SolEq weights: the victim becomes liquidatable; the liquidator's health stands on
+    // its PyUSD deposit.
+    test_f
+        .get_bank_mut(&BankMint::SolEquivalent)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+
+    // Liquidate 120 SolEq against PyUSD, handing in a WRONG oracle for the liquidator's own
+    // SOL leg. SOL is not a liquidation bank, so its feed appears exactly once — in the
+    // liquidator's observation set — and the liquidation math itself prices normally.
+    let payer = test_f.payer_keypair();
+    let mut ix = liquidator
+        .make_liquidate_ix_with_authority(&victim, sol_eq_bank_f, 120, pyusd_bank_f, payer.pubkey())
+        .await;
+    let sol_feed_positions: Vec<usize> = ix
+        .accounts
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.pubkey == PYTH_SOL_FEED)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(sol_feed_positions.len(), 1, "unexpected SOL oracle layout");
+    ix.accounts[sol_feed_positions[0]].pubkey = Pubkey::new_unique();
+    liquidator.send_liquidate_ix(ix, &payer).await?;
+
+    // Pre-fix the liquidator's USDC debt kept the diluted rate. Now the incomplete pass
+    // ratchets it to the hidden SOL leg's full pair rate.
+    let account = liquidator.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        (rate - 1.0).abs() < 0.001,
+        "liquidator's own debt must ratchet to 1.0%, got {}",
+        rate
+    );
+
+    // A clean pulse re-prices freely (down) against the real post-liquidation mix.
+    liquidator.try_lending_account_pulse_health().await?;
+    let account = liquidator.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        rate < 0.6 && rate > 0.3,
+        "clean pulse must restore a diluted rate near 0.4%, got {}",
+        rate
+    );
+    Ok(())
+}

@@ -851,6 +851,29 @@ impl MarginfiAccountFixture {
         liab_bank_fixture: &BankFixture,
         authority: &Keypair,
     ) -> std::result::Result<(), BanksClientError> {
+        let ix = self
+            .make_liquidate_ix_with_authority(
+                liquidatee,
+                asset_bank_fixture,
+                asset_ui_amount,
+                liab_bank_fixture,
+                authority.pubkey(),
+            )
+            .await;
+        self.send_liquidate_ix(ix, authority).await
+    }
+
+    /// Builds the liquidation instruction. Remaining accounts, in order: liab mint (T22 only),
+    /// asset oracle, liab oracle, the liquidator's observation set, the liquidatee's
+    /// observation set — tests may edit the metas before `send_liquidate_ix`.
+    pub async fn make_liquidate_ix_with_authority<T: Into<f64> + Copy>(
+        &self,
+        liquidatee: &MarginfiAccountFixture,
+        asset_bank_fixture: &BankFixture,
+        asset_ui_amount: T,
+        liab_bank_fixture: &BankFixture,
+        authority: Pubkey,
+    ) -> Instruction {
         let marginfi_account = self.load().await;
 
         let asset_bank = asset_bank_fixture.load().await;
@@ -861,7 +884,7 @@ impl MarginfiAccountFixture {
             asset_bank: asset_bank_fixture.key,
             liab_bank: liab_bank_fixture.key,
             liquidator_marginfi_account: self.key,
-            authority: authority.pubkey(),
+            authority,
             liquidatee_marginfi_account: liquidatee.key,
             bank_liquidity_vault_authority: liab_bank_fixture
                 .get_vault_authority(BankVaultType::Liquidity)
@@ -944,7 +967,14 @@ impl MarginfiAccountFixture {
 
         ix.accounts.extend_from_slice(liquidator_obs_accounts);
         ix.accounts.extend_from_slice(liquidatee_obs_accounts);
+        ix
+    }
 
+    pub async fn send_liquidate_ix(
+        &self,
+        ix: Instruction,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;

@@ -645,11 +645,16 @@ struct LiquidatorLiabSeedInfo {
 /// [`check_liquidatee_health_and_refresh_premium`] for the `#[inline(never)]` rationale.
 ///
 /// No `refresh_unavailable` gate here (a stale unrelated leg must not block liquidations).
-/// Instead, on an incomplete pass the just-grown premium-active debt's snapshot is RAISED to
-/// the max configured pair rate for its tag — claiming the elapsed window at the old rate
-/// first (never retroactive), raising anything below the max (a pre-seeded tiny rate must
-/// not dodge it), never lowering. So a permanently-stale dust leg costs the worst rate
-/// instead of granting a standing discount; the next complete pass reprices normally.
+/// Instead the refresh RATCHETS on an incomplete pass (`ratchet_on_incomplete = true`): the
+/// liquidator signs for their own account and picks the oracle accounts, so — exactly like a
+/// withdraw — a bad oracle on one of their tagged legs must never let a stale, cheaper
+/// snapshot survive on ANY of their liabilities. On top of that, the just-grown liab-bank debt
+/// is seeded to the max configured pair rate for its tag (stricter than the ratchet's
+/// "highest unpriceable pair", which a brand-new balance may not have): claiming the elapsed
+/// window at the old rate first (never retroactive), never lowering. So a permanently-stale
+/// dust leg costs the worst rate instead of granting a standing discount; the next complete
+/// pass reprices normally. The liquidatee side stays a no-op: its oracles are chosen by the
+/// liquidator, a third party who must not be able to ratchet the victim.
 #[inline(never)]
 fn check_liquidator_health_and_refresh_premium<'info>(
     liquidator_marginfi_account: &mut MarginfiAccount,
@@ -666,7 +671,7 @@ fn check_liquidator_health_and_refresh_premium<'info>(
         &mut None,
         &mut Some(&mut premium_scratch),
     )?;
-    liquidator_marginfi_account.update_premium_snapshots(group, &premium_scratch, now, false)?;
+    liquidator_marginfi_account.update_premium_snapshots(group, &premium_scratch, now, true)?;
 
     if !premium_scratch.complete && liab_info.premium_active {
         let balance = liquidator_marginfi_account
