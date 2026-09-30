@@ -512,9 +512,11 @@ jobs:
       # Target-scaled iteration budget. PR target branch decides depth:
       # version-branch PRs (`0.1.9-main`, …) get 25K — daily dev work.
       # Release PRs landing on `main` get the full 250K soak — last
-      # gate before the release lands. `workflow_dispatch` falls into
-      # the 5K middle tier for ad-hoc manual runs, unless the `fuzz_iters`
-      # input is set — use that to run the release soak on any branch:
+      # gate before the release lands. A PR whose head branch ends in
+      # `-soak` also gets the release budget — push the same commit as
+      # `<branch>-soak` to rehearse the release run without touching
+      # `main` (no extra permissions needed). `workflow_dispatch` falls
+      # into the 5K middle tier unless the `fuzz_iters` input is set:
       #   gh workflow run test.yaml --ref <branch> -f fuzz_iters=250000
       #
       # Budgets are iterations × FUZZ_FLOWS_PER_ITER (100). Per-iteration
@@ -525,21 +527,23 @@ jobs:
       # To trade depth for time, lower the release budget here.
       env:
         FUZZ_ITERS_OVERRIDE: ${{ inputs.fuzz_iters }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+        HEAD_REF: ${{ github.head_ref }}
       run: |
         if [ -n "$FUZZ_ITERS_OVERRIDE" ]; then
           case "$FUZZ_ITERS_OVERRIDE" in
-            *[!0-9]*|"") echo "fuzz_iters must be a positive integer, got: $FUZZ_ITERS_OVERRIDE" >&2; exit 1 ;;
+            *[!0-9]*) echo "fuzz_iters must be a positive integer, got: $FUZZ_ITERS_OVERRIDE" >&2; exit 1 ;;
           esac
-          echo "iters=$FUZZ_ITERS_OVERRIDE" >> "$GITHUB_OUTPUT"
-        elif [ "${{ github.event_name }}" = "pull_request" ]; then
-          if [ "${{ github.base_ref }}" = "main" ]; then
-            echo "iters=250000" >> "$GITHUB_OUTPUT"
-          else
-            echo "iters=25000"  >> "$GITHUB_OUTPUT"
-          fi
+          iters="$FUZZ_ITERS_OVERRIDE"
+        elif [ "$EVENT_NAME" != "pull_request" ]; then
+          iters=5000
+        elif [ "$BASE_REF" = "main" ] || [[ "$HEAD_REF" == *-soak ]]; then
+          iters=250000
         else
-          echo "iters=5000" >> "$GITHUB_OUTPUT"
+          iters=25000
         fi
+        echo "iters=$iters" >> "$GITHUB_OUTPUT"
 
     - name: Run regression seeds
       # Deterministic regression checks run BEFORE the random fuzz so
