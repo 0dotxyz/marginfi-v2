@@ -2,6 +2,11 @@ name: Test
 
 on:
   workflow_dispatch:
+    inputs:
+      fuzz_iters:
+        description: "Trident iterations override (e.g. 250000 = release soak). Empty = 5K."
+        required: false
+        default: ""
   push:
     branches:
     - main
@@ -505,23 +510,35 @@ jobs:
     - name: Set fuzz size
       id: size
       # Target-scaled iteration budget. PR target branch decides depth:
-      # version-branch PRs (`0.1.9-main`, …) get 50K — daily dev work.
-      # Release PRs landing on `main` get the full 500K soak — last
+      # version-branch PRs (`0.1.9-main`, …) get 25K — daily dev work.
+      # Release PRs landing on `main` get the full 250K soak — last
       # gate before the release lands. `workflow_dispatch` falls into
-      # the 10K middle tier for ad-hoc manual runs.
+      # the 5K middle tier for ad-hoc manual runs, unless the `fuzz_iters`
+      # input is set — use that to run the release soak on any branch:
+      #   gh workflow run test.yaml --ref <branch> -f fuzz_iters=250000
       #
-      # Note on 500K: extrapolating from local smokes it can approach
-      # GitHub-hosted's 6h job cap. If a real release PR overruns,
-      # drop to 200-300K, or move this job onto a larger runner.
+      # Budgets are iterations × FUZZ_FLOWS_PER_ITER (100). Per-iteration
+      # `#[init]` costs ~24 ms/thread vs ~0.85 ms per flow, so longer
+      # sequences amortize setup; 250K×100 keeps the old 500K×50 flow
+      # budget. Measured 2026-09-28: 500K×50 = 2h05m on the 4-vCPU
+      # runner (fork fetch is 5 s; the loop prints nothing on non-TTY).
+      # To trade depth for time, lower the release budget here.
+      env:
+        FUZZ_ITERS_OVERRIDE: ${{ inputs.fuzz_iters }}
       run: |
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
+        if [ -n "$FUZZ_ITERS_OVERRIDE" ]; then
+          case "$FUZZ_ITERS_OVERRIDE" in
+            *[!0-9]*|"") echo "fuzz_iters must be a positive integer, got: $FUZZ_ITERS_OVERRIDE" >&2; exit 1 ;;
+          esac
+          echo "iters=$FUZZ_ITERS_OVERRIDE" >> "$GITHUB_OUTPUT"
+        elif [ "${{ github.event_name }}" = "pull_request" ]; then
           if [ "${{ github.base_ref }}" = "main" ]; then
-            echo "iters=500000" >> "$GITHUB_OUTPUT"
+            echo "iters=250000" >> "$GITHUB_OUTPUT"
           else
-            echo "iters=50000"  >> "$GITHUB_OUTPUT"
+            echo "iters=25000"  >> "$GITHUB_OUTPUT"
           fi
         else
-          echo "iters=10000" >> "$GITHUB_OUTPUT"
+          echo "iters=5000" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Run regression seeds
@@ -564,5 +581,5 @@ jobs:
       working-directory: trident-tests
       env:
         FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
-        FUZZ_FLOWS_PER_ITER: '50'
+        FUZZ_FLOWS_PER_ITER: '100'
       run: trident fuzz run ${{ matrix.test.target }} -e invariants
