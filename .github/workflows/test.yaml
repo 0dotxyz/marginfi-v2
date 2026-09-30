@@ -541,7 +541,7 @@ jobs:
         elif [ "$BASE_REF" = "main" ] || [[ "$HEAD_REF" == *-soak ]]; then
           iters=250000
         else
-          iters=25000
+          iters=250000 # TEMP rehearsal for PR #688 — revert to 25000 before merge
         fi
         echo "iters=$iters" >> "$GITHUB_OUTPUT"
 
