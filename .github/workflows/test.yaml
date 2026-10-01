@@ -500,6 +500,17 @@ jobs:
         toolchain: nightly
         components: rustfmt
 
+    - name: Cache trident harness build
+      # Release build of the harness (~650 crates). Only the local
+      # `fuzz_tests` crate recompiles on a hit; restore-keys picks up
+      # the latest build for the same Cargo.lock when sources change.
+      uses: actions/cache@v4
+      with:
+        path: trident-tests/target
+        key: trident-harness-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}-${{ hashFiles('trident-tests/fuzz_0/**/*.rs', 'target/idl/*.json') }}
+        restore-keys: |
+          trident-harness-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}-
+
     - name: Regenerate trident types.rs
       # `types.rs` is gitignored — regenerate from the IDLs we just
       # downloaded from `anchor-build`. No `--idl-paths` so trident
