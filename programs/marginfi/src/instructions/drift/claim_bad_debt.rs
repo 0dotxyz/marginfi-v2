@@ -24,8 +24,15 @@ use marginfi_type_crate::{
     types::{Bank, BankVaultType, FeeState},
 };
 
-pub const MERKLE_DISTRIBUTOR_PROGRAM_ID: Pubkey =
-    pubkey!("AtXLVASdFhmdq2KZxzhVFonmNXL76dTTsEABXySEHgLh");
+cfg_if::cfg_if! {
+    if #[cfg(feature = "devnet")] {
+        pub const MERKLE_DISTRIBUTOR_PROGRAM_ID: Pubkey =
+            pubkey!("AtXLVASdFhmdq2KZxzhVFonmNXL76dTTsEABXySEHgLh");
+    } else {
+        pub const MERKLE_DISTRIBUTOR_PROGRAM_ID: Pubkey =
+            pubkey!("distAitdwx9mDm3SaPMtGZRjpXMPUenLhmPwoySV3Hp");
+    }
+}
 const CLAIM_STATUS_LEN: usize = 112;
 
 #[derive(AnchorSerialize)]
