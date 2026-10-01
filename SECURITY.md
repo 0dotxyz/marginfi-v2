@@ -428,3 +428,39 @@ to review.
 
 Our use of the feature is still evolving, so we may relax liquidations during the initial oracle
 failure or enable them just for the risk manager.
+
+### Pairs of Banks With Very High Leverage May Block Classic Liquidation
+
+When a pair of banks has enabled high-leverage borrowing (usually due to emode boosts) it may put
+them into a state where the liquidation premium + insurance fee is too high to liquidate that pair
+using the classic liquidation instruction. As the default fees are 2.5% and 2.5% (5% total), this
+typically occurs when the banks have a 0.95 weight ratio or roughly a 20x leverage.
+
+Banks are only placed into this state if the risk is liquidation is exceedingly low or technically
+impossible, for example LST/SOL, Stable/Stable,  PTToken/Underlying asset, etc.
+
+Receivership liquidation is still functional in this state, so there is no risk to solvency. We also
+anticipate lowering either the liquidation fee or insurance fee for some of these pairs to make
+eligible for classic liquidation again.
+
+### Interest Can Resume in CircuitBroken State
+
+Interest is suspended during breakers from the start to the end of that breaker. After the "final"
+T3 breaker trip, when the bank formally enters "CircuitBroken" state, the duration is now
+indefinite, so there is no given end time. We pause interest only until the end of the last
+fixed-duration breaker which triggered before the bank entered that state; interest then resumes.
+
+Our rationale is that the admin should not completely block interest by merely being too slow to
+unlock the breaker. Short and temporary interest suspension is fair, but letting interest be
+suspended indefinitely during an unbounded break is not fair. If the admin is lax in resolving the
+breaker, borrowers should not enjoy a large windfall. In normal operation, we do not anticipate
+breakers being live for longer than a few hours at most, but the goal is to resolve all
+"CircuitBroken" states before the final T3 breaker would expire anyways, which would render the
+interest question moot. If we do not, then interest resumes, which is intentional.
+
+### When PROGRAM_FEES_ENABLED, Turning Off the Flag Does Not Remove Fees
+
+This minor bug is currently WONTFIX: there is only a single group with notable TVL in production,
+and we manage it internally, so there have not historically been any program fees regardless. Even
+if the fees were enabled, they would currently go to the same actual owner in practice (the current
+program administrator).
