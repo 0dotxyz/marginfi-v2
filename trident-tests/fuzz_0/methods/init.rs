@@ -586,7 +586,10 @@ impl FuzzTest {
     }
 
     pub fn bank_layout(&mut self, bank: Pubkey) -> BankLayout {
-        BankLayout {
+        if let Some(layout) = self.bank_layouts.get(&bank) {
+            return *layout;
+        }
+        let layout = BankLayout {
             liquidity_vault_authority: self
                 .trident
                 .find_program_address(
@@ -629,7 +632,9 @@ impl FuzzTest {
                     &types::marginfi::program_id(),
                 )
                 .0,
-        }
+        };
+        self.bank_layouts.insert(bank, layout);
+        layout
     }
 
     /// Isolated-tier bank: `asset_weight = 0` (positions contribute zero

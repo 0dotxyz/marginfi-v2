@@ -122,6 +122,7 @@ struct FuzzTest {
     // immutability check available.
     pub(crate) marginfi_group_snapshot: Option<AccountDataSnapshot>,
     pub(crate) fee_state_snapshot: Option<AccountDataSnapshot>,
+    pub(crate) bank_layouts: HashMap<Pubkey, methods::init::BankLayout>,
 }
 
 #[flow_executor]
@@ -359,6 +360,7 @@ impl FuzzTest {
             banks_with_bankruptcy: HashSet::new(),
             marginfi_group_snapshot: None,
             fee_state_snapshot: None,
+            bank_layouts: HashMap::new(),
         }
     }
 
@@ -367,6 +369,7 @@ impl FuzzTest {
         // Bound the virtual clock: see `base_timestamp`. Accounts were
         // just reset to fork state, so rewinding the Clock is consistent.
         self.trident.warp_to_timestamp(self.base_timestamp);
+        self.bank_layouts.clear();
 
         // ================================================================================================
         // Initialization
