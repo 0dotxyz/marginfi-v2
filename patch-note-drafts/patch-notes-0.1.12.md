@@ -40,7 +40,7 @@ The reverse is also true: depositing USDC in a pure BONK account lowers the prem
 smaller share of the loan is backed by BONK.
 
 Users now face market pressure to diversify their holdings such that riskier lending positions are
-isolated from less risky positions, and are generally have an incentivize to lend less risky assets,
+isolated from less risky positions, and generally have an incentivize to lend less risky assets,
 especially those with high borrowing demand. 
 
 ### Quick Technicals:
