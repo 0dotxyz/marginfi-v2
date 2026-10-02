@@ -235,7 +235,7 @@ describe("Borrow funds", () => {
       balances[borrowIndex].liabilityShares,
       amtUsdcWithFee_native
     );
-    assertI80F48Equal(balances[borrowIndex].emissionsOutstanding, 0);
+    assertI80F48Equal(balances[borrowIndex].premiumOutstanding, 0);
 
     let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[borrowIndex].lastUpdate, now, 2);

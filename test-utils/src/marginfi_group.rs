@@ -19,13 +19,15 @@ use marginfi::{
     instructions::marginfi_group::StakedSettingsConfig,
 };
 use marginfi_type_crate::constants::{
-    FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
-    SAME_ASSET_EMODE_REGISTRY_SEED, STAKED_SETTINGS_SEED,
+    FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, SAME_ASSET_EMODE_REGISTRY_SEED,
+    STAKED_SETTINGS_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
-    BankConfig, BankConfigCompact, BankConfigOpt, BankVaultType, EmodeEntry, FeeState,
-    InterestRateConfigOpt, MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
+    Bank, BankConfig, BankConfigCompact, BankConfigFast, BankConfigGov, BankConfigOpt,
+    BankVaultType, EmodeEntry, FeeState, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
+    PremiumEntry, StakedSettings, MAX_EMODE_ENTRIES,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -81,16 +83,18 @@ impl MarginfiGroupFixture {
                     admin,
                     fee_state: fee_state_key,
                     system_program: system_program::id(),
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: marginfi::instruction::MarginfiGroupInitialize {}.data(),
             };
 
-            let configure_marginfi_group_ix = Instruction {
+            let configure_marginfi_group_fast_ix = Instruction {
                 program_id: marginfi::ID,
                 accounts: marginfi::accounts::MarginfiGroupConfigure {
                     marginfi_group: group_key.pubkey(),
                     admin,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: MarginfiGroupConfigure {
@@ -98,12 +102,26 @@ impl MarginfiGroupFixture {
                     // true in production - the MS is the main admin and others are lower-impact
                     // wallets with a smaller threshold.
                     new_admin: Some(admin),
-                    new_emode_admin: Some(admin),
                     new_curve_admin: Some(admin),
                     new_limit_admin: Some(admin),
                     new_flow_admin: Some(admin),
                     new_emissions_admin: Some(admin),
                     new_metadata_admin: Some(admin),
+                }
+                .data(),
+            };
+
+            let configure_marginfi_group_slow_ix = Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::MarginfiGroupConfigureGov {
+                    marginfi_group: group_key.pubkey(),
+                    governance_admin: admin,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                }
+                .to_account_metas(Some(true)),
+                data: MarginfiGroupConfigureGov {
+                    new_admin: None,
+                    new_emode_admin: Some(admin),
                     new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
                     emode_max_maint_leverage: None,
@@ -125,7 +143,11 @@ impl MarginfiGroupFixture {
                     fee_wallet_key = fee_state_data.global_fee_wallet;
 
                     let tx = Transaction::new_signed_with_payer(
-                        &[initialize_marginfi_group_ix, configure_marginfi_group_ix],
+                        &[
+                            initialize_marginfi_group_ix,
+                            configure_marginfi_group_fast_ix,
+                            configure_marginfi_group_slow_ix,
+                        ],
                         Some(&ctx.payer.pubkey().clone()),
                         &[&ctx.payer, &group_key],
                         ctx.banks_client.get_latest_blockhash().await.unwrap(),
@@ -167,7 +189,8 @@ impl MarginfiGroupFixture {
                     &[
                         init_fee_state_ix,
                         initialize_marginfi_group_ix,
-                        configure_marginfi_group_ix,
+                        configure_marginfi_group_fast_ix,
+                        configure_marginfi_group_slow_ix,
                     ],
                     Some(&ctx.payer.pubkey().clone()),
                     &[&ctx.payer, &group_key],
@@ -192,10 +215,11 @@ impl MarginfiGroupFixture {
                 program_id: marginfi::ID,
                 accounts: marginfi::accounts::InitStakedSettings {
                     marginfi_group: group_key.pubkey(),
-                    admin: ctx.payer.pubkey(),
+                    governance_admin: ctx.payer.pubkey(),
                     fee_payer: ctx.payer.pubkey(),
                     staked_settings: staked_settings_key,
                     system_program: system_program::id(),
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 }
                 .to_account_metas(Some(true)),
                 data: InitStakedSettings { settings }.data(),
@@ -243,7 +267,7 @@ impl MarginfiGroupFixture {
 
         let accounts = marginfi::accounts::LendingPoolAddBank {
             marginfi_group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
             fee_payer: self.ctx.borrow().payer.pubkey(),
             fee_state: self.fee_state,
             global_fee_wallet: self.fee_wallet,
@@ -257,6 +281,7 @@ impl MarginfiGroupFixture {
             fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
             token_program: bank_asset_mint_fixture.token_program,
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -347,7 +372,7 @@ impl MarginfiGroupFixture {
 
         let accounts = marginfi::accounts::LendingPoolAddBankWithSeed {
             marginfi_group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
             fee_payer: self.ctx.borrow().payer.pubkey(),
             fee_state: self.fee_state,
             global_fee_wallet: self.fee_wallet,
@@ -361,6 +386,7 @@ impl MarginfiGroupFixture {
             fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
             token_program: bank_fixture.get_token_program(),
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -408,23 +434,71 @@ impl MarginfiGroupFixture {
         Ok(bank_fixture)
     }
 
-    pub fn make_lending_pool_configure_bank_ix(
+    fn make_lending_pool_configure_bank_fast_ix(
         &self,
         bank: &BankFixture,
-        bank_config_opt: BankConfigOpt,
+        admin: Pubkey,
+        bank_config: BankConfigFast,
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolConfigureBank {
             bank: bank.key,
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            admin,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
         Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: LendingPoolConfigureBank { bank_config_opt }.data(),
+            data: LendingPoolConfigureBank {
+                bank_config_opt: bank_config,
+            }
+            .data(),
         }
+    }
+
+    fn make_lending_pool_configure_bank_gov_ix(
+        &self,
+        bank: &BankFixture,
+        governance_admin: Pubkey,
+        bank_config: BankConfigGov,
+    ) -> Instruction {
+        let accounts = marginfi::accounts::LendingPoolConfigureBankGov {
+            bank: bank.key,
+            group: self.key,
+            governance_admin,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true));
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: LendingPoolConfigureBankGov {
+                bank_config_opt: bank_config,
+            }
+            .data(),
+        }
+    }
+
+    /// Test convenience for legacy aggregate configurations. The returned instructions have
+    /// explicit fast and governance authorities and may be submitted in one transaction.
+    pub fn make_lending_pool_configure_bank_ixs(
+        &self,
+        bank: &BankFixture,
+        bank_config_opt: BankConfigOpt,
+    ) -> Vec<Instruction> {
+        let signer = self.ctx.borrow().payer.pubkey();
+        let (fast, gov) = bank_config_opt.split();
+        let mut ixs = Vec::with_capacity(2);
+        if !fast.is_empty() {
+            ixs.push(self.make_lending_pool_configure_bank_fast_ix(bank, signer, fast));
+        }
+        if !gov.is_empty() {
+            ixs.push(self.make_lending_pool_configure_bank_gov_ix(bank, signer, gov));
+        }
+        ixs
     }
 
     pub fn make_lending_pool_configure_bank_oracle_ix(
@@ -437,7 +511,8 @@ impl MarginfiGroupFixture {
         let mut accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
             bank: bank.key,
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -460,8 +535,9 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolSetOraclePrice {
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -483,9 +559,10 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolSetBankSameAssetEmodeEligibility {
             group: self.key,
-            signer: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
             same_asset_emode_registry: self.same_asset_emode_registry,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -499,9 +576,10 @@ impl MarginfiGroupFixture {
     pub fn make_lending_pool_init_same_asset_emode_registry_ix(&self) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolInitSameAssetEmodeRegistry {
             group: self.key,
-            signer: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
             same_asset_emode_registry: self.same_asset_emode_registry,
             system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -537,9 +615,9 @@ impl MarginfiGroupFixture {
         bank: &BankFixture,
         bank_config_opt: BankConfigOpt,
     ) -> Result<(), BanksClientError> {
-        let ix = self.make_lending_pool_configure_bank_ix(bank, bank_config_opt);
+        let ixs = self.make_lending_pool_configure_bank_ixs(bank, bank_config_opt);
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &ixs,
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
@@ -596,6 +674,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             delegate_curve_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -642,6 +721,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             delegate_limit_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -709,6 +789,179 @@ impl MarginfiGroupFixture {
         Ok(result)
     }
 
+    pub async fn try_edit_fee_state_premium(
+        &self,
+        premium_wallet: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_edit_fee_state_premium_with_signer(premium_wallet, &payer)
+            .await
+    }
+
+    pub async fn try_edit_fee_state_premium_with_signer(
+        &self,
+        premium_wallet: Pubkey,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeStatePremium {
+                global_fee_admin: signer.pubkey(),
+                fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: EditFeeStatePremium { premium_wallet }.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Set one premium matrix pair (rate 0 = remove). For several pairs, call once per pair.
+    pub async fn try_configure_group_premium(
+        &self,
+        entry: PremiumEntry,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_group_premium_with_signer(entry, &payer)
+            .await
+    }
+
+    pub async fn try_configure_group_premium_with_signer(
+        &self,
+        entry: PremiumEntry,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureGroupPremium {
+                group: self.key,
+                admin: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureGroupPremium {
+                collateral_tag: entry.collateral_tag,
+                liability_tag: entry.liability_tag,
+                rate: entry.rate,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn try_configure_bank_premium(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_bank_premium_with_signer(bank, premium_tag, active, &payer)
+            .await
+    }
+
+    pub async fn try_configure_bank_premium_with_signer(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureBankPremium {
+                group: self.key,
+                admin: signer.pubkey(),
+                bank: bank.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureBankPremium {
+                premium_tag,
+                active,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Sweep realized premium from the bank's liquidity vault to `premium_ata` (the canonical
+    /// ATA of `FeeState.premium_wallet` for the bank's mint).
+    pub async fn try_collect_premium_fees(
+        &self,
+        bank: &BankFixture,
+        premium_ata: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank_key = bank.key;
+        let (liquidity_vault_authority, _) = Pubkey::find_program_address(
+            &[LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(), bank_key.as_ref()],
+            &marginfi::ID,
+        );
+        let (liquidity_vault, _) = Pubkey::find_program_address(
+            &[LIQUIDITY_VAULT_SEED.as_bytes(), bank_key.as_ref()],
+            &marginfi::ID,
+        );
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolCollectBankPremiumFees {
+                group: self.key,
+                bank: bank_key,
+                liquidity_vault_authority,
+                liquidity_vault,
+                fee_state: self.fee_state,
+                premium_ata,
+                token_program: bank.get_token_program(),
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolCollectBankPremiumFees {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
     pub fn make_lending_pool_configure_bank_emode_ix(
         &self,
         bank: &BankFixture,
@@ -718,7 +971,8 @@ impl MarginfiGroupFixture {
         let accounts = marginfi::accounts::LendingPoolConfigureBankEmode {
             bank: bank.key,
             group: self.key,
-            emode_admin: self.ctx.borrow().payer.pubkey(),
+            governance_admin: self.ctx.borrow().payer.pubkey(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -735,14 +989,47 @@ impl MarginfiGroupFixture {
         emode_tag: u16,
         entries: &[EmodeEntry],
     ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_lending_pool_configure_bank_emode_with_signer(bank, emode_tag, entries, &payer)
+            .await
+    }
+
+    pub async fn try_lending_pool_configure_bank_emode_with_signer(
+        &self,
+        bank: &BankFixture,
+        emode_tag: u16,
+        entries: &[EmodeEntry],
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let padded_entries = Self::pad_emode_entries(entries)?;
-        let ix = self.make_lending_pool_configure_bank_emode_ix(bank, emode_tag, padded_entries);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureBankEmode {
+                bank: bank.key,
+                group: self.key,
+                governance_admin: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureBankEmode {
+                emode_tag,
+                entries: padded_entries,
+            }
+            .data(),
+        };
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
         let tx = Transaction::new_signed_with_payer(
             &[ix],
-            Some(&self.ctx.borrow().payer.pubkey().clone()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
         );
+        drop(ctx);
 
         self.ctx
             .borrow_mut()
@@ -761,9 +1048,10 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolCloneEmode {
             group: self.key,
-            signer,
+            governance_admin: signer,
             copy_from_bank,
             copy_to_bank,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
 
@@ -892,6 +1180,106 @@ impl MarginfiGroupFixture {
         ctx.banks_client.process_transaction(tx).await
     }
 
+    fn make_group_configure_fast_ix(&self, config: MarginfiGroupConfigure) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigure {
+                marginfi_group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: config.data(),
+        }
+    }
+
+    fn make_group_configure_gov_ix(&self, config: MarginfiGroupConfigureGov) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigureGov {
+                marginfi_group: self.key,
+                governance_admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: config.data(),
+        }
+    }
+
+    pub async fn try_group_configure_with_signer(
+        &self,
+        signer: &Keypair,
+        config: MarginfiGroupConfigure,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigure {
+                marginfi_group: self.key,
+                admin: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: config.data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        drop(ctx);
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_group_configure_gov_with_signer(
+        &self,
+        signer: &Keypair,
+        config: MarginfiGroupConfigureGov,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigureGov {
+                marginfi_group: self.key,
+                governance_admin: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: config.data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        drop(ctx);
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
     pub async fn try_update(
         &self,
         new_admin: Pubkey,
@@ -959,32 +1347,26 @@ impl MarginfiGroupFixture {
         same_asset_emode_maint_leverage: Option<WrappedI80F48>,
     ) -> Result<(), BanksClientError> {
         let group = self.load().await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiGroupConfigure {
-                marginfi_group: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: MarginfiGroupConfigure {
-                new_admin: Some(new_admin),
-                new_emode_admin: Some(new_emode_admin),
-                new_curve_admin: Some(new_curve_admin),
-                new_limit_admin: Some(new_limit_admin),
-                new_flow_admin: Some(group.delegate_flow_admin),
-                new_emissions_admin: Some(new_emissions_admin),
-                new_metadata_admin: Some(new_metadata_admin),
-                new_risk_admin: Some(new_risk_admin),
-                emode_max_init_leverage: None,
-                emode_max_maint_leverage: None,
-                same_asset_emode_init_leverage,
-                same_asset_emode_maint_leverage,
-            }
-            .data(),
-        };
+        let fast_ix = self.make_group_configure_fast_ix(MarginfiGroupConfigure {
+            new_admin: Some(new_admin),
+            new_curve_admin: Some(new_curve_admin),
+            new_limit_admin: Some(new_limit_admin),
+            new_flow_admin: Some(group.delegate_flow_admin),
+            new_emissions_admin: Some(new_emissions_admin),
+            new_metadata_admin: Some(new_metadata_admin),
+        });
+        let slow_ix = self.make_group_configure_gov_ix(MarginfiGroupConfigureGov {
+            new_admin: None,
+            new_emode_admin: Some(new_emode_admin),
+            new_risk_admin: Some(new_risk_admin),
+            emode_max_init_leverage: None,
+            emode_max_maint_leverage: None,
+            same_asset_emode_init_leverage,
+            same_asset_emode_maint_leverage,
+        });
 
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &[slow_ix, fast_ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
@@ -1038,32 +1420,26 @@ impl MarginfiGroupFixture {
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
     ) -> Result<(), BanksClientError> {
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiGroupConfigure {
-                marginfi_group: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
-            }
-            .to_account_metas(Some(true)),
-            data: MarginfiGroupConfigure {
-                new_admin: Some(new_admin),
-                new_emode_admin: Some(new_emode_admin),
-                new_curve_admin: Some(new_curve_admin),
-                new_limit_admin: Some(new_limit_admin),
-                new_flow_admin: Some(new_flow_admin),
-                new_emissions_admin: Some(new_emissions_admin),
-                new_metadata_admin: Some(new_metadata_admin),
-                new_risk_admin: Some(new_risk_admin),
-                emode_max_init_leverage,
-                emode_max_maint_leverage,
-                same_asset_emode_init_leverage: None,
-                same_asset_emode_maint_leverage: None,
-            }
-            .data(),
-        };
+        let fast_ix = self.make_group_configure_fast_ix(MarginfiGroupConfigure {
+            new_admin: Some(new_admin),
+            new_curve_admin: Some(new_curve_admin),
+            new_limit_admin: Some(new_limit_admin),
+            new_flow_admin: Some(new_flow_admin),
+            new_emissions_admin: Some(new_emissions_admin),
+            new_metadata_admin: Some(new_metadata_admin),
+        });
+        let slow_ix = self.make_group_configure_gov_ix(MarginfiGroupConfigureGov {
+            new_admin: None,
+            new_emode_admin: Some(new_emode_admin),
+            new_risk_admin: Some(new_risk_admin),
+            emode_max_init_leverage,
+            emode_max_maint_leverage,
+            same_asset_emode_init_leverage: None,
+            same_asset_emode_maint_leverage: None,
+        });
 
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &[slow_ix, fast_ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
@@ -1087,6 +1463,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::ConfigureDeleverageWithdrawalLimit {
                 marginfi_group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: ConfigureDeleverageWithdrawalLimit { limit }.data(),
@@ -1120,6 +1497,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: self.key,
                 delegate_flow_admin: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: UpdateDeleverageWithdrawals {
@@ -1214,6 +1592,7 @@ impl MarginfiGroupFixture {
             insurance_vault: bank.get_vault(BankVaultType::Insurance).0,
             insurance_vault_authority: bank.get_vault_authority(BankVaultType::Insurance).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1290,6 +1669,7 @@ impl MarginfiGroupFixture {
             liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
             liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1368,6 +1748,7 @@ impl MarginfiGroupFixture {
             admin_token_account,
             liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
             token_program: bank.get_token_program(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if bank.mint.token_program == anchor_spl::token_2022::ID {
@@ -1443,6 +1824,12 @@ impl MarginfiGroupFixture {
         Self::truncate_account_to(&self.ctx, self.fee_state, 8 + FeeState::V1_LEN).await
     }
 
+    /// Shrink a bank account to the v1 (8 + struct) size, simulating a mainnet bank created
+    /// before banks were allocated at the v2 size.
+    pub async fn truncate_bank_account_to_v1(&self, bank: Pubkey) {
+        Self::truncate_account_to(&self.ctx, bank, 8 + Bank::V1_LEN).await
+    }
+
     async fn truncate_account_to(ctx: &Rc<RefCell<ProgramTestContext>>, key: Pubkey, len: usize) {
         let mut ctx = ctx.borrow_mut();
         let mut account = ctx.banks_client.get_account(key).await.unwrap().unwrap();
@@ -1507,6 +1894,32 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
+    pub async fn try_resize_bank_account(&self, bank: Pubkey) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolResizeBankAccount {
+                bank,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolResizeBankAccount {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_protocol_fees_flag(&self, enabled: bool) {
         let mut group = self.load().await;
         let mut ctx = self.ctx.borrow_mut();
@@ -1541,6 +1954,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::PanicPause {
                 pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: PanicPause {}.data(),
@@ -1580,6 +1994,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::PanicUnpause {
                 global_fee_admin: pause_authority.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: PanicUnpause {}.data(),
@@ -1614,6 +2029,7 @@ impl MarginfiGroupFixture {
             accounts: marginfi::accounts::EditFeeState {
                 global_fee_admin: self.ctx.borrow().payer.pubkey(),
                 fee_state: self.fee_state,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: EditGlobalFeeState {
@@ -1672,23 +2088,39 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_disable_staked_oracles(&self) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_disable_staked_oracles_with_signer(&payer).await
+    }
+
+    pub async fn try_disable_staked_oracles_with_signer(
+        &self,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::DisableStakedOracles {
                 group: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
+                governance_admin: signer.pubkey(),
                 staked_settings: self.staked_settings,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: DisableStakedOracles {}.data(),
         };
 
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
         let tx = Transaction::new_signed_with_payer(
             &[ix],
-            Some(&self.ctx.borrow().payer.pubkey()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
         );
+        drop(ctx);
 
         self.ctx
             .borrow_mut()
@@ -1698,24 +2130,316 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_enable_staked_oracle_onramp(&self) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_enable_staked_oracle_onramp_with_signer(&payer)
+            .await
+    }
+
+    pub async fn try_enable_staked_oracle_onramp_with_signer(
+        &self,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::EnableStakedOracleOnramp {
                 group: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
+                governance_admin: signer.pubkey(),
                 staked_settings: self.staked_settings,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: EnableStakedOracleOnramp {}.data(),
         };
 
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
         let tx = Transaction::new_signed_with_payer(
             &[ix],
-            Some(&self.ctx.borrow().payer.pubkey()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        drop(ctx);
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_set_governance_admin(&self, new_governance_admin: &Keypair) -> Result<()> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetGovernanceAdmin {
+                marginfi_group: self.key,
+                signer: self.ctx.borrow().payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupSetGovernanceAdmin {
+                new_governance_admin: new_governance_admin.pubkey(),
+            }
+            .data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
         );
 
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_set_governance_admin_with_signer(
+        &self,
+        signer: &Keypair,
+        new_governance_admin: Pubkey,
+    ) -> Result<()> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetGovernanceAdmin {
+                marginfi_group: self.key,
+                signer: signer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupSetGovernanceAdmin {
+                new_governance_admin,
+            }
+            .data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_lending_pool_add_bank_with_signer(
+        &self,
+        signer: &Keypair,
+        mint: &MintFixture,
+        bank_config: BankConfigCompact,
+    ) -> Result<BankFixture> {
+        let bank_key = Keypair::new();
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        // Create BankFixture to properly derive vault accounts
+        let bank_fixture = BankFixture::new(self.ctx.clone(), bank_key.pubkey(), mint, None);
+
+        let accounts = marginfi::accounts::LendingPoolAddBank {
+            marginfi_group: self.key,
+            governance_admin: signer.pubkey(),
+            fee_payer: payer_pubkey,
+            fee_state: self.fee_state,
+            global_fee_wallet: self.fee_wallet,
+            bank_mint: mint.key,
+            bank: bank_key.pubkey(),
+            liquidity_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank_fixture.get_vault(BankVaultType::Liquidity).0,
+            insurance_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Insurance).0,
+            insurance_vault: bank_fixture.get_vault(BankVaultType::Insurance).0,
+            fee_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Fee).0,
+            fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
+            token_program: mint.token_program,
+            system_program: system_program::id(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true));
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolAddBank { bank_config }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer, &bank_key],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(bank_fixture)
+    }
+
+    pub async fn try_lending_pool_configure_bank_oracle_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        setup: u8,
+        oracle: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
+            group: self.key,
+            governance_admin: signer.pubkey(),
+            bank: bank.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true));
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolConfigureBankOracle { setup, oracle }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_lending_pool_set_oracle_price_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        price: marginfi_type_crate::types::WrappedI80F48,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
+                group: self.key,
+                governance_admin: signer.pubkey(),
+                bank: bank.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolSetOraclePrice {
+                price,
+                setup: OracleSetup::Fixed as u8,
+            }
+            .data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_lending_pool_configure_bank_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        bank_config: BankConfigOpt,
+    ) -> Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let (fast, gov) = bank_config.split();
+        let mut ixs = Vec::with_capacity(2);
+
+        if !fast.is_empty() {
+            ixs.push(Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::LendingPoolConfigureBank {
+                    group: self.key,
+                    admin: signer.pubkey(),
+                    bank: bank.key,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                }
+                .to_account_metas(Some(true)),
+                data: marginfi::instruction::LendingPoolConfigureBank {
+                    bank_config_opt: fast,
+                }
+                .data(),
+            });
+        }
+
+        if !gov.is_empty() {
+            ixs.push(Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::LendingPoolConfigureBankGov {
+                    group: self.key,
+                    governance_admin: signer.pubkey(),
+                    bank: bank.key,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                }
+                .to_account_metas(Some(true)),
+                data: marginfi::instruction::LendingPoolConfigureBankGov {
+                    bank_config_opt: gov,
+                }
+                .data(),
+            });
+        }
+
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
+
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
         self.ctx
             .borrow_mut()
             .banks_client

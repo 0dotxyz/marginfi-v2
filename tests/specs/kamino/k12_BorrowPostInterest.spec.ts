@@ -227,8 +227,8 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       [user.wallet],
       true,
     );
-    // ReserveStale
-    assertBankrunTxFailed(result, 6009);
+    // Kamino's ObligationStale (6017), not marginfi's BankReduceOnly which shares that code
+    assertBankrunTxFailed(result, 6017);
   });
 
   it("(user 2) Deposits into USDC bank", async () => {
@@ -337,8 +337,8 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       [user.wallet],
       true,
     );
-    // ReserveStale
-    assertBankrunTxFailed(result, 6009);
+    // Kamino's ObligationStale (6017), not marginfi's BankReduceOnly which shares that code
+    assertBankrunTxFailed(result, 6017);
 
     result = await processBankrunTx(
       bankrunContext,

@@ -1,8 +1,11 @@
+use bytemuck::from_bytes_mut;
+use fixed_macro::types::I80F48;
 use fixtures::{
     assert_custom_error,
     test::{BankMint, TestFixture, TestSettings},
 };
 use marginfi::errors::MarginfiError;
+use marginfi_type_crate::types::Bank;
 use solana_program_test::tokio;
 use solana_sdk::clock::Clock;
 
@@ -73,39 +76,44 @@ async fn lending_account_close_balance() -> anyhow::Result<()> {
     let res = borrower_mfi_account_f.try_balance_close(sol_bank).await;
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
-    let last_update_before_repay = borrower_mfi_account_f.load().await.last_update;
 
-    // Let a second go b
-    {
-        let ctx = test_f.context.borrow_mut();
-        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
-        // Advance clock by 1 second
-        clock.unix_timestamp += 1;
-        ctx.set_sysvar(&clock);
-    }
-
-    // Repay isolated SOL EQ borrow successfully
+    // Before v0.1.12, a partial repay could orphan dust of this shape, so a real balance may
+    // still contain it. Since v0.1.12 prevents repay from creating orphaned dust, seed the
+    // legacy state directly to retain coverage of the close path.
+    let dust_liability_shares = I80F48!(0.00005);
+    let mut borrower_account = borrower_mfi_account_f.load().await;
+    let sol_eq_balance = borrower_account
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|balance| balance.is_active() && balance.bank_pk == sol_eq_bank.key)
+        .unwrap();
+    sol_eq_balance.liability_shares = dust_liability_shares.into();
     borrower_mfi_account_f
-        .try_bank_repay(
-            borrower_token_account_f_sol_eq.key,
-            sol_eq_bank,
-            0.01,
-            Some(false),
-        )
+        .set_account(&borrower_account)
         .await?;
-    let last_update_after_repay = borrower_mfi_account_f.load().await.last_update;
-    assert_eq!(last_update_after_repay, last_update_before_repay + 1);
 
-    // Let another second pass
     {
-        let ctx = test_f.context.borrow_mut();
-        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
-        // Advance clock by 1 second
-        clock.unix_timestamp += 1;
-        ctx.set_sysvar(&clock);
+        let mut bank_account = test_f
+            .context
+            .borrow_mut()
+            .banks_client
+            .get_account(sol_eq_bank.key)
+            .await?
+            .unwrap();
+        let bank = from_bytes_mut::<Bank>(&mut bank_account.data.as_mut_slice()[8..]);
+        bank.total_liability_shares = dust_liability_shares.into();
+        // Dust below ZERO_AMOUNT_THRESHOLD does not count as an active borrow.
+        bank.borrowing_position_count = 0;
+        test_f
+            .context
+            .borrow_mut()
+            .set_account(&sol_eq_bank.key, &bank_account.into());
     }
 
-    // Liability share in balance is smaller than 0.0001, so repay all should fail
+    // The dust is below the repayment tolerance, so it must be cleared through close_balance, repay
+    // will fail. The borrower could also take on more debt, then repay.
+    let last_update_before_failed_repay = borrower_mfi_account_f.load().await.last_update;
     let res = borrower_mfi_account_f
         .try_bank_repay(
             borrower_token_account_f_sol_eq.key,
@@ -116,17 +124,26 @@ async fn lending_account_close_balance() -> anyhow::Result<()> {
         .await;
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::NoLiabilityFound);
-    // No change to last_update if the ix was unsuccessful
     assert_eq!(
-        last_update_after_repay,
+        last_update_before_failed_repay,
         borrower_mfi_account_f.load().await.last_update
     );
+
+    // Let another second pass
+    let last_update_before_close = borrower_mfi_account_f.load().await.last_update;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        // Advance clock by 1 second
+        clock.unix_timestamp += 1;
+        ctx.set_sysvar(&clock);
+    }
 
     let res = borrower_mfi_account_f.try_balance_close(sol_eq_bank).await;
     assert!(res.is_ok());
     let account = borrower_mfi_account_f.load().await;
     // Balance closing also updates last_update
-    assert_eq!(account.last_update, last_update_after_repay + 1);
+    assert_eq!(account.last_update, last_update_before_close + 1);
     assert_eq!(account.indexer_flags.is_lending_only, 0);
     assert_eq!(account.indexer_flags.is_single_borrower, 1);
 

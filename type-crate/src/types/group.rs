@@ -5,7 +5,10 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::{assert_struct_size, constants::discriminators};
 
-use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
+use super::{
+    GroupRateLimiter, PanicStateCache, PremiumEntry, PremiumSettings, WrappedI80F48,
+    MAX_PREMIUM_ENTRIES,
+};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -14,9 +17,13 @@ assert_struct_size!(MarginfiGroup, 9248);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MarginfiGroup {
     /// Broadly able to modify anything, and can set/remove other admins at will.
+    ///
+    /// Subsequent to the release of the `governance_admin`, this role can be considered the "fast" admin,
+    /// it can perform various tasks that do not require timelock sensitivity. High-risk activities
+    /// like changing oracles or bank weights are now under the control of the "slow" governance admin.
     pub admin: Pubkey,
     /// Bitmask for group settings flags.
     /// * Bit 0 (1): `PROGRAM_FEES_ENABLED` — If set, program-level fees are enabled.
@@ -56,10 +63,10 @@ pub struct MarginfiGroup {
     pub metadata_admin: Pubkey,
 
     /// Maximum leverage allowed for emode positions (initial margin), stored as u32 basis.
-    /// Use `u32_to_basis` to convert to I80F48. Range: 1-100.
+    /// Use `u32_to_basis` to convert to I80F48. Range: 1-100; 0 is unset and bounds nothing.
     pub emode_max_init_leverage: u32,
     /// Maximum leverage allowed for emode positions (maintenance margin), stored as u32 basis.
-    /// Must be > emode_max_init_leverage. Range: 1-100.
+    /// Must be > emode_max_init_leverage. Range: 1-100; 0 is unset and bounds nothing.
     pub emode_max_maint_leverage: u32,
 
     /// Encoded same-asset automatic emode leverage for initial margin.
@@ -68,6 +75,9 @@ pub struct MarginfiGroup {
     pub same_asset_emode_init_leverage: u32,
     /// Encoded same-asset automatic emode leverage for maintenance margin.
     /// Decode with `u32_to_basis`. Ordering is validated in decoded space.
+    /// Eligible banks have their liquidation fees checked against this value only when they opt in
+    /// while it is enabled or when they change fees. Enabling or raising it does not re-check them,
+    /// so verify every eligible bank off-chain first.
     pub same_asset_emode_maint_leverage: u32,
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.
@@ -92,9 +102,23 @@ pub struct MarginfiGroup {
     /// does not itself compromise any funds, and is merely annoying.
     pub delegate_flow_admin: Pubkey,
 
-    pub _padding_0: [[u64; 2]; 2],
-    pub _padding_1: [[u64; 2]; 32],
-    pub _padding_2: [[u64; 32]; 32],
+    /// Header for the pairwise variable-borrow premium matrix stored in `premium_entries`.
+    /// Occupies the former `_padding_0`/`_padding_1` region of the v1 layout, so v1 accounts
+    /// resize to a zeroed header (matrix off).
+    pub premium_settings: PremiumSettings,
+    /// Pairwise variable-borrow premium rates, keyed by (collateral `premium_tag`, liability
+    /// `premium_tag`). Live entries occupy the first `premium_settings.entry_count` slots.
+    /// Read only via `find_premium_rate`. Future capacity growth carves from `_padding_2`.
+    pub premium_entries: [PremiumEntry; MAX_PREMIUM_ENTRIES],
+    /// Also called the "slow" admin. Dedicated authority for time-locked configuration. Legacy
+    /// groups have this field zeroed after resize and must be bootstrapped by the fast admin with
+    /// `marginfi_group_set_governance_admin` before slow-authority operations are available.
+    ///
+    /// This is the first 32 bytes of post-v1 reserved space; renaming the field does not alter
+    /// any serialized account bytes.
+    pub governance_admin: Pubkey,
+    pub _padding_2: [[u64; 32]; 31],
+    pub _padding_3: [u64; 28],
 }
 
 impl MarginfiGroup {
@@ -106,6 +130,12 @@ impl MarginfiGroup {
 
     pub fn program_fees_enabled(&self) -> bool {
         (self.group_flags & PROGRAM_FEES_ENABLED) != 0
+    }
+}
+
+impl Default for MarginfiGroup {
+    fn default() -> Self {
+        Self::zeroed()
     }
 }
 

@@ -182,11 +182,18 @@ out-of-scope.
 
 ### Propagation-Related Issues
 
-We are that pause state, global fees, etc can go out of sync if a group doesn't propagate the global
+We are aware that pause state, global fees, etc can go out of sync if a group doesn't propagate the global
 fee state in a timely fashion. It's incumbent on the group admin to propagate global fee state
 settings. When we change fee state settings, we propagate to the main group in the same tx. Third
 party groups can opt in to be included in that process (reach out to us if this interests you) or
 propagate on their own. Any issues that deal with someone forgetting to propagate are out-of-scope.
+
+The same applies to state we mirror from integrated protocols. For example, when Kamino puts a whole
+lending market into emergency mode, our Kamino banks in that market keep full borrowing power until
+someone calls the permissionless `propagate_kamino_market_emergency` (and likewise stay restricted
+after Kamino resumes, until it is called again). Reading the market account on every risk action
+would be too costly for this edge case, so our response time is bounded by our monitoring. Issues
+that rely on this propagation window are out-of-scope.
 
 ### Bank Position Counts
 

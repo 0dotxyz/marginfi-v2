@@ -215,7 +215,8 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           signer: groupAdmin.wallet.publicKey,
           reserve: usdcReserve,
           lendingMarket: market,
-          globalConfig
+          globalConfig,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .instruction(),
     );
@@ -305,7 +306,8 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           signer: groupAdmin.wallet.publicKey,
           reserve: tokenAReserve,
           lendingMarket: market,
-          globalConfig
+          globalConfig,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .instruction(),
     );

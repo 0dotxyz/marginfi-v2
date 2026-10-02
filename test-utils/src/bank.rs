@@ -60,7 +60,7 @@ impl BankFixture {
         let bank = self.load().await;
         let oracle_adapter = match bank.config.oracle_setup {
             OracleSetup::Fixed => {
-                OraclePriceFeedAdapter::try_from_bank(&bank, &[], &Clock::default()).unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[], &Clock::default(), false).unwrap()
             }
             _ => {
                 let oracle_key = bank.config.oracle_keys[0];
@@ -74,7 +74,8 @@ impl BankFixture {
                     .unwrap();
 
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
-                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default(), false)
+                    .unwrap()
             }
         };
 
@@ -99,29 +100,54 @@ impl BankFixture {
     ) -> anyhow::Result<()> {
         let mut instructions = Vec::new();
 
-        let accounts = marginfi::accounts::LendingPoolConfigureBank {
-            group: self.load().await.group,
-            admin: self.ctx.borrow().payer.pubkey(),
-            bank: self.key,
-        }
-        .to_account_metas(Some(true));
+        let group = self.load().await.group;
+        let admin = self.ctx.borrow().payer.pubkey();
+        let (fast, gov) = config.split();
 
-        let config_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolConfigureBank {
-                bank_config_opt: config,
+        if !fast.is_empty() {
+            let accounts = marginfi::accounts::LendingPoolConfigureBank {
+                group,
+                admin,
+                bank: self.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
-            .data(),
-        };
+            .to_account_metas(Some(true));
 
-        instructions.push(config_ix);
+            instructions.push(Instruction {
+                program_id: marginfi::ID,
+                accounts,
+                data: marginfi::instruction::LendingPoolConfigureBank {
+                    bank_config_opt: fast,
+                }
+                .data(),
+            });
+        }
+
+        if !gov.is_empty() {
+            let accounts = marginfi::accounts::LendingPoolConfigureBankGov {
+                group,
+                governance_admin: admin,
+                bank: self.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true));
+
+            instructions.push(Instruction {
+                program_id: marginfi::ID,
+                accounts,
+                data: marginfi::instruction::LendingPoolConfigureBankGov {
+                    bank_config_opt: gov,
+                }
+                .data(),
+            });
+        }
 
         if let Some((setup, oracle)) = oracle_update {
-            let mut oracle_accounts = marginfi::accounts::LendingPoolConfigureBank {
+            let mut oracle_accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
                 group: self.load().await.group,
-                admin: self.ctx.borrow().payer.pubkey(),
+                governance_admin: self.ctx.borrow().payer.pubkey(),
                 bank: self.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true));
 
@@ -227,6 +253,7 @@ impl BankFixture {
             fee_vault: bank.fee_vault,
             fee_vault_authority,
             dst_token_account: receiving_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -309,6 +336,7 @@ impl BankFixture {
             bank: self.key,
             admin: signer_pk,
             destination_account: destination_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -354,6 +382,7 @@ impl BankFixture {
             insurance_vault: bank.insurance_vault,
             insurance_vault_authority,
             dst_token_account: receiving_account.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
@@ -443,6 +472,7 @@ impl BankFixture {
             group: bank.group,
             authority,
             bank: self.key,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true));
         Instruction {

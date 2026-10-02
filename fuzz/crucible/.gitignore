@@ -1,0 +1,13 @@
+/target
+/corpus
+/crashes
+/output
+/coverage
+*.orig
+.build-state.json
+/bundle
+/programs/*.so
+/target-linux
+/.crucible-scout
+/.scout-provenance.lock
+/fc-workdir-*

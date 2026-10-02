@@ -2,6 +2,11 @@ name: Test
 
 on:
   workflow_dispatch:
+    inputs:
+      fuzz_iters:
+        description: "Trident iterations override (e.g. 250000 = release soak). Empty = 5K."
+        required: false
+        default: ""
   push:
     branches:
     - main
@@ -495,6 +500,17 @@ jobs:
         toolchain: nightly
         components: rustfmt
 
+    - name: Cache trident harness build
+      # Release build of the harness (~650 crates). Only the local
+      # `fuzz_tests` crate recompiles on a hit; restore-keys picks up
+      # the latest build for the same Cargo.lock when sources change.
+      uses: actions/cache@v4
+      with:
+        path: trident-tests/target
+        key: trident-harness-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}-${{ hashFiles('trident-tests/fuzz_0/**/*.rs', 'target/idl/*.json') }}
+        restore-keys: |
+          trident-harness-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}-
+
     - name: Regenerate trident types.rs
       # `types.rs` is gitignored — regenerate from the IDLs we just
       # downloaded from `anchor-build`. No `--idl-paths` so trident
@@ -505,24 +521,40 @@ jobs:
     - name: Set fuzz size
       id: size
       # Target-scaled iteration budget. PR target branch decides depth:
-      # version-branch PRs (`0.1.9-main`, …) get 50K — daily dev work.
-      # Release PRs landing on `main` get the full 500K soak — last
-      # gate before the release lands. `workflow_dispatch` falls into
-      # the 10K middle tier for ad-hoc manual runs.
+      # version-branch PRs (`0.1.9-main`, …) get 25K — daily dev work.
+      # Release PRs landing on `main` get the full 250K soak — last
+      # gate before the release lands. A PR whose head branch ends in
+      # `-soak` also gets the release budget — push the same commit as
+      # `<branch>-soak` to rehearse the release run without touching
+      # `main` (no extra permissions needed). `workflow_dispatch` falls
+      # into the 5K middle tier unless the `fuzz_iters` input is set:
+      #   gh workflow run test.yaml --ref <branch> -f fuzz_iters=250000
       #
-      # Note on 500K: extrapolating from local smokes it can approach
-      # GitHub-hosted's 6h job cap. If a real release PR overruns,
-      # drop to 200-300K, or move this job onto a larger runner.
+      # Budgets are iterations × FUZZ_FLOWS_PER_ITER (100). Per-iteration
+      # `#[init]` costs ~24 ms/thread vs ~0.85 ms per flow, so longer
+      # sequences amortize setup; 250K×100 keeps the old 500K×50 flow
+      # budget. Measured 2026-09-28: 500K×50 = 2h05m on the 4-vCPU
+      # runner (fork fetch is 5 s; the loop prints nothing on non-TTY).
+      # To trade depth for time, lower the release budget here.
+      env:
+        FUZZ_ITERS_OVERRIDE: ${{ inputs.fuzz_iters }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+        HEAD_REF: ${{ github.head_ref }}
       run: |
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          if [ "${{ github.base_ref }}" = "main" ]; then
-            echo "iters=500000" >> "$GITHUB_OUTPUT"
-          else
-            echo "iters=50000"  >> "$GITHUB_OUTPUT"
-          fi
+        if [ -n "$FUZZ_ITERS_OVERRIDE" ]; then
+          case "$FUZZ_ITERS_OVERRIDE" in
+            *[!0-9]*) echo "fuzz_iters must be a positive integer, got: $FUZZ_ITERS_OVERRIDE" >&2; exit 1 ;;
+          esac
+          iters="$FUZZ_ITERS_OVERRIDE"
+        elif [ "$EVENT_NAME" != "pull_request" ]; then
+          iters=5000
+        elif [ "$BASE_REF" = "main" ] || [[ "$HEAD_REF" == *-soak ]]; then
+          iters=250000
         else
-          echo "iters=10000" >> "$GITHUB_OUTPUT"
+          iters=25000
         fi
+        echo "iters=$iters" >> "$GITHUB_OUTPUT"
 
     - name: Run regression seeds
       # Deterministic regression checks run BEFORE the random fuzz so
@@ -564,5 +596,5 @@ jobs:
       working-directory: trident-tests
       env:
         FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
-        FUZZ_FLOWS_PER_ITER: '50'
+        FUZZ_FLOWS_PER_ITER: '100'
       run: trident fuzz run ${{ matrix.test.target }} -e invariants

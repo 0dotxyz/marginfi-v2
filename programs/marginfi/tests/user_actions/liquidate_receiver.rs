@@ -721,6 +721,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
             accounts: marginfi::accounts::ConfigureGroupRateLimits {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::ConfigureGroupRateLimits {
@@ -1099,9 +1100,17 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Here liquidator can zero-out the account because it falls below the minimum value threshold
-#[tokio::test]
-async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
+/// Deposits SOL against a USDC borrow and records the account for liquidation, leaving the
+/// bank weights and oracle at the fixture defaults (SOL at $10).
+async fn setup_liquidatee(
+    sol_deposit: f64,
+    usdc_borrow: f64,
+) -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    TokenAccountFixture,
+    Pubkey,
+)> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1128,12 +1137,11 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
         .usdc_mint
         .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
         .await;
-    //  .4 * 10 = $4, which is less than the minimum of $5
     liquidatee
         .try_bank_deposit_with_authority(
             user_token_sol.key,
             sol_bank,
-            0.4,
+            sol_deposit,
             None,
             &liquidatee_authority,
         )
@@ -1142,19 +1150,9 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
         .try_bank_borrow_with_authority(
             user_token_usdc.key,
             usdc_bank,
-            2.0,
+            usdc_borrow,
             0,
             &liquidatee_authority,
-        )
-        .await?;
-    sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
         )
         .await?;
 
@@ -1178,23 +1176,30 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
             .await?;
     }
 
-    let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
-    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
-    // NOTE: In receivership liquidation, you MUST PASS the oracle for the withdrawn asset even for
-    // a withdraw-all. The entire balance is still withdrawn!
-    let withdraw_ix = liquidatee
-        .make_bank_withdraw_ix_include_closing_bank(
-            liquidator_sol_acc.key,
-            sol_bank,
-            0.4,
-            Some(true),
+    Ok((test_f, liquidatee, liquidator_usdc_acc, record_pk))
+}
+
+// Below the minimum value threshold the account may end healthy, but the premium cap still
+// binds: the liquidator cannot take the whole $4 of collateral for the $2 of debt repaid.
+#[tokio::test]
+async fn liquidate_receiver_low_value_acc_may_end_healthy() -> anyhow::Result<()> {
+    //  .4 * 10 = $4, which is less than the minimum of $5
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(0.4, 2.0).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
         )
-        .await;
-    // The entire liability
-    let repay_ix = liquidatee
-        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
-        .await;
+        .await?;
+
+    let payer = test_f.payer().clone();
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
             record_pk,
@@ -1205,10 +1210,28 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
         )
         .await;
 
+    // Seizing all $4 for the $2 repaid exceeds the 5% premium
+    // NOTE: In receivership liquidation, you MUST PASS the oracle for the withdrawn asset even for
+    // a withdraw-all. The entire balance is still withdrawn!
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix_include_closing_bank(
+                liquidator_sol_acc.key,
+                sol_bank,
+                0.4,
+                Some(true),
+            )
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
+            .await,
+        end_ix.clone(),
+    ];
     {
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
-            &[start_ix, withdraw_ix, repay_ix, end_ix],
+            &ixs,
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
             ctx.banks_client.get_latest_blockhash().await.unwrap(),
@@ -1217,17 +1240,159 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
             .banks_client
             .process_transaction_with_preflight(tx)
             .await;
-        assert!(res.is_ok());
-    } // release borrow of ctx
+        assert_custom_error!(res.unwrap_err(), MarginfiError::LiquidationPremiumTooHigh);
+    }
 
-    // Account has been fully closed, all positions were seized and repaid.
+    // Seizing $2.10 for the $2 repaid clears the debt and leaves the account healthy
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.21, None)
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
+            .await,
+        end_ix,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    assert_eq!(
+        liquidator_sol_acc.balance().await,
+        native!(0.21, "SOL", f64)
+    );
     let marginfi_account = liquidatee.load().await;
-    let active_balance_count = marginfi_account
+    let mut balances = marginfi_account.lending_account.get_active_balances_iter();
+    assert_eq!(balances.next().map(|b| b.bank_pk), Some(sol_bank.key));
+    assert!(balances.next().is_none());
+
+    Ok(())
+}
+
+// A low-value account already in bad debt cannot be drained for free: the premium cap requires
+// $3.81 of repayment for the $4 seized.
+#[tokio::test]
+async fn liquidate_receiver_low_value_bad_debt_acc_still_pays_premium_cap() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(2.0, 10.0).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    // SOL falls to $2: $4 of collateral against $10 of debt, below the $5 closeout threshold
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 2_000_000_000, 0, 0)
+        .await;
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.5).into()),
+                asset_weight_maint: Some(I80F48!(0.8).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let payer = test_f.payer().clone();
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![sol_bank.key],
+        )
+        .await;
+
+    // Seizing all $4 without repaying anything
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix_include_closing_bank(
+                liquidator_sol_acc.key,
+                sol_bank,
+                2.0,
+                Some(true),
+            )
+            .await,
+        end_ix.clone(),
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::LiquidationPremiumTooHigh);
+    }
+
+    // Repaying $3.81 funds the $4 seized at the 5% premium
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix_include_closing_bank(
+                liquidator_sol_acc.key,
+                sol_bank,
+                2.0,
+                Some(true),
+            )
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 3.81, None)
+            .await,
+        end_ix,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    assert_eq!(liquidator_sol_acc.balance().await, native!(2, "SOL"));
+    let liquidatee_ma = liquidatee.load().await;
+    let usdc_bank_state = usdc_bank.load().await;
+    let usdc_index = liquidatee_ma
         .lending_account
-        .get_active_balances_iter()
-        .count();
-    // The lending position is closed.
-    assert_eq!(0, active_balance_count);
+        .balances
+        .iter()
+        .position(|b| b.bank_pk == usdc_bank.key)
+        .unwrap();
+    let usdc_liab = usdc_bank_state.get_liability_amount(
+        liquidatee_ma.lending_account.balances[usdc_index]
+            .liability_shares
+            .into(),
+    )?;
+    // 10 - 3.81, in native usdc decimals
+    assert_eq!(usdc_liab, I80F48!(6190000));
+    assert_eq!(
+        liquidatee_ma
+            .lending_account
+            .get_active_balances_iter()
+            .count(),
+        1
+    );
 
     Ok(())
 }
@@ -2199,52 +2364,11 @@ async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
 // liq_cache_locked set forever and freezing the bank's cache.
 #[tokio::test]
 async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
-
-    let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee_authority = Keypair::new();
-    let liquidatee = MarginfiAccountFixture::new_with_authority(
-        test_f.context.clone(),
-        &test_f.marginfi_group.key,
-        &liquidatee_authority,
-    )
-    .await;
+    // Low value account, so it may end healthy. The debt nearly matches the collateral so
+    // closing both balances stays within the premium cap.
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(0.4, 3.85).await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
-
-    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
-    liquidator
-        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
-        .await?;
-
-    let user_token_sol = test_f
-        .sol_mint
-        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
-        .await;
-    let user_token_usdc = test_f
-        .usdc_mint
-        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
-        .await;
-    // Low value account so full close-out is allowed
-    liquidatee
-        .try_bank_deposit_with_authority(
-            user_token_sol.key,
-            sol_bank,
-            0.4,
-            None,
-            &liquidatee_authority,
-        )
-        .await?;
-    liquidatee
-        .try_bank_borrow_with_authority(
-            user_token_usdc.key,
-            usdc_bank,
-            2.0,
-            0,
-            &liquidatee_authority,
-        )
-        .await?;
-
     sol_bank
         .update_config(
             BankConfigOpt {
@@ -2268,26 +2392,6 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
         .cache
         .is_liquidation_price_cache_locked());
 
-    let (record_pk, _bump) = Pubkey::find_program_address(
-        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
-        &marginfi::ID,
-    );
-    {
-        let ctx = test_f.context.borrow_mut();
-        let init_ix = liquidatee
-            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
-            .await;
-        let init_tx = Transaction::new_signed_with_payer(
-            &[init_ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
-        );
-        ctx.banks_client
-            .process_transaction_with_preflight(init_tx)
-            .await?;
-    }
-
     let payer = test_f.payer().clone();
     let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
@@ -2297,7 +2401,7 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
         .await;
     // repay_all closes the usdc liability entirely
     let repay_ix = liquidatee
-        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 3.85, Some(true))
         .await;
     // Exclude both banks from end_ix remaining accounts since both balances are closed.
     let end_ix = liquidatee
@@ -2336,6 +2440,162 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
         !usdc_bank_state.cache.is_liquidation_price_cache_locked(),
         "usdc_bank liq_cache_locked must be cleared after liquidation"
     );
+
+    Ok(())
+}
+
+/// Deposits $20 of SOL against a $19.50 USDC borrow, then weights SOL at a maintenance ratio of
+/// 0.96, which puts the maintenance limit at 25x (against the 1.0 USDC liability weight) and caps
+/// any liquidator's premium at 1/24, leaving the account $0.30 short of maintenance. Returns the
+/// fixture, the parties, and the liquidation record.
+async fn setup_high_leverage_liquidatee() -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    TokenAccountFixture,
+    Pubkey,
+)> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(2.0, 19.5).await?;
+    test_f
+        .get_bank(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.95).into()),
+                asset_weight_maint: Some(I80F48!(0.96).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    Ok((test_f, liquidatee, liquidator_usdc_acc, record_pk))
+}
+
+// Seizing the 5% premium that `LIQUIDATION_BONUS_FEE_MINIMUM` guarantees costs the account
+// -2.10 * 0.96 + 2.00 = $0.016 of maintenance health, less than the $0.10 premium taken.
+#[tokio::test]
+async fn liquidate_receiver_high_leverage_allows_minimum_premium() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) =
+        setup_high_leverage_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    // Seize $2.10 for $2.00 repaid, exactly the guaranteed 5% premium
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.21, None)
+        .await;
+    let repay_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
+        .await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, withdraw_ix, repay_ix, end_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    assert_eq!(
+        liquidator_sol_acc.balance().await,
+        native!(0.21, "SOL", f64)
+    );
+    Ok(())
+}
+
+// The premium is paid out of the liquidatee's equity, so it stops at the point the account would
+// be left in bad debt. Here $20 of collateral against $19.50 of debt funds $0.50 of premium.
+#[tokio::test]
+async fn liquidate_receiver_premium_stops_at_insolvency() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) =
+        setup_high_leverage_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let payer = test_f.payer().clone();
+
+    // Seizing $11.55 for $11.00 repaid takes $0.55 of premium, $0.05 more than the account has
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 1.155, None)
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 11.0, None)
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostLiquidation);
+    }
+
+    // $0.45 of premium leaves the account solvent and goes through
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.945, None)
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 9.0, None)
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
 
     Ok(())
 }
