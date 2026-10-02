@@ -1,6 +1,6 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
-    log_pool_info,
+    ix_utils, log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
     MarginfiError, MarginfiResult,
 };
@@ -22,6 +22,8 @@ pub fn lending_pool_add_bank(
     ctx: Context<LendingPoolAddBank>,
     bank_config: BankConfigCompact,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     // Transfer the flat sol init fee to the global fee wallet
     let fee_state = ctx.accounts.fee_state.load()?;
     let bank_init_flat_sol_fee = fee_state.bank_init_flat_sol_fee;
@@ -86,7 +88,7 @@ pub fn lending_pool_add_bank(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.governance_admin.key)
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
@@ -102,13 +104,10 @@ pub fn lending_pool_add_bank(
 #[derive(Accounts)]
 #[instruction(bank_config: BankConfigCompact)]
 pub struct LendingPoolAddBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     /// Pays to init accounts and pays `fee_state.bank_init_flat_sol_fee` lamports to the protocol
     #[account(mut)]
@@ -212,6 +211,10 @@ pub struct LendingPoolAddBank<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl<'info> LendingPoolAddBank<'info> {

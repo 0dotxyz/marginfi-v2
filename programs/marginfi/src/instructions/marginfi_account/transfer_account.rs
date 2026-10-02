@@ -34,6 +34,7 @@ fn initialize_migrated_account(
     new_account.account_flags = old_account.account_flags;
     new_account.migrated_from = old_account_key;
     new_account.indexer_flags = old_account.indexer_flags;
+    new_account.liquidation_tagged_at = old_account.liquidation_tagged_at;
     new_account.sync_indexer_flags();
 }
 
@@ -95,6 +96,11 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
         MarginfiError::AccountAlreadyMigrated
     );
 
+    check!(
+        !old_account.get_flag(ACCOUNT_DISABLED),
+        MarginfiError::AccountDisabled
+    );
+
     let mut new_account = ctx.accounts.new_marginfi_account.load_init()?;
     let current_timestamp = Clock::get()?.unix_timestamp as u64;
     initialize_migrated_account(
@@ -145,7 +151,7 @@ pub struct TransferToNewAccount<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -243,6 +249,11 @@ pub fn transfer_to_new_account_pda(
         MarginfiError::AccountAlreadyMigrated
     );
 
+    check!(
+        !old_account.get_flag(ACCOUNT_DISABLED),
+        MarginfiError::AccountDisabled
+    );
+
     // Validate third-party id restriction if provided
     if let Some(id) = third_party_id {
         if !is_allowed_cpi_for_third_party_id(&ctx.accounts.instructions_sysvar, id)? {
@@ -304,7 +315,7 @@ pub struct TransferToNewAccountPda<'info> {
         constraint = {
             let a = old_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,

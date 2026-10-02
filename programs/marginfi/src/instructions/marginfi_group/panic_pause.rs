@@ -1,3 +1,4 @@
+use crate::ix_utils;
 use crate::state::{fee_state::FeeStateImpl, panic_state::PanicStateImpl};
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
@@ -5,6 +6,8 @@ use marginfi_type_crate::constants::FEE_STATE_SEED;
 use marginfi_type_crate::types::{FeeState, PanicState};
 
 pub fn panic_pause(ctx: Context<PanicPause>) -> Result<()> {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
     let current_timestamp = Clock::get()?.unix_timestamp;
 
@@ -43,4 +46,8 @@ pub struct PanicPause<'info> {
         constraint = fee_state.load()?.is_pause_authority(pause_authority.key()) @ MarginfiError::Unauthorized
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

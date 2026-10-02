@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use marginfi_type_crate::constants::REBALANCE_FEE_POOL_SEED;
 use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_FROZEN};
 
 use crate::{check, state::marginfi_account::MarginfiAccountImpl, MarginfiError, MarginfiResult};
@@ -28,6 +29,12 @@ pub fn close_account(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
         "Account cannot be closed"
     );
 
+    check!(
+        ctx.accounts.rebalance_fee_pool.lamports() == 0,
+        MarginfiError::IllegalAction,
+        "Withdraw rebalance fee pool before closing account"
+    );
+
     Ok(())
 }
 
@@ -43,4 +50,11 @@ pub struct MarginfiAccountClose<'info> {
     pub authority: Signer<'info>,
     #[account(mut)]
     pub fee_payer: Signer<'info>,
+    /// CHECK: the account's rebalance fee pool PDA; validated by seeds. Must be empty (drained via
+    /// `withdraw_rebalance_fee_pool`) before close so its lamports are not orphaned.
+    #[account(
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub rebalance_fee_pool: SystemAccount<'info>,
 }

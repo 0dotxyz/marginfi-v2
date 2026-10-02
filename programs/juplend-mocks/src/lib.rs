@@ -8,7 +8,7 @@ pub mod state;
 
 use anchor_lang::prelude::*;
 
-// Jupiter Lend (Fluid) Earn / fToken lending program ID (mainnet)
+// JupLend Earn / fToken lending program ID (mainnet)
 declare_id!("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9");
 
 // Declare the JupLend lending program for CPI.

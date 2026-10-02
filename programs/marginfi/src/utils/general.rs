@@ -335,15 +335,18 @@ pub fn i80f48_to_f64(n: I80F48) -> f64 {
 /// Fetch a low-biased price for a given bank from a properly structured remaining accounts slice as
 /// passed to any risk check.
 ///
+/// * `in_deleverage` prices a PT bank through an Exponent emergency, so the risk admin can unwind
+///   a position whose vault has depegged. Pass false anywhere else.
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
 pub fn fetch_asset_price_for_bank_low_bias<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
+    in_deleverage: bool,
 ) -> Result<I80F48> {
     let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
-    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
+    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock, in_deleverage)?;
     let price = pf.get_price_of_type(
         OraclePriceType::RealTime,
         Some(PriceBias::Low),

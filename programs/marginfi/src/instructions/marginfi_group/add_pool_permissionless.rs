@@ -25,34 +25,28 @@ use marginfi_type_crate::{
     },
 };
 
-pub fn lending_pool_add_bank_permissionless(
-    ctx: Context<LendingPoolAddBankPermissionless>,
+/// Build the bank's initial state in its own stack frame.
+///
+/// * `#[inline(never)]` is load-bearing: the `Bank`/`BankConfigCompact`/`InterestRateConfig`
+///   temporaries total several KB and the handler frame sits near the 4 KiB SBF stack limit —
+///   inlined, the handler overflows it (access violation at runtime, "Stack offset exceeded"
+///   at build time).
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn write_staked_bank(
+    bank: &mut Bank,
+    settings: &StakedSettings,
+    group_key: Pubkey,
+    mint: Pubkey,
+    mint_decimals: u8,
+    is_t22: bool,
+    liquidity_vault: Pubkey,
+    insurance_vault: Pubkey,
+    fee_vault: Pubkey,
+    // liquidity vault/authority, insurance vault/authority, fee vault/authority
+    bumps: [u8; 6],
     bank_seed: u64,
 ) -> MarginfiResult {
-    let LendingPoolAddBankPermissionless {
-        bank_mint,
-        liquidity_vault,
-        insurance_vault,
-        fee_vault,
-        bank: bank_loader,
-        stake_pool,
-        sol_pool,
-        pool_onramp,
-        validator_vote_account,
-        ..
-    } = ctx.accounts;
-
-    let mut bank = bank_loader.load_init()?;
-    let settings = ctx.accounts.staked_settings.load()?;
-    let mut group = ctx.accounts.marginfi_group.load_mut()?;
-
-    let liquidity_vault_bump = ctx.bumps.liquidity_vault;
-    let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;
-    let insurance_vault_bump = ctx.bumps.insurance_vault;
-    let insurance_vault_authority_bump = ctx.bumps.insurance_vault_authority;
-    let fee_vault_bump = ctx.bumps.fee_vault;
-    let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
-
     // These are placeholder values: staked collateral positions do not support borrowing and likely
     // never will, thus they will earn no interest.
 
@@ -88,33 +82,79 @@ pub fn lending_pool_add_bank_permissionless(
         oracle_max_confidence: 0,
     };
 
-    let now = Clock::get().unwrap().unix_timestamp;
+    let now = Clock::get()?.unix_timestamp;
     let config = default_config.into();
 
     bank.init(
-        ctx.accounts.marginfi_group.key(),
+        group_key,
         &config,
-        bank_mint.key(),
-        bank_mint.decimals,
-        liquidity_vault.key(),
-        insurance_vault.key(),
-        fee_vault.key(),
+        mint,
+        mint_decimals,
+        liquidity_vault,
+        insurance_vault,
+        fee_vault,
         now,
-        liquidity_vault_bump,
-        liquidity_vault_authority_bump,
-        insurance_vault_bump,
-        insurance_vault_authority_bump,
-        fee_vault_bump,
-        fee_vault_authority_bump,
+        bumps[0],
+        bumps[1],
+        bumps[2],
+        bumps[3],
+        bumps[4],
+        bumps[5],
         bank_seed,
     );
     bank.flags |= BANK_SEED_KNOWN;
     bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
-    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+    if is_t22 {
         bank.flags |= IS_T22;
     }
     bank.config.oracle_setup = OracleSetup::StakedWithPythPush;
     bank.config.oracle_keys[0] = settings.oracle;
+
+    Ok(())
+}
+
+pub fn lending_pool_add_bank_permissionless(
+    ctx: Context<LendingPoolAddBankPermissionless>,
+    bank_seed: u64,
+) -> MarginfiResult {
+    let LendingPoolAddBankPermissionless {
+        bank_mint,
+        liquidity_vault,
+        insurance_vault,
+        fee_vault,
+        bank: bank_loader,
+        stake_pool,
+        sol_pool,
+        pool_onramp,
+        validator_vote_account,
+        ..
+    } = ctx.accounts;
+
+    let mut bank = bank_loader.load_init()?;
+    let settings = ctx.accounts.staked_settings.load()?;
+    let mut group = ctx.accounts.marginfi_group.load_mut()?;
+
+    let is_t22 = bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID;
+    write_staked_bank(
+        &mut bank,
+        &settings,
+        ctx.accounts.marginfi_group.key(),
+        bank_mint.key(),
+        bank_mint.decimals,
+        is_t22,
+        liquidity_vault.key(),
+        insurance_vault.key(),
+        fee_vault.key(),
+        [
+            ctx.bumps.liquidity_vault,
+            ctx.bumps.liquidity_vault_authority,
+            ctx.bumps.insurance_vault,
+            ctx.bumps.insurance_vault_authority,
+            ctx.bumps.fee_vault,
+            ctx.bumps.fee_vault_authority,
+        ],
+        bank_seed,
+    )?;
 
     log_pool_info(&bank);
 

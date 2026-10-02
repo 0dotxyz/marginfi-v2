@@ -421,7 +421,9 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::SolendPythPull
         | OracleSetup::SolendSwitchboardPull
         | OracleSetup::JuplendPythPull
-        | OracleSetup::JuplendSwitchboardPull => vec![keys[0], keys[1]],
+        | OracleSetup::JuplendSwitchboardPull
+        | OracleSetup::ScopeKamino
+        | OracleSetup::ScopeJuplend => vec![keys[0], keys[1]],
         // Pyth + Marinade State / SPL StakePool / Exponent vault
         OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
             vec![keys[0], keys[1]]

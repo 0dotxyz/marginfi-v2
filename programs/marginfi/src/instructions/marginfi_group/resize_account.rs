@@ -4,7 +4,7 @@ use crate::MarginfiResult;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
-    types::{FeeState, MarginfiGroup},
+    types::{Bank, FeeState, MarginfiGroup},
 };
 
 /// (permissionless) Resize a v1-sized group account to the current struct size. `payer` funds
@@ -26,6 +26,33 @@ pub fn lending_pool_resize_group_account(
     grow_account(
         group_ai,
         8 + MarginfiGroup::LEN,
+        &ctx.accounts.payer,
+        &ctx.accounts.system_program,
+    )
+}
+
+/// (permissionless) Resize a v1-sized bank account to the current struct size. `payer` funds
+/// the added rent; new bytes are zero-filled.
+pub fn lending_pool_resize_bank_account(
+    ctx: Context<LendingPoolResizeBankAccount>,
+) -> MarginfiResult {
+    let bank_ai = &ctx.accounts.bank;
+
+    check!(
+        bank_ai.owner == &crate::ID,
+        MarginfiError::InvalidBankAccount
+    );
+    {
+        let data = bank_ai.try_borrow_data()?;
+        check!(
+            data.len() >= 8 && data[..8] == Bank::DISCRIMINATOR,
+            MarginfiError::InvalidBankAccount
+        );
+    }
+
+    grow_account(
+        bank_ai,
+        8 + Bank::LEN,
         &ctx.accounts.payer,
         &ctx.accounts.system_program,
     )
@@ -95,6 +122,20 @@ pub struct LendingPoolResizeGroupAccount<'info> {
     /// undersized group can still be resized under the future (larger-struct) program.
     #[account(mut)]
     pub group: UncheckedAccount<'info>,
+
+    /// Funds the rent for the added account space.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct LendingPoolResizeBankAccount<'info> {
+    /// CHECK: owner + discriminator validated in the handler; not an AccountLoader so an
+    /// undersized bank can still be resized under the future (larger-struct) program.
+    #[account(mut)]
+    pub bank: UncheckedAccount<'info>,
 
     /// Funds the rent for the added account space.
     #[account(mut)]

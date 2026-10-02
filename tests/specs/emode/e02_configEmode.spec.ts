@@ -11,7 +11,6 @@ import {
   EMODE_MAINT_RATE_LST_TO_LST,
   EMODE_MAINT_RATE_SOL_TO_LST,
   EMODE_SEED,
-  emodeAdmin,
   emodeGroup,
   groupAdmin,
   users,
@@ -94,11 +93,11 @@ describe("Init e-mode settings for a set of banks", () => {
     assertBankrunTxFailed(result, "0x179a");
   });
 
-  it("(emode admin) Bad emode settings - should fail", async () => {
+  it("(slow governance admin) Bad emode settings - should fail", async () => {
     // init > maint weight
     let tx = new Transaction();
     tx.add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: solBank,
         tag: EMODE_SOL_TAG,
         entries: [
@@ -112,7 +111,7 @@ describe("Init e-mode settings for a set of banks", () => {
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     let result = await banksClient.tryProcessTransaction(tx);
     // 6075 (BadEmodeConfig)
     assertBankrunTxFailed(result, "0x17bb");
@@ -120,7 +119,7 @@ describe("Init e-mode settings for a set of banks", () => {
     // weight > 1
     tx = new Transaction();
     tx.add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: solBank,
         tag: EMODE_SOL_TAG,
         entries: [
@@ -134,22 +133,22 @@ describe("Init e-mode settings for a set of banks", () => {
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     result = await banksClient.tryProcessTransaction(tx);
     // 6075 (BadEmodeConfig)
     assertBankrunTxFailed(result, "0x17bb");
   });
 
   // * Note: you can pack two emode configure ixes into one tx, but that's it, since the data
-  //   payload is just over 400 bytes. In production, when editing multiple banks, the emode admin
+  //   payload is just over 400 bytes. In production, when editing multiple banks, the slow governance admin
   //   should use a jito bundle to ensure they all update at the same time and don't trigger
   //   liquidations accidentally.
   // * Note: The default init/maint weight for all banks in this test suite is 0.5/0.6
-  it("(emode admin) Configures bank emodes - happy path", async () => {
+  it("(slow governance admin) Configures bank emodes - happy path", async () => {
     let tx = new Transaction();
 
     tx.add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: usdcBank,
         tag: EMODE_STABLE_TAG,
         entries: [
@@ -159,7 +158,7 @@ describe("Init e-mode settings for a set of banks", () => {
     );
 
     tx.add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: stableBank,
         tag: EMODE_STABLE_TAG,
         entries: [
@@ -169,11 +168,11 @@ describe("Init e-mode settings for a set of banks", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
 
     tx = new Transaction().add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: solBank,
         tag: EMODE_SOL_TAG,
         entries: [
@@ -188,11 +187,11 @@ describe("Init e-mode settings for a set of banks", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
 
     tx = new Transaction().add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: lstABank,
         tag: EMODE_LST_TAG,
         entries: [
@@ -219,7 +218,7 @@ describe("Init e-mode settings for a set of banks", () => {
     );
 
     tx.add(
-      await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
+      await configBankEmode(groupAdmin.mrgnBankrunProgram, {
         bank: lstBBank,
         tag: EMODE_LST_TAG,
         entries: [
@@ -240,7 +239,7 @@ describe("Init e-mode settings for a set of banks", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(emodeAdmin.wallet);
+    tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
 
     const clock = await banksClient.getClock();

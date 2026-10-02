@@ -448,7 +448,11 @@ export type Farms = {
           "type": "u64"
         },
         {
-          "name": "expectedRewardIssuedUnclaimed",
+          "name": "expectedRewardsIssuedCumulative",
+          "type": "u64"
+        },
+        {
+          "name": "userStateId",
           "type": "u64"
         }
       ]
@@ -1037,6 +1041,53 @@ export type Farms = {
       "args": []
     },
     {
+      "name": "closeEmptyUserState",
+      "discriminator": [
+        240,
+        24,
+        9,
+        227,
+        86,
+        225,
+        199,
+        95
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The account that signs the transaction",
+            "- Non-delegated: user signs",
+            "- Delegated: delegated authority signs"
+          ],
+          "signer": true
+        },
+        {
+          "name": "userState",
+          "writable": true
+        },
+        {
+          "name": "farmState",
+          "docs": [
+            "The farm state account for validation"
+          ]
+        },
+        {
+          "name": "rentReceiver",
+          "docs": [
+            "The account that receives the rent",
+            "- Non-delegated: user receives the rent",
+            "- Delegated: farm admin receives the rent"
+          ],
+          "writable": true
+        },
+        {
+          "name": "systemProgram"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "idlMissingTypes",
       "discriminator": [
         130,
@@ -1494,8 +1545,63 @@ export type Farms = {
     },
     {
       "code": 6067,
-      "name": "currentRewardIssuedUnclaimedMismatch",
-      "msg": "Current reward issued unclaimed does not match expected value"
+      "name": "rewardsIssuedCumulativeMismatch",
+      "msg": "Rewards issued cumulative does not match expected value"
+    },
+    {
+      "code": 6068,
+      "name": "cannotCloseUserStateStakeNonZero",
+      "msg": "Cannot close user state because staked amount is non-zero"
+    },
+    {
+      "code": 6069,
+      "name": "cannotCloseUserStatePendingUnstakes",
+      "msg": "Cannot close user state because there are pending unstake requests"
+    },
+    {
+      "code": 6070,
+      "name": "cannotCloseUserStatePendingDeposits",
+      "msg": "Cannot close user state because there are pending deposit requests"
+    },
+    {
+      "code": 6071,
+      "name": "cannotCloseUserStateUnharvestedRewards",
+      "msg": "Cannot close user state because there are unharvested rewards"
+    },
+    {
+      "code": 6072,
+      "name": "cannotCloseUserStateSignerNotOwner",
+      "msg": "Cannot close user state because signer is not the owner"
+    },
+    {
+      "code": 6073,
+      "name": "cannotCloseUserStateDelegatedSignerNotDelegateAuthority",
+      "msg": "Cannot close user state (delegated) because signer is not the delegate authority"
+    },
+    {
+      "code": 6074,
+      "name": "cannotCloseUserStateRentReceiverNotOwner",
+      "msg": "Cannot close user state because rent receiver is not the owner"
+    },
+    {
+      "code": 6075,
+      "name": "cannotCloseUserStateDelegatedRentReceiverNotAdmin",
+      "msg": "Cannot close user state (delegated) because rent receiver is not the admin"
+    },
+    {
+      "code": 6076,
+      "name": "userRewardTokenAccountMustBeAta",
+      "msg": "User reward token account must be an ATA when payer is not the owner"
+    },
+    {
+      "code": 6077,
+      "name": "rewardsIssuedCumulativeAtMax",
+      "msg": "Cannot reward user because rewards_issued_cumulative has reached maximum value"
+    },
+    {
+      "code": 6078,
+      "name": "userStateIdMismatch",
+      "msg": "User state user id does not match expected value"
     }
   ],
   "types": [

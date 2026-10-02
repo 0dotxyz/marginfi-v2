@@ -68,7 +68,7 @@ describe("sl08: 16 Banks Stress Test", () => {
 
   const startingSeed = 800;
   const REGULAR_BANKS_COUNT = 15;
-  const SOLEND_BANKS_COUNT = 8; // Limited by MAX_INTEGRATION_POSITIONS
+  const SOLEND_BANKS_COUNT = 8; // Over MAX_COSTLY_POSITIONS, which local tests disable
 
   const seedAmountLst = new BN(10 * 10 ** ecosystem.lstAlphaDecimals);
   const userDepositAmountUsdc = new BN(1000 * 10 ** ecosystem.usdcDecimals);
