@@ -7,7 +7,9 @@ use fixtures::{
 };
 use marginfi::constants::PROGRAM_VERSION;
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
+use marginfi_type_crate::types::{
+    centi_to_u32, u32_to_centi, BalanceSide, OrderTrigger, WrappedI80F48,
+};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -1386,6 +1388,96 @@ async fn keeper_close_order_success_after_clearing_side(
         "order should be closed after keeper_close_order"
     );
     assert_active_orders(&borrower_mfi_account_f, 0).await;
+
+    Ok(())
+}
+
+/// A full repayment with `repay_all = false` leaves the tagged balance live. If the owner then
+/// deposits into that same bank, it becomes a second tagged asset. A stale order must not give a
+/// keeper permission to withdraw either asset without repaying debt.
+#[tokio::test]
+async fn start_order_execution_rejects_repaid_and_redeposited_tagged_liability(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // The order starts valid, and its take-profit is initially unmet: $100 SOL - $50 USDC = $50.
+    let borrower = create_borrower_with_positions(&test_f, sol_bank, 10.0, usdc_bank, 50.0).await?;
+    let order_pda = borrower
+        .try_place_order(
+            vec![sol_bank.key, usdc_bank.key],
+            take_profit_trigger(fp!(500.0), 0),
+        )
+        .await?;
+    assert_active_orders(&borrower, 1).await;
+
+    // Repay the USDC debt without closing its balance, then deposit into the same tagged bank.
+    let repay_account = usdc_bank.mint.create_token_account_and_mint_to(50.0).await;
+    borrower
+        .try_bank_repay(repay_account.key, usdc_bank, 50.0, Some(false))
+        .await?;
+    let redeposit_account = usdc_bank
+        .mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(redeposit_account.key, usdc_bank, 1_000.0, None)
+        .await?;
+
+    // Both order tags are still live, but they now identify two assets rather than an asset/debt
+    // pair. The redeposit also makes the former take-profit condition true.
+    let order = borrower.load_order(order_pda).await;
+    let account = borrower.load().await;
+    let tagged_balances = account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|balance| balance.is_active() && order.tags.contains(&balance.tag))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tagged_balances.len(),
+        2,
+        "both original order tags must remain live"
+    );
+    assert_eq!(
+        tagged_balances
+            .iter()
+            .filter(|balance| matches!(balance.get_side(), Some(BalanceSide::Assets)))
+            .count(),
+        2,
+        "repay then redeposit must preserve both tags while flipping the USDC side"
+    );
+    assert_eq!(
+        tagged_balances
+            .iter()
+            .filter(|balance| matches!(balance.get_side(), Some(BalanceSide::Liabilities)))
+            .count(),
+        0,
+        "the tagged liability must be fully repaid"
+    );
+
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let (start_ix, _execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::InvalidAssetOrLiabilitiesCount
+    );
+    assert_active_orders(&borrower, 1).await;
 
     Ok(())
 }
