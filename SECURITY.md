@@ -471,3 +471,32 @@ This minor bug is currently WONTFIX: there is only a single group with notable T
 and we manage it internally, so there have not historically been any program fees regardless. Even
 if the fees were enabled, they would currently go to the same actual owner in practice (the current
 program administrator).
+
+### Rebalance Keepers Can Pay to Induce a Move or to Collect a Tip
+
+Rebalance execution is permissionless by design: anyone can act as the keeper for any open order,
+and anyone can settle a tip, which goes to the keeper that executed or back to the fee pool. The
+user is protected by the checks below, not by who the keeper is.
+
+Before an auto-rebalance moves a deposit, the program checks that the destination bank pays more
+than the source right now, and that it paid more in total over the order's cooldown period (counted
+as at least 6 hours and at most 48), each by the order's `min_improvement`. Both checks read real
+yield, so a keeper can still pass them by paying for it: borrowing from the destination, depositing
+same-mint emissions into it, or depositing into the source to dilute it. This costs the keeper
+roughly `min_improvement` on the destination's entire deposit base for that period, less whatever
+it gets back as a depositor there. On a small bank, or one where the keeper holds most of the
+deposits, that can be less than the tip.
+
+After a move, the tip is paid if the destination earned more than the source over the settlement
+window (10 minutes to 1 hour), by any margin. A keeper can borrow from the destination during that
+window to make sure it does. We do not scale the tip by the size of that margin, because honest
+keepers do not control where rates go after a move.
+
+In both cases the user's principal is never at risk, the loss is capped at one tip per order per
+cooldown, and moves only happen between banks the user picked. Users choose their own banks and
+tips: listing deep banks and keeping tips modest makes this unprofitable. We consider this
+sufficiently mitigated by economic realities.
+
+Relatedly, a bank must hold rate history as old as that period before a deposit can move into or
+out of it. Rebalance being unavailable for a bank that is new, or that nobody has priced for a
+while, is expected.

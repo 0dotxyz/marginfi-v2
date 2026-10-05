@@ -1,14 +1,38 @@
 use crate::{
-    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
-    state::marginfi_account::LendingAccountImpl,
+    check,
+    errors::MarginfiError,
+    math_error,
+    prelude::MarginfiResult,
+    state::{marginfi_account::LendingAccountImpl, rate::realized_apr},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
+use marginfi_type_crate::constants::{
+    EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+    REBALANCE_CONSERVATION_DUST_ATOMS, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+    REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+};
 use marginfi_type_crate::types::{
-    Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
+    Balance, BalanceSide, Bank, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
     RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
+
+/// The supply APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its yield index `yield_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_supply_apr(
+    bank: &Bank,
+    window: u32,
+    yield_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let reading = bank
+        .rate_reading_at_least(i64::from(window), now)
+        .ok_or(MarginfiError::RebalanceHistoryTooShort)?;
+    let elapsed = now
+        .checked_sub(reading.timestamp)
+        .ok_or_else(math_error!())?;
+    realized_apr(reading.asset_index(), yield_index_now, elapsed)
+}
 
 pub trait RebalanceOrderImpl {
     #[allow(clippy::too_many_arguments)]
@@ -27,6 +51,14 @@ pub trait RebalanceOrderImpl {
 
     /// Replace the venue allowlist, validating the count and zeroing unused slots.
     fn set_allowed_banks(&mut self, allowed_banks: &[Pubkey]) -> MarginfiResult;
+
+    /// Seconds of history a move's realized rates are measured over: the cooldown, held to the
+    /// spans the bank rate readings serve.
+    fn rate_window(&self) -> u32;
+
+    /// Seconds a keeper tip stays escrowed before it can be settled: the cooldown, held to the
+    /// settle delay bounds.
+    fn settle_delay(&self) -> u64;
 }
 
 impl RebalanceOrderImpl for RebalanceOrder {
@@ -70,6 +102,19 @@ impl RebalanceOrderImpl for RebalanceOrder {
             *slot = *bank;
         }
         Ok(())
+    }
+
+    fn rate_window(&self) -> u32 {
+        u32::try_from(self.cooldown_seconds)
+            .unwrap_or(u32::MAX)
+            .clamp(INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS)
+    }
+
+    fn settle_delay(&self) -> u64 {
+        self.cooldown_seconds.clamp(
+            REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+            REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        )
     }
 }
 
@@ -353,15 +398,21 @@ fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
 
 #[cfg(test)]
 mod tests {
-    use super::RebalanceRecordImpl;
+    use super::{realized_supply_apr, RebalanceOrderImpl, RebalanceRecordImpl};
     use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
-    use marginfi_type_crate::constants::EXP_10_I80F48;
-    use marginfi_type_crate::types::{
-        Balance, MarginfiAccount, RebalanceMove, RebalanceRecord, RebalanceRefBank,
+    use marginfi_type_crate::constants::{
+        EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS, SECONDS_PER_YEAR,
     };
+    use marginfi_type_crate::types::{
+        Balance, Bank, MarginfiAccount, RateReading, RebalanceMove, RebalanceOrder,
+        RebalanceRecord, RebalanceRefBank,
+    };
+
+    const WINDOW: u32 = INTEREST_MIN_WINDOW_SECONDS;
 
     fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
         let mut record = RebalanceRecord::zeroed();
@@ -387,6 +438,71 @@ mod tests {
         // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
         assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
         assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
+    }
+
+    /// A bank whose ring holds one reading at index 1, `age` seconds before `now`.
+    fn bank_with_reading(age: i64, now: i64) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.record_rate_reading(RateReading::new(I80F48::ONE, I80F48::ONE, now - age).unwrap());
+        bank
+    }
+
+    /// Growth is annualized over the reading's actual age, which is the youngest reading at least
+    /// a window old; a reading older than the window lengthens the span.
+    #[test]
+    fn the_realized_rate_spans_the_youngest_reading_at_least_a_window_old() {
+        let now = 1_700_000_000;
+        let per_year = |age: i64| SECONDS_PER_YEAR / I80F48::from_num(age);
+
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&bank, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(i64::from(WINDOW))
+        );
+
+        let older = bank_with_reading(2 * i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&older, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(2 * i64::from(WINDOW))
+        );
+    }
+
+    #[test]
+    fn a_ring_with_no_reading_old_enough_has_no_measurement() {
+        let now = 1_700_000_000;
+        let young = bank_with_reading(i64::from(WINDOW) - 1, now);
+        for bank in [young, Bank::zeroed()] {
+            assert_eq!(
+                realized_supply_apr(&bank, WINDOW, I80F48::ONE, now).unwrap_err(),
+                MarginfiError::RebalanceHistoryTooShort.into()
+            );
+        }
+    }
+
+    #[test]
+    fn the_rate_window_is_the_cooldown_held_to_the_reading_spans() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, window) in [
+            (0, INTEREST_MIN_WINDOW_SECONDS),
+            (86_400, 86_400),
+            (u64::MAX, INTEREST_MAX_WINDOW_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.rate_window(), window);
+        }
+    }
+
+    #[test]
+    fn the_settle_delay_is_the_cooldown_held_to_its_bounds() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, delay) in [
+            (0, REBALANCE_SETTLE_DELAY_MIN_SECONDS),
+            (1_800, 1_800),
+            (u64::MAX, REBALANCE_SETTLE_DELAY_MAX_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.settle_delay(), delay);
+        }
     }
 
     fn balance(bank: Pubkey, tag: u16) -> Balance {
