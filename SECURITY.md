@@ -493,9 +493,17 @@ window to make sure it does. We do not scale the tip by the size of that margin,
 keepers do not control where rates go after a move.
 
 In both cases the user's principal is never at risk, the loss is capped at one tip per order per
-cooldown, and moves only happen between banks the user picked. Users choose their own banks and
-tips: listing deep banks and keeping tips modest makes this unprofitable. We consider this
-sufficiently mitigated by economic realities.
+cooldown, and moves only happen between banks the user picked.
+
+Users choose their own banks and tips. A sensible tip is no more than a move earns before the next
+one can happen: `min_improvement` on the user's position for one cooldown. Faking a move costs the
+same rate on the destination's entire deposit base for the same period, so with a tip in that range
+it only pays when the position is larger than the destination bank itself. A deposit that large
+normally pushes the destination's rate below the required margin, and the check on the current
+rate, which counts the incoming deposit, refuses the move. For cooldowns longer than 48 hours the
+period looked back over stops growing, so the tip should stay under about two days of the move's
+gain. A user who lists very small banks or sets a larger tip accepts the risk of paying it for a
+move that did not help. We consider this sufficiently mitigated by economic realities.
 
 Relatedly, a bank must hold rate history as old as that period before a deposit can move into or
 out of it. Rebalance being unavailable for a bank that is new, or that nobody has priced for a
