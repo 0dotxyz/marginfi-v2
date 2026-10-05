@@ -1392,12 +1392,13 @@ async fn keeper_close_order_success_after_clearing_side(
     Ok(())
 }
 
-/// A full repayment with `repay_all = false` leaves the tagged balance live. If the owner then
-/// deposits into that same bank, it becomes a second tagged asset. A stale order must not give a
-/// keeper permission to withdraw either asset without repaying debt.
+/// A full repayment with `repay_all = false` leaves the balance slot live, but it must clear any
+/// order tag. Neither a later deposit nor borrow may revive a stale order's authorization.
+/// Essentially, for Order purposes, it is the same as if the user used repay_all on the balance.
+/// This avoids a footgun where a liability is flipped to an asset while retaining an old Order tag.
 #[tokio::test]
-async fn start_order_execution_rejects_repaid_and_redeposited_tagged_liability(
-) -> anyhow::Result<()> {
+async fn non_repay_all_full_repayment_clears_tag_before_redeposit_or_reborrow() -> anyhow::Result<()>
+{
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -1412,11 +1413,39 @@ async fn start_order_execution_rejects_repaid_and_redeposited_tagged_liability(
         .await?;
     assert_active_orders(&borrower, 1).await;
 
-    // Repay the USDC debt without closing its balance, then deposit into the same tagged bank.
+    let order = borrower.load_order(order_pda).await;
+    let account_before_repay = borrower.load().await;
+    let original_usdc_tag = account_before_repay
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("USDC liability must exist before repayment")
+        .tag;
+    assert!(
+        original_usdc_tag != 0 && order.tags.contains(&original_usdc_tag),
+        "the USDC liability must carry an order tag"
+    );
+
+    // Repay the USDC debt without closing its balance.
     let repay_account = usdc_bank.mint.create_token_account_and_mint_to(50.0).await;
     borrower
         .try_bank_repay(repay_account.key, usdc_bank, 50.0, Some(false))
         .await?;
+
+    let account_after_repay = borrower.load().await;
+    let repaid_usdc_balance = account_after_repay
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("non-repay_all must keep the cleared balance slot active");
+    assert!(
+        repaid_usdc_balance.get_side().is_none(),
+        "the USDC liability must be fully cleared"
+    );
+    assert_eq!(
+        repaid_usdc_balance.tag, 0,
+        "a side-less balance must not retain an order tag"
+    );
+
+    // Reuse the same balance as an asset; it must not regain the old order tag.
     let redeposit_account = usdc_bank
         .mint
         .create_token_account_and_mint_to(1_000.0)
@@ -1424,37 +1453,41 @@ async fn start_order_execution_rejects_repaid_and_redeposited_tagged_liability(
     borrower
         .try_bank_deposit(redeposit_account.key, usdc_bank, 1_000.0, None)
         .await?;
-
-    // Both order tags are still live, but they now identify two assets rather than an asset/debt
-    // pair. The redeposit also makes the former take-profit condition true.
-    let order = borrower.load_order(order_pda).await;
-    let account = borrower.load().await;
-    let tagged_balances = account
+    let account_after_redeposit = borrower.load().await;
+    let redeposited_usdc_balance = account_after_redeposit
         .lending_account
-        .balances
-        .iter()
-        .filter(|balance| balance.is_active() && order.tags.contains(&balance.tag))
-        .collect::<Vec<_>>();
+        .get_balance(&usdc_bank.key)
+        .expect("USDC asset must exist after redeposit");
+    assert!(matches!(
+        redeposited_usdc_balance.get_side(),
+        Some(BalanceSide::Assets)
+    ));
     assert_eq!(
-        tagged_balances.len(),
-        2,
-        "both original order tags must remain live"
+        redeposited_usdc_balance.tag, 0,
+        "a deposit must not revive the cleared order tag"
     );
+
+    // Close that asset and reopen the bank as a liability. This must remain untagged too.
+    let withdraw_destination = usdc_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_withdraw(withdraw_destination.key, usdc_bank, 0.0, Some(true))
+        .await?;
+    let borrow_destination = usdc_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrow_destination.key, usdc_bank, 50.0)
+        .await?;
+    let account_after_reborrow = borrower.load().await;
+    let reborrowed_usdc_balance = account_after_reborrow
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("USDC liability must exist after reborrow");
+    assert!(matches!(
+        reborrowed_usdc_balance.get_side(),
+        Some(BalanceSide::Liabilities)
+    ));
     assert_eq!(
-        tagged_balances
-            .iter()
-            .filter(|balance| matches!(balance.get_side(), Some(BalanceSide::Assets)))
-            .count(),
-        2,
-        "repay then redeposit must preserve both tags while flipping the USDC side"
-    );
-    assert_eq!(
-        tagged_balances
-            .iter()
-            .filter(|balance| matches!(balance.get_side(), Some(BalanceSide::Liabilities)))
-            .count(),
-        0,
-        "the tagged liability must be fully repaid"
+        reborrowed_usdc_balance.tag, 0,
+        "a borrow must not revive the cleared order tag"
     );
 
     let keeper = Keypair::new();
@@ -1475,7 +1508,7 @@ async fn start_order_execution_rejects_repaid_and_redeposited_tagged_liability(
 
     assert_custom_error!(
         result.unwrap_err(),
-        MarginfiError::InvalidAssetOrLiabilitiesCount
+        MarginfiError::LendingAccountBalanceNotFound
     );
     assert_active_orders(&borrower, 1).await;
 

@@ -305,9 +305,9 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         MarginfiError::LendingAccountBalanceNotFound
     );
     // Prevents a footgun where a repaid liability is later deposited as an asset without clearing
-    // the tag. For example, user opens order 1: A/B and 2: C/B, Order 1 fullfills A/B with
-    // repay_all = false. Then later, user deposits B, which turns it into an asset. Keeper could,
-    // if the user didn't first close C/B, fullfill C/B without repaying anything: this blocks that.
+    // the tag. For example, user opens order 1: A/B and 2: C/B, Order 1 fulfills A/B with repay_all
+    // = false. Then later, user deposits B, which turns it into an asset. Keeper could, if the user
+    // didn't first close C/B, fullfill C/B without repaying anything: this blocks that.
     check!(
         order_asset_count == 1 && order_liab_count == 1,
         MarginfiError::InvalidAssetOrLiabilitiesCount

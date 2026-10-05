@@ -25,7 +25,7 @@ use marginfi_type_crate::{
     },
     types::{
         is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -58,6 +58,11 @@ pub fn lending_account_repay<'info>(
         !marginfi_account.get_flag(ACCOUNT_DISABLED),
         MarginfiError::AccountDisabled
     );
+    // A successful order execution must close its one tagged liability, technically this check is
+    // superflous, but avoids a partial repayment leaving a side-less balance that is still tagged
+    if marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
+        check!(repay_all, MarginfiError::OrderLiabilityNotClosed);
+    }
     let maybe_bank_mint = {
         let bank = bank_loader.load()?;
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
@@ -109,6 +114,12 @@ pub fn lending_account_repay<'info>(
             MarginfiError::IllegalBalanceState,
             "Partial repay would leave positive liability shares below the empty balance threshold"
         );
+
+        // Unlike repay_all, a full non-repay_all repayment keeps the balance slot active. Its
+        // order tag must not be reused if a later deposit or borrow gives that slot a new side.
+        if bank_account.balance.get_side().is_none() {
+            bank_account.balance.tag = 0;
+        }
 
         (amount, share_amount)
     };
