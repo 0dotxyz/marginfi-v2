@@ -148,7 +148,7 @@ pub(crate) fn load_kamino_reserve<'info>(
 /// Whether a Kamino bank's collateral can still back new borrows. The reserve carries its own
 /// emergency flag; the market's is cached on the bank by `propagate_kamino_market_emergency`,
 /// because the market account never reaches the pricing path.
-fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
+pub fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
     !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
 }
 
