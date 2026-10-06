@@ -125,7 +125,6 @@ pub fn start_receivership<'info>(
             liq_cache: Some(&mut liq_price_cache),
         },
         ignore_healthy,
-        false,
     )?;
 
     // Use heap-efficient equity calculation

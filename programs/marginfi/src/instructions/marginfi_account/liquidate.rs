@@ -34,6 +34,7 @@ use marginfi_type_crate::{
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
         MarginfiGroup, OraclePriceType, PriceBias, RequirementType, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -162,6 +163,10 @@ pub fn lending_account_liquidate<'info>(
 
     // Like deleverage, only the risk admin may liquidate through an Exponent PT emergency.
     let risk_admin_liquidation = ctx.accounts.authority.key() == group.risk_admin;
+    if risk_admin_liquidation {
+        liquidatee_marginfi_account.set_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
+        liquidator_marginfi_account.set_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
+    }
 
     {
         let group = marginfi_group_loader.load()?;
@@ -217,7 +222,6 @@ pub fn lending_account_liquidate<'info>(
             &mut None,
             HealthPriceMode::Live { liq_cache: None },
             false,
-            risk_admin_liquidation,
         )?;
 
     let asset_bank = ctx.accounts.asset_bank.load()?;
@@ -543,7 +547,6 @@ pub fn lending_account_liquidate<'info>(
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
         clock.unix_timestamp as u64,
-        risk_admin_liquidation,
     )?;
 
     // Note: the liquidatee's post-liquidation health is computed above but intentionally not
@@ -586,6 +589,8 @@ pub fn lending_account_liquidate<'info>(
         &liab_seed_info,
         clock.unix_timestamp as u64,
     )?;
+    liquidatee_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
+    liquidator_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
 
     // The liquidator takes on the liability at live prices, so their account is subject to the
     // same gate as a borrow.
@@ -626,7 +631,6 @@ fn check_liquidatee_health_and_refresh_premium<'info>(
     liab_bank_pk: &Pubkey,
     pre_liquidation_health: I80F48,
     now: u64,
-    ignore_pt_emergency: bool,
 ) -> MarginfiResult<I80F48> {
     let mut premium_scratch = PremiumScratch::default();
     let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
@@ -636,7 +640,6 @@ fn check_liquidatee_health_and_refresh_premium<'info>(
         liab_bank_pk,
         pre_liquidation_health,
         &mut Some(&mut premium_scratch),
-        ignore_pt_emergency,
     )?;
     liquidatee_marginfi_account.update_premium_snapshots(group, &premium_scratch, now, false)?;
     Ok(post_liquidation_health)

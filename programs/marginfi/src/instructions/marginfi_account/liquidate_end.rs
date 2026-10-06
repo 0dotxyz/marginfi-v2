@@ -157,7 +157,6 @@ pub fn end_receivership<'info>(
             &mut Some(&mut post_hc),
             HealthPriceMode::Cached,
             below_closeout_threshold,
-            false,
         )?;
     let mut premium_scratch = PremiumScratch::default();
     let (post_assets_equity, post_liabilities_equity) = get_health_components(

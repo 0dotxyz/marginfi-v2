@@ -89,6 +89,7 @@ pub trait MarginfiAccountImpl {
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
     fn defers_health_to_end_instruction(&self) -> bool;
+    fn prices_through_pt_emergency(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -313,6 +314,12 @@ impl MarginfiAccountImpl for MarginfiAccount {
     /// transaction: receivership, order execution, and auto-rebalance.
     fn defers_health_to_end_instruction(&self) -> bool {
         self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
+    }
+
+    /// Risk-admin unwinds (deleverage, risk-admin liquidation) price PT banks through an Exponent
+    /// emergency.
+    fn prices_through_pt_emergency(&self) -> bool {
+        self.get_flag(ACCOUNT_IN_DELEVERAGE | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION)
     }
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
@@ -1055,29 +1062,6 @@ pub fn get_health_components<'info>(
     price_mode: HealthPriceMode<'_>,
     premium_scratch: &mut Option<&mut PremiumScratch>,
 ) -> MarginfiResult<(I80F48, I80F48)> {
-    get_health_components_with_pt_override(
-        marginfi_account,
-        group,
-        remaining_ais,
-        requirement_type,
-        health_cache,
-        price_mode,
-        premium_scratch,
-        false,
-    )
-}
-
-/// [`get_health_components`] that can also price PT banks through an Exponent emergency.
-pub fn get_health_components_with_pt_override<'info>(
-    marginfi_account: &MarginfiAccount,
-    group: &MarginfiGroup,
-    remaining_ais: &'info [AccountInfo<'info>],
-    requirement_type: RequirementType,
-    health_cache: &mut Option<&mut HealthCache>,
-    price_mode: HealthPriceMode<'_>,
-    premium_scratch: &mut Option<&mut PremiumScratch>,
-    ignore_pt_emergency: bool,
-) -> MarginfiResult<(I80F48, I80F48)> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
         MarginfiError::AccountInFlashloan
@@ -1091,8 +1075,7 @@ pub fn get_health_components_with_pt_override<'info>(
         HealthPriceMode::Client(clock) => (false, None, clock),
     };
 
-    let ignore_pt_emergency = ignore_pt_emergency
-        || marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION);
+    let ignore_pt_emergency = marginfi_account.prices_through_pt_emergency();
 
     let lending_account = &marginfi_account.lending_account;
 
@@ -1479,7 +1462,6 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     health_cache: &mut Option<&mut HealthCache>,
     price_mode: HealthPriceMode<'_>,
     ignore_healthy: bool,
-    ignore_pt_emergency: bool,
 ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -1506,7 +1488,7 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     }
 
     // Get health components using heap reuse
-    let (assets, liabs) = get_health_components_with_pt_override(
+    let (assets, liabs) = get_health_components(
         marginfi_account,
         group,
         remaining_ais,
@@ -1514,7 +1496,6 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
         health_cache,
         price_mode,
         &mut None,
-        ignore_pt_emergency,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -1806,7 +1787,6 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     bank_pk: &Pubkey,
     pre_liquidation_health: I80F48,
     premium_scratch: &mut Option<&mut PremiumScratch>,
-    ignore_pt_emergency: bool,
 ) -> MarginfiResult<I80F48> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -1830,7 +1810,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
         MarginfiError::TooSeverePayoff
     );
 
-    let (assets, liabs) = get_health_components_with_pt_override(
+    let (assets, liabs) = get_health_components(
         marginfi_account,
         group,
         remaining_ais,
@@ -1838,7 +1818,6 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
         premium_scratch,
-        ignore_pt_emergency,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;

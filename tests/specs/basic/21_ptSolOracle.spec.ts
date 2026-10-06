@@ -665,6 +665,20 @@ describe("PT-SOL internal oracle setup", () => {
       ),
       [borrower.wallet],
     );
+    // A PT debt (larger than what it'll seize) makes the risk admin's own health check price PT.
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await borrowIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: riskAdminAcc.publicKey,
+          bank: ptBank.publicKey,
+          tokenAccount: riskAdmin.wsolAccount,
+          remaining: composeRemainingAccounts([ptGroupFor(okVault), debtGroup]),
+          amount: wsol(0.2),
+        }),
+      ),
+      [riskAdmin.wallet],
+    );
 
     // Cut the PT collateral weight so the borrower is liquidatable at the PT's normal mark...
     const weights = blankBankConfigOptRaw();
