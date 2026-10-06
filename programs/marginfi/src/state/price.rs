@@ -291,7 +291,7 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
-        in_deleverage: bool,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<Self> {
         let context = Self::load_oracle_context_with_max_age(
             bank,
@@ -299,7 +299,7 @@ impl OraclePriceFeedAdapter {
             clock,
             bank.config.get_oracle_max_age(),
             None,
-            in_deleverage,
+            ignore_pt_emergency,
         )?;
         Ok(context.adjusted_price_feed)
     }
@@ -321,7 +321,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
-        in_deleverage: bool,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -1299,7 +1299,8 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
+                let pt_rate =
+                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1329,7 +1330,8 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
+                let pt_price =
+                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
 
                 let feed = FixedPriceFeed {
                     price: pt_price,

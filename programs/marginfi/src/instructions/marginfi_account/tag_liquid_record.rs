@@ -38,6 +38,7 @@ pub fn tag_liquidation_record<'info>(
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
         true,
+        false,
     )?;
 
     if health > I80F48::ZERO || liabs == I80F48::ZERO {

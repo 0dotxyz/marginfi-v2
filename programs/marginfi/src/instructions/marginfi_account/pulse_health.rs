@@ -102,6 +102,7 @@ pub fn lending_account_pulse_health<'info>(
         &mut Some(&mut health_cache),
         HealthPriceMode::Live { liq_cache: None },
         false,
+        false,
     );
     let mut liquidatable_flag_update: Option<u8> = None;
     if let Err(err) = liq_result {

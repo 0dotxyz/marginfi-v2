@@ -25,6 +25,7 @@ use marginfi_type_crate::{
         HealthCache, HealthPriceMode, LiquidationPriceCache, LiquidationRecord, MarginfiAccount,
         MarginfiGroup, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -43,6 +44,10 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
     let group = ctx.accounts.group.load()?;
+    let receiver = &ctx.accounts.liquidation_receiver;
+    if receiver.is_signer && receiver.key() == group.risk_admin {
+        marginfi_account.set_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
+    }
     check!(
         !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
         MarginfiError::CircuitBreakerAdminOnly
@@ -120,6 +125,7 @@ pub fn start_receivership<'info>(
             liq_cache: Some(&mut liq_price_cache),
         },
         ignore_healthy,
+        false,
     )?;
 
     // Use heap-efficient equity calculation

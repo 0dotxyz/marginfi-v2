@@ -34,7 +34,7 @@ use marginfi_type_crate::{
     types::{
         is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
         ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -93,7 +93,8 @@ pub fn lending_account_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE),
+                marginfi_account
+                    .get_flag(ACCOUNT_IN_DELEVERAGE | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION),
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits

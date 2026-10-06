@@ -253,6 +253,9 @@ pub const ACCOUNT_IN_ORDER_EXECUTION: u64 = 1 << 7;
 /// The account is mid auto-rebalance (keeper moving one asset between same-mint venues). Transient,
 /// only set within a `start_rebalance`..`end_rebalance` sandwich.
 pub const ACCOUNT_IN_REBALANCE: u64 = 1 << 8;
+/// A receivership liquidation started by the signing risk admin, which (like deleverage) may price
+/// PT banks through an Exponent emergency. Transient, cleared at `end_liquidation`.
+pub const ACCOUNT_IN_RISK_ADMIN_LIQUIDATION: u64 = 1 << 9;
 
 /// Account states that block placing or starting an order/rebalance sandwich (disabled, in a
 /// flashloan, frozen, in receivership, or being deleveraged). The transient in-flight flags
