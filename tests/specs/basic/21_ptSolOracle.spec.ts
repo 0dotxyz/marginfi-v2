@@ -586,7 +586,7 @@ describe("PT-SOL internal oracle setup", () => {
     await mintTo(
       ecosystem.usdcMint.publicKey,
       riskAdmin.usdcAccount,
-      usdc(100),
+      usdc(200),
     );
 
     for (const [user, acc] of [

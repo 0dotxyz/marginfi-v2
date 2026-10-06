@@ -485,7 +485,8 @@ These changes affect only admin tooling:
 - `MarginfiAccount` (size unchanged)
   - Adds `rebalance_execution_seq: u64` and `liquidation_tagged_at: i64` (0 = not tagged), taken
     from reserved padding.
-  - `account_flags` adds `ACCOUNT_IN_REBALANCE` (1 << 8).
+  - `account_flags` adds `ACCOUNT_IN_REBALANCE` (1 << 8) and `ACCOUNT_IN_RISK_ADMIN_LIQUIDATION`
+    (1 << 9), both transient within their transaction.
   - `active_orders` now also counts rebalance orders.
   - `HealthCache.flags` adds `EMODE_BOOSTED` (8). It is set when e-mode raises any collateral above
     its bank's own maintenance weight.
@@ -557,7 +558,8 @@ New:
 - Scope-priced Kamino banks now respect Kamino reserve emergency mode. Before, they always kept
   their borrowing power.
 - Exponent PT banks whose vault is in emergency mode can now be priced during a risk-admin
-  deleverage, so the position can be unwound. Liquidation still refuses to price them.
+  deleverage or a liquidation (classic or receivership) signed by the risk admin, so the position
+  can be unwound. Any other liquidator still can't price them.
 - Limit-order execution now runs the circuit-breaker price check at the start.
 - `MarginfiError::from(6135)` now returns `SlippageTooHigh` (the mapping was missing).
 - Added a new fuzz harness (#675).
