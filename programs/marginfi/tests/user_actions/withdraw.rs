@@ -1,13 +1,18 @@
+use anchor_lang::InstructionData;
 use anchor_spl::token_2022::spl_token_2022::extension::{
     transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
 };
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*, ui_to_native};
 use marginfi::{assert_eq_with_tolerance, prelude::*, state::bank::BankImpl};
-use marginfi_type_crate::types::BankVaultType;
+use marginfi_type_crate::{
+    constants::ZERO_AMOUNT_THRESHOLD,
+    types::{BankConfig, BankVaultType},
+};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::clock::Clock;
+use solana_sdk::{clock::Clock, signer::Signer, transaction::Transaction};
 use test_case::test_case;
 
 #[test_case(0.03, 0.012, BankMint::Usdc)]
@@ -338,4 +343,113 @@ async fn marginfi_account_withdraw_failure_withdrawing_too_much(
     assert_custom_error!(res.unwrap_err(), MarginfiError::OperationWithdrawOnly);
 
     Ok(())
+}
+
+/// The withdraw tolerance (`ZERO_AMOUNT_THRESHOLD` = 0.0001) is in native units. At share value
+/// 0.999995 on an 8-decimal "BTC" bank:
+/// * 10 sats deposited are worth 9.99995 sats: withdrawing 10 succeeds with 0.00005 sats of dust.
+/// * 1 BTC deposited is worth 99_999_500 sats: withdrawing 100_000_000 is 500 sats (0.000005 BTC)
+///   short and fails, which it wouldn't if the tolerance were 0.0001 BTC.
+#[test_case(10, true ; "10 sats, dust under 0.0001 sat")]
+#[test_case(100_000_000, false ; "1 BTC, 500 sats short is rejected")]
+#[tokio::test]
+async fn withdraw_dust_tolerance_is_in_native_units(
+    amount_native: u64,
+    accepted: bool,
+) -> anyhow::Result<()> {
+    let btc_price = I80F48!(100_000);
+    let share_value = I80F48!(0.999995);
+
+    let test_f = TestFixture::new(None).await;
+    let mut btc_mint = MintFixture::new(test_f.context.clone(), None, Some(8)).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(
+            &btc_mint,
+            None,
+            BankConfig {
+                fixed_price: btc_price.into(),
+                ..*DEFAULT_FIXED_TEST_BANK_CONFIG
+            },
+            Some(btc_price),
+        )
+        .await?;
+
+    let marginfi_account_f = test_f.create_marginfi_account().await;
+    let user_token_f =
+        TokenAccountFixture::new(test_f.context.clone(), &btc_mint, &test_f.payer()).await;
+    btc_mint.mint_to(&user_token_f.key, 10.0).await;
+
+    // Exact native amounts, bypassing the helpers' f64 UI conversion.
+    let mut deposit_ix = marginfi_account_f
+        .make_deposit_ix(user_token_f.key, &bank_f, 1.0, None)
+        .await;
+    deposit_ix.data = marginfi::instruction::LendingAccountDeposit {
+        amount: amount_native,
+        deposit_up_to_limit: None,
+    }
+    .data();
+    send(&test_f, deposit_ix).await?;
+
+    bank_f.set_asset_share_value(share_value).await;
+
+    let shares_before: I80F48 = marginfi_account_f
+        .load()
+        .await
+        .lending_account
+        .get_balance(&bank_f.key)
+        .unwrap()
+        .asset_shares
+        .into();
+    let vault_f = bank_f
+        .get_vault_token_account(BankVaultType::Liquidity)
+        .await;
+    let vault_before = vault_f.balance().await;
+
+    let mut withdraw_ix = marginfi_account_f
+        .make_bank_withdraw_ix(user_token_f.key, &bank_f, 1.0, None)
+        .await;
+    withdraw_ix.data = marginfi::instruction::LendingAccountWithdraw {
+        amount: amount_native,
+        withdraw_all: None,
+    }
+    .data();
+    let res = send(&test_f, withdraw_ix).await;
+
+    if !accepted {
+        assert_custom_error!(res.unwrap_err(), MarginfiError::OperationWithdrawOnly);
+        return Ok(());
+    }
+    res?;
+
+    // Exactly `amount_native` sats left the vault, against burned shares worth slightly less.
+    assert_eq!(vault_before - vault_f.balance().await, amount_native);
+    let shares_after: I80F48 = marginfi_account_f
+        .load()
+        .await
+        .lending_account
+        .get_balance(&bank_f.key)
+        .map(|b| b.asset_shares.into())
+        .unwrap_or(I80F48::ZERO);
+    let dust_native =
+        I80F48::from_num(amount_native) - (shares_before - shares_after) * share_value;
+    assert!(dust_native > I80F48::ZERO);
+    assert!(dust_native < ZERO_AMOUNT_THRESHOLD);
+
+    Ok(())
+}
+
+async fn send(
+    test_f: &TestFixture,
+    ix: solana_sdk::instruction::Instruction,
+) -> Result<(), BanksClientError> {
+    let payer = test_f.context.borrow().payer.insecure_clone();
+    let blockhash = latest_blockhash(&test_f.context).await;
+    let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await
 }
