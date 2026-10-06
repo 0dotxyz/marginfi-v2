@@ -266,6 +266,7 @@ pub fn run_cb_price_gate<'info>(
                     oracle_ais,
                     &clock,
                     OraclePriceType::RealTime,
+                    marginfi_account.prices_through_pt_emergency(),
                 )?;
             bank.cb_price_gate(cache_price.cb_observation()?)?;
         }

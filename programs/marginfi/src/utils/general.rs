@@ -370,6 +370,7 @@ pub fn fetch_unbiased_price_for_bank_with_cache<'info>(
         oracle_ais,
         clock,
         OraclePriceType::RealTime,
+        false,
     )?;
 
     Ok(prices)

@@ -589,14 +589,14 @@ pub fn lending_account_liquidate<'info>(
         &liab_seed_info,
         clock.unix_timestamp as u64,
     )?;
-    liquidatee_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
-    liquidator_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
 
     // The liquidator takes on the liability at live prices, so their account is subject to the
     // same gate as a borrow.
     if !cb_admin_liquidation {
         run_cb_price_gate(&liquidator_marginfi_account, liquidator_remaining_accounts)?;
     }
+    liquidatee_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
+    liquidator_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
 
     emit!(LendingAccountLiquidateEvent {
         header: AccountEventHeader {

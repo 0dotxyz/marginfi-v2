@@ -1357,6 +1357,7 @@ impl OraclePriceFeedAdapter {
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
         oracle_price_type: OraclePriceType,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
         let max_age = bank.config.get_oracle_max_age();
         let max_conf = bank.config.oracle_max_confidence;
@@ -1366,7 +1367,7 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
-            false,
+            ignore_pt_emergency,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -1391,6 +1392,7 @@ impl OraclePriceFeedAdapter {
             ais,
             clock,
             OraclePriceType::RealTime,
+            false,
         )?;
         Ok(cache_price)
     }

@@ -8,7 +8,7 @@ import {
 import { Marginfi } from "../../../target/types/marginfi";
 import {
   addBank,
-  configureBank,
+  configureBankIxs,
   configureBankOracle,
   groupConfigure,
   groupInitialize,
@@ -684,13 +684,19 @@ describe("PT-SOL internal oracle setup", () => {
     const weights = blankBankConfigOptRaw();
     weights.assetWeightInit = bigNumberToWrappedI80F48(0.01);
     weights.assetWeightMaint = bigNumberToWrappedI80F48(0.02);
+    // The breaker's price gate must also price PT through the emergency.
+    weights.circuitBreakerEnabled = true;
+    weights.cbDeviationBpsTiers = [500, 1000, 2500];
+    weights.cbTierDurationsSeconds = [600, 3600, 14400];
+    weights.cbEscalationWindowMult = 2;
+    weights.cbEmaAlphaBps = 1000;
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await configureBank(groupAdmin.mrgnBankrunProgram, {
+        ...(await configureBankIxs(groupAdmin.mrgnBankrunProgram, {
           bank: ptBank.publicKey,
           bankConfigOpt: weights,
-        }),
+        })),
       ),
       [groupAdmin.wallet],
     );
