@@ -1285,14 +1285,13 @@ pub fn get_health_components<'info>(
         heap_restore(heap_checkpoint);
     }
 
-    // Only complete if every balance priced cleanly, so a refresh can't be written from a pass
-    // that dropped a stale leg — flagged either by the health pass (`err_code`) or by the
-    // premium-price path itself (`unpriceable_leg`, for legs health soft-zeroes without
-    // inspecting the oracle, e.g. ReduceOnly under Initial).
-    if first_err_index == NO_INDEX_FOUND {
-        if let Some(scratch) = premium_scratch.as_mut() {
-            scratch.complete = !scratch.unpriceable_leg;
-        }
+    // Only complete if every premium-relevant leg priced cleanly, so a refresh can't be written
+    // from a pass that dropped a stale leg. `unpriceable_leg` covers exactly those legs: both
+    // Operational stale-skips (which also set `err_code`) and ReduceOnly/Paused soft-zeroes
+    // (which don't). Legs the weighting ignores (isolated, zero-weight) can't taint the pass,
+    // and neither can any leg under an empty matrix, where every rate is 0 regardless.
+    if let Some(scratch) = premium_scratch.as_mut() {
+        scratch.complete = !scratch.unpriceable_leg;
     }
 
     // Update health cache totals
