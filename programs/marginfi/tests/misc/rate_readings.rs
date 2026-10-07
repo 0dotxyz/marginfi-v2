@@ -53,7 +53,7 @@ async fn readings_inside_the_spacing_are_not_recorded() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The pulse is not the only writer: any instruction that prices the bank takes a reading.
+/// The pulse is not the only writer.
 #[tokio::test]
 async fn a_borrow_and_a_withdraw_take_readings() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -97,8 +97,7 @@ async fn a_borrow_and_a_withdraw_take_readings() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A pulse while the protocol is paused leaves the bank unaccrued, so it prices the bank without
-/// taking a reading.
+/// A pulse while the protocol is paused does not accrue the bank.
 #[tokio::test]
 async fn a_pulse_while_paused_takes_no_reading() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
