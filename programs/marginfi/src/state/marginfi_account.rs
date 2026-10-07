@@ -5,9 +5,8 @@ use crate::{
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
     state::premium::{
-        accrued_premium_total, premium_elapsed_seconds, BalancePremiumImpl, PremiumScratch,
-        PremiumScratchEntry, SCRATCH_ASSET, SCRATCH_LIABILITY, SCRATCH_PREMIUM_ACTIVE,
-        SCRATCH_UNPRICEABLE,
+        BalancePremiumImpl, PremiumScratch, PremiumScratchEntry, SCRATCH_ASSET, SCRATCH_LIABILITY,
+        SCRATCH_PREMIUM_ACTIVE, SCRATCH_UNPRICEABLE,
     },
     utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
@@ -21,13 +20,13 @@ use marginfi_type_crate::{
         PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
-        BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
-        LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
-        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        compute_same_asset_emode_weight, premium_liability_value, reconcile_emode_configs,
+        u32_to_basis, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache,
+        HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup,
+        OracleFeedFamily, OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
+        ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 use std::{
@@ -604,31 +603,9 @@ fn calc_premium_liab_value(
     price: I80F48,
     now: u64,
 ) -> MarginfiResult<I80F48> {
-    if !bank.get_flag(PREMIUM_ACTIVE)
-        || !matches!(balance.get_side(), Some(BalanceSide::Liabilities))
-    {
-        return Ok(I80F48::ZERO);
-    }
-
-    let liability_amount = bank.get_liability_amount(balance.liability_shares.into())?;
-    let total_premium = accrued_premium_total(
-        liability_amount,
-        balance.premium_rate_snapshot,
-        balance.premium_outstanding.into(),
-        premium_elapsed_seconds(balance, bank.premium_activated_at, now),
-    )?;
-    if total_premium <= I80F48::ZERO || price <= I80F48::ZERO {
-        return Ok(I80F48::ZERO);
-    }
-
-    let liability_weight = bank
-        .config
-        .get_weight(requirement_type, BalanceSide::Liabilities);
-    calc_value(
-        total_premium,
-        price,
-        bank.get_balance_decimals(),
-        Some(liability_weight),
+    Ok(
+        premium_liability_value(balance, bank, requirement_type, price, now)
+            .ok_or_else(math_error!())?,
     )
 }
 

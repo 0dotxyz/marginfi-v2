@@ -7,8 +7,11 @@ use crate::{
         DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
         LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
+        TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
-    types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
+    types::{
+        calc_value, BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType,
+    },
 };
 
 #[cfg(feature = "anchor")]
@@ -266,6 +269,27 @@ impl Bank {
     #[inline]
     pub fn liability_amount(&self, shares: I80F48) -> Option<I80F48> {
         shares.checked_mul(self.liability_share_value.into())
+    }
+
+    /// Deposits past the bank's USD cap count only in proportion to it for Initial margin: the
+    /// factor to apply to the asset weight, `1` when the cap does not bind, `None` on overflow.
+    pub fn asset_weight_init_discount(&self, price: I80F48) -> Option<I80F48> {
+        let limit = self.config.total_asset_value_init_limit;
+        if limit == TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE {
+            return Some(I80F48::ONE);
+        }
+        let deposits = calc_value(
+            self.asset_amount(self.total_asset_shares.into())?,
+            price,
+            self.get_balance_decimals(),
+            None,
+        )?;
+        let limit = I80F48::from_num(limit);
+        if deposits > limit {
+            limit.checked_div(deposits)
+        } else {
+            Some(I80F48::ONE)
+        }
     }
 
     pub fn get_balance_decimals(&self) -> u8 {

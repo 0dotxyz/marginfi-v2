@@ -6,8 +6,8 @@ use anchor_lang::prelude::*;
 
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::SECONDS_PER_YEAR,
-    types::{u32_to_milli, Balance, MarginfiGroup},
+    constants::{PREMIUM_ACTIVE, SECONDS_PER_YEAR},
+    types::{calc_value, u32_to_milli, Balance, BalanceSide, Bank, MarginfiGroup, RequirementType},
 };
 
 /// Maximum pairwise premium entries storable in `MarginfiGroup.premium_entries`. Future
@@ -128,6 +128,40 @@ pub fn accrued_premium_total(
             .checked_mul(years)?
     };
     outstanding.checked_add(pending)
+}
+
+/// Projected premium (materialized + pending) of a liability balance as a weighted USD value at
+/// `price`. Zero for asset/empty balances, non-premium banks and zero prices; `None` on overflow.
+pub fn premium_liability_value(
+    balance: &Balance,
+    bank: &Bank,
+    requirement: RequirementType,
+    price: I80F48,
+    now: u64,
+) -> Option<I80F48> {
+    if bank.flags & PREMIUM_ACTIVE == 0
+        || !matches!(balance.get_side(), Some(BalanceSide::Liabilities))
+    {
+        return Some(I80F48::ZERO);
+    }
+    let total_premium = accrued_premium_total(
+        bank.liability_amount(balance.liability_shares.into())?,
+        balance.premium_rate_snapshot,
+        balance.premium_outstanding.into(),
+        premium_elapsed_seconds(balance, bank.premium_activated_at, now),
+    )?;
+    if total_premium <= I80F48::ZERO || price <= I80F48::ZERO {
+        return Some(I80F48::ZERO);
+    }
+    calc_value(
+        total_premium,
+        price,
+        bank.get_balance_decimals(),
+        Some(
+            bank.config
+                .get_weight(requirement, BalanceSide::Liabilities),
+        ),
+    )
 }
 
 #[cfg(test)]
