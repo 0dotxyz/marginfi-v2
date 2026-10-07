@@ -28,7 +28,7 @@ A user is lending $100 in SOL and borrowing $50 in BONK. They set a take-profit 
 
 An Order can also carry an **interest trigger**: exit when the position's carry has been negative on
 average over a window you choose. This is aimed at strategies, where the point of the position is
-the spread between what the lend leg earns and what the borrow leg costs.
+the spread between what the lending position earns and what the borrowing position costs.
 
 ```
 A user lends $1,000 USDC earning 5% and borrows $900 PYUSD costing 3%, keeping the 2% spread.
@@ -53,12 +53,13 @@ no slippage they can exit the moment carry turns; on an expensive route they mus
 to worsen or find a better route. Your `max_slippage` still caps the exit regardless.
 
 `min_negative_apr` optionally requires the loss to reach a given annual rate, measured against your
-lend leg, before the trigger fires at all. Left unset, any negative carry qualifies.
+lending position, before the trigger fires at all. Left unset, any negative carry qualifies.
 
 The lend side counts only what the bank pays its lenders. Yield a token earns through its own
-price, such as a liquid staking token's staking yield or a PT accruing to par, is not measured, so
-set `min_negative_apr` to that yield. With a 5% staking yield, a setting of 5% fires the trigger
-once the loss measured here is deeper than what the token earns.
+price, such as a liquid staking token's staking yield or a PT accruing to par, is not measured.
+Set `min_negative_apr` to that yield. With a 5% staking yield, a setting of 5% fires the trigger
+once the loss measured here is deeper than what the token earns. Native staked collateral is the
+exception: its pool value is part of the measurement.
 
 These settings are yours to choose, and together they decide how much it takes to trigger an exit
 and what one can cost. A longer `window_seconds` and a higher `min_negative_apr` ask for more before
@@ -72,9 +73,9 @@ pushes the spread negative.
 Every bank keeps its own rolling history of where its share value stood, written by the protocol's
 ordinary pricing activity (borrows, withdrawals, liquidations, and a permissionless pulse anyone can
 run), at least three hours apart and reaching back at least 48 hours once the bank has been live
-that long. Your Order records nothing of its own. When a Keeper tries to execute it, each leg's rate
-is read from its bank's history, from the reading closest to your window that is at least a window
-old.
+that long. Your Order records nothing of its own. When a Keeper tries to execute it, each
+position's rate is read from its bank's history, from the reading closest to your window that is at
+least a window old.
 
 Three things follow.
 
@@ -89,9 +90,10 @@ Three things follow.
 If a bank has been quiet for longer than your window, the nearest older reading is used, so the
 measured span can be longer than you asked for, never shorter.
 
-An auto-rebalance does not move a balance an interest trigger was placed on, so the bank your lend
-leg is measured in stays the one you chose. The balance is held this way until its Order tag is
-cleared with `SetKeeperCloseFlags`, including after the Order has executed or been closed.
+An auto-rebalance does not move a balance an interest trigger was placed on, so the bank your
+lending position is measured in stays the one you chose. The balance is held this way until its
+Order tag is cleared with `SetKeeperCloseFlags`, including after the Order has executed or been
+closed.
 
 ### Interest and Price Triggers Together
 

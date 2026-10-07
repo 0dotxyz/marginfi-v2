@@ -379,7 +379,6 @@ impl Balance {
         }
     }
 
-    /// Drop the order tag along with its type.
     pub fn clear_tag(&mut self) {
         self.tag = 0;
         self.tag_type = OrderTagType::default() as u8;

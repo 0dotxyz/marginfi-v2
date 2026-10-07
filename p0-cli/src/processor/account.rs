@@ -738,9 +738,9 @@ pub fn marginfi_account_place_order(
     Ok(())
 }
 
-/// Observation metas with the order's two legs promoted to writable, as `start_execute_order` needs
-/// to accrue them. An order with no interest trigger accrues nothing, so nothing is promoted.
-fn observation_metas_accruing_legs(
+/// Observation metas with the order's two banks promoted to writable, as `start_execute_order`
+/// needs to accrue them. An order with no interest trigger accrues nothing, so nothing is promoted.
+fn observation_metas_accruing_order_banks(
     order: &Order,
     marginfi_account: &MarginfiAccount,
     banks: &HashMap<Pubkey, Bank>,
@@ -749,7 +749,7 @@ fn observation_metas_accruing_legs(
     if !order.interest_trigger_enabled() {
         return metas;
     }
-    let legs: Vec<Pubkey> = marginfi_account
+    let order_banks: Vec<Pubkey> = marginfi_account
         .lending_account
         .balances
         .iter()
@@ -757,7 +757,7 @@ fn observation_metas_accruing_legs(
         .map(|b| b.bank_pk)
         .collect();
     for meta in metas.iter_mut() {
-        meta.is_writable |= legs.contains(&meta.pubkey);
+        meta.is_writable |= order_banks.contains(&meta.pubkey);
     }
     metas
 }
@@ -924,7 +924,7 @@ pub fn marginfi_account_keeper_execute_order(
     let observation_metas =
         load_observation_account_metas(&marginfi_account, &banks, vec![], vec![]);
     // Only `start` accrues, so only it needs the write locks.
-    let start_metas = observation_metas_accruing_legs(&order, &marginfi_account, &banks);
+    let start_metas = observation_metas_accruing_order_banks(&order, &marginfi_account, &banks);
     let execute_record_pk = find_execute_order_pda(&order_pk, &config.program_id).0;
     let fee_state_pk = find_fee_state_pda(&config.program_id).0;
 

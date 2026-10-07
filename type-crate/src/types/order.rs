@@ -96,12 +96,12 @@ pub struct Order {
     pub bump: u8,
     pub pad2: [u8; 6],
 
-    /// Shortest span the realized rates are measured over: each leg is read from its bank's
+    /// Shortest span the realized rates are measured over: each balance's bank is read from its
     /// youngest rate reading at least this old.
     pub interest_window_seconds: u32,
     /// The carry loss accrued over this span is the budget the realized unwind cost must fit in.
     pub interest_exit_budget_seconds: u32,
-    /// Annualized loss, against the lend leg, required to fire the trigger. Encoded like the
+    /// Annualized loss, against the asset balance, required to fire the trigger. Encoded like the
     /// interest-curve points via `milli_to_u32` (0-1000%). Zero fires on any negative carry.
     pub interest_min_negative_apr: u32,
     /// Bit 0 (`INTEREST_TRIGGER_ENABLED`) - the carry condition is active on this order.
@@ -146,7 +146,7 @@ pub struct ExecuteOrderRecord {
     _reserved0: [u8; 5],
     pub order_start_health: WrappedI80F48,
     /// Net carry in USD per year at start, negative when the pair loses to interest. The end gate
-    /// reads it because the closed liability leg makes it unrecomputable there.
+    /// reads it because the closed liability balance makes it unrecomputable there.
     pub interest_carry: WrappedI80F48,
 }
 

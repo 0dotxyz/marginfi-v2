@@ -33,10 +33,9 @@ const SOL_PRICE: f64 = 10.0;
 
 pub const TAG_COLLATERAL: u16 = 100;
 pub const TAG_LIABILITY: u16 = 200;
-/// The variable-borrow premium `charge_premium` puts on the SOL liability.
 pub const PREMIUM_APR: f64 = 0.25;
 
-// A near-idle borrow leg (1 SOL against a 1,000 SOL float) so its baseline rate is negligible and
+// A near-idle borrow (1 SOL against a 1,000 SOL float) so its baseline rate is negligible and
 // whatever a driver does to utilization is the only thing the window measures.
 pub const SPIKE_LENDER_SOL: f64 = 1_000.0;
 const SPIKE_BORROW_SOL: f64 = 1.0;
@@ -48,7 +47,7 @@ pub const TEST_WINDOW: i64 = TEST_WINDOW_SECONDS as i64;
 /// Above anything the near-idle baseline produces, below what a held ~90% utilization does.
 const SPIKE_MARGIN_APR: f64 = 0.02;
 
-/// A near-idle borrow leg at the default size, with a margin small enough that base rates alone
+/// A near-idle borrow at the default size, with a margin small enough that base rates alone
 /// miss it and a premium alone clears it.
 pub fn premium_params() -> Params {
     Params {
@@ -200,7 +199,7 @@ pub async fn setup(p: Params) -> anyhow::Result<InterestFixture> {
         .try_bank_borrow(borrower_sol.key, sol, p.borrow_sol)
         .await?;
 
-    // The borrow priced the SOL bank, which took its first reading. The lend leg has only been
+    // The borrow priced the SOL bank, which took its first reading. The asset bank has only been
     // deposited into, which prices nothing, so it is pulsed for its own.
     test_f
         .marginfi_group
@@ -216,14 +215,14 @@ pub async fn setup(p: Params) -> anyhow::Result<InterestFixture> {
         threshold: p.stop_loss.into(),
         max_slippage: slippage(p.max_slippage_pct),
     };
-    let legs = vec![usdc.key, sol.key];
+    let bank_keys = vec![usdc.key, sol.key];
     let order = match p.interest {
         Some(interest) => {
             account_f
-                .try_place_interest_order(legs, trigger, interest)
+                .try_place_interest_order(bank_keys, trigger, interest)
                 .await?
         }
-        None => account_f.try_place_order(legs, trigger).await?,
+        None => account_f.try_place_order(bank_keys, trigger).await?,
     };
 
     let keeper = Keypair::new();
@@ -298,7 +297,7 @@ impl InterestFixture {
         Ok(())
     }
 
-    /// Close out the borrow leg's accrual at the current rate, so the next span accrues only at
+    /// Close out the SOL bank's accrual at the current rate, so the next span accrues only at
     /// whatever rate a driver then sets.
     pub async fn settle_borrow_rate(&self) -> anyhow::Result<()> {
         let sol = self.test_f.get_bank(&BankMint::Sol);
@@ -306,7 +305,7 @@ impl InterestFixture {
         Ok(())
     }
 
-    /// Charge `PREMIUM_APR` on the SOL liability, collateralised by the USDC lend leg, and write
+    /// Charge `PREMIUM_APR` on the SOL liability, collateralised by the USDC asset balance, and
     /// it to the account's snapshot, which only an oracle-carrying instruction does.
     pub async fn charge_premium(&self) -> anyhow::Result<()> {
         let group_f = &self.test_f.marginfi_group;

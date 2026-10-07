@@ -42,7 +42,7 @@ use marginfi_type_crate::constants::{
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED, SECONDS_PER_YEAR,
 };
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
-use marginfi_type_crate::types::{Bank, BankConfig, OraclePriceType};
+use marginfi_type_crate::types::{Bank, BankConfig, OraclePriceType, RateReading};
 
 /// Accounts a venue needs beyond its rate-bearing account to price a deposit and its reward
 /// emissions, each bound to the bank's own venue state; reading the stored rate needs none.
@@ -239,6 +239,41 @@ pub fn realized_apr(anchor: I80F48, current: I80F48, elapsed: i64) -> MarginfiRe
         .and_then(|annual| annual.checked_div(I80F48::from_num(elapsed)))
         .ok_or_else(math_error!())
         .map_err(Into::into)
+}
+
+/// The reading a rate window of `window` seconds starts at, and the seconds elapsed since it.
+fn rate_window_start(bank: &Bank, window: u32, now: i64) -> MarginfiResult<(&RateReading, i64)> {
+    let reading = bank
+        .rate_reading_at_least(i64::from(window), now)
+        .ok_or(MarginfiError::RateHistoryTooShort)?;
+    let elapsed = now
+        .checked_sub(reading.timestamp)
+        .ok_or_else(math_error!())?;
+    Ok((reading, elapsed))
+}
+
+/// The supply APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its yield index `yield_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_supply_apr(
+    bank: &Bank,
+    window: u32,
+    yield_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let (reading, elapsed) = rate_window_start(bank, window, now)?;
+    realized_apr(reading.asset_index(), yield_index_now, elapsed)
+}
+
+/// The borrow APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its debt index `debt_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_borrow_apr(
+    bank: &Bank,
+    window: u32,
+    debt_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let (reading, elapsed) = rate_window_start(bank, window, now)?;
+    realized_apr(reading.debt_index(), debt_index_now, elapsed)
 }
 
 /// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`
@@ -667,8 +702,62 @@ mod slot_pacing {
 #[cfg(test)]
 mod realized_rates {
     use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::INTEREST_MIN_WINDOW_SECONDS;
 
     const YEAR: i64 = 31_536_000;
+    const WINDOW: u32 = INTEREST_MIN_WINDOW_SECONDS;
+
+    /// A bank whose ring holds one reading `age` seconds before `now`, at a supply index of 1 and
+    /// a debt index of 2.
+    fn bank_with_reading(age: i64, now: i64) -> Bank {
+        let mut bank = Bank::zeroed();
+        let reading = RateReading::new(I80F48::ONE, I80F48::from_num(2), now - age).unwrap();
+        bank.record_rate_reading(reading);
+        bank
+    }
+
+    /// Growth is annualized over the reading's actual age, which is the youngest reading at least
+    /// a window old; a reading older than the window lengthens the span.
+    #[test]
+    fn the_realized_rate_spans_the_youngest_reading_at_least_a_window_old() {
+        let now = 1_700_000_000;
+        let per_year = |age: i64| SECONDS_PER_YEAR / I80F48::from_num(age);
+
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&bank, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(i64::from(WINDOW))
+        );
+
+        let older = bank_with_reading(2 * i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&older, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(2 * i64::from(WINDOW))
+        );
+    }
+
+    #[test]
+    fn the_borrow_rate_is_measured_on_the_debt_index() {
+        let now = 1_700_000_000;
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_borrow_apr(&bank, WINDOW, I80F48::from_num(2.125), now).unwrap(),
+            I80F48::from_num(0.0625) * SECONDS_PER_YEAR / I80F48::from_num(WINDOW)
+        );
+    }
+
+    #[test]
+    fn a_ring_with_no_reading_old_enough_has_no_measurement() {
+        let now = 1_700_000_000;
+        let young = bank_with_reading(i64::from(WINDOW) - 1, now);
+        for bank in [young, Bank::zeroed()] {
+            assert_eq!(
+                realized_supply_apr(&bank, WINDOW, I80F48::ONE, now).unwrap_err(),
+                MarginfiError::RateHistoryTooShort.into()
+            );
+        }
+    }
 
     #[test]
     fn growth_annualizes_over_the_span_it_was_measured_on() {

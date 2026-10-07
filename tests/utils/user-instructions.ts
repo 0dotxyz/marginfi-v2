@@ -1028,7 +1028,7 @@ export type StartExecuteOrderArgs = {
   order: PublicKey;
   remaining: PublicKey[];
   /**
-   * The order's two legs, if it carries an interest trigger, which accrues them before reading
+   * The order's two banks, if it carries an interest trigger, which accrues them before reading
    * their share indices. Only those banks need the write lock, and only on `start`.
    */
   bankWritable?: PublicKey[];

@@ -179,7 +179,7 @@ pub enum AccountCommand {
         interest_exit_budget_days: Option<u32>,
         #[clap(
             long,
-            help = "Annual loss against the lend leg required to fire, in basis points (default: any)"
+            help = "Annual loss against the asset balance required to fire, in basis points (default: any)"
         )]
         interest_min_negative_apr_bps: Option<u32>,
     },

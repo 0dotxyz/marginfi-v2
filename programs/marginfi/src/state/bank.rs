@@ -854,7 +854,7 @@ impl BankImpl for Bank {
     }
 
     /// Records the live oracle price on the cache, feeds the circuit breaker and takes a rate
-    /// reading. Every path that reads a fresh oracle price calls this; repeats are no-ops.
+    /// reading if the bank's indices are current. Every pricing path calls it; repeats are no-ops.
     fn update_cache_price(
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
@@ -868,15 +868,15 @@ impl BankImpl for Bank {
         // while the protocol is paused does not do. A venue bank's index is its live multiplier.
         let indices_current = is_integration_asset_tag(self.config.asset_tag)
             || self.last_update == clock.unix_timestamp;
-        // An index past the reading's encodable range goes unrecorded; the price update proceeds.
-        if let Some(reading) = RateReading::new(
-            yield_index_of(self, multiplier)?,
-            debt_index_of(self, multiplier)?,
-            clock.unix_timestamp,
-        )
-        .filter(|_| indices_current)
-        {
-            self.record_rate_reading(reading);
+        if indices_current {
+            // An index past the encodable range goes unrecorded; the price update proceeds.
+            if let Some(reading) = RateReading::new(
+                yield_index_of(self, multiplier)?,
+                debt_index_of(self, multiplier)?,
+                clock.unix_timestamp,
+            ) {
+                self.record_rate_reading(reading);
+            }
         }
 
         if self.cache.is_liquidation_price_cache_locked() {

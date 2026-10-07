@@ -28,7 +28,7 @@ async fn interest_order_fires_once_the_pair_has_bled_for_a_window() -> anyhow::R
             .balances
             .iter()
             .any(|b| b.is_active() && b.bank_pk == sol.key),
-        "the borrow leg should be closed"
+        "the liability balance should be closed"
     );
     let usdc = fx.test_f.get_bank(&BankMint::Usdc);
     assert!(
@@ -37,7 +37,7 @@ async fn interest_order_fires_once_the_pair_has_bled_for_a_window() -> anyhow::R
             .balances
             .iter()
             .any(|b| b.is_active() && b.bank_pk == usdc.key),
-        "the lend leg should survive"
+        "the asset balance should survive"
     );
     Ok(())
 }
@@ -65,10 +65,7 @@ async fn interest_order_cannot_execute_before_its_window_elapses() -> anyhow::Re
 
     fx.advance(TEST_WINDOW - 1).await;
     let res = fx.unwind(1.0).await;
-    assert_custom_error!(
-        res.unwrap_err(),
-        MarginfiError::OrderInterestHistoryTooShort
-    );
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
     Ok(())
 }
 
@@ -212,7 +209,7 @@ async fn read_only_order_banks_are_rejected() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn an_unreadable_carry_leg_does_not_block_a_price_trigger() -> anyhow::Result<()> {
+async fn unreadable_rates_do_not_block_a_price_trigger() -> anyhow::Result<()> {
     // The pair is worth ~$900, so this stop-loss is breached from the start.
     let mut fx = setup(Params {
         stop_loss: fp!(5000),
@@ -225,7 +222,7 @@ async fn an_unreadable_carry_leg_does_not_block_a_price_trigger() -> anyhow::Res
     fx.unwind_readonly_full(1.0).await?;
     assert!(
         fx.test_f.try_load(&fx.order).await?.is_none(),
-        "the price trigger should execute despite the carry leg being unreadable"
+        "the price trigger should execute despite the rates being unreadable"
     );
     Ok(())
 }
@@ -237,7 +234,7 @@ async fn execution_accrues_both_order_banks() -> anyhow::Result<()> {
     fx.advance(TEST_WINDOW).await;
     assert!(
         fx.bank_last_update(&BankMint::Usdc).await < fx.now,
-        "the lend leg should be stale going in, or this proves nothing"
+        "the asset bank should be stale going in, or this proves nothing"
     );
 
     fx.unwind(1.0).await?;
@@ -253,7 +250,7 @@ async fn the_variable_borrow_premium_counts_toward_the_carry_cost() -> anyhow::R
 
     fx.advance(TEST_WINDOW).await;
 
-    // Base rates alone leave the near-idle borrow leg well short of the trigger margin.
+    // Base rates alone leave the near-idle borrow well short of the trigger margin.
     let res = fx.unwind(1.0).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::OrderInterestNotNegative);
 
@@ -345,7 +342,7 @@ async fn execution_holds_up_with_the_account_near_max_balances() -> anyhow::Resu
         .iter()
         .filter(|b| b.is_active())
         .count();
-    assert_eq!(active, 8, "six pads plus the order's own two legs");
+    assert_eq!(active, 8, "six pads plus the order's own two balances");
 
     fx.advance(TEST_WINDOW).await;
     fx.unwind_with_budget(1.0, 1_400_000).await?;
@@ -364,7 +361,7 @@ async fn execution_holds_up_with_the_account_near_max_balances() -> anyhow::Resu
             .filter(|b| b.is_active())
             .count(),
         active - 1,
-        "only the borrow leg should have closed"
+        "only the liability balance should have closed"
     );
     Ok(())
 }
