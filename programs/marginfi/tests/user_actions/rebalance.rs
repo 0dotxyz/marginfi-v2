@@ -2384,6 +2384,30 @@ async fn rebalance_carries_the_order_tag_with_a_whole_move() -> anyhow::Result<(
     Ok(())
 }
 
+/// A balance tagged by an interest trigger order stays where it is until its tag is cleared.
+#[tokio::test]
+async fn rebalance_moves_an_interest_tagged_balance_only_once_its_tag_is_cleared(
+) -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.place_interest_order_on(&f.src_bank_f).await?;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::RebalanceInterestTaggedBalance
+    );
+
+    f.user.try_set_keeper_close_flags(None).await?;
+    // A compute-budget ix keeps this retry's signature distinct from the rejected attempt's.
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    ixs.insert(0, ComputeBudgetInstruction::set_compute_unit_limit(400_000));
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
 /// A partial move of a tagged balance is rejected at end.
 #[tokio::test]
 async fn rebalance_rejects_a_partial_move_of_a_tagged_balance() -> anyhow::Result<()> {

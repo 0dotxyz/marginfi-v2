@@ -25,6 +25,15 @@ pub enum OrderTriggerType {
 unsafe impl Zeroable for OrderTriggerType {}
 unsafe impl Pod for OrderTriggerType {}
 
+/// The kind of order holding a balance's tag. `Balance::tag_type` stores it as a byte.
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
+pub enum OrderTagType {
+    #[default]
+    TpSl, // 0
+    Interest, // 1
+}
+
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]

@@ -18,7 +18,7 @@ use marginfi_type_crate::pdas::{
 use marginfi_type_crate::{
     constants::{INTEREST_MAX_WINDOW_SECONDS, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
-    types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
+    types::{InterestTriggerConfig, OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::sysvar;
 use solana_sdk::{
@@ -545,6 +545,24 @@ impl RebalanceFixture {
 
     /// Borrow SOL and place a stop-loss over the `bank` deposit and the SOL loan; returns its PDA.
     pub async fn place_stop_loss_on(&self, bank: &BankFixture) -> anyhow::Result<Pubkey> {
+        self.place_order_on(bank, None).await
+    }
+
+    /// [`Self::place_stop_loss_on`], with an interest trigger at its default settings.
+    pub async fn place_interest_order_on(&self, bank: &BankFixture) -> anyhow::Result<Pubkey> {
+        let interest = InterestTriggerConfig {
+            window_seconds: None,
+            exit_budget_seconds: None,
+            min_negative_apr: None,
+        };
+        self.place_order_on(bank, Some(interest)).await
+    }
+
+    async fn place_order_on(
+        &self,
+        bank: &BankFixture,
+        interest: Option<InterestTriggerConfig>,
+    ) -> anyhow::Result<Pubkey> {
         let sol_bank = self.test_f.get_bank(&BankMint::Sol);
         let user_sol = self.test_f.sol_mint.create_empty_token_account().await;
         self.user
@@ -552,12 +570,13 @@ impl RebalanceFixture {
             .await?;
         let order = self
             .user
-            .try_place_order(
+            .place_order_inner(
                 vec![bank.key, sol_bank.key],
                 OrderTrigger::StopLoss {
                     threshold: WrappedI80F48::from(I80F48::ONE),
                     max_slippage: 0,
                 },
+                interest,
             )
             .await?;
         Ok(order)

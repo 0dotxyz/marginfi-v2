@@ -24,10 +24,10 @@ use marginfi_type_crate::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
         BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
-        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, OrderTagType, PriceBias,
+        ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -2255,7 +2255,8 @@ impl<'a> BankAccountWrapper<'a> {
                     liability_shares: I80F48::ZERO.into(),
                     premium_outstanding: I80F48::ZERO.into(),
                     last_update: Clock::get()?.unix_timestamp as u64,
-                    _padding: [0; 1],
+                    tag_type: OrderTagType::default() as u8,
+                    _padding: [0; 7],
                 };
 
                 Ok(Self {

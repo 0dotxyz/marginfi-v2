@@ -2427,7 +2427,7 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    async fn place_order_inner(
+    pub(crate) async fn place_order_inner(
         &self,
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,

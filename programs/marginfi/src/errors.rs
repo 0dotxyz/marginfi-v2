@@ -535,6 +535,8 @@ pub enum MarginfiError {
     RebalanceTaggedBalanceSplit, // 6720
     #[msg("Rebalance moves a bank with no rate reading as old as the order's rate window")]
     RebalanceHistoryTooShort, // 6721
+    #[msg("Rebalance cannot move a balance held by an interest trigger order")]
+    RebalanceInterestTaggedBalance, // 6722
     // ************** END AUTO-REBALANCE ERRORS
     // ************** BEGIN SCOPE ERRORS (starting at 6800)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
@@ -835,6 +837,7 @@ impl From<u32> for MarginfiError {
             6719 => MarginfiError::RebalanceForeignBankLeg,
             6720 => MarginfiError::RebalanceTaggedBalanceSplit,
             6721 => MarginfiError::RebalanceHistoryTooShort,
+            6722 => MarginfiError::RebalanceInterestTaggedBalance,
 
             // Premium-specific errors (starting at 6610)
             6610 => MarginfiError::PremiumEntryInvalid,

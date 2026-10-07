@@ -89,6 +89,10 @@ Three things follow.
 If a bank has been quiet for longer than your window, the nearest older reading is used, so the
 measured span can be longer than you asked for, never shorter.
 
+An auto-rebalance does not move a balance an interest trigger was placed on, so the bank your lend
+leg is measured in stays the one you chose. The balance is held this way until its Order tag is
+cleared with `SetKeeperCloseFlags`, including after the Order has executed or been closed.
+
 ### Interest and Price Triggers Together
 
 The interest trigger is independent of the Stop Loss / Take Profit threshold on the same Order, so

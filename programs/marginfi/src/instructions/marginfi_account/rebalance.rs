@@ -13,7 +13,8 @@
 //! measured as the tighter of the bank's own limit and its venue's, would pay the move's tokens
 //! more, counting that bank's own declared inflow; a bank is either a source or a destination
 //! within one execution; an order-tagged balance moves whole, alone, into a bank the account holds
-//! nothing in, and its tag follows it; the total tokens moved are capped by the order's `amount`
+//! nothing in, and its tag follows it, unless an interest trigger order tagged it, in which case
+//! it does not move; the total tokens moved are capped by the order's `amount`
 //! budget (uncapped when the order is unlimited); token principal is conserved per bank up to a
 //! small dust tolerance; every withdraw/deposit leg acts on the rebalanced account and one of the
 //! referenced banks; the non-referenced balance set is unchanged, neither altered nor added to;
@@ -88,8 +89,8 @@ use marginfi_type_crate::{
     },
     pdas::derive_juplend_rate_model,
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, RebalanceMove,
-        RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OrderTagType,
+        RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
         ORDER_BLOCKING_FLAGS,
     },
@@ -882,6 +883,13 @@ pub fn start_rebalance<'info>(
             MarginfiError::RebalanceTaggedBalanceSplit
         );
         if ref_banks[s].tag != 0 {
+            check!(
+                account
+                    .lending_account
+                    .get_balance(&banks[s].key)
+                    .is_none_or(|b| b.tag_type != OrderTagType::Interest as u8),
+                MarginfiError::RebalanceInterestTaggedBalance
+            );
             tagged_dst[d] = true;
             // Every move out of `s` targets `d`, and every move into `d` comes from `s`.
             check!(

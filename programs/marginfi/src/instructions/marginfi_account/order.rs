@@ -38,7 +38,7 @@ use marginfi_type_crate::{
     types::{
         u32_to_milli, BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache,
         HealthPriceMode, InterestTriggerConfig, MarginfiAccount, MarginfiGroup, Order,
-        OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_IN_ORDER_EXECUTION,
+        OrderTagType, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_IN_ORDER_EXECUTION,
         ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
     },
 };
@@ -129,6 +129,11 @@ fn init_order(
         lending_account.balances[balance_index_1].tag,
         lending_account.balances[balance_index_2].tag,
     ];
+    if interest.is_some() {
+        for index in [balance_index_1, balance_index_2] {
+            lending_account.balances[index].tag_type = OrderTagType::Interest as u8;
+        }
+    }
 
     let marginfi_account_key = marginfi_account_loader.key();
 
@@ -279,13 +284,12 @@ pub fn set_keeper_close_flags(
             for bank_key in keys.iter() {
                 let index = lending_account.get_balance_index(bank_key)?;
 
-                let balance = &mut lending_account.balances[index];
-                balance.tag = 0;
+                lending_account.balances[index].clear_tag();
             }
         }
         None => {
             for balance in lending_account.balances.iter_mut() {
-                balance.tag = 0;
+                balance.clear_tag();
             }
         }
     }
