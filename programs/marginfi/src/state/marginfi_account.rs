@@ -1904,11 +1904,13 @@ fn calc_weighted_asset_value_standalone(
                 )
             ) {
                 debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
+                // Premium weighting only: health never prices this leg, so a wide confidence
+                // band must not revert the instruction. The bias still haircuts by the
+                // interval, capped at 5% of price.
                 let premium_price = match (need_premium_price, price_adapter_result) {
-                    (true, Ok(feed)) => feed.get_price_of_type(
+                    (true, Ok(feed)) => feed.get_price_of_type_ignore_conf(
                         requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
-                        bank.config.oracle_max_confidence,
                     )?,
                     // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
                     _ => I80F48::ZERO,
@@ -1951,11 +1953,11 @@ fn calc_weighted_asset_value_standalone(
                 && matches!(requirement_type, RequirementType::Initial)
             {
                 debug!("Bank without borrow power is worth 0 for Initial margin");
+                // Same as the Paused/ReduceOnly exit: premium-only read, confidence ignored.
                 let premium_price = if need_premium_price {
-                    price_feed.get_price_of_type(
+                    price_feed.get_price_of_type_ignore_conf(
                         requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
-                        bank.config.oracle_max_confidence,
                     )?
                 } else {
                     I80F48::ZERO
