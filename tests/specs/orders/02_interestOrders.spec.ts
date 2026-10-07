@@ -42,11 +42,11 @@ import {
 import { expectFailedTxWithError } from "../../utils/genericTests";
 import { Clock } from "../../utils/litesvm";
 import { toI80Scaled } from "../../utils/bn-utils";
+import {
+  INTEREST_MAX_WINDOW_SECONDS,
+  INTEREST_MIN_WINDOW_SECONDS,
+} from "../../utils/rate-readings";
 
-/** Matches `INTEREST_MIN_WINDOW_SECONDS`. */
-const MIN_WINDOW = 21_600;
-/** Matches `INTEREST_MAX_WINDOW_SECONDS`. */
-const MAX_WINDOW = 172_800;
 /** Matches `INTEREST_DEFAULT_EXIT_BUDGET_SECONDS`. */
 const DEFAULT_EXIT_BUDGET = 1_209_600;
 
@@ -340,7 +340,7 @@ describe("Interest trigger orders", () => {
   it("rejects a window under the floor - OrderInterestInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
-        await place(interest(MIN_WINDOW - 1, null));
+        await place(interest(INTEREST_MIN_WINDOW_SECONDS - 1, null));
       },
       "OrderInterestInvalidConfig",
       6903,
@@ -350,7 +350,7 @@ describe("Interest trigger orders", () => {
   it("rejects a window over the ceiling - OrderInterestInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
-        await place(interest(MAX_WINDOW + 1, null));
+        await place(interest(INTEREST_MAX_WINDOW_SECONDS + 1, null));
       },
       "OrderInterestInvalidConfig",
       6903,
@@ -388,11 +388,11 @@ describe("Interest trigger orders", () => {
   });
 
   it("carries the interest policy with no accounts beyond a plain order", async () => {
-    order = await place(interest(MIN_WINDOW, null));
+    order = await place(interest(INTEREST_MIN_WINDOW_SECONDS, null));
     const fetched = await program.account.order.fetch(order);
 
     assert.equal(fetched.interestFlags, 1);
-    assert.equal(fetched.interestWindowSeconds, MIN_WINDOW);
+    assert.equal(fetched.interestWindowSeconds, INTEREST_MIN_WINDOW_SECONDS);
     assert.equal(fetched.interestExitBudgetSeconds, DEFAULT_EXIT_BUDGET);
     assert.equal(fetched.interestMinNegativeApr, 0);
   });
@@ -409,7 +409,7 @@ describe("Interest trigger orders", () => {
   });
 
   it("cannot execute before the banks hold a window of history - OrderInterestHistoryTooShort", async () => {
-    await advance(MIN_WINDOW - 60);
+    await advance(INTEREST_MIN_WINDOW_SECONDS - 60);
     await expectFailedTxWithError(
       async () => {
         await keeper.mrgnProgram.provider.sendAndConfirm!(await sandwich());

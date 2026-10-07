@@ -7,7 +7,8 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_account_init_health, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+        check_account_init_health_and_clear_tag, run_cb_price_gate, LendingAccountImpl,
+        MarginfiAccountImpl,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
@@ -124,8 +125,8 @@ pub fn lending_account_end_flashloan<'info>(
 
     let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
-    check_account_init_health(
-        &marginfi_account,
+    check_account_init_health_and_clear_tag(
+        &mut marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut None,
@@ -139,11 +140,14 @@ pub fn lending_account_end_flashloan<'info>(
     );
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
-    // the post-flashloan balances.
+    // the post-flashloan balances. Ratchet on incomplete is unreachable today (the gate above
+    // reverts first) — `true` is defense-in-depth so this owner-signed path can never regress
+    // to a rate freeze if that gate is ever relaxed.
     marginfi_account.update_premium_snapshots(
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        true,
     )?;
 
     if marginfi_account.lending_account.has_liabilities() {

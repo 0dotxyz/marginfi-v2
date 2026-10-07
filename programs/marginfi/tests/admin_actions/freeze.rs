@@ -7,7 +7,7 @@ use solana_program_test::tokio;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 #[tokio::test]
-async fn admin_can_toggle_account_freeze() -> anyhow::Result<()> {
+async fn shared_fast_and_governance_admin_can_toggle_account_freeze() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
     let authority = Keypair::new();
 
@@ -193,6 +193,77 @@ async fn frozen_account_blocks_withdraw_allows_admin() -> anyhow::Result<()> {
         .try_bank_withdraw_with_authority(admin_dest_account.key, &usdc_bank, 1.0, None, &payer)
         .await;
     assert!(admin_res.is_ok());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn frozen_account_withdraw_requires_governance_admin() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
+    let slow_admin = Keypair::new();
+    let payer = test_f.payer_keypair();
+
+    let marginfi_account = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
+    let mut usdc_bank = test_f.get_bank(&BankMint::Usdc).clone();
+
+    let user_token_account =
+        TokenAccountFixture::new(test_f.context.clone(), &usdc_bank.mint, &authority.pubkey())
+            .await;
+    usdc_bank
+        .mint
+        .mint_to(&user_token_account.key, native!(200, "USDC") as f64)
+        .await;
+    marginfi_account
+        .try_bank_deposit_with_authority(
+            user_token_account.key,
+            &usdc_bank,
+            100.0,
+            None,
+            &authority,
+        )
+        .await?;
+
+    test_f
+        .marginfi_group
+        .try_set_governance_admin(&slow_admin)
+        .await?;
+    // The unchanged fast group admin can still freeze immediately.
+    marginfi_account.try_set_freeze(true).await?;
+
+    let fast_dest =
+        TokenAccountFixture::new(test_f.context.clone(), &usdc_bank.mint, &payer.pubkey()).await;
+    let fast_result = marginfi_account
+        .try_bank_withdraw_with_authority(fast_dest.key, &usdc_bank, 1.0, None, &payer)
+        .await;
+    assert_custom_error!(fast_result.unwrap_err(), MarginfiError::Unauthorized);
+
+    let fast_unfreeze_result = marginfi_account.try_set_freeze(false).await;
+    assert_custom_error!(
+        fast_unfreeze_result.unwrap_err(),
+        MarginfiError::Unauthorized
+    );
+    assert!(marginfi_account.load().await.get_flag(ACCOUNT_FROZEN));
+
+    let slow_dest = TokenAccountFixture::new(
+        test_f.context.clone(),
+        &usdc_bank.mint,
+        &slow_admin.pubkey(),
+    )
+    .await;
+    marginfi_account
+        .try_bank_withdraw_with_authority(slow_dest.key, &usdc_bank, 1.0, None, &slow_admin)
+        .await?;
+
+    marginfi_account
+        .try_set_freeze_with_signer(false, &slow_admin)
+        .await?;
+    assert!(!marginfi_account.load().await.get_flag(ACCOUNT_FROZEN));
 
     Ok(())
 }

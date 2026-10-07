@@ -2,6 +2,7 @@ use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID,
     SVSP_PHANTOM_TOKEN_AMOUNT, SWITCHBOARD_PULL_ID,
 };
+use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::state::lst_stake_price::{
     expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
@@ -20,7 +21,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, KAMINO_MARKET_EMERGENCY,
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -80,6 +81,10 @@ impl OraclePriceWithMultiplier {
 
 #[enum_dispatch]
 pub trait PriceAdapter {
+    /// False if this collateral can no longer back new borrows, e.g. a Kamino reserve in
+    /// emergency mode. Worth zero for Initial margin, unchanged for Maintenance.
+    fn has_borrow_power(&self) -> bool;
+
     fn get_price_and_confidence_of_type(
         &self,
         oracle_price_type: OraclePriceType,
@@ -138,6 +143,13 @@ pub(crate) fn load_kamino_reserve<'info>(
     let reserve_loader: AccountLoader<MinimalReserve> = AccountLoader::try_from(reserve_info)
         .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
     Ok(reserve_loader)
+}
+
+/// Whether a Kamino bank's collateral can still back new borrows. The reserve carries its own
+/// emergency flag; the market's is cached on the bank by `propagate_kamino_market_emergency`,
+/// because the market account never reaches the pricing path.
+fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
+    !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
 }
 
 fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
@@ -279,8 +291,17 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
+        in_deleverage: bool,
     ) -> MarginfiResult<Self> {
-        Self::try_from_bank_with_max_age(bank, ais, clock, bank.config.get_oracle_max_age())
+        let context = Self::load_oracle_context_with_max_age(
+            bank,
+            ais,
+            clock,
+            bank.config.get_oracle_max_age(),
+            None,
+            in_deleverage,
+        )?;
+        Ok(context.adjusted_price_feed)
     }
 
     pub fn try_from_bank_with_max_age<'info>(
@@ -289,7 +310,8 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
     ) -> MarginfiResult<Self> {
-        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
+        let context =
+            Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None, false)?;
         Ok(context.adjusted_price_feed)
     }
 
@@ -299,6 +321,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
+        in_deleverage: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -355,6 +378,84 @@ impl OraclePriceFeedAdapter {
                     ),
                     cache_raw_price: None,
                     cache_multiplier: I80F48::ONE,
+                })
+            }
+            OracleSetup::ScopeKamino => {
+                // (0) Scope feed (for price) and (1) Kamino reserve (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let feed_info = &ais[0];
+                let reserve_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, feed_info)?;
+
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
+                let reserve = reserve_loader.load()?;
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
+                let multiplier: I80F48 = kamino_price_multiplier(&reserve)?;
+
+                let mut price_feed = ScopePriceFeed::load_checked(
+                    feed_info,
+                    clock.unix_timestamp,
+                    max_age,
+                    bank_config.scope_entry_index,
+                )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
+
+                // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
+                price_feed.price = price_feed
+                    .price
+                    .checked_mul(multiplier)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
+            }
+            OracleSetup::ScopeJuplend => {
+                // (0) Scope feed (for price) and (1) JupLend Lending state (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let feed_info = &ais[0];
+                let lending_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, feed_info)?;
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let multiplier: I80F48 = juplend_price_multiplier(&lending)?;
+
+                let mut price_feed = ScopePriceFeed::load_checked(
+                    feed_info,
+                    clock.unix_timestamp,
+                    max_age,
+                    bank_config.scope_entry_index,
+                )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
+                price_feed.price = price_feed
+                    .price
+                    .checked_mul(multiplier)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
                 })
             }
             OracleSetup::StakedWithPythPush => {
@@ -478,6 +579,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -521,6 +623,7 @@ impl OraclePriceFeedAdapter {
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(
                         price_type,
@@ -550,7 +653,10 @@ impl OraclePriceFeedAdapter {
                 );
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed { price }),
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        price,
+                        has_borrow_power: true,
+                    }),
                     cache_raw_price: None,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -765,6 +871,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: true,
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -812,6 +919,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: kamino_borrow_power(bank, &reserve),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -853,6 +961,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        has_borrow_power: true,
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1015,6 +1124,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1121,6 +1231,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the LST/SOL rate first so the cached raw price is the LST/USD price.
                 apply_i80f48_multiplier(&mut price_feed, lst_rate)?;
@@ -1188,7 +1299,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_rate = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1218,9 +1329,12 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
+                let pt_price = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
 
-                let feed = FixedPriceFeed { price: pt_price };
+                let feed = FixedPriceFeed {
+                    price: pt_price,
+                    has_borrow_power: true,
+                };
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
@@ -1250,6 +1364,7 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
+            false,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -1373,6 +1488,52 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+                Ok(())
+            }
+            OracleSetup::ScopeKamino => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
+                // (0) Scope feed, (1) Kamino reserve
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::ScopeJuplend => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
+                // (0) Scope feed, (1) JupLend Lending state
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::SwitchboardPull => {
@@ -1876,6 +2037,7 @@ impl OraclePriceFeedAdapter {
 pub struct ScopePriceFeed {
     pub price: I80F48,
     pub last_updated_timestamp: u64,
+    has_borrow_power: bool,
 }
 
 impl ScopePriceFeed {
@@ -1921,6 +2083,7 @@ impl ScopePriceFeed {
         Ok(Self {
             price,
             last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power: true,
         })
     }
 
@@ -1952,6 +2115,10 @@ impl ScopePriceFeed {
 }
 
 impl PriceAdapter for ScopePriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
@@ -1978,9 +2145,14 @@ impl PriceAdapter for ScopePriceFeed {
 #[derive(Copy, Clone, Debug)]
 pub struct FixedPriceFeed {
     pub price: I80F48,
+    has_borrow_power: bool,
 }
 
 impl PriceAdapter for FixedPriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
@@ -2005,6 +2177,7 @@ impl PriceAdapter for FixedPriceFeed {
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct SwitchboardPullPriceFeed {
     pub feed: Box<LitePullFeedAccountData>,
+    has_borrow_power: bool,
 }
 
 impl SwitchboardPullPriceFeed {
@@ -2028,6 +2201,7 @@ impl SwitchboardPullPriceFeed {
         }
 
         Ok(Self {
+            has_borrow_power: true,
             feed: Box::new(lite_feed),
         })
     }
@@ -2082,6 +2256,10 @@ impl SwitchboardPullPriceFeed {
 }
 
 impl PriceAdapter for SwitchboardPullPriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         _price_type: OraclePriceType,
@@ -2204,6 +2382,7 @@ pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpd
 pub struct PythPushOraclePriceFeed {
     ema_price: Box<price_update::Price>,
     price: Box<price_update::Price>,
+    has_borrow_power: bool,
 }
 
 impl PythPushOraclePriceFeed {
@@ -2252,6 +2431,7 @@ impl PythPushOraclePriceFeed {
         };
 
         Ok(Self {
+            has_borrow_power: true,
             price: Box::new(price),
             ema_price: Box::new(ema_price),
         })
@@ -2289,6 +2469,7 @@ impl PythPushOraclePriceFeed {
         Ok(Self {
             price: Box::new(price),
             ema_price: Box::new(ema_price),
+            has_borrow_power: true,
         })
     }
 
@@ -2386,6 +2567,10 @@ impl PythPushOraclePriceFeed {
 }
 
 impl PriceAdapter for PythPushOraclePriceFeed {
+    fn has_borrow_power(&self) -> bool {
+        self.has_borrow_power
+    }
+
     fn get_price_of_type(
         &self,
         price_type: OraclePriceType,
@@ -2552,6 +2737,7 @@ mod tests {
 
     fn test_switchboard_pull_feed(value: i128) -> SwitchboardPullPriceFeed {
         SwitchboardPullPriceFeed {
+            has_borrow_power: true,
             feed: Box::new(LitePullFeedAccountData {
                 result: CurrentResult {
                     value,
@@ -2762,19 +2948,19 @@ mod tests {
 
         // Before start -> start_price; at/after maturity -> par (1.0)
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(500), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(500), start_price, false).unwrap(),
             start_price
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap(),
             I80F48::ONE
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(9_999), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(9_999), start_price, false).unwrap(),
             I80F48::ONE
         );
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
-        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
@@ -2791,29 +2977,29 @@ mod tests {
         // 0.4375 SY per PT * 2.0 asset per SY = 0.875, so the cap must beat par at maturity.
         let mut vault = fully_backed_vault(1_000, 1_000);
         vault.sy_for_pt = 437_500_000_000;
-        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(matured, I80F48::from_num(0.875));
 
         // Below the ceiling, the cap is inert: halfway from 0.5 to par is 0.75.
-        let early = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let early = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
         assert_eq!(early, I80F48::from_num(0.75));
 
         vault.sy_for_pt = 125_000_000_000; // 0.25
-        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
+        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
         assert_eq!(broken, I80F48::from_num(0.25));
 
         // Degenerate vaults are rejected rather than priced at zero.
         let mut zero_supply = fully_backed_vault(1_000, 1_000);
         zero_supply.pt_supply = 0;
-        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price, false).is_err());
 
         let mut zero_rate = fully_backed_vault(1_000, 1_000);
         zero_rate.last_seen_sy_exchange_rate = [0; 4];
-        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price, false).is_err());
 
         let mut overflowed = fully_backed_vault(1_000, 1_000);
         overflowed.last_seen_sy_exchange_rate = [0, 1, 0, 0];
-        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price).is_err());
+        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price, false).is_err());
     }
 
     #[test]
@@ -2828,13 +3014,20 @@ mod tests {
         let mut healthy = fully_backed_vault(1_000, 1_000);
         healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
         assert!(!healthy.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&healthy, &at, start_price).is_ok());
+        assert!(pt_linear_multiplier(&healthy, &at, start_price, false).is_ok());
 
         // SY rate below its all-time high -> emergency mode -> refuse to price.
         let mut depegged = fully_backed_vault(1_000, 1_000);
         depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
         assert!(depegged.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&depegged, &at, start_price).is_err());
+        assert!(pt_linear_multiplier(&depegged, &at, start_price, false).is_err());
+
+        // Deleverage prices it anyway, at the same mark a healthy vault would carry, so the risk
+        // admin can unwind a position the depeg would otherwise strand.
+        assert_eq!(
+            pt_linear_multiplier(&depegged, &at, start_price, true).unwrap(),
+            pt_linear_multiplier(&healthy, &at, start_price, false).unwrap(),
+        );
     }
 
     #[test]
@@ -3325,6 +3518,124 @@ mod tests {
                 )
                 .unwrap_err(),
                 MarginfiError::InvalidOracleSetup.into()
+            );
+        }
+    }
+
+    /// The venue-wrapped Scope setups take `[feed, venue account]`: the feed is validated exactly
+    /// like plain Scope, and the venue account only has to match `oracle_keys[1]` here (the
+    /// reserve / lending state is loaded and freshness-checked at price time, not at configure
+    /// time, mirroring the Pyth/Switchboard venue setups).
+    #[test]
+    fn scope_venue_setups_require_matching_tag_and_venue_key() {
+        fn validate<'a>(
+            config: &BankConfig,
+            mint: Pubkey,
+            ais: &'a [AccountInfo<'a>],
+        ) -> MarginfiResult {
+            OraclePriceFeedAdapter::validate_bank_config(config, mint, ais, None, None, None)
+        }
+
+        let feed_key = Pubkey::new_unique();
+        let venue_key = Pubkey::new_unique();
+        let impostor_key = Pubkey::new_unique();
+        let venue_owner = Pubkey::new_unique();
+        let mut feed_lamports = 0u64;
+        let mut venue_lamports = 0u64;
+        let mut impostor_lamports = 0u64;
+        let mut feed_data = scope_account_data(42, 10_344_510_800, 8, 1000);
+        let mut venue_data = [0u8; 8];
+        let mut impostor_data = [0u8; 8];
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let venue_ai = scope_ai(
+            &venue_key,
+            &venue_owner,
+            &mut venue_lamports,
+            &mut venue_data,
+        );
+        let impostor_ai = scope_ai(
+            &impostor_key,
+            &venue_owner,
+            &mut impostor_lamports,
+            &mut impostor_data,
+        );
+        let mint = Pubkey::new_unique();
+
+        let feed_and_venue = [feed_ai.clone(), venue_ai.clone()];
+        let feed_and_impostor = [feed_ai.clone(), impostor_ai.clone()];
+        let venue_then_feed = [venue_ai.clone(), feed_ai.clone()];
+        let feed_only = [feed_ai.clone()];
+
+        for (setup, tag, venue_err) in [
+            (
+                OracleSetup::ScopeKamino,
+                ASSET_TAG_KAMINO,
+                MarginfiError::KaminoReserveValidationFailed,
+            ),
+            (
+                OracleSetup::ScopeJuplend,
+                ASSET_TAG_JUPLEND,
+                MarginfiError::JuplendLendingValidationFailed,
+            ),
+        ] {
+            let mut config = BankConfig {
+                oracle_setup: setup,
+                scope_entry_index: 42,
+                asset_tag: tag,
+                ..BankConfig::default()
+            };
+            config.oracle_keys[0] = feed_key;
+            config.oracle_keys[1] = venue_key;
+
+            validate(&config, mint, &feed_and_venue).unwrap();
+
+            // Only the matching venue tag may carry the setup.
+            for other_tag in [
+                ASSET_TAG_DEFAULT,
+                ASSET_TAG_SOL,
+                ASSET_TAG_STAKED,
+                ASSET_TAG_DRIFT,
+                ASSET_TAG_SOLEND,
+                ASSET_TAG_KAMINO,
+                ASSET_TAG_JUPLEND,
+            ]
+            .into_iter()
+            .filter(|t| *t != tag)
+            {
+                config.asset_tag = other_tag;
+                assert_eq!(
+                    validate(&config, mint, &feed_and_venue).unwrap_err(),
+                    MarginfiError::InvalidOracleSetup.into()
+                );
+            }
+            config.asset_tag = tag;
+
+            // The venue account is pinned to `oracle_keys[1]`.
+            assert_eq!(
+                validate(&config, mint, &feed_and_impostor).unwrap_err(),
+                venue_err.into()
+            );
+
+            // The feed alone is not enough, and the order is fixed.
+            assert_eq!(
+                validate(&config, mint, &feed_only).unwrap_err(),
+                MarginfiError::WrongNumberOfOracleAccounts.into()
+            );
+            assert_eq!(
+                validate(&config, mint, &venue_then_feed).unwrap_err(),
+                MarginfiError::WrongOracleAccountKeys.into()
+            );
+
+            // The entry must be readable, same as plain Scope.
+            config.scope_entry_index = 300;
+            assert_eq!(
+                validate(&config, mint, &feed_and_venue).unwrap_err(),
+                MarginfiError::ScopeInvalidEntry.into()
             );
         }
     }

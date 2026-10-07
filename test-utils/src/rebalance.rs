@@ -2,21 +2,23 @@ use crate::bank::BankFixture;
 use crate::marginfi_account::{MarginfiAccountFixture, RebalanceBankMeta};
 use crate::prelude::*;
 use crate::test::TestFixture;
-use anchor_lang::prelude::Clock;
+use anchor_lang::prelude::AccountInfo;
+use anchor_lang::solana_program::account_info::IntoAccountInfo;
 use anchor_lang::{system_program, InstructionData, ToAccountMetas};
 use drift_mocks::drift::client as drift;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending, TokenReserve};
 use kamino_mocks::state::{CurvePoint, MinimalReserve};
+use marginfi::state::rate::{venue_multiplier, yield_index_of};
 use marginfi_type_crate::pdas::{
     derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
     DRIFT_PROGRAM_ID,
 };
 use marginfi_type_crate::{
-    constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
-    pdas::derive_juplend_token_reserve,
-    types::{RebalanceMove, RebalanceRecord, WrappedI80F48},
+    constants::{INTEREST_MAX_WINDOW_SECONDS, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
+    pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
+    types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::sysvar;
 use solana_sdk::{
@@ -28,6 +30,48 @@ use solana_sdk::{
 };
 
 pub const DEPOSIT_USDC: f64 = 1_000.0;
+
+/// The cooldown, and so the rate window, a live-history fixture sets by default.
+pub const TEST_WINDOW: i64 = INTEREST_MAX_WINDOW_SECONDS as i64;
+
+// ~90% utilization on the destination: a rate that held for ten minutes barely registers over the
+// window, and held for the whole window is realized in full.
+pub const SPIKE_BORROW: f64 = 900.0;
+pub const SPIKE_COLLATERAL: f64 = 300.0;
+/// Above what a ten-minute spike realizes over the window, below the spiked bank's rate once the
+/// move has landed in it.
+const SPIKE_MARGIN_APR: f64 = 0.02;
+
+/// Settings of a fixture whose banks hold only the history the program itself recorded.
+pub struct LiveParams {
+    pub min_improvement: I80F48,
+    pub cooldown_seconds: u64,
+    /// USDC borrowed from the destination at its first reading, so it out-yields the idle source by
+    /// construction. Zero leaves it idle, at whatever rate a test then drives it to.
+    pub dst_borrow: f64,
+    /// Seconds between the banks' first readings and the order being placed.
+    pub history_before_placement: i64,
+}
+
+impl Default for LiveParams {
+    fn default() -> Self {
+        Self {
+            min_improvement: I80F48::from_num(0.0001),
+            cooldown_seconds: TEST_WINDOW as u64,
+            dst_borrow: 500.0,
+            history_before_placement: 0,
+        }
+    }
+}
+
+/// The fixture the spike pair shares: identical on both sides so only duration differs.
+pub fn spike_params() -> LiveParams {
+    LiveParams {
+        min_improvement: I80F48::from_num(SPIKE_MARGIN_APR),
+        dst_borrow: 0.0,
+        ..Default::default()
+    }
+}
 
 /// Two same-mint native USDC banks plus a placed rebalance order. `src` holds the user's whole
 /// deposit at 0 utilization (supply rate 0); `dst` carries a borrow so its supply rate is > 0,
@@ -70,15 +114,7 @@ pub async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> any
     Ok(())
 }
 
-/// Fund `bank` with 1_000 USDC of lender liquidity and draw `borrow_ui` against `sol_collateral_ui`
-/// SOL collateral, then accrue, giving the bank a supply rate set by the resulting utilization.
-pub async fn drive_utilization(
-    test_f: &TestFixture,
-    bank: &BankFixture,
-    borrow_ui: f64,
-    sol_collateral_ui: f64,
-) -> anyhow::Result<()> {
-    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+pub async fn fund_lender(test_f: &TestFixture, bank: &BankFixture) -> anyhow::Result<()> {
     let lender = test_f.create_marginfi_account().await;
     let lender_usdc = test_f
         .usdc_mint
@@ -87,7 +123,18 @@ pub async fn drive_utilization(
     lender
         .try_bank_deposit(lender_usdc.key, bank, 1_000.0, None)
         .await?;
+    Ok(())
+}
 
+/// Open a USDC borrow from `bank` against fresh SOL collateral, pushing its utilization (and so its
+/// supply rate) up.
+pub async fn drive_rate(
+    test_f: &TestFixture,
+    bank: &BankFixture,
+    borrow_ui: f64,
+    sol_collateral_ui: f64,
+) -> anyhow::Result<()> {
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
     let borrower = test_f.create_marginfi_account().await;
     let borrower_sol = test_f
         .sol_mint
@@ -100,7 +147,21 @@ pub async fn drive_utilization(
     borrower
         .try_bank_borrow(borrower_usdc.key, bank, borrow_ui)
         .await?;
+    Ok(())
+}
+
+/// Fund `bank` with 1_000 USDC of lender liquidity, draw `borrow_ui` against `sol_collateral_ui`
+/// SOL collateral, accrue, and seed a full max window of history at the resulting supply rate.
+pub async fn drive_utilization(
+    test_f: &TestFixture,
+    bank: &BankFixture,
+    borrow_ui: f64,
+    sol_collateral_ui: f64,
+) -> anyhow::Result<()> {
+    fund_lender(test_f, bank).await?;
+    drive_rate(test_f, bank, borrow_ui, sol_collateral_ui).await?;
     test_f.marginfi_group.try_accrue_interest(bank).await?;
+    bank.seed_native_rate_history().await;
     Ok(())
 }
 
@@ -133,11 +194,29 @@ pub fn rebalance_move(src_index: u8, dst_index: u8, ui_value: f64) -> RebalanceM
     }
 }
 
+/// Both banks carry seeded history, a full max window at the rate each pays at setup, so a move is
+/// executable at once.
 pub async fn setup(
     min_improvement: I80F48,
     cooldown_seconds: u64,
 ) -> anyhow::Result<RebalanceFixture> {
+    setup_with(min_improvement, cooldown_seconds, None).await
+}
+
+/// [`setup`] without the seeding: each bank's history starts at the reading its first pricing took
+/// at `BASE_TS`.
+pub async fn setup_live(p: LiveParams) -> anyhow::Result<RebalanceFixture> {
+    setup_with(p.min_improvement, p.cooldown_seconds, Some(p)).await
+}
+
+async fn setup_with(
+    min_improvement: I80F48,
+    cooldown_seconds: u64,
+    live: Option<LiveParams>,
+) -> anyhow::Result<RebalanceFixture> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let oracle = get_oracle_id_from_feed_id(PYTH_USDC_FEED).unwrap_or(PYTH_USDC_FEED);
+    test_f.pin_clock(BASE_TS, &[oracle, PYTH_SOL_FEED]).await;
 
     let src_bank_f = test_f
         .marginfi_group
@@ -167,11 +246,38 @@ pub async fn setup(
     user.try_bank_deposit(user_usdc.key, &src_bank_f, DEPOSIT_USDC, None)
         .await?;
 
-    drive_dst_utilization(&test_f, &dst_bank_f).await?;
-    test_f
-        .marginfi_group
-        .try_accrue_interest(&src_bank_f)
-        .await?;
+    match live {
+        None => {
+            drive_dst_utilization(&test_f, &dst_bank_f).await?;
+            test_f
+                .marginfi_group
+                .try_accrue_interest(&src_bank_f)
+                .await?;
+            src_bank_f.seed_native_rate_history().await;
+        }
+        Some(p) => {
+            fund_lender(&test_f, &dst_bank_f).await?;
+            if p.dst_borrow > 0.0 {
+                // SOL collateral worth twice the borrow at the $10 test oracle.
+                drive_rate(&test_f, &dst_bank_f, p.dst_borrow, p.dst_borrow / 5.0).await?;
+            }
+            // A deposit prices nothing, so each bank is pulsed for its first reading.
+            for bank in [&src_bank_f, &dst_bank_f] {
+                test_f
+                    .marginfi_group
+                    .try_pulse_bank_price_cache(bank)
+                    .await?;
+            }
+            if p.history_before_placement > 0 {
+                test_f
+                    .pin_clock(
+                        BASE_TS + p.history_before_placement,
+                        &[oracle, PYTH_SOL_FEED],
+                    )
+                    .await;
+            }
+        }
+    }
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -219,7 +325,6 @@ pub async fn setup(
         ctx.banks_client.process_transaction(tx).await?;
     }
 
-    let oracle = get_oracle_id_from_feed_id(PYTH_USDC_FEED).unwrap_or(PYTH_USDC_FEED);
     let oracle_meta = AccountMeta::new_readonly(oracle, false);
     let oracle_metas = vec![oracle_meta.clone(), oracle_meta];
 
@@ -346,6 +451,47 @@ impl RebalanceFixture {
         Ok(bank)
     }
 
+    /// Add a same-mint bank holding 1_000 USDC of lender liquidity and no rate reading, and extend
+    /// the allowlist to `[src, dst, bank]`.
+    pub async fn add_bank_without_history(&self) -> anyhow::Result<BankFixture> {
+        let bank = self
+            .test_f
+            .marginfi_group
+            .try_lending_pool_add_bank_with_seed(
+                &self.test_f.usdc_mint,
+                None,
+                *DEFAULT_USDC_TEST_BANK_CONFIG,
+                105,
+            )
+            .await?;
+        fund_lender(&self.test_f, &bank).await?;
+
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let update_ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                Some(vec![self.src_bank_f.key, self.dst_bank_f.key, bank.key]),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        self.process_as_payer(&[update_ix]).await?;
+        Ok(bank)
+    }
+
+    /// Price `bank` through the permissionless pulse, which also takes a rate reading.
+    pub async fn pulse(&self, bank: &BankFixture) -> anyhow::Result<()> {
+        self.test_f
+            .marginfi_group
+            .try_pulse_bank_price_cache(bank)
+            .await?;
+        Ok(())
+    }
+
     /// Add a second same-mint USDC SOURCE bank at 0% utilization (rate 0), give the user a `deposit`
     /// position in it, and extend the order allowlist to `[src, dst, src2]`. For consolidation (N->1)
     /// tests: the user then holds value in two low-rate sources to sweep into the higher-rate `dst`.
@@ -360,18 +506,12 @@ impl RebalanceFixture {
                 103,
             )
             .await?;
-        let user_usdc = self
-            .test_f
-            .usdc_mint
-            .create_token_account_and_mint_to(deposit)
-            .await;
-        self.user
-            .try_bank_deposit(user_usdc.key, &src2, deposit, None)
-            .await?;
+        self.deposit_usdc(&src2, deposit).await?;
         self.test_f
             .marginfi_group
             .try_accrue_interest(&src2)
             .await?;
+        src2.seed_native_rate_history().await;
 
         let payer = self.test_f.context.borrow().payer.pubkey();
         let update_ix = self
@@ -390,12 +530,70 @@ impl RebalanceFixture {
         Ok(src2)
     }
 
+    /// Deposit `amount` USDC from a fresh token account into `bank`.
+    pub async fn deposit_usdc(&self, bank: &BankFixture, amount: f64) -> anyhow::Result<()> {
+        let user_usdc = self
+            .test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(amount)
+            .await;
+        self.user
+            .try_bank_deposit(user_usdc.key, bank, amount, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Borrow SOL and place a stop-loss over the `bank` deposit and the SOL loan; returns its PDA.
+    pub async fn place_stop_loss_on(&self, bank: &BankFixture) -> anyhow::Result<Pubkey> {
+        let sol_bank = self.test_f.get_bank(&BankMint::Sol);
+        let user_sol = self.test_f.sol_mint.create_empty_token_account().await;
+        self.user
+            .try_bank_borrow(user_sol.key, sol_bank, 10.0)
+            .await?;
+        let order = self
+            .user
+            .try_place_order(
+                vec![bank.key, sol_bank.key],
+                OrderTrigger::StopLoss {
+                    threshold: WrappedI80F48::from(I80F48::ONE),
+                    max_slippage: 0,
+                },
+            )
+            .await?;
+        Ok(order)
+    }
+
+    /// The order tag on the user's balance in `bank`, or `None` without one.
+    pub async fn balance_tag(&self, bank: Pubkey) -> Option<u16> {
+        self.user
+            .load()
+            .await
+            .lending_account
+            .get_balance(&bank)
+            .map(|b| b.tag)
+    }
+
     /// The keeper-signed sandwich: start -> withdraw all of `src` -> deposit into `dst` -> end.
     /// One full-position move from referenced bank 0 (`src`) to bank 1 (`dst`).
     pub async fn build_sandwich(&self, src: Pubkey, dst: Pubkey) -> Vec<Instruction> {
+        self.build_sandwich_among(src, dst, &[]).await
+    }
+
+    /// [`Self::build_sandwich`] for an order allowing more banks than the move touches: `others`,
+    /// which the account holds nothing in, are referenced after `src` and `dst`.
+    pub async fn build_sandwich_among(
+        &self,
+        src: Pubkey,
+        dst: Pubkey,
+        others: &[Pubkey],
+    ) -> Vec<Instruction> {
         let execution_seq = self.user.load().await.rebalance_execution_seq;
         let record_pda = record_pda_at(self.user.key, execution_seq);
-        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let ref_banks: Vec<RebalanceBankMeta> = [src, dst]
+            .iter()
+            .chain(others)
+            .map(|bank| self.bank_meta(*bank))
+            .collect();
         let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
             .user
@@ -433,7 +631,7 @@ impl RebalanceFixture {
             .user
             .make_rebalance_end_ix(
                 ref_banks,
-                vec![src],
+                [src].iter().chain(others).copied().collect(),
                 self.order_pda,
                 record_pda,
                 self.keeper.pubkey(),
@@ -526,33 +724,17 @@ impl RebalanceFixture {
             .await
     }
 
-    /// Pin the clock's unix timestamp to `now` and refresh the native oracle to match.
+    /// Pin the clock's unix timestamp to `now` and republish the USDC and SOL feeds at it.
     pub async fn pin_clock(&self, now: i64) {
-        {
-            let ctx = self.test_f.context.borrow_mut();
-            let mut clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
-            clock.unix_timestamp = now;
-            ctx.set_sysvar(&clock);
-        }
         self.test_f
-            .set_pyth_oracle_timestamp(self.oracle_metas[0].pubkey, now)
+            .pin_clock(now, &[self.oracle_metas[0].pubkey, PYTH_SOL_FEED])
             .await;
     }
 
-    /// Advance the pinned clock by `secs` and refresh the native oracle timestamp so its price stays
-    /// fresh for post-advance reads.
+    /// Advance the pinned clock by `secs`, keeping the USDC and SOL feeds fresh.
     pub async fn advance_clock(&self, secs: i64) {
-        let now = {
-            let ctx = self.test_f.context.borrow_mut();
-            let mut clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
-            clock.unix_timestamp = clock.unix_timestamp.saturating_add(secs);
-            let now = clock.unix_timestamp;
-            ctx.set_sysvar(&clock);
-            now
-        };
-        self.test_f
-            .set_pyth_oracle_timestamp(self.oracle_metas[0].pubkey, now)
-            .await;
+        let now = self.test_f.get_clock().await.unix_timestamp;
+        self.pin_clock(now.saturating_add(secs)).await;
     }
 
     pub async fn asset_shares(&self, bank: Pubkey) -> I80F48 {
@@ -881,25 +1063,35 @@ impl MultiVenueFixture {
             .set_account(&spot_market_key, &AccountSharedData::from(acct));
     }
 
-    /// Stamps the JupLend dst `TokenReserve` rate fields so its supply rate is high
-    /// (`borrow_rate × utilization`, no fee), making JupLend a high-rate destination for the start
-    /// gate. Leaves the supply/borrow totals and exchange prices as the venue seeded them, and stamps
-    /// `last_update_timestamp` to the current (pinned) clock so the reserve reads fresh without
-    /// breaking the deposit leg's `now - last_update` interest math.
+    /// Stamps the JupLend dst `TokenReserve` to a stored 8% supply rate (10% borrow rate at 80%
+    /// utilization, no fee) over tiny totals, a high-rate destination for the start gate.
     pub async fn set_juplend_rate_high(&self) {
+        self.stamp_juplend_reserve(1_000, 8_000, 1_000_000, 1_000_000)
+            .await;
+    }
+
+    /// Stamps the JupLend dst `TokenReserve` rate fields and totals (unit exchange prices, no fee)
+    /// and its `last_update_timestamp` to the pinned clock, so the reserve reads fresh.
+    pub async fn stamp_juplend_reserve(
+        &self,
+        borrow_rate: u16,
+        last_utilization: u16,
+        total_supply: u64,
+        total_borrow: u64,
+    ) {
         let key = derive_juplend_token_reserve(&self.mint.key).0;
         let now = self.test_f.get_clock().await.unix_timestamp as u64;
         let mut acct = self.test_f.try_load(&key).await.unwrap().unwrap();
         let size = std::mem::size_of::<TokenReserve>();
         let tr = bytemuck::from_bytes_mut::<TokenReserve>(&mut acct.data[8..8 + size]);
-        tr.borrow_rate = 1_000; // 10%
-        tr.last_utilization = 8_000; // 80%
+        tr.borrow_rate = borrow_rate;
+        tr.last_utilization = last_utilization;
         tr.fee_on_interest = 0;
-        tr.supply_exchange_price = 1_000_000_000_000;
-        tr.borrow_exchange_price = 1_000_000_000_000;
-        tr.total_supply_with_interest = 1_000_000;
-        tr.total_borrow_with_interest = 1_000_000;
-        tr.last_update_timestamp = now;
+        tr.supply_exchange_price = 1_000_000_000_000u64.to_le_bytes();
+        tr.borrow_exchange_price = 1_000_000_000_000u64.to_le_bytes();
+        tr.total_supply_with_interest = total_supply;
+        tr.total_borrow_with_interest = total_borrow;
+        tr.last_update_timestamp = now.to_le_bytes();
         self.test_f
             .context
             .borrow_mut()
@@ -923,6 +1115,15 @@ impl MultiVenueFixture {
         )
         .0;
         let record_pda = record_pda_at(self.user.key, 0);
+
+        // A flat source and a destination that has out-yielded it by well over the margin, so the
+        // spot gates are the ones a venue test exercises.
+        let dst_apr = min_improvement + I80F48::ONE;
+        for (bank, apr) in [(src_bank, I80F48::ZERO), (dst_bank, dst_apr)] {
+            let (bank_f, index) = self.yield_index(bank).await;
+            let age = i64::from(INTEREST_MAX_WINDOW_SECONDS);
+            bank_f.seed_rate_history(index, apr, age).await;
+        }
 
         let payer = self.test_f.context.borrow().payer.pubkey();
         let place_ix = self
@@ -951,6 +1152,34 @@ impl MultiVenueFixture {
             ctx.banks_client.process_transaction(tx).await?;
         }
         Ok((order_pda, record_pda))
+    }
+
+    /// `bank`, one of this fixture's venue banks, with its current yield index: its share value
+    /// times the venue multiplier the program reads from the bank's oracle slice.
+    pub async fn yield_index(&self, bank: Pubkey) -> (&BankFixture, I80F48) {
+        let (bank_f, slice) = if bank == self.kamino_bank.key {
+            (&self.kamino_bank, self.kamino_slice().await)
+        } else if bank == self.drift_bank.key {
+            (&self.drift_bank, self.drift_slice().await)
+        } else {
+            (&self.juplend_bank, self.juplend_slice().await)
+        };
+        let state = bank_f.load().await;
+        let clock = self.test_f.get_clock().await;
+        let mut accounts = Vec::with_capacity(slice.len());
+        for meta in slice {
+            let account = self.test_f.try_load(&meta.pubkey).await.unwrap().unwrap();
+            accounts.push((meta.pubkey, account));
+        }
+        // `venue_multiplier` ties the slice's lifetime to its accounts', so they are leaked.
+        let ais: &'static [AccountInfo<'static>] = Box::leak(
+            Box::leak(Box::new(accounts))
+                .iter_mut()
+                .map(|(key, account)| (&*key, account).into_account_info())
+                .collect(),
+        );
+        let multiplier = venue_multiplier(&state, ais, &clock).unwrap();
+        (bank_f, yield_index_of(&state, multiplier).unwrap())
     }
 
     /// Reads the user's asset shares in `bank` (zero if no active balance).
@@ -1002,7 +1231,11 @@ impl MultiVenueFixture {
         let lending_key = self.juplend_bank.load().await.integration_acc_1;
         let lending =
             load_and_deserialize::<Lending>(self.test_f.context.clone(), &lending_key).await;
-        vec![lending.rewards_rate_model, lending.f_token_mint]
+        vec![
+            lending.rewards_rate_model,
+            lending.f_token_mint,
+            derive_juplend_rate_model(&self.mint.key).0,
+        ]
     }
 
     pub async fn process(

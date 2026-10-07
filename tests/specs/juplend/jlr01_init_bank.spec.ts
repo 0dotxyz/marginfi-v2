@@ -920,7 +920,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       true,
       false,
     );
-    assertBankrunTxFailed(result, 6042); // Unauthorized
+    assertBankrunTxFailed(result, 6143); // InvalidFastBankOperationalState
 
     const bank = await bankrunProgram.account.bank.fetch(addresses.bank);
     assert.deepEqual(bank.config.operationalState, { operational: {} });

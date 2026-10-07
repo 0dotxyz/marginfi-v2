@@ -5,9 +5,10 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::prelude::*;
+use fixtures::rebalance::fund_keeper_for_fees;
 use fixtures::test::{
-    PYTH_PUSH_SOL_FULLV_FEED, PYTH_PUSH_SOL_PARTV_FEED, PYTH_PYUSD_FEED, PYTH_SOL_EQUIVALENT_FEED,
-    PYTH_SOL_FEED, PYTH_USDC_FEED,
+    BASE_TS, PYTH_PUSH_SOL_FULLV_FEED, PYTH_PUSH_SOL_PARTV_FEED, PYTH_PYUSD_FEED,
+    PYTH_SOL_EQUIVALENT_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED,
 };
 use marginfi_type_crate::constants::{
     INTEREST_DEFAULT_EXIT_BUDGET_SECONDS, INTEREST_MAX_EXIT_BUDGET_SECONDS,
@@ -26,9 +27,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-/// `program-test` boots at timestamp 0, which a rate reading treats as never written, so tests pin
-/// a real time.
-const BASE_TS: i64 = 1_700_000_000;
 const ASSET_DEPOSIT: f64 = 1_000.0; // USDC, $1,000 at the $1 test oracle
 const LIABILITY_BORROW: f64 = 10.0; // SOL, $100 at the $10 test oracle
 const SOL_PRICE: f64 = 10.0;
@@ -227,7 +225,7 @@ pub async fn setup(p: Params) -> anyhow::Result<InterestFixture> {
     };
 
     let keeper = Keypair::new();
-    test_f.fund_keeper(&keeper).await?;
+    fund_keeper_for_fees(&test_f, &keeper).await?;
     let keeper_sol = sol
         .mint
         .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 100_000.0)
@@ -312,10 +310,6 @@ impl InterestFixture {
 
     pub async fn bank_last_update(&self, mint: &BankMint) -> i64 {
         self.load_bank(mint).await.last_update
-    }
-
-    pub async fn recorded_readings(&self, mint: &BankMint) -> usize {
-        self.load_bank(mint).await.recorded_rate_readings().count()
     }
 
     /// Repay the SOL liability from the keeper's own tokens, pull `scale` times the covering USDC

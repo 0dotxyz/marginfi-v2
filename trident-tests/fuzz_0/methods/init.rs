@@ -235,9 +235,10 @@ impl FuzzTest {
     pub fn init_premium_foundation(&mut self) {
         let payer = self.payer.pubkey();
 
-        // The group initializes without an emode admin; premium config is emode-admin gated.
-        let ix = types::marginfi::MarginfiGroupConfigureInstruction::data(
-            types::marginfi::MarginfiGroupConfigureInstructionData::new(
+        // The governance instruction owns the retained emode-admin field. The fuzz identity is
+        // both fast and governance admin for this isolated harness.
+        let ix = types::marginfi::MarginfiGroupConfigureGovInstruction::data(
+            types::marginfi::MarginfiGroupConfigureGovInstructionData::new(
                 None,
                 Some(payer),
                 None,
@@ -245,14 +246,9 @@ impl FuzzTest {
                 None,
                 None,
                 None,
-                None,
-                None,
-                None,
-                None,
-                None,
             ),
         )
-        .accounts(types::marginfi::MarginfiGroupConfigureInstructionAccounts::new(
+        .accounts(types::marginfi::MarginfiGroupConfigureGovInstructionAccounts::new(
             self.marginfi_group,
             payer,
         ))
@@ -560,7 +556,9 @@ impl FuzzTest {
             | OracleSetup::SolendPythPull
             | OracleSetup::SolendSwitchboardPull
             | OracleSetup::JuplendPythPull
-            | OracleSetup::JuplendSwitchboardPull => {
+            | OracleSetup::JuplendSwitchboardPull
+            | OracleSetup::ScopeKamino
+            | OracleSetup::ScopeJuplend => {
                 vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
             }
 
@@ -588,7 +586,10 @@ impl FuzzTest {
     }
 
     pub fn bank_layout(&mut self, bank: Pubkey) -> BankLayout {
-        BankLayout {
+        if let Some(layout) = self.bank_layouts.get(&bank) {
+            return *layout;
+        }
+        let layout = BankLayout {
             liquidity_vault_authority: self
                 .trident
                 .find_program_address(
@@ -631,7 +632,9 @@ impl FuzzTest {
                     &types::marginfi::program_id(),
                 )
                 .0,
-        }
+        };
+        self.bank_layouts.insert(bank, layout);
+        layout
     }
 
     /// Isolated-tier bank: `asset_weight = 0` (positions contribute zero

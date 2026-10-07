@@ -10,8 +10,8 @@ const INDEX_DROPPED_BITS: u32 = 16;
 
 assert_struct_size!(RateReading, 24);
 assert_struct_align!(RateReading, 8);
-/// A bank's share indices at one instant, which an interest-trigger order measures realized rates
-/// from. See `Bank::rate_readings`.
+/// A bank's share indices at one instant, which realized rates are measured from. See
+/// `Bank::rate_readings`.
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]

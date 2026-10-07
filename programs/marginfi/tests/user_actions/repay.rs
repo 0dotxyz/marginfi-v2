@@ -153,6 +153,74 @@ async fn marginfi_account_repay_success(
     Ok(())
 }
 
+#[tokio::test]
+async fn repay_rejects_positive_liability_below_empty_threshold() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_sol = test_f.sol_mint.create_token_account_and_mint_to(1).await;
+    lender
+        .try_bank_deposit(lender_sol.key, sol_bank, 1, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_usdc = test_f.usdc_mint.create_token_account_and_mint_to(1).await;
+    borrower
+        .try_bank_deposit(borrower_usdc.key, usdc_bank, 1, None)
+        .await?;
+
+    // A liability share is worth 1.5 native units. Borrowing three lamports creates two
+    // liability shares; repaying two would leave 2/3 of a share, which health treats as empty.
+    sol_bank.set_liability_share_value(I80F48!(1.5)).await;
+    let borrower_sol = test_f.sol_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_sol.key, sol_bank, 0.000_000_003)
+        .await?;
+
+    let bank_before = sol_bank.load().await;
+    let account_before = borrower.load().await;
+    let liability_shares_before: I80F48 = account_before
+        .lending_account
+        .get_balance(&sol_bank.key)
+        .unwrap()
+        .liability_shares
+        .into();
+    let token_balance_before = borrower_sol.balance().await;
+
+    let result = borrower
+        .try_bank_repay(borrower_sol.key, sol_bank, 0.000_000_002, Some(false))
+        .await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::IllegalBalanceState);
+
+    let bank_after = sol_bank.load().await;
+    let account_after = borrower.load().await;
+    let liability_shares_after: I80F48 = account_after
+        .lending_account
+        .get_balance(&sol_bank.key)
+        .unwrap()
+        .liability_shares
+        .into();
+
+    assert_eq!(
+        I80F48::from(bank_before.total_liability_shares),
+        I80F48::from(bank_after.total_liability_shares),
+        "reverted partial repay must not change the bank's liability shares"
+    );
+    assert_eq!(
+        liability_shares_before, liability_shares_after,
+        "reverted partial repay must not change the borrower's liability shares"
+    );
+    assert_eq!(
+        token_balance_before,
+        borrower_sol.balance().await,
+        "reverted partial repay must not transfer tokens"
+    );
+
+    Ok(())
+}
+
 #[test_case(100., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123456., BankMint::Usdc, BankMint::Sol)]
 #[test_case(1., BankMint::Sol, BankMint::Usdc)]

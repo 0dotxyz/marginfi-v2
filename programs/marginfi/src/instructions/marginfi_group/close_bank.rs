@@ -9,7 +9,6 @@ use marginfi_type_crate::{
     constants::{CLOSE_ENABLED_FLAG, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiGroup},
 };
-
 /// * force_close - (admin escape hatch) when `Some(true)`, skips the `CLOSE_ENABLED_FLAG` and
 ///   open-position checks. Intended for legacy pre-0.1.4 banks whose position count is
 ///   non-authoritative. The zero-shares/zero-emissions checks are always enforced, so a bank still
@@ -53,9 +52,6 @@ pub fn lending_pool_close_bank(
     );
 
     drop(bank);
-
-    // Bank will now be closed by anchor
-
     Ok(())
 }
 
@@ -70,7 +66,7 @@ pub struct LendingPoolCloseBank<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        close = admin
+        close = admin,
     )]
     pub bank: AccountLoader<'info, Bank>,
 

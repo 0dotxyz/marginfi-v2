@@ -7,7 +7,6 @@ import {
   bankrunProgram,
   banksClient,
   ecosystem,
-  emodeAdmin,
   globalProgramAdmin,
   groupAdmin,
   oracles,
@@ -19,11 +18,7 @@ import {
   users,
   verbose,
 } from "../../rootHooks";
-import {
-  addBankWithSeed,
-  groupConfigure,
-  groupInitialize,
-} from "../../utils/group-instructions";
+import { addBankWithSeed, groupInitialize } from "../../utils/group-instructions";
 import {
   configBankPremium,
   configGroupPremium,
@@ -128,7 +123,7 @@ describe("vb01: Configure variable-borrow premium", () => {
   let solBank: PublicKey;
   let solUntaggedBank: PublicKey;
 
-  it("(admin) init premium group + set emode admin", async () => {
+  it("(admin) init premium group", async () => {
     const tx = new Transaction().add(
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: premiumGroup.publicKey,
@@ -139,20 +134,6 @@ describe("vb01: Configure variable-borrow premium", () => {
     tx.sign(groupAdmin.wallet, premiumGroup);
     await banksClient.processTransaction(tx);
 
-    const configTx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: premiumGroup.publicKey,
-        newEmodeAdmin: emodeAdmin.wallet.publicKey,
-      }),
-    );
-    configTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    configTx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(configTx);
-
-    const group = await bankrunProgram.account.marginfiGroup.fetch(
-      premiumGroup.publicKey,
-    );
-    assertKeysEqual(group.emodeAdmin, emodeAdmin.wallet.publicKey);
     if (verbose) console.log("*init premium group: " + premiumGroup.publicKey);
   });
 
@@ -244,7 +225,7 @@ describe("vb01: Configure variable-borrow premium", () => {
     assertKeysEqual(feeState.premiumWallet, premiumWallet);
   });
 
-  it("(non-emode-admin) configure matrix fails", async () => {
+  it("(non-admin) configure matrix fails", async () => {
     const tx = new Transaction().add(
       await configGroupPremium(users[0].mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
@@ -261,13 +242,13 @@ describe("vb01: Configure variable-borrow premium", () => {
   it("matrix validation: zero tags and delete-missing rejected", async () => {
     const submit = async (entry: ReturnType<typeof newPremiumEntry>) => {
       const tx = new Transaction().add(
-        await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+        await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
           group: premiumGroup.publicKey,
           entry,
         }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(emodeAdmin.wallet);
+      tx.sign(groupAdmin.wallet);
       return banksClient.tryProcessTransaction(tx);
     };
 
@@ -279,19 +260,19 @@ describe("vb01: Configure variable-borrow premium", () => {
     assertBankrunTxFailed(await submit(newPremiumEntry(9, 9, 0)), "0x19d6");
   });
 
-  it("(emode admin) pairs are stored sorted regardless of add order", async () => {
+  it("(fast admin) pairs are stored sorted regardless of add order", async () => {
     // Two pairs added out of collateral-tag order; storage must sort ascending.
     const tx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0.01),
       }),
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(PREMIUM_STABLE_TAG, PREMIUM_SOL_TAG, 0.005),
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
       premiumGroup.publicKey,
@@ -303,19 +284,19 @@ describe("vb01: Configure variable-borrow premium", () => {
     assert.equal(group.premiumEntries[1].collateralTag, PREMIUM_SOL_TAG);
   });
 
-  it("(emode admin) re-config updates a pair in place; rate 0 removes it", async () => {
+  it("(fast admin) re-config updates a pair in place; rate 0 removes it", async () => {
     // From the previous spec the matrix is [(STABLE, SOL, 0.5%), (SOL, STABLE, 1%)]
     const tx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0.02), // update
       }),
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(PREMIUM_STABLE_TAG, PREMIUM_SOL_TAG, 0), // delete
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
       premiumGroup.publicKey,
@@ -327,14 +308,14 @@ describe("vb01: Configure variable-borrow premium", () => {
     assert.equal(group.premiumEntries[1].collateralTag, 0);
   });
 
-  it("(emode admin) removing the last pair turns the matrix off (entryCount 0)", async () => {
+  it("(fast admin) removing the last pair turns the matrix off (entryCount 0)", async () => {
     const tx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0),
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
       premiumGroup.publicKey,
@@ -342,9 +323,9 @@ describe("vb01: Configure variable-borrow premium", () => {
     assert.equal(group.premiumSettings.entryCount, 0);
   });
 
-  it("(emode admin) set the production matrix (sol -> stable = 1%)", async () => {
+  it("(fast admin) set the production matrix (sol -> stable = 1%)", async () => {
     const tx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configGroupPremium(groupAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
         entry: newPremiumEntry(
           PREMIUM_SOL_TAG,
@@ -353,7 +334,7 @@ describe("vb01: Configure variable-borrow premium", () => {
         ),
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
       premiumGroup.publicKey,
@@ -361,21 +342,21 @@ describe("vb01: Configure variable-borrow premium", () => {
     assert.equal(group.premiumSettings.entryCount, 1);
   });
 
-  it("(emode admin) configure bank premium tags + flags", async () => {
+  it("(fast admin) configure bank premium tags + flags", async () => {
     // USDC (liability) bank: tag + active.
     let tx = new Transaction().add(
-      await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configBankPremium(groupAdmin.mrgnBankrunProgram, {
         bank: usdcBank,
         premiumTag: PREMIUM_STABLE_TAG,
         active: true,
       }),
-      await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configBankPremium(groupAdmin.mrgnBankrunProgram, {
         bank: solBank,
         premiumTag: PREMIUM_SOL_TAG,
         active: true,
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     let usdc = await bankrunProgram.account.bank.fetch(usdcBank);
     assert.equal(usdc.premiumTag, PREMIUM_STABLE_TAG);
@@ -383,26 +364,26 @@ describe("vb01: Configure variable-borrow premium", () => {
 
     // Disabling clears the flag but keeps the tag.
     tx = new Transaction().add(
-      await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configBankPremium(groupAdmin.mrgnBankrunProgram, {
         bank: usdcBank,
         premiumTag: PREMIUM_STABLE_TAG,
         active: false,
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     usdc = await bankrunProgram.account.bank.fetch(usdcBank);
     assert.equal(usdc.premiumTag, PREMIUM_STABLE_TAG);
     assertBNEqual(usdc.flags.and(new BN(PREMIUM_ACTIVE)), 0);
 
     // Re-enable for the downstream accrual specs.
     tx = new Transaction().add(
-      await configBankPremium(emodeAdmin.mrgnBankrunProgram, {
+      await configBankPremium(groupAdmin.mrgnBankrunProgram, {
         bank: usdcBank,
         premiumTag: PREMIUM_STABLE_TAG,
         active: true,
       }),
     );
-    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
 
 });

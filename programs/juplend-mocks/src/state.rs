@@ -8,6 +8,7 @@ pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241
 // Anchor discriminator = sha256("account:TokenReserve")[0..8].
 pub const TOKEN_RESERVE_DISCRIMINATOR: [u8; 8] = [21, 18, 59, 135, 120, 20, 31, 12];
 pub const REWARDS_RATE_MODEL_DISCRIMINATOR: [u8; 8] = [166, 72, 71, 131, 172, 74, 166, 181];
+pub const RATE_MODEL_DISCRIMINATOR: [u8; 8] = [94, 3, 203, 219, 107, 137, 4, 162];
 
 /// Precision used for exchange prices in JupLend (1e12).
 ///
@@ -201,8 +202,9 @@ const _: () = assert!(core::mem::size_of::<TokenReserve>() == 184);
 /// Minimal mirror of the Juplend's liquidity-layer `TokenReserve` account — the rate-bearing account a
 /// JupLend `Lending` references via `token_reserves_liquidity`.
 /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L14-L40
+/// The `u64`s JupLend places at unaligned offsets are held as little-endian bytes.
 #[zero_copy]
-#[repr(C, packed)]
+#[repr(C)]
 pub struct TokenReserve {
     pub mint: Pubkey,
     pub vault: Pubkey,
@@ -213,11 +215,11 @@ pub struct TokenReserve {
     pub fee_on_interest: u16,
     /// Last stored utilization (1e2: 100% == 10_000).
     pub last_utilization: u16,
-    pub last_update_timestamp: u64,
+    pub last_update_timestamp: [u8; 8],
     /// Supply exchange price (1e12).
-    pub supply_exchange_price: u64,
+    pub supply_exchange_price: [u8; 8],
     /// Borrow exchange price (1e12).
-    pub borrow_exchange_price: u64,
+    pub borrow_exchange_price: [u8; 8],
 
     pub max_utilization: u16,
 
@@ -237,19 +239,26 @@ impl TokenReserve {
     /// A future `last_update_timestamp` is treated as fresh (mirrors `Lending::is_stale`).
     #[inline]
     pub fn is_stale(&self, current_timestamp: i64) -> bool {
-        (self.last_update_timestamp as i64) < current_timestamp
+        (u64::from_le_bytes(self.last_update_timestamp) as i64) < current_timestamp
     }
 
-    /// Decode a `TokenReserve` from raw JupLend account data: an 8-byte Anchor discriminator followed by
-    /// the packed body. Because the struct is `#[repr(C, packed)]` (matching JupLend's exact byte layout)
-    /// it can't be borrowed zero-copy via `AccountLoader`, so the body is copied out with an unaligned
-    /// read. Returns `None` on a length or discriminator mismatch.
+    pub fn supply_exchange_price(&self) -> u64 {
+        u64::from_le_bytes(self.supply_exchange_price)
+    }
+
+    pub fn borrow_exchange_price(&self) -> u64 {
+        u64::from_le_bytes(self.borrow_exchange_price)
+    }
+
+    /// Decode a `TokenReserve` from raw JupLend account data: an 8-byte Anchor discriminator followed
+    /// by the body. Returns `None` on a length or discriminator mismatch, or a body that is not
+    /// 8-byte aligned.
     pub fn from_account_data(data: &[u8]) -> Option<Self> {
         const LEN: usize = core::mem::size_of::<TokenReserve>();
         if data.len() < 8 + LEN || data[..8] != TOKEN_RESERVE_DISCRIMINATOR {
             return None;
         }
-        bytemuck::try_pod_read_unaligned(&data[8..8 + LEN]).ok()
+        bytemuck::try_from_bytes(&data[8..8 + LEN]).ok().copied()
     }
 
     /// JupLend liquidity-layer supply rate (I80F48, 1.0 == 100%) from the lagged stored fields. The
@@ -258,14 +267,14 @@ impl TokenReserve {
     /// `TokenReserve::calculate_exchange_prices`:
     /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L362-L539
     pub fn supply_rate(&self) -> Option<I80F48> {
-        self.supply_rate_at(0)
+        self.supply_rate_at(0, None)
     }
 
     /// Utilization (1e2 scale, 100% == 10_000) after `extra` native tokens are supplied. Both sides
     /// are scaled by their exchange price, and `extra` is converted to the raw shares it mints.
     fn utilization_at(&self, extra: u64) -> Option<u128> {
-        let sep = u128::from(self.supply_exchange_price);
-        let bep = u128::from(self.borrow_exchange_price);
+        let sep = u128::from(self.supply_exchange_price());
+        let bep = u128::from(self.borrow_exchange_price());
         if sep == 0 || bep == 0 {
             return None;
         }
@@ -293,25 +302,29 @@ impl TokenReserve {
             .checked_div(scaled_supply)
     }
 
-    /// [`TokenReserve::supply_rate`] as it would read after `extra` native tokens were supplied.
-    /// Holds the stored `borrow_rate` fixed, modelling only utilization dilution: an upper bound.
-    pub fn supply_rate_at(&self, extra: u64) -> Option<I80F48> {
-        // The stored utilization is authoritative when nothing is added.
-        let utilization = if extra == 0 {
-            u128::from(self.last_utilization)
+    /// [`TokenReserve::supply_rate`] after `extra` native tokens are supplied, the diluted
+    /// utilization priced on `model` as `operate` does. `extra == 0` reads the stored rate.
+    pub fn supply_rate_at(&self, extra: u64, model: Option<&RateModel>) -> Option<I80F48> {
+        let (borrow_rate, utilization) = if extra == 0 {
+            (
+                u128::from(self.borrow_rate),
+                u128::from(self.last_utilization),
+            )
         } else {
-            self.utilization_at(extra)?
+            let utilization = self.utilization_at(extra)?;
+            let borrow_rate = model?.borrow_rate_at(utilization)?;
+            (u128::from(borrow_rate), utilization)
         };
         juplend_supply_rate_from_parts(
-            u128::from(self.borrow_rate),
+            borrow_rate,
             u128::from(self.fee_on_interest),
             utilization,
-            u128::from(self.supply_exchange_price),
-            u128::from(self.borrow_exchange_price),
+            u128::from(self.supply_exchange_price()),
+            u128::from(self.borrow_exchange_price()),
             u128::from(self.total_supply_with_interest).saturating_add(
                 u128::from(extra)
                     .saturating_mul(EXCHANGE_PRICES_PRECISION)
-                    .checked_div(u128::from(self.supply_exchange_price))
+                    .checked_div(u128::from(self.supply_exchange_price()))
                     .unwrap_or(0),
             ),
             u128::from(self.total_supply_interest_free),
@@ -319,6 +332,82 @@ impl TokenReserve {
             u128::from(self.total_borrow_interest_free),
         )
     }
+}
+
+const _: () = assert!(core::mem::size_of::<RateModel>() == 45);
+
+/// Minimal mirror of JupLend's liquidity-layer `RateModel`, the per-mint borrow-rate curve that
+/// `operate` re-prices a reserve on after every supply or borrow change.
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/rate_model.rs
+/// JupLend's `u16` fields start at odd offsets, so they are held as little-endian bytes.
+#[zero_copy]
+#[repr(C)]
+pub struct RateModel {
+    pub mint: Pubkey,
+    pub version: u8,
+    pub rate_at_zero: [u8; 2],
+    pub kink1_utilization: [u8; 2],
+    pub rate_at_kink1: [u8; 2],
+    pub rate_at_max: [u8; 2],
+    pub kink2_utilization: [u8; 2],
+    pub rate_at_kink2: [u8; 2],
+}
+
+/// Borrow rates are 1e2-scaled and capped at `u16::MAX`.
+const MAX_RATE: u128 = 65_535;
+const TWELVE_DECIMALS: i128 = 1_000_000_000_000;
+
+impl RateModel {
+    pub fn from_account_data(data: &[u8]) -> Option<Self> {
+        const LEN: usize = core::mem::size_of::<RateModel>();
+        if data.len() < 8 + LEN || data[..8] != RATE_MODEL_DISCRIMINATOR {
+            return None;
+        }
+        bytemuck::try_from_bytes(&data[8..8 + LEN]).ok().copied()
+    }
+
+    /// Borrow rate (1e2: 100% == 10_000) at `utilization` (1e2) on the curve segment it falls in,
+    /// capped at `MAX_RATE`. `None` for an unsupported version or a negative interpolation.
+    pub fn borrow_rate_at(&self, utilization: u128) -> Option<u16> {
+        let read = |bytes: [u8; 2]| u128::from(u16::from_le_bytes(bytes));
+        let (zero, kink1, at_kink1, max) = (
+            read(self.rate_at_zero),
+            read(self.kink1_utilization),
+            read(self.rate_at_kink1),
+            read(self.rate_at_max),
+        );
+        let (kink2, at_kink2) = (read(self.kink2_utilization), read(self.rate_at_kink2));
+        let (y1, y2, x1, x2) = match self.version {
+            1 if utilization < kink1 => (zero, at_kink1, 0, kink1),
+            1 => (at_kink1, max, kink1, FOUR_DECIMALS),
+            2 if utilization < kink1 => (zero, at_kink1, 0, kink1),
+            2 if utilization < kink2 => (at_kink1, at_kink2, kink1, kink2),
+            2 => (at_kink2, max, kink2, FOUR_DECIMALS),
+            _ => return None,
+        };
+        let rate = interpolate_rate(y1, y2, x1, x2, utilization)?;
+        u16::try_from(rate.min(MAX_RATE)).ok()
+    }
+}
+
+/// Upstream `get_rate`: the line through `(x1, y1)` and `(x2, y2)` evaluated at `utilization`, with
+/// the slope held at 1e12 precision. `None` on a zero-width segment or a negative result.
+fn interpolate_rate(y1: u128, y2: u128, x1: u128, x2: u128, utilization: u128) -> Option<u128> {
+    let num = i128::try_from(y2)
+        .ok()?
+        .checked_sub(i128::try_from(y1).ok()?)?
+        .checked_mul(TWELVE_DECIMALS)?;
+    let den = i128::try_from(x2.checked_sub(x1)?).ok()?;
+    let slope = num.checked_div(den)?;
+    let constant = i128::try_from(y1)
+        .ok()?
+        .checked_mul(TWELVE_DECIMALS)?
+        .checked_sub(slope.checked_mul(i128::try_from(x1).ok()?)?)?;
+    let rate = slope
+        .checked_mul(i128::try_from(utilization).ok()?)?
+        .checked_add(constant)?
+        .checked_div(TWELVE_DECIMALS)?;
+    u128::try_from(rate).ok()
 }
 
 const _: () = assert!(core::mem::size_of::<LendingRewardsRateModel>() == 81);
@@ -485,8 +574,8 @@ mod rate_tests {
     fn utilization_scales_by_exchange_prices() {
         use bytemuck::Zeroable;
         let mut r = TokenReserve::zeroed();
-        r.supply_exchange_price = 1_030_000_000_000; // 1.03e12
-        r.borrow_exchange_price = 1_070_000_000_000; // 1.07e12
+        r.supply_exchange_price = 1_030_000_000_000u64.to_le_bytes(); // 1.03e12
+        r.borrow_exchange_price = 1_070_000_000_000u64.to_le_bytes(); // 1.07e12
         r.total_supply_with_interest = 400_000_000_000_000;
         r.total_borrow_with_interest = 321_783_551_401_869;
         // scaled: borrow*bep*1e4 / (supply*sep) == 8356 (1e2 scale), matching upstream's formula.
@@ -501,8 +590,8 @@ mod rate_tests {
     fn utilization_at_dilutes_by_native_deposit() {
         use bytemuck::Zeroable;
         let mut r = TokenReserve::zeroed();
-        r.supply_exchange_price = 1_250_000_000_000; // 1.25e12
-        r.borrow_exchange_price = 1_500_000_000_000; // 1.50e12
+        r.supply_exchange_price = 1_250_000_000_000u64.to_le_bytes(); // 1.25e12
+        r.borrow_exchange_price = 1_500_000_000_000u64.to_le_bytes(); // 1.50e12
         r.total_supply_with_interest = 500_000_000_000_000;
         r.total_borrow_with_interest = 400_000_000_000_000;
         // scaled 600_000 borrow over 625_000 supply == 96%.
@@ -587,8 +676,8 @@ mod rate_tests {
         tr.borrow_rate = 442;
         tr.fee_on_interest = 1000;
         tr.last_utilization = 8357;
-        tr.supply_exchange_price = 1_029_996_710_353;
-        tr.borrow_exchange_price = 1_000_000_000_000;
+        tr.supply_exchange_price = 1_029_996_710_353u64.to_le_bytes();
+        tr.borrow_exchange_price = 1_000_000_000_000u64.to_le_bytes();
         tr.total_supply_with_interest = 401_387_174_957_279;
         tr.total_borrow_with_interest = 100_000_000_000;
         assert_eq!(
@@ -614,19 +703,108 @@ mod rate_tests {
         use bytemuck::Zeroable;
         let mut tr = TokenReserve::zeroed();
         tr.borrow_rate = 442;
-        tr.last_update_timestamp = 1_700_000_000;
+        tr.last_update_timestamp = 1_700_000_000u64.to_le_bytes();
 
         let mut buf = TOKEN_RESERVE_DISCRIMINATOR.to_vec();
         buf.extend_from_slice(bytemuck::bytes_of(&tr));
 
         let decoded = TokenReserve::from_account_data(&buf).unwrap();
-        assert_eq!({ decoded.borrow_rate }, 442);
-        assert_eq!({ decoded.last_update_timestamp }, 1_700_000_000);
+        assert_eq!(decoded.borrow_rate, 442);
+        assert_eq!(
+            u64::from_le_bytes(decoded.last_update_timestamp),
+            1_700_000_000
+        );
 
         let mut wrong_discriminator = buf.clone();
         wrong_discriminator[0] ^= 0xFF;
         assert!(TokenReserve::from_account_data(&wrong_discriminator).is_none());
 
         assert!(TokenReserve::from_account_data(&buf[..buf.len() - 1]).is_none());
+    }
+
+    fn rate_model_v1(kink: u16, at_zero: u16, at_kink: u16, at_max: u16) -> RateModel {
+        use bytemuck::Zeroable;
+        let mut m = RateModel::zeroed();
+        m.version = 1;
+        m.kink1_utilization = kink.to_le_bytes();
+        m.rate_at_zero = at_zero.to_le_bytes();
+        m.rate_at_kink1 = at_kink.to_le_bytes();
+        m.rate_at_max = at_max.to_le_bytes();
+        m
+    }
+
+    /// Upstream's own one-kink vectors: both segments, the kink itself, and the cap.
+    #[test]
+    fn rate_model_v1_matches_upstream_vectors() {
+        let m = rate_model_v1(9_000, 0, 300, 10_000);
+        assert_eq!(m.borrow_rate_at(0).unwrap(), 0);
+        assert_eq!(m.borrow_rate_at(577).unwrap(), 19);
+        assert_eq!(m.borrow_rate_at(4_500).unwrap(), 149);
+        assert_eq!(m.borrow_rate_at(9_000).unwrap(), 300);
+        assert_eq!(m.borrow_rate_at(9_500).unwrap(), 5_150);
+        assert_eq!(m.borrow_rate_at(10_000).unwrap(), 10_000);
+        let capped = rate_model_v1(9_000, 0, 300, u16::MAX);
+        assert_eq!(capped.borrow_rate_at(20_000).unwrap(), u16::MAX);
+    }
+
+    /// Upstream's own two-kink vectors across all three segments, plus the unsupported version.
+    #[test]
+    fn rate_model_v2_matches_upstream_vectors() {
+        use bytemuck::Zeroable;
+        let mut m = RateModel::zeroed();
+        m.version = 2;
+        m.kink1_utilization = 8_500u16.to_le_bytes();
+        m.kink2_utilization = 9_300u16.to_le_bytes();
+        m.rate_at_zero = 0u16.to_le_bytes();
+        m.rate_at_kink1 = 600u16.to_le_bytes();
+        m.rate_at_kink2 = 800u16.to_le_bytes();
+        m.rate_at_max = 10_000u16.to_le_bytes();
+        assert_eq!(m.borrow_rate_at(4_250).unwrap(), 299);
+        assert_eq!(m.borrow_rate_at(8_500).unwrap(), 600);
+        assert_eq!(m.borrow_rate_at(8_900).unwrap(), 700);
+        assert_eq!(m.borrow_rate_at(9_300).unwrap(), 800);
+        assert_eq!(m.borrow_rate_at(9_650).unwrap(), 5_399);
+        assert_eq!(m.borrow_rate_at(10_000).unwrap(), 9_999);
+        m.version = 3;
+        assert!(m.borrow_rate_at(5_000).is_none());
+    }
+
+    /// A deposit is priced at the borrow rate the curve pays at the diluted utilization, while a
+    /// zero deposit reads the stored rate.
+    #[test]
+    fn supply_rate_at_prices_a_deposit_on_the_curve() {
+        use bytemuck::Zeroable;
+        let mut r = TokenReserve::zeroed();
+        r.borrow_rate = 15_000;
+        r.last_utilization = 9_000;
+        r.supply_exchange_price = 1_000_000_000_000u64.to_le_bytes();
+        r.borrow_exchange_price = 1_000_000_000_000u64.to_le_bytes();
+        r.total_supply_with_interest = 1_000_000_000;
+        r.total_borrow_with_interest = 900_000_000;
+        let m = rate_model_v1(8_000, 400, 1_000, 15_000);
+        let expected = |borrow_rate: u128, utilization: u128, supply: u128| {
+            juplend_supply_rate_from_parts(
+                borrow_rate,
+                0,
+                utilization,
+                1_000_000_000_000,
+                1_000_000_000_000,
+                supply,
+                0,
+                900_000_000,
+                0,
+            )
+        };
+        assert_eq!(
+            r.supply_rate_at(0, None),
+            expected(15_000, 9_000, 1_000_000_000)
+        );
+        // 100_000_000 more lands at 8181 utilization, where the curve pays 2267.
+        assert_eq!(m.borrow_rate_at(8_181).unwrap(), 2_267);
+        assert_eq!(
+            r.supply_rate_at(100_000_000, Some(&m)),
+            expected(2_267, 8_181, 1_100_000_000)
+        );
+        assert!(r.supply_rate_at(100_000_000, None).is_none());
     }
 }

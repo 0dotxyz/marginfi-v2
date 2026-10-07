@@ -54,12 +54,6 @@ describe("Config group", () => {
             null,
             null,
             null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
             null
           )
           .accountsPartial({

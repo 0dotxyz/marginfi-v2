@@ -15,6 +15,7 @@ use crate::state::rate::{debt_index_of, venue_multiplier, yield_index_of};
 use crate::utils::is_integration_asset_tag;
 use crate::{
     check,
+    constants::PROGRAM_VERSION,
     prelude::*,
     state::{
         bank::BankImpl,
@@ -567,6 +568,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let fee_state = fee_state_loader.load()?;
 
     let mut health_cache = HealthCache::zeroed();
+    health_cache.timestamp = Clock::get()?.unix_timestamp;
     let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
     let (
@@ -588,6 +590,8 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         let is_healthy = account_health >= I80F48::ZERO;
 
         health_cache.set_healthy(is_healthy);
+        health_cache.program_version = PROGRAM_VERSION;
+        health_cache.set_engine_ok(true);
 
         (
             get_tagged_account_health_components(
@@ -715,6 +719,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         is_healthy,
     )?;
 
+    if is_healthy {
+        marginfi_account.liquidation_tagged_at = 0;
+    }
+
     // At this point we know that all non order balances were not touched and the order
     // balances that were touched:
     // 1) Is still above or equal to the trigger price (in equity terms).
@@ -728,6 +736,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         &group,
         &premium_scratch,
         Clock::get()?.unix_timestamp as u64,
+        false,
     )?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
@@ -815,7 +824,7 @@ pub struct CloseOrder<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -870,7 +879,7 @@ pub struct SetKeeperCloseFlags<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

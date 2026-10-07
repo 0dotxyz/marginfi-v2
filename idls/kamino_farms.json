@@ -409,8 +409,63 @@
     },
     {
       "code": 6067,
-      "name": "CurrentRewardIssuedUnclaimedMismatch",
-      "msg": "Current reward issued unclaimed does not match expected value"
+      "name": "RewardsIssuedCumulativeMismatch",
+      "msg": "Rewards issued cumulative does not match expected value"
+    },
+    {
+      "code": 6068,
+      "name": "CannotCloseUserStateStakeNonZero",
+      "msg": "Cannot close user state because staked amount is non-zero"
+    },
+    {
+      "code": 6069,
+      "name": "CannotCloseUserStatePendingUnstakes",
+      "msg": "Cannot close user state because there are pending unstake requests"
+    },
+    {
+      "code": 6070,
+      "name": "CannotCloseUserStatePendingDeposits",
+      "msg": "Cannot close user state because there are pending deposit requests"
+    },
+    {
+      "code": 6071,
+      "name": "CannotCloseUserStateUnharvestedRewards",
+      "msg": "Cannot close user state because there are unharvested rewards"
+    },
+    {
+      "code": 6072,
+      "name": "CannotCloseUserStateSignerNotOwner",
+      "msg": "Cannot close user state because signer is not the owner"
+    },
+    {
+      "code": 6073,
+      "name": "CannotCloseUserStateDelegatedSignerNotDelegateAuthority",
+      "msg": "Cannot close user state (delegated) because signer is not the delegate authority"
+    },
+    {
+      "code": 6074,
+      "name": "CannotCloseUserStateRentReceiverNotOwner",
+      "msg": "Cannot close user state because rent receiver is not the owner"
+    },
+    {
+      "code": 6075,
+      "name": "CannotCloseUserStateDelegatedRentReceiverNotAdmin",
+      "msg": "Cannot close user state (delegated) because rent receiver is not the admin"
+    },
+    {
+      "code": 6076,
+      "name": "UserRewardTokenAccountMustBeAta",
+      "msg": "User reward token account must be an ATA when payer is not the owner"
+    },
+    {
+      "code": 6077,
+      "name": "RewardsIssuedCumulativeAtMax",
+      "msg": "Cannot reward user because rewards_issued_cumulative has reached maximum value"
+    },
+    {
+      "code": 6078,
+      "name": "UserStateIdMismatch",
+      "msg": "User state user id does not match expected value"
     }
   ],
   "types": [],
