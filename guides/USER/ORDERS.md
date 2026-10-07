@@ -55,6 +55,11 @@ to worsen or find a better route. Your `max_slippage` still caps the exit regard
 `min_negative_apr` optionally requires the loss to reach a given annual rate, measured against your
 lend leg, before the trigger fires at all. Left unset, any negative carry qualifies.
 
+The lend side counts only what the bank pays its lenders. Yield a token earns through its own
+price, such as a liquid staking token's staking yield or a PT accruing to par, is not measured, so
+set `min_negative_apr` to that yield. With a 5% staking yield, a setting of 5% fires the trigger
+once the loss measured here is deeper than what the token earns.
+
 These settings are yours to choose, and together they decide how much it takes to trigger an exit
 and what one can cost. A longer `window_seconds` and a higher `min_negative_apr` ask for more before
 the Order fires, while `exit_budget_seconds` and `max_slippage` cap what a Keeper may spend.
@@ -89,8 +94,8 @@ measured span can be longer than you asked for, never shorter.
 The interest trigger is independent of the Stop Loss / Take Profit threshold on the same Order, so
 one Order can carry both. That matters for a leveraged staking loop: lend an LST, borrow SOL, and
 you face a depeg (a price problem, wanting a Stop Loss) and a borrow rate climbing above the
-staking yield (a carry problem, wanting this trigger). Either condition can execute the Order, and
-each is bound by its own cost rule.
+staking yield (a carry problem, wanting this trigger with `min_negative_apr` set to that yield).
+Either condition can execute the Order, and each is bound by its own cost rule.
 
 Before the banks hold a full window of history, your Stop Loss still works normally.
 
