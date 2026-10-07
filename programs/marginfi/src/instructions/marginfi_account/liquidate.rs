@@ -1,4 +1,7 @@
-use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
+use crate::events::{
+    AccountEventHeader, LendingAccountLiquidateEvent, LendingAccountPremiumSettledEvent,
+    LiquidationBalances,
+};
 use crate::state::{
     bank::BankImpl,
     liquidation_record::tag_after_liquidation,
@@ -392,6 +395,7 @@ pub fn lending_account_liquidate<'info>(
 
         // Liquidator receives `asset_quantity` amount of collateral
         let (liquidator_asset_pre_balance, liquidator_asset_post_balance) = {
+            let liquidator_authority = liquidator_marginfi_account.authority;
             let mut bank_account = BankAccountWrapper::find_or_create(
                 &ctx.accounts.asset_bank.key(),
                 &mut asset_bank,
@@ -422,6 +426,25 @@ pub fn lending_account_liquidate<'info>(
             let post_balance: I80F48 = bank_account
                 .bank
                 .get_asset_amount(bank_account.balance.asset_shares.into())?;
+
+            if premium_settled > I80F48::ZERO {
+                emit!(LendingAccountPremiumSettledEvent {
+                    header: AccountEventHeader {
+                        signer: Some(ctx.accounts.authority.key()),
+                        marginfi_account: liquidator_marginfi_account_loader.key(),
+                        marginfi_account_authority: liquidator_authority,
+                        marginfi_group: marginfi_group_loader.key(),
+                    },
+                    bank: asset_bank_key,
+                    mint: bank_account.bank.mint,
+                    premium_settled: premium_settled.to_num(),
+                    premium_written_off: 0.0,
+                    premium_outstanding_remaining: I80F48::from(
+                        bank_account.balance.premium_outstanding,
+                    )
+                    .to_num(),
+                });
+            }
 
             liquidator_marginfi_account.last_update = current_timestamp as u64;
 

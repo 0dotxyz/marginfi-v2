@@ -3155,9 +3155,19 @@ async fn premium_zero_weight_collateral_does_not_dilute_the_mix() -> anyhow::Res
 /// Finding: the liquidator's seized-collateral credit settles their accrued premium in the
 /// asset bank (vault-backed, like a repay) instead of writing it off when the credit closes
 /// their principal.
+#[test_case::test_case(120.0, YEAR; "full settlement and principal close")]
+#[test_case::test_case(2.0, YEAR; "partial premium settlement")]
+#[test_case::test_case(120.0, 0; "no premium emits no settlement")]
 #[tokio::test]
-async fn premium_liquidation_settles_liquidator_premium_instead_of_write_off() -> anyhow::Result<()>
-{
+async fn premium_liquidation_settles_liquidator_premium_instead_of_write_off(
+    seized_sol: f64,
+    elapsed: i64,
+) -> anyhow::Result<()> {
+    use anchor_lang::{AnchorDeserialize, Discriminator};
+    use base64::Engine;
+    use marginfi::events::LendingAccountPremiumSettledEvent;
+    use solana_compute_budget_interface::ComputeBudgetInstruction;
+    use solana_sdk::transaction::Transaction;
     let mut test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -3243,8 +3253,8 @@ async fn premium_liquidation_settles_liquidator_premium_instead_of_write_off() -
         .try_bank_borrow(victim_usdc.key, usdc_bank_f, 3_000)
         .await?;
 
-    // One year of premium on the liquidator's 100 SOL debt: P = 5 SOL.
-    advance_clock(&test_f, YEAR).await;
+    // A year accrues 5 SOL of premium; zero elapsed time exercises the no-event case.
+    advance_clock(&test_f, elapsed).await;
 
     // Crush SOL collateral weights so the victim is liquidatable (the liquidator's SOL is a
     // liability, so this leaves the liquidator untouched).
@@ -3265,29 +3275,94 @@ async fn premium_liquidation_settles_liquidator_premium_instead_of_write_off() -
     let collected_before: I80F48 = sol_bank_f.load().await.collected_premium_outstanding.into();
     assert_eq!(collected_before, I80F48::ZERO);
 
-    // Seize 120 SOL: covers the 100 SOL principal + 5 SOL premium, remainder deposits.
-    liquidator
-        .try_liquidate(&victim, sol_bank_f, 120, usdc_bank_f)
-        .await?;
+    let (banks_client, payer) = {
+        let ctx = test_f.context.borrow();
+        (ctx.banks_client.clone(), ctx.payer.insecure_clone())
+    };
+    let ix = liquidator
+        .make_liquidate_ix_with_authority(
+            &victim,
+            sol_bank_f,
+            seized_sol,
+            usdc_bank_f,
+            payer.pubkey(),
+        )
+        .await;
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+            ix,
+        ],
+        Some(&payer.pubkey()),
+        &[&payer],
+        banks_client.get_latest_blockhash().await?,
+    );
+    let result = banks_client.process_transaction_with_metadata(tx).await?;
+    result.result?;
+    let events: Vec<_> = result
+        .metadata
+        .unwrap()
+        .log_messages
+        .iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .map(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap()
+        })
+        .filter(|data| data.starts_with(LendingAccountPremiumSettledEvent::DISCRIMINATOR))
+        .map(|data| {
+            LendingAccountPremiumSettledEvent::deserialize(
+                &mut &data[LendingAccountPremiumSettledEvent::DISCRIMINATOR.len()..],
+            )
+            .unwrap()
+        })
+        .collect();
+    let accrued_sol = if elapsed == 0 { 0.0 } else { 5.0 };
+    let settled_sol = seized_sol.min(accrued_sol);
 
     // The premium was settled into the bank's swept-premium counter, NOT written off.
     let collected_after: I80F48 = sol_bank_f.load().await.collected_premium_outstanding.into();
     assert_eq_noise!(
         collected_after,
-        I80F48::from(native!(5, "SOL")),
+        I80F48::from_num(settled_sol * 1e9),
         I80F48!(10_000) // rate-encoding granularity on 5e9 native units
     );
 
-    // Liquidator's SOL leg: principal closed, premium cleared by SETTLEMENT, remainder
-    // (120 - 100 - 5 = 15 SOL) landed as a deposit.
+    // Premium is paid first; only credit beyond the 100 SOL principal becomes a deposit.
     let account = liquidator.load().await;
     let sol_balance = usdc_balance(&account, &sol_bank_f.key);
-    assert_eq!(I80F48::from(sol_balance.premium_outstanding), I80F48::ZERO);
     assert_eq_noise!(
-        I80F48::from(sol_balance.asset_shares), // share value 1 (zero interest)
-        I80F48::from(native!(15, "SOL")),
+        I80F48::from(sol_balance.premium_outstanding),
+        I80F48::from_num((accrued_sol - settled_sol) * 1e9),
         I80F48!(10_000)
     );
+    assert_eq_noise!(
+        I80F48::from(sol_balance.asset_shares), // share value 1 (zero interest)
+        I80F48::from_num((seized_sol - settled_sol - 100.0).max(0.0) * 1e9),
+        I80F48!(10_000)
+    );
+    if settled_sol == 0.0 {
+        assert!(events.is_empty());
+    } else {
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.header.signer, Some(payer.pubkey()));
+        assert_eq!(event.header.marginfi_account, liquidator.key);
+        assert_eq!(event.header.marginfi_account_authority, account.authority);
+        assert_eq!(event.header.marginfi_group, account.group);
+        assert_eq!(event.bank, sol_bank_f.key);
+        assert_eq!(event.mint, sol_bank_f.load().await.mint);
+        assert_eq!(
+            event.premium_settled,
+            (collected_after - collected_before).to_num::<f64>()
+        );
+        assert_eq!(event.premium_written_off, 0.0);
+        assert_eq!(
+            event.premium_outstanding_remaining,
+            I80F48::from(sol_balance.premium_outstanding).to_num::<f64>()
+        );
+    }
     Ok(())
 }
 
