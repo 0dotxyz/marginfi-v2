@@ -508,3 +508,11 @@ move that did not help. We consider this sufficiently mitigated by economic real
 Relatedly, a bank must hold rate history as old as that period before a deposit can move into or
 out of it. Rebalance being unavailable for a bank that is new, or that nobody has priced for a
 while, is expected.
+
+### Interest Triggers Measure the Rates Banks Actually Paid
+
+An interest trigger reads what a pair's two banks charged and paid over the Order's window. Bank
+rates follow utilization, so activity in either bank, a Keeper's own included, is part of what the
+Order measures. What an exit can cost is bounded by the Order's own settings: the window, the
+minimum loss (`min_negative_apr`), the exit budget and `max_slippage`. Users pick these themselves,
+as they pick slippage on any Order, and we treat an exit those settings allowed as INFO.
