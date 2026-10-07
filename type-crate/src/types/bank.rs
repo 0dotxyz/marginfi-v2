@@ -250,8 +250,8 @@ pub struct Bank {
     pub premium_activated_at: i64,
 
     /// Share-index history, one reading per `BANK_RATE_READING_SPACING_SECONDS` at most, written by
-    /// every instruction that prices the bank, oldest overwritten first. Orders measure realized
-    /// rates from it.
+    /// every instruction that prices the bank while its indices are current, oldest overwritten
+    /// first. Orders measure realized rates from it.
     pub rate_readings: [RateReading; BANK_RATE_READINGS],
 
     pub _reserved0: [[u64; 8]; 25],

@@ -53,7 +53,7 @@ async fn readings_inside_the_spacing_are_not_recorded() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The pulse is not the only writer: any instruction that prices the bank takes a reading.
+/// The pulse is not the only writer.
 #[tokio::test]
 async fn a_borrow_and_a_withdraw_take_readings() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -94,6 +94,29 @@ async fn a_borrow_and_a_withdraw_take_readings() -> anyhow::Result<()> {
         .await?;
     assert_eq!(usdc.load().await.recorded_rate_readings().count(), 2);
     assert_newest_reading_is_the_share_values(usdc, now).await;
+    Ok(())
+}
+
+/// A pulse while the protocol is paused does not accrue the bank.
+#[tokio::test]
+async fn a_pulse_while_paused_takes_no_reading() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let group = &test_f.marginfi_group;
+
+    pin_clock(&test_f, BASE_TS).await;
+    group.try_pulse_bank_price_cache(usdc).await?;
+    assert_eq!(usdc.load().await.recorded_rate_readings().count(), 1);
+
+    group.try_panic_pause().await?;
+    group.try_propagate_fee_state().await?;
+
+    let now = BASE_TS + BANK_RATE_READING_SPACING_SECONDS;
+    pin_clock(&test_f, now).await;
+    group.try_pulse_bank_price_cache(usdc).await?;
+    let bank = usdc.load().await;
+    assert_eq!(bank.recorded_rate_readings().count(), 1);
+    assert_eq!(bank.cache.last_oracle_price_timestamp, now);
     Ok(())
 }
 

@@ -79,7 +79,7 @@ async fn rebalance_rate_window_follows_the_cooldown(
     f.advance_clock(i64::from(window) - 1).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceHistoryTooShort);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
 
     f.advance_clock(1).await;
     // A compute-budget ix keeps this retry's signature distinct from the rejected attempt's.
@@ -182,7 +182,7 @@ async fn rebalance_rejects_a_destination_without_a_window_of_history() -> anyhow
         )
         .await;
     let res = f.process(&[start_ix]).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceHistoryTooShort);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
     Ok(())
 }
 

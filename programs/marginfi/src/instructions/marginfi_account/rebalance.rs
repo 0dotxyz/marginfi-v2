@@ -62,10 +62,10 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         rate::{
-            self, rate_at, rate_of, venue_multiplier, yield_index_of, NativeRateModel,
-            RewardsAccounts,
+            self, rate_at, rate_of, realized_supply_apr, venue_multiplier, yield_index_of,
+            NativeRateModel, RewardsAccounts,
         },
-        rebalance::{realized_supply_apr, RebalanceOrderImpl, RebalanceRecordImpl},
+        rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
     utils::is_integration_asset_tag,
 };

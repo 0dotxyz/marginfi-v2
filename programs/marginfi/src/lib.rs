@@ -830,6 +830,7 @@ pub mod marginfi {
     }
 
     /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
+    /// While the protocol is paused, a native bank takes no reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

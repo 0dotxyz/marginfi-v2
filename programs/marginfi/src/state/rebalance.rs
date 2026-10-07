@@ -1,9 +1,6 @@
 use crate::{
-    check,
-    errors::MarginfiError,
-    math_error,
-    prelude::MarginfiResult,
-    state::{marginfi_account::LendingAccountImpl, rate::realized_apr},
+    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
+    state::marginfi_account::LendingAccountImpl,
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -13,26 +10,9 @@ use marginfi_type_crate::constants::{
     REBALANCE_SETTLE_DELAY_MIN_SECONDS,
 };
 use marginfi_type_crate::types::{
-    Balance, BalanceSide, Bank, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
+    Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
     RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
-
-/// The supply APR `bank` has realized since its youngest reading at least `window` seconds old,
-/// given its yield index `yield_index_now`. A gap in the readings only lengthens the span.
-pub fn realized_supply_apr(
-    bank: &Bank,
-    window: u32,
-    yield_index_now: I80F48,
-    now: i64,
-) -> MarginfiResult<I80F48> {
-    let reading = bank
-        .rate_reading_at_least(i64::from(window), now)
-        .ok_or(MarginfiError::RebalanceHistoryTooShort)?;
-    let elapsed = now
-        .checked_sub(reading.timestamp)
-        .ok_or_else(math_error!())?;
-    realized_apr(reading.asset_index(), yield_index_now, elapsed)
-}
 
 pub trait RebalanceOrderImpl {
     #[allow(clippy::too_many_arguments)]
@@ -398,21 +378,18 @@ fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{realized_supply_apr, RebalanceOrderImpl, RebalanceRecordImpl};
+    use super::{RebalanceOrderImpl, RebalanceRecordImpl};
     use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
     use marginfi_type_crate::constants::{
         EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
-        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS, SECONDS_PER_YEAR,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     };
     use marginfi_type_crate::types::{
-        Balance, Bank, MarginfiAccount, RateReading, RebalanceMove, RebalanceOrder,
-        RebalanceRecord, RebalanceRefBank,
+        Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
     };
-
-    const WINDOW: u32 = INTEREST_MIN_WINDOW_SECONDS;
 
     fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
         let mut record = RebalanceRecord::zeroed();
@@ -438,45 +415,6 @@ mod tests {
         // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
         assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
         assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
-    }
-
-    /// A bank whose ring holds one reading at index 1, `age` seconds before `now`.
-    fn bank_with_reading(age: i64, now: i64) -> Bank {
-        let mut bank = Bank::zeroed();
-        bank.record_rate_reading(RateReading::new(I80F48::ONE, I80F48::ONE, now - age).unwrap());
-        bank
-    }
-
-    /// Growth is annualized over the reading's actual age, which is the youngest reading at least
-    /// a window old; a reading older than the window lengthens the span.
-    #[test]
-    fn the_realized_rate_spans_the_youngest_reading_at_least_a_window_old() {
-        let now = 1_700_000_000;
-        let per_year = |age: i64| SECONDS_PER_YEAR / I80F48::from_num(age);
-
-        let bank = bank_with_reading(i64::from(WINDOW), now);
-        assert_eq!(
-            realized_supply_apr(&bank, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
-            I80F48::from_num(0.0625) * per_year(i64::from(WINDOW))
-        );
-
-        let older = bank_with_reading(2 * i64::from(WINDOW), now);
-        assert_eq!(
-            realized_supply_apr(&older, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
-            I80F48::from_num(0.0625) * per_year(2 * i64::from(WINDOW))
-        );
-    }
-
-    #[test]
-    fn a_ring_with_no_reading_old_enough_has_no_measurement() {
-        let now = 1_700_000_000;
-        let young = bank_with_reading(i64::from(WINDOW) - 1, now);
-        for bank in [young, Bank::zeroed()] {
-            assert_eq!(
-                realized_supply_apr(&bank, WINDOW, I80F48::ONE, now).unwrap_err(),
-                MarginfiError::RebalanceHistoryTooShort.into()
-            );
-        }
     }
 
     #[test]

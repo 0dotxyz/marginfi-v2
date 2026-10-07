@@ -241,6 +241,23 @@ pub fn realized_apr(anchor: I80F48, current: I80F48, elapsed: i64) -> MarginfiRe
         .map_err(Into::into)
 }
 
+/// The supply APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its yield index `yield_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_supply_apr(
+    bank: &Bank,
+    window: u32,
+    yield_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let reading = bank
+        .rate_reading_at_least(i64::from(window), now)
+        .ok_or(MarginfiError::RateHistoryTooShort)?;
+    let elapsed = now
+        .checked_sub(reading.timestamp)
+        .ok_or_else(math_error!())?;
+    realized_apr(reading.asset_index(), yield_index_now, elapsed)
+}
+
 /// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`
 /// when the venue has no cap to read. A `Some(n)` bounds a deposit but does not guarantee it lands.
 pub fn venue_remaining_capacity<'info>(
@@ -667,8 +684,51 @@ mod slot_pacing {
 #[cfg(test)]
 mod realized_rates {
     use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::INTEREST_MIN_WINDOW_SECONDS;
+    use marginfi_type_crate::types::RateReading;
 
     const YEAR: i64 = 31_536_000;
+    const WINDOW: u32 = INTEREST_MIN_WINDOW_SECONDS;
+
+    /// A bank whose ring holds one reading at index 1, `age` seconds before `now`.
+    fn bank_with_reading(age: i64, now: i64) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.record_rate_reading(RateReading::new(I80F48::ONE, I80F48::ONE, now - age).unwrap());
+        bank
+    }
+
+    /// Growth is annualized over the reading's actual age, which is the youngest reading at least
+    /// a window old; a reading older than the window lengthens the span.
+    #[test]
+    fn the_realized_rate_spans_the_youngest_reading_at_least_a_window_old() {
+        let now = 1_700_000_000;
+        let per_year = |age: i64| SECONDS_PER_YEAR / I80F48::from_num(age);
+
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&bank, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(i64::from(WINDOW))
+        );
+
+        let older = bank_with_reading(2 * i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&older, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(2 * i64::from(WINDOW))
+        );
+    }
+
+    #[test]
+    fn a_ring_with_no_reading_old_enough_has_no_measurement() {
+        let now = 1_700_000_000;
+        let young = bank_with_reading(i64::from(WINDOW) - 1, now);
+        for bank in [young, Bank::zeroed()] {
+            assert_eq!(
+                realized_supply_apr(&bank, WINDOW, I80F48::ONE, now).unwrap_err(),
+                MarginfiError::RateHistoryTooShort.into()
+            );
+        }
+    }
 
     #[test]
     fn growth_annualizes_over_the_span_it_was_measured_on() {

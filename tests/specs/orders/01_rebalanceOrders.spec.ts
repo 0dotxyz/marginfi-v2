@@ -1163,7 +1163,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
     await closeOrder(order);
   });
 
-  it("moves only once the banks hold a window of rate history - RebalanceHistoryTooShort", async () => {
+  it("moves only once the banks hold a window of rate history - RateHistoryTooShort", async () => {
     await resetOwnerToSrc();
     const order = await placeOrder({
       allowedBanks: [srcBank, dstBank, dst2Bank],
@@ -1178,8 +1178,8 @@ describe("Auto-rebalance orders (native -> native)", () => {
       async () => {
         await sendKeeper(await buildSandwich({ order }));
       },
-      "RebalanceHistoryTooShort",
-      6721,
+      "RateHistoryTooShort",
+      6145,
     );
 
     // A zero cooldown takes the shortest rate window. The destinations carry borrows and the source
