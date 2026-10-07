@@ -97,6 +97,30 @@ async fn a_borrow_and_a_withdraw_take_readings() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A pulse while the protocol is paused leaves the bank unaccrued, so it prices the bank without
+/// taking a reading.
+#[tokio::test]
+async fn a_pulse_while_paused_takes_no_reading() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let group = &test_f.marginfi_group;
+
+    pin_clock(&test_f, BASE_TS).await;
+    group.try_pulse_bank_price_cache(usdc).await?;
+    assert_eq!(usdc.load().await.recorded_rate_readings().count(), 1);
+
+    group.try_panic_pause().await?;
+    group.try_propagate_fee_state().await?;
+
+    let now = BASE_TS + BANK_RATE_READING_SPACING_SECONDS;
+    pin_clock(&test_f, now).await;
+    group.try_pulse_bank_price_cache(usdc).await?;
+    let bank = usdc.load().await;
+    assert_eq!(bank.recorded_rate_readings().count(), 1);
+    assert_eq!(bank.cache.last_oracle_price_timestamp, now);
+    Ok(())
+}
+
 /// A share value driven past what a reading encodes leaves the ring as it was, and the instruction
 /// pricing the bank still lands.
 #[tokio::test]

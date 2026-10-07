@@ -17,6 +17,7 @@ use crate::{
         price::OraclePriceWithMultiplier,
         rate::{debt_index_of, yield_index_of},
     },
+    utils::is_integration_asset_tag,
 };
 use anchor_lang::ToAccountInfo;
 use anchor_lang::{err, prelude::*};
@@ -863,12 +864,18 @@ impl BankImpl for Bank {
         };
         let clock = Clock::get()?;
         let multiplier = price_with_multiplier.price_multiplier;
+        // A native bank's share values are current only if it accrued this second, which a pulse
+        // while the protocol is paused does not do. A venue bank's index is its live multiplier.
+        let indices_current = is_integration_asset_tag(self.config.asset_tag)
+            || self.last_update == clock.unix_timestamp;
         // An index past the reading's encodable range goes unrecorded; the price update proceeds.
         if let Some(reading) = RateReading::new(
             yield_index_of(self, multiplier)?,
             debt_index_of(self, multiplier)?,
             clock.unix_timestamp,
-        ) {
+        )
+        .filter(|_| indices_current)
+        {
             self.record_rate_reading(reading);
         }
 
