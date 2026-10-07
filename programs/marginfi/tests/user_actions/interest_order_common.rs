@@ -15,7 +15,7 @@ use marginfi_type_crate::constants::{
     INTEREST_MAX_WINDOW_SECONDS,
 };
 use marginfi_type_crate::types::{
-    centi_to_u32, milli_to_u32, Bank, InterestTriggerConfig, OrderTrigger,
+    centi_to_u32, milli_to_u32, Bank, InterestTriggerConfig, OrderTrigger, PremiumEntry,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::BanksClientError;
@@ -33,6 +33,8 @@ const SOL_PRICE: f64 = 10.0;
 
 pub const TAG_COLLATERAL: u16 = 100;
 pub const TAG_LIABILITY: u16 = 200;
+/// The variable-borrow premium `charge_premium` puts on the SOL liability.
+pub const PREMIUM_APR: f64 = 0.25;
 
 // A near-idle borrow leg (1 SOL against a 1,000 SOL float) so its baseline rate is negligible and
 // whatever a driver does to utilization is the only thing the window measures.
@@ -301,6 +303,27 @@ impl InterestFixture {
     pub async fn settle_borrow_rate(&self) -> anyhow::Result<()> {
         let sol = self.test_f.get_bank(&BankMint::Sol);
         self.test_f.marginfi_group.try_accrue_interest(sol).await?;
+        Ok(())
+    }
+
+    /// Charge `PREMIUM_APR` on the SOL liability, collateralised by the USDC lend leg, and write
+    /// it to the account's snapshot, which only an oracle-carrying instruction does.
+    pub async fn charge_premium(&self) -> anyhow::Result<()> {
+        let group_f = &self.test_f.marginfi_group;
+        group_f
+            .try_configure_group_premium(PremiumEntry {
+                collateral_tag: TAG_COLLATERAL,
+                liability_tag: TAG_LIABILITY,
+                rate: milli_to_u32(I80F48::from_num(PREMIUM_APR)),
+            })
+            .await?;
+        group_f
+            .try_configure_bank_premium(self.test_f.get_bank(&BankMint::Usdc), TAG_COLLATERAL, true)
+            .await?;
+        group_f
+            .try_configure_bank_premium(self.test_f.get_bank(&BankMint::Sol), TAG_LIABILITY, true)
+            .await?;
+        self.account_f.try_lending_account_pulse_health().await?;
         Ok(())
     }
 

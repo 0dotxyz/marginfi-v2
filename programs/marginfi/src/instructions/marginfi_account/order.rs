@@ -33,6 +33,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ix_discriminators, EXECUTE_ORDER_SEED, FEE_STATE_SEED, ORDER_ACTIVE_TAGS, ORDER_SEED,
+        PREMIUM_ACTIVE,
     },
     types::{
         u32_to_milli, BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache,
@@ -395,13 +396,19 @@ fn read_order_legs<'info>(
                 });
             }
             BalanceSide::Liabilities => {
+                // Switching a bank's premium off leaves each liability's snapshot as it was.
+                let premium_apr = if bank.get_flag(PREMIUM_ACTIVE) {
+                    u32_to_milli(balance.premium_rate_snapshot)
+                } else {
+                    I80F48::ZERO
+                };
                 debt = Some((
                     LegSpan {
                         start: reading.debt_index(),
                         end: debt_index_of(&bank, multiplier)?,
                         elapsed,
                     },
-                    u32_to_milli(balance.premium_rate_snapshot),
+                    premium_apr,
                 ));
             }
         }

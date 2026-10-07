@@ -3,7 +3,7 @@ use fixed_macro::types::I80F48 as fp;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::constants::INTEREST_MAX_EXIT_BUDGET_SECONDS;
-use marginfi_type_crate::types::{milli_to_u32, PremiumEntry};
+use marginfi_type_crate::types::{milli_to_u32, u32_to_milli};
 use solana_program_test::tokio;
 
 use super::interest_order_common::*;
@@ -257,29 +257,44 @@ async fn the_variable_borrow_premium_counts_toward_the_carry_cost() -> anyhow::R
     let res = fx.unwind(1.0).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::OrderInterestNotNegative);
 
-    // A 25% premium on the SOL liability, collateralised by the USDC lend leg.
-    let group_f = &fx.test_f.marginfi_group;
-    group_f
-        .try_configure_group_premium(PremiumEntry {
-            collateral_tag: TAG_COLLATERAL,
-            liability_tag: TAG_LIABILITY,
-            rate: milli_to_u32(I80F48::from_num(0.25)),
-        })
-        .await?;
-    group_f
-        .try_configure_bank_premium(fx.test_f.get_bank(&BankMint::Usdc), TAG_COLLATERAL, true)
-        .await?;
-    group_f
-        .try_configure_bank_premium(fx.test_f.get_bank(&BankMint::Sol), TAG_LIABILITY, true)
-        .await?;
-    // The snapshot is written by an oracle-carrying instruction, not by the config change itself.
-    fx.account_f.try_lending_account_pulse_health().await?;
+    fx.charge_premium().await?;
 
     fx.unwind(1.0).await?;
     assert!(
         fx.test_f.try_load(&fx.order).await?.is_none(),
         "the premium should carry the pair past the trigger margin"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_premium_switched_off_stops_counting_toward_the_carry_cost() -> anyhow::Result<()> {
+    let mut fx = setup(premium_params()).await?;
+
+    fx.advance(TEST_WINDOW).await;
+    fx.charge_premium().await?;
+
+    let sol = fx.test_f.get_bank(&BankMint::Sol);
+    fx.test_f
+        .marginfi_group
+        .try_configure_bank_premium(sol, TAG_LIABILITY, false)
+        .await?;
+    let account = fx.account_f.load().await;
+    let liability = account
+        .lending_account
+        .balances
+        .iter()
+        .find(|b| b.is_active() && b.bank_pk == sol.key)
+        .unwrap();
+    // The rate round-trips through the u32 encoding once on its way into the snapshot.
+    let charged = milli_to_u32(u32_to_milli(milli_to_u32(I80F48::from_num(PREMIUM_APR))));
+    assert_eq!(
+        liability.premium_rate_snapshot, charged,
+        "the snapshot should outlive the switch, or this proves nothing"
+    );
+
+    let res = fx.unwind(1.0).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::OrderInterestNotNegative);
     Ok(())
 }
 
