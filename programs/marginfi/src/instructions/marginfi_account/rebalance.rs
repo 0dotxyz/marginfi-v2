@@ -6,16 +6,20 @@
 //!
 //! On-chain guarantees: every referenced bank holds the order's mint and is in the allowed set; each
 //! move's destination, priced with every declared deposit into it counted, beats the move's source
-//! by `min_improvement` before the legs run and still does after they land; no other referenced
-//! bank with deposit capacity, measured as the tighter of the bank's own limit and its venue's,
-//! would pay the move's tokens more, counting that bank's own declared inflow; a bank is either a
-//! source or a destination within one execution; an order-tagged balance moves whole, alone, into
-//! a bank the account holds nothing in, and its tag follows it; the total tokens moved are capped
-//! by the order's `amount` budget (uncapped when the order is unlimited); token principal is
-//! conserved per bank up to a small dust tolerance; every withdraw/deposit leg acts on the
-//! rebalanced account and one of the referenced banks; the non-referenced balance set is
-//! unchanged, neither altered nor added to; the account stays healthy at the maintenance
-//! requirement if it borrows; and a per-order cooldown.
+//! by `min_improvement` before the legs run and still does after they land, and has out-yielded it
+//! by `min_improvement` over the order's rate window (its cooldown, held between
+//! `INTEREST_MIN_WINDOW_SECONDS` and `INTEREST_MAX_WINDOW_SECONDS`), measured from the two banks'
+//! rate readings, which must reach back that far; no other referenced bank with deposit capacity,
+//! measured as the tighter of the bank's own limit and its venue's, would pay the move's tokens
+//! more, counting that bank's own declared inflow; a bank is either a source or a destination
+//! within one execution; an order-tagged balance moves whole, alone, into a bank the account holds
+//! nothing in, and its tag follows it, unless an interest trigger order tagged it, in which case
+//! it does not move; the total tokens moved are capped by the order's `amount`
+//! budget (uncapped when the order is unlimited); token principal is conserved per bank up to a
+//! small dust tolerance; every withdraw/deposit leg acts on the rebalanced account and one of the
+//! referenced banks; the non-referenced balance set is unchanged, neither altered nor added to;
+//! the account stays healthy at the maintenance requirement if it borrows; and a per-order
+//! cooldown.
 //!
 //! Supports native, Kamino, Drift, and JupLend legs; Solend banks are rate-visible but have no move
 //! legs and are rejected up front. Referenced banks arrive as a deduped, indexed stream in the
@@ -27,12 +31,13 @@
 //! closes the record at `end_rebalance`. The record's lifetime is independent of the order's and
 //! the account's.
 //!
-//! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
-//! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
-//! gates, and unwind afterwards, so the move itself can be induced. Settlement pays the tip only on
-//! realized yield, by any margin above zero: a spike realizing nothing refunds the tip and leaves
-//! unpaid griefing bounded by the per-order cooldown and the conservation dust, while any realized
-//! edge pays the full tip for a move that did leave the position in the better venue.
+//! Residual risk: the sandwich forbids in-transaction rate manipulation. The rate window compares
+//! the yield each bank paid in total, not how long a rate held. So inducing a move costs
+//! `min_improvement` on the destination's whole deposit base for the window, paid as borrow
+//! interest over any stretch or as a same-mint emissions deposit. That goes to the destination's
+//! depositors, so a keeper that deposits there gets its share back. Diluting the source with a
+//! deposit held for the window costs only capital. Settlement pays the tip only on realized yield,
+//! by any margin above zero: a move realizing nothing refunds it, any realized edge pays in full.
 
 use crate::{
     check, check_eq,
@@ -57,8 +62,10 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
-        price::OraclePriceFeedAdapter,
-        rate::{self, rate_at, rate_of, NativeRateModel, RewardsAccounts},
+        rate::{
+            self, rate_at, rate_of, realized_supply_apr, venue_multiplier, yield_index_of,
+            NativeRateModel, RewardsAccounts,
+        },
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
     utils::is_integration_asset_tag,
@@ -79,35 +86,16 @@ use marginfi_type_crate::{
         ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOLEND, EXP_10_I80F48,
         REBALANCE_DEFAULT_COOLDOWN_SECONDS, REBALANCE_DEFAULT_MIN_IMPROVEMENT,
         REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
-        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
     pdas::derive_juplend_rate_model,
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OrderTagType,
         RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
         ORDER_BLOCKING_FLAGS,
     },
 };
 use std::cell::RefMut;
-
-/// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
-/// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
-/// accounts. The spot price itself is discarded, but reading it applies the bank's staleness and
-/// confidence gates, so every rebalance step blocks while the oracle is untrustworthy.
-fn venue_multiplier<'info>(
-    bank: &Bank,
-    oracle_ais: &'info [AccountInfo<'info>],
-    clock: &Clock,
-) -> MarginfiResult<I80F48> {
-    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
-        bank,
-        oracle_ais,
-        clock,
-        OraclePriceType::RealTime,
-    )?;
-    Ok(priced.price_multiplier)
-}
 
 /// Underlying-token amount (whole-token UI units) of a raw native token amount in `bank`:
 /// `native × venue_multiplier`, EXCLUDING the oracle price. Every referenced bank holds the SAME mint,
@@ -116,19 +104,6 @@ fn venue_multiplier<'info>(
 /// disagree, because price never enters the count. The oracle price is used only by the health check.
 fn underlying_of(amount_native: I80F48, bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     calc_value(amount_native, multiplier, bank.get_balance_decimals(), None)
-}
-
-/// Monotonic per-share yield index for `bank`: `asset_share_value` times the venue exchange-rate
-/// multiplier, excluding the oracle spot price. Native banks accrue via `asset_share_value`
-/// (multiplier 1); integration banks accrue via the venue multiplier (Kamino cToken rate, Drift
-/// cumulative interest, JupLend exchange price), all monotonic. The growth of this index over a
-/// window is the realized supply yield a depositor earned, which `settle_rebalance_tip` compares
-/// across banks. Because it is an accrued integral, not a spot rate, a single-tx rate spike cannot
-/// move it.
-fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
-    Ok(I80F48::from(bank.asset_share_value)
-        .checked_mul(multiplier)
-        .ok_or_else(math_error!())?)
 }
 
 /// Tokens a rebalance may still deliver into `bank`, in whole-token UI units (the units of
@@ -800,6 +775,7 @@ pub fn start_rebalance<'info>(
     );
     let allowed = &order.allowed_banks[..bank_count];
     let min_imp = I80F48::from(order.min_improvement);
+    let window = order.rate_window();
 
     let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count, true, true)?;
     check!(tail.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
@@ -819,7 +795,9 @@ pub fn start_rebalance<'info>(
     let mut ref_banks: Vec<RebalanceRefBank> = Vec::with_capacity(banks.len());
     // Native banks price from their own curve and totals, captured once here and reused below.
     let mut models: Vec<Option<NativeRateModel>> = Vec::with_capacity(banks.len());
-    for parsed in banks.iter() {
+    // Realized supply APR over the window, measured only for the banks a move touches.
+    let mut realized = vec![I80F48::ZERO; banks.len()];
+    for (i, parsed) in banks.iter().enumerate() {
         // `parse_rebalance_banks` rejects duplicates and yields exactly `allowed.len()` banks, so
         // membership here makes the parsed set the allowlist exactly.
         check!(
@@ -852,6 +830,17 @@ pub fn start_rebalance<'info>(
         };
         let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
         let pre = bank_underlying(&account, &parsed.key, &bank, multiplier)?;
+        if moves
+            .iter()
+            .any(|m| m.src_index as usize == i || m.dst_index as usize == i)
+        {
+            realized[i] = realized_supply_apr(
+                &bank,
+                window,
+                yield_index_of(&bank, multiplier)?,
+                clock.unix_timestamp,
+            )?;
+        }
         rates.push(rate);
         capacity.push(deposit_capacity_of(
             &bank,
@@ -894,6 +883,13 @@ pub fn start_rebalance<'info>(
             MarginfiError::RebalanceTaggedBalanceSplit
         );
         if ref_banks[s].tag != 0 {
+            check!(
+                account
+                    .lending_account
+                    .get_balance(&banks[s].key)
+                    .is_none_or(|b| b.tag_type != OrderTagType::Interest as u8),
+                MarginfiError::RebalanceInterestTaggedBalance
+            );
             tagged_dst[d] = true;
             // Every move out of `s` targets `d`, and every move into `d` comes from `s`.
             check!(
@@ -950,6 +946,14 @@ pub fn start_rebalance<'info>(
         check!(
             landed[d]
                 > rates[m.src_index as usize]
+                    .checked_add(min_imp)
+                    .ok_or_else(math_error!())?,
+            MarginfiError::RebalanceNotImproving
+        );
+        // The same margin on `realized`: each bank's APR since its reading at least a window old.
+        check!(
+            realized[d]
+                > realized[m.src_index as usize]
                     .checked_add(min_imp)
                     .ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
@@ -1096,10 +1100,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 .collect::<Vec<_>>(),
             order.amount,
             order.keeper_tip,
-            order.cooldown_seconds.clamp(
-                REBALANCE_SETTLE_DELAY_MIN_SECONDS,
-                REBALANCE_SETTLE_DELAY_MAX_SECONDS,
-            ),
+            order.settle_delay(),
             I80F48::from(order.min_improvement),
         )
     };
@@ -1251,9 +1252,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
     // Record the move-time yield indices, the timestamp, and the tip. The tip is NOT paid here: it is
     // escrowed into the record and released later by `settle_rebalance_tip` only if the destinations
-    // realized more yield than the sources over the settlement window. This defeats cross-transaction
-    // (Jito bundle) rate manipulation, where a transient rate spike qualifies the move and is reverted
-    // in the same bundle: the spike leaves no realized yield, so the tip is never paid.
+    // realized more yield than the sources over the settlement window.
     {
         let mut record = ctx.accounts.rebalance_record.load_mut()?;
         for (i, idx) in move_yield_indices.iter().enumerate() {

@@ -4,7 +4,11 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
+use marginfi_type_crate::constants::{
+    EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+    REBALANCE_CONSERVATION_DUST_ATOMS, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+    REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+};
 use marginfi_type_crate::types::{
     Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
     RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
@@ -27,6 +31,14 @@ pub trait RebalanceOrderImpl {
 
     /// Replace the venue allowlist, validating the count and zeroing unused slots.
     fn set_allowed_banks(&mut self, allowed_banks: &[Pubkey]) -> MarginfiResult;
+
+    /// Seconds of history a move's realized rates are measured over: the cooldown, held to the
+    /// spans the bank rate readings serve.
+    fn rate_window(&self) -> u32;
+
+    /// Seconds a keeper tip stays escrowed before it can be settled: the cooldown, held to the
+    /// settle delay bounds.
+    fn settle_delay(&self) -> u64;
 }
 
 impl RebalanceOrderImpl for RebalanceOrder {
@@ -70,6 +82,19 @@ impl RebalanceOrderImpl for RebalanceOrder {
             *slot = *bank;
         }
         Ok(())
+    }
+
+    fn rate_window(&self) -> u32 {
+        u32::try_from(self.cooldown_seconds)
+            .unwrap_or(u32::MAX)
+            .clamp(INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS)
+    }
+
+    fn settle_delay(&self) -> u64 {
+        self.cooldown_seconds.clamp(
+            REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+            REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        )
     }
 }
 
@@ -353,14 +378,17 @@ fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
 
 #[cfg(test)]
 mod tests {
-    use super::RebalanceRecordImpl;
+    use super::{RebalanceOrderImpl, RebalanceRecordImpl};
     use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
-    use marginfi_type_crate::constants::EXP_10_I80F48;
+    use marginfi_type_crate::constants::{
+        EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+    };
     use marginfi_type_crate::types::{
-        Balance, MarginfiAccount, RebalanceMove, RebalanceRecord, RebalanceRefBank,
+        Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
     };
 
     fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
@@ -387,6 +415,32 @@ mod tests {
         // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
         assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
         assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
+    }
+
+    #[test]
+    fn the_rate_window_is_the_cooldown_held_to_the_reading_spans() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, window) in [
+            (0, INTEREST_MIN_WINDOW_SECONDS),
+            (86_400, 86_400),
+            (u64::MAX, INTEREST_MAX_WINDOW_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.rate_window(), window);
+        }
+    }
+
+    #[test]
+    fn the_settle_delay_is_the_cooldown_held_to_its_bounds() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, delay) in [
+            (0, REBALANCE_SETTLE_DELAY_MIN_SECONDS),
+            (1_800, 1_800),
+            (u64::MAX, REBALANCE_SETTLE_DELAY_MAX_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.settle_delay(), delay);
+        }
     }
 
     fn balance(bank: Pubkey, tag: u16) -> Balance {

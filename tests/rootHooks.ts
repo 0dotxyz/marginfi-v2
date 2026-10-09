@@ -218,6 +218,8 @@ export const MAINNET_GROUP = new PublicKey(
 );
 /** Current bank layout size (8-byte discriminator + Bank::LEN) */
 export const BANK_ACCOUNT_LEN = 8 + 3904;
+/** v1 bank layout size (8-byte discriminator + Bank::V1_LEN), as on mainnet in 0.1.11 and earlier */
+export const BANK_V1_ACCOUNT_LEN = 8 + 1856;
 
 /** Banks in the emode test suite use this seed */
 export const EMODE_SEED = 44;

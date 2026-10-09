@@ -15,7 +15,9 @@ use crate::{
         },
         marginfi_account::calc_value,
         price::OraclePriceWithMultiplier,
+        rate::{debt_index_of, yield_index_of},
     },
+    utils::is_integration_asset_tag,
 };
 use anchor_lang::ToAccountInfo;
 use anchor_lang::{err, prelude::*};
@@ -34,7 +36,7 @@ use marginfi_type_crate::{
     },
     types::{
         u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
-        OraclePriceWithConfidence,
+        OraclePriceWithConfidence, RateReading,
     },
 };
 
@@ -851,32 +853,45 @@ impl BankImpl for Bank {
         Ok(())
     }
 
-    /// Records the live oracle price on the cache and feeds it into the circuit breaker.
-    /// Called from every path that consumes a fresh oracle reading (borrow/withdraw/liquidate,
-    /// adapter integrations, and the explicit pulse crank); CB dedup makes redundant calls a
-    /// no-op so callers don't need to coordinate.
+    /// Records the live oracle price on the cache, feeds the circuit breaker and takes a rate
+    /// reading if the bank's indices are current. Every pricing path calls it; repeats are no-ops.
     fn update_cache_price(
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()> {
+        let Some(price_with_multiplier) = oracle_price else {
+            return Ok(());
+        };
+        let clock = Clock::get()?;
+        let multiplier = price_with_multiplier.price_multiplier;
+        // A native bank's share values are current only if it accrued this second, which a pulse
+        // while the protocol is paused does not do. A venue bank's index is its live multiplier.
+        let indices_current = is_integration_asset_tag(self.config.asset_tag)
+            || self.last_update == clock.unix_timestamp;
+        if indices_current {
+            // An index past the encodable range goes unrecorded; the price update proceeds.
+            if let Some(reading) = RateReading::new(
+                yield_index_of(self, multiplier)?,
+                debt_index_of(self, multiplier)?,
+                clock.unix_timestamp,
+            ) {
+                self.record_rate_reading(reading);
+            }
+        }
+
         if self.cache.is_liquidation_price_cache_locked() {
             return Ok(());
         }
-        if let Some(price_with_multiplier) = oracle_price {
-            let clock = Clock::get()?;
-            self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
-            self.cache.last_oracle_price_confidence =
-                price_with_multiplier.oracle_price.confidence.into();
-            self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
-            self.cache.last_oracle_price_timestamp = clock.unix_timestamp;
-            self.update_circuit_breaker(
-                clock.unix_timestamp,
-                clock.slot,
-                price_with_multiplier.cb_observation()?,
-            )?;
-        }
-
-        Ok(())
+        self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
+        self.cache.last_oracle_price_confidence =
+            price_with_multiplier.oracle_price.confidence.into();
+        self.cache.price_multiplier = multiplier.into();
+        self.cache.last_oracle_price_timestamp = clock.unix_timestamp;
+        self.update_circuit_breaker(
+            clock.unix_timestamp,
+            clock.slot,
+            price_with_multiplier.cb_observation()?,
+        )
     }
 
     fn is_cb_halted(&self, now: i64) -> bool {

@@ -24,6 +24,87 @@ A user is lending $100 in SOL and borrowing $50 in BONK. They set a take-profit 
  * Any combination of SOL going up or BONK going down that leads to a net-value of $70 can make the Order eligible to execute!
 ```
 
+## Interest Triggers
+
+An Order can also carry an **interest trigger**: exit when the position's carry has been negative on
+average over a window you choose. This is aimed at strategies, where the point of the position is
+the spread between what the lending position earns and what the borrowing position costs.
+
+```
+A user lends $1,000 USDC earning 5% and borrows $900 PYUSD costing 3%, keeping the 2% spread.
+ * If the USDC lend rate falls or the PYUSD borrow rate climbs, the spread can flip negative
+   and the position bleeds every day it stays open.
+ * An interest trigger closes it for them.
+```
+
+Two things make this more than "exit when the spread goes negative".
+
+**A blip is not a signal.** Rates are measured as the growth of each bank's share value across a
+window you choose (`window_seconds`, 6 to 48 hours, 24 hours by default), which is the average
+rate actually realized over that window. A brief move counts only for the interest it actually
+charged, and the longer the window, the more it takes to move the average. A longer window is
+steadier, a shorter one reacts sooner.
+
+**Leaving costs money.** Losing 1% a year does not justify paying 1% slippage today to escape. You
+set `exit_budget_seconds` (14 days by default), and a Keeper may only execute when the unwind
+costs less than what the position would lose to interest over that span. It is a spending limit
+priced in days of loss, not a delay: nothing waits for it. If a Keeper finds a route with
+no slippage they can exit the moment carry turns; on an expensive route they must wait for the rate
+to worsen or find a better route. Your `max_slippage` still caps the exit regardless.
+
+`min_negative_apr` optionally requires the loss to reach a given annual rate, measured against your
+lending position, before the trigger fires at all. Left unset, any negative carry qualifies.
+
+The lend side counts only what the bank pays its lenders. Yield a token earns through its own
+price, such as a liquid staking token's staking yield or a PT accruing to par, is not measured.
+Set `min_negative_apr` to that yield. With a 5% staking yield, a setting of 5% fires the trigger
+once the loss measured here is deeper than what the token earns. Native staked collateral is the
+exception: its pool value is part of the measurement.
+
+These settings are yours to choose, and together they decide how much it takes to trigger an exit
+and what one can cost. A longer `window_seconds` and a higher `min_negative_apr` ask for more before
+the Order fires, while `exit_budget_seconds` and `max_slippage` cap what a Keeper may spend.
+
+The variable-borrow premium you pay counts toward the cost side, since it is a real charge that
+pushes the spread negative.
+
+### How the Measurement Stays Honest
+
+Every bank keeps its own rolling history of where its share value stood, written by the protocol's
+ordinary pricing activity (borrows, withdrawals, liquidations, and a permissionless pulse anyone can
+run), at least three hours apart and reaching back at least 48 hours once the bank has been live
+that long. Your Order records nothing of its own. When a Keeper tries to execute it, each
+position's rate is read from its bank's history, from the reading closest to your window that is at
+least a window old.
+
+Three things follow.
+
+- **It works from the moment you place it.** If the banks already hold a window of history, the
+  Order can execute right away. There is no priming step, and nothing for you or a Keeper to keep
+  alive.
+- **The history is the bank's, not the Order's.** It is shared by every Order on the bank. A Keeper
+  cannot shorten your window, reset it, or pick a flattering starting point.
+- **The measurement is exact.** It reads accrued share value, not a rate at an instant. Whatever the
+  bank actually charged or paid over the window is what the Order sees.
+
+If a bank has been quiet for longer than your window, the nearest older reading is used, so the
+measured span can be longer than you asked for, never shorter.
+
+An auto-rebalance does not move a balance an interest trigger was placed on, so the bank your
+lending position is measured in stays the one you chose. The balance is held this way until its
+Order tag is cleared with `SetKeeperCloseFlags`, including after the Order has executed or been
+closed.
+
+### Interest and Price Triggers Together
+
+The interest trigger is independent of the Stop Loss / Take Profit threshold on the same Order, so
+one Order can carry both. That matters for a leveraged staking loop: lend an LST, borrow SOL, and
+you face a depeg (a price problem, wanting a Stop Loss) and a borrow rate climbing above the
+staking yield (a carry problem, wanting this trigger with `min_negative_apr` set to that yield).
+Either condition can execute the Order, and each is bound by its own cost rule.
+
+Before the banks hold a full window of history, your Stop Loss still works normally.
+
 ### Fees, and Who Keeps the Keepers
 
 Project Zero will run Keepers initially upon feature public launch (ETA Q2/Q3 2026), but any
@@ -100,6 +181,8 @@ sure they do not close out positions involved with their Orders without updating
 
 - `PlaceOrder` (user) - Place a new Stop Loss, Take Profit, or Both type Order on a pair of balances
   the user currently holds.
+- `PlaceInterestOrder` (user) - The same, carrying an `InterestTriggerConfig`. Takes the same
+  accounts; the rates are read from the banks' own history, so the order is live from placement.
 - `StartExecuteOrder` (Keeper) - Keepers run this to begin the execution of an Order. Must be at the
   start of the tx. Withdraw/Repay of the involved balances typically follows this ix.
   Requires a risk check of just the balances involved in the Order.

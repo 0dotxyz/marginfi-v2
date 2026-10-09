@@ -394,7 +394,7 @@ export const closeLiquidationRecordIx = (
         },
       ],
       data: CLOSE_LIQ_RECORD_DISCRIMINATOR,
-    })
+    }),
   );
 };
 
@@ -435,7 +435,7 @@ export const startLiquidationIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   return program.methods
     .startLiquidation()
@@ -464,7 +464,7 @@ export const endLiquidationIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   const liquidationReceiver = program.provider.publicKey;
   return program.methods
@@ -514,7 +514,7 @@ export const startDeleverageIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   return program.methods
     .startDeleverage()
@@ -539,7 +539,7 @@ export const endDeleverageIx = (
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   const [liquidationRecord] = deriveLiquidationRecord(
     program.programId,
-    args.marginfiAccount
+    args.marginfiAccount,
   );
   const riskAdmin = program.provider.publicKey;
   return program.methods
@@ -870,6 +870,12 @@ export type OrderTriggerArgs =
       };
     };
 
+export type InterestTriggerArgs = {
+  windowSeconds: number | null;
+  exitBudgetSeconds: number | null;
+  minNegativeApr: number | null;
+};
+
 export type PlaceOrderArgs = {
   marginfiAccount: PublicKey;
   authority: PublicKey;
@@ -878,6 +884,10 @@ export type PlaceOrderArgs = {
   trigger: OrderTriggerArgs;
   feeState?: PublicKey;
   globalFeeWallet?: PublicKey;
+};
+
+export type PlaceInterestOrderArgs = PlaceOrderArgs & {
+  interest: InterestTriggerArgs;
 };
 
 export const placeOrderIx = async (
@@ -907,6 +917,39 @@ export const placeOrderIx = async (
   return program.methods
     .marginfiAccountPlaceOrder(args.bankKeys, args.trigger)
     .accounts(accounts)
+    .instruction();
+};
+
+/** Places an order that also exits on negative carry. Same accounts as `placeOrderIx`. */
+export const placeInterestOrderIx = async (
+  program: Program<Marginfi>,
+  args: PlaceInterestOrderArgs,
+) => {
+  const [orderPda] = deriveOrderPda(
+    program.programId,
+    args.marginfiAccount,
+    args.bankKeys,
+  );
+
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const globalFeeWallet =
+    args.globalFeeWallet ??
+    (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+
+  return program.methods
+    .marginfiAccountPlaceInterestOrder(
+      args.bankKeys,
+      args.trigger,
+      args.interest,
+    )
+    .accounts({
+      authority: args.authority,
+      marginfiAccount: args.marginfiAccount,
+      feePayer: args.feePayer,
+      order: orderPda,
+      feeState,
+      globalFeeWallet,
+    })
     .instruction();
 };
 
@@ -984,6 +1027,11 @@ export type StartExecuteOrderArgs = {
   executor: PublicKey;
   order: PublicKey;
   remaining: PublicKey[];
+  /**
+   * The order's two banks, if it carries an interest trigger, which accrues them before reading
+   * their share indices. Only those banks need the write lock, and only on `start`.
+   */
+  bankWritable?: PublicKey[];
 };
 
 export const startExecuteOrderIx = (
@@ -992,10 +1040,11 @@ export const startExecuteOrderIx = (
 ) => {
   const [executeRecord] = deriveExecuteOrderPda(program.programId, args.order);
 
+  const writable = args.bankWritable ?? [];
   const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
     pubkey,
     isSigner: false,
-    isWritable: false,
+    isWritable: writable.some((bank) => bank.equals(pubkey)),
   }));
 
   const accounts: any = {

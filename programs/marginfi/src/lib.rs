@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigFast, BankConfigGov, EmodeEntry, InterestRateConfigOpt,
-    OrderTrigger, RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
+    InterestTriggerConfig, OrderTrigger, RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -427,6 +427,18 @@ pub mod marginfi {
         marginfi_account::place_order(ctx, bank_keys, trigger)
     }
 
+    /// (user) Place an order that also unwinds the pair when its carry turns negative. The rates
+    /// are measured from the banks' own reading history, so the order is live from placement.
+    /// * interest - the carry-exit policy; `None` fields take the `INTEREST_DEFAULT_*` constants
+    pub fn marginfi_account_place_interest_order(
+        ctx: Context<PlaceOrder>,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> MarginfiResult {
+        marginfi_account::place_interest_order(ctx, bank_keys, trigger, interest)
+    }
+
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
@@ -499,8 +511,9 @@ pub mod marginfi {
 
     /// (permissionless keeper) Begin an auto-rebalance. `moves` declares each value relocation as
     /// `(src_index, dst_index, amount)` over the banks passed in remaining_accounts; validates
-    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
-    /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
+    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement, both now and
+    /// as realized over the order's cooldown. Opens the start/end sandwich; `end_rebalance` must be
+    /// the last ix; CPI forbidden.
     pub fn marginfi_account_start_rebalance<'info>(
         ctx: Context<'info, StartRebalance<'info>>,
         moves: Vec<RebalanceMove>,
@@ -520,8 +533,8 @@ pub mod marginfi {
 
     /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
     /// recorded keeper only if the destinations realized more yield than the sources over the window
-    /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
-    /// record, returning its rent to the recorded keeper.
+    /// (makes cross-tx rate manipulation costly); otherwise refunds the tip to the fee pool. Closes
+    /// the record, returning its rent to the recorded keeper.
     pub fn marginfi_account_settle_rebalance_tip<'info>(
         ctx: Context<'info, SettleRebalanceTip<'info>>,
     ) -> MarginfiResult {
@@ -828,7 +841,8 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
-    /// (Permissionless) Refresh the cached oracle price for a bank.
+    /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
+    /// While the protocol is paused, a native bank takes no reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

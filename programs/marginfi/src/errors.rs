@@ -293,6 +293,8 @@ pub enum MarginfiError {
     InvalidFastBankOperationalState, // 6143
     #[msg("Governance bank configuration may only transition a bank to Operational")]
     InvalidGovernanceBankOperationalState, // 6144
+    #[msg("A bank has no rate reading as old as the order's rate window")]
+    RateHistoryTooShort, // 6145
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -533,6 +535,8 @@ pub enum MarginfiError {
     RebalanceForeignBankLeg, // 6719
     #[msg("Rebalance must move an order-tagged balance whole, alone, into an empty bank")]
     RebalanceTaggedBalanceSplit, // 6720
+    #[msg("Rebalance cannot move a balance held by an interest trigger order")]
+    RebalanceInterestTaggedBalance, // 6721
     // ************** END AUTO-REBALANCE ERRORS
     // ************** BEGIN SCOPE ERRORS (starting at 6800)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
@@ -543,7 +547,17 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+    // ************** BEGIN INTEREST ORDER ERRORS (starting at 6900)
+    #[msg("Realized carry does not meet the order's negative-rate margin")]
+    OrderInterestNotNegative = 900, // 6900
+    #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
+    OrderInterestCostExceedsCarry, // 6901
+    #[msg("Interest trigger window or exit budget is outside the permitted range")]
+    OrderInterestInvalidConfig, // 6902
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")]
+    OrderInterestBankNotWritable, // 6903
+                                  // ************** END INTEREST ORDER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -712,6 +726,7 @@ impl From<u32> for MarginfiError {
             6142 => MarginfiError::MixedGroupConfigAuthority,
             6143 => MarginfiError::InvalidFastBankOperationalState,
             6144 => MarginfiError::InvalidGovernanceBankOperationalState,
+            6145 => MarginfiError::RateHistoryTooShort,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -820,6 +835,7 @@ impl From<u32> for MarginfiError {
             6718 => MarginfiError::RebalanceBankSourceAndDestination,
             6719 => MarginfiError::RebalanceForeignBankLeg,
             6720 => MarginfiError::RebalanceTaggedBalanceSplit,
+            6721 => MarginfiError::RebalanceInterestTaggedBalance,
 
             // Premium-specific errors (starting at 6610)
             6610 => MarginfiError::PremiumEntryInvalid,
@@ -834,6 +850,12 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Interest order errors (starting at 6900)
+            6900 => MarginfiError::OrderInterestNotNegative,
+            6901 => MarginfiError::OrderInterestCostExceedsCarry,
+            6902 => MarginfiError::OrderInterestInvalidConfig,
+            6903 => MarginfiError::OrderInterestBankNotWritable,
 
             _ => MarginfiError::InternalLogicError,
         }

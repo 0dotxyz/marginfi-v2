@@ -24,10 +24,10 @@ use marginfi_type_crate::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
         BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
-        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, OrderTagType, PriceBias,
+        ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -2256,7 +2256,8 @@ impl<'a> BankAccountWrapper<'a> {
                     liability_shares: I80F48::ZERO.into(),
                     premium_outstanding: I80F48::ZERO.into(),
                     last_update: Clock::get()?.unix_timestamp as u64,
-                    _padding: [0; 1],
+                    tag_type: OrderTagType::default() as u8,
+                    _padding: [0; 7],
                 };
 
                 Ok(Self {
@@ -2795,7 +2796,12 @@ impl<'a> BankAccountWrapper<'a> {
         // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
         // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
         let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
-            let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            // Taking the whole position burns all of its shares.
+            let shares = if asset_amount_decrease == current_asset_amount {
+                current_asset_shares
+            } else {
+                bank.get_asset_shares(asset_amount_decrease)?
+            };
             // If asset share value > 2^48, this prevents a 1-satoshi withdraw from trunctuating.
             check!(
                 shares > I80F48::ZERO,
@@ -3559,6 +3565,69 @@ mod test {
 
             let err = wrapper.withdraw(I80F48::ONE).unwrap_err();
             assert_eq!(err, MarginfiError::IllegalBalanceState.into());
+        }
+
+        /// A single ulp of asset shares on a bank whose share value is one ulp above one: the
+        /// amount converts back to zero shares, so the withdraw must burn the balance's own
+        /// share count.
+        #[test]
+        fn withdraw_of_the_entire_position_burns_every_share() {
+            let asset_shares = I80F48::DELTA;
+            let asset_share_value = I80F48::ONE + I80F48::DELTA * 2;
+            let (mut bank, mut balance) =
+                make_bank_and_balance(asset_share_value, I80F48::ONE, asset_shares, I80F48::ZERO);
+            let current_asset_amount = bank.get_asset_amount(asset_shares).unwrap();
+            assert_eq!(
+                bank.get_asset_shares(current_asset_amount).unwrap(),
+                I80F48::ZERO
+            );
+            let bank_total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.withdraw(current_asset_amount).unwrap();
+
+            assert_eq!(I80F48::from(balance.asset_shares), I80F48::ZERO);
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                bank_total_asset_shares_before - asset_shares
+            );
+        }
+
+        /// A liquidator's `withdraw_ignore_borrow_cap` that flips an asset position into a
+        /// liability burns the whole position; converting the amount back to shares would strand
+        /// one ulp.
+        #[test]
+        fn flipping_an_asset_position_into_a_liability_leaves_no_asset_dust() {
+            let asset_shares = I80F48::from_num(1_000_000) + I80F48::DELTA;
+            let asset_share_value = I80F48::ONE + I80F48::DELTA * 2;
+            let (mut bank, mut balance) =
+                make_bank_and_balance(asset_share_value, I80F48::ONE, asset_shares, I80F48::ZERO);
+            let current_asset_amount = bank.get_asset_amount(asset_shares).unwrap();
+            assert_eq!(
+                bank.get_asset_shares(current_asset_amount).unwrap(),
+                I80F48::from_num(1_000_000)
+            );
+            let borrow_amount = I80F48::from_num(250_000);
+            let bank_total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper
+                .withdraw_ignore_borrow_cap(current_asset_amount + borrow_amount)
+                .unwrap();
+
+            assert_eq!(I80F48::from(balance.asset_shares), I80F48::ZERO);
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                bank_total_asset_shares_before - asset_shares
+            );
+            assert_eq!(I80F48::from(balance.liability_shares), borrow_amount);
+            assert_eq!(I80F48::from(bank.total_liability_shares), borrow_amount);
         }
 
         /// `repay` on a bank with fractional `liability_share_value`. Choose
