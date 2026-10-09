@@ -1302,14 +1302,13 @@ pub fn get_health_components<'info>(
         heap_restore(heap_checkpoint);
     }
 
-    // Only complete if every balance priced cleanly, so a refresh can't be written from a pass
-    // that dropped a stale leg — flagged either by the health pass (`err_code`) or by the
-    // premium-price path itself (`unpriceable_leg`, for legs health soft-zeroes without
-    // inspecting the oracle, e.g. ReduceOnly under Initial).
-    if first_err_index == NO_INDEX_FOUND {
-        if let Some(scratch) = premium_scratch.as_mut() {
-            scratch.complete = !scratch.unpriceable_leg;
-        }
+    // Only complete if every premium-relevant leg priced cleanly, so a refresh can't be written
+    // from a pass that dropped a stale leg. `unpriceable_leg` covers exactly those legs: both
+    // Operational stale-skips (which also set `err_code`) and ReduceOnly/Paused soft-zeroes
+    // (which don't). Legs the weighting ignores (isolated, zero-weight) can't taint the pass,
+    // and neither can any leg under an empty matrix, where every rate is 0 regardless.
+    if let Some(scratch) = premium_scratch.as_mut() {
+        scratch.complete = !scratch.unpriceable_leg;
     }
 
     // Update health cache totals
@@ -1922,11 +1921,13 @@ fn calc_weighted_asset_value_standalone(
                 )
             ) {
                 debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
+                // Premium weighting only: health never prices this leg, so a wide confidence
+                // band must not revert the instruction. The bias still haircuts by the
+                // interval, capped at 5% of price.
                 let premium_price = match (need_premium_price, price_adapter_result) {
-                    (true, Ok(feed)) => feed.get_price_of_type(
+                    (true, Ok(feed)) => feed.get_price_of_type_ignore_conf(
                         requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
-                        bank.config.oracle_max_confidence,
                     )?,
                     // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
                     _ => I80F48::ZERO,
@@ -1969,11 +1970,11 @@ fn calc_weighted_asset_value_standalone(
                 && matches!(requirement_type, RequirementType::Initial)
             {
                 debug!("Bank without borrow power is worth 0 for Initial margin");
+                // Same as the Paused/ReduceOnly exit: premium-only read, confidence ignored.
                 let premium_price = if need_premium_price {
-                    price_feed.get_price_of_type(
+                    price_feed.get_price_of_type_ignore_conf(
                         requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
-                        bank.config.oracle_max_confidence,
                     )?
                 } else {
                     I80F48::ZERO

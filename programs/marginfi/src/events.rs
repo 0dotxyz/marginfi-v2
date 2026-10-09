@@ -222,13 +222,13 @@ pub struct LendingAccountPremiumSettledEvent {
     pub header: AccountEventHeader,
     pub bank: Pubkey,
     pub mint: Pubkey,
-    /// Premium moved into `bank.collected_premium_outstanding` with this repayment (tokens
-    /// arrived in the liquidity vault), in native token units.
+    /// Vault-backed premium moved into `bank.collected_premium_outstanding` by a repayment
+    /// or seized-collateral liquidation credit, in native token units.
     pub premium_settled: f64,
     /// Premium receivable written off with no tokens (tokenless risk-admin repayment), in
     /// native token units.
     pub premium_written_off: f64,
-    /// Premium receivable still outstanding on the balance after this repayment.
+    /// Premium receivable still outstanding on the balance after this settlement.
     pub premium_outstanding_remaining: f64,
 }
 

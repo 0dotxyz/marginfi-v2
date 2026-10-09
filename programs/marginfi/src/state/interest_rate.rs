@@ -714,13 +714,13 @@ mod tests {
     /// must share a basis. The native lender APR is `base_rate(util) * util`; each integration's is
     /// `borrow_rate(util) * util * (1 - cut)`. Configure all three with the SAME linear curve
     /// (slope `m`) and a zero protocol cut: every venue must then yield the same `m * util^2`,
-    /// proving the cross-venue comparison is apples-to-apples. Kamino denominates against a
-    /// slot-year, so its figure carries the wall-clock scalar for the pacing it is priced at.
+    /// proving the cross-venue comparison is apples-to-apples. Kamino's `Legacy` basis denominates
+    /// against a slot-year, so its figure carries the wall-clock scalar for its pacing.
     #[test]
     fn integration_supply_rates_share_basis_with_native_lending_rate() {
         use drift_mocks::state::drift_deposit_rate_from_parts;
         use kamino_mocks::state::{
-            kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND,
+            kamino_supply_apr_from_parts, CurvePoint, InterestRateBasis, KLEND_SLOTS_PER_SECOND,
         };
 
         let m = 0.40_f64; // 40% APR at 100% utilization
@@ -763,6 +763,7 @@ mod tests {
                 I80F48::from_num(1000.0 * u),
                 &k_points,
                 0,
+                InterestRateBasis::Legacy,
                 I80F48::from_num(pace),
             )
             .unwrap()

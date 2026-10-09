@@ -509,8 +509,9 @@ Changed:
 New:
 
 - Premium: `LendingPoolGroupPremiumConfigureEvent`, `LendingPoolBankPremiumConfigureEvent`,
-  `LendingPoolPremiumFeesCollectedEvent`, `LendingAccountPremiumSettledEvent` (emitted on repay
-  when premium was paid or written off).
+  `LendingPoolPremiumFeesCollectedEvent`, `LendingAccountPremiumSettledEvent` (emitted when a
+  repayment pays or writes off premium, or when a seized-collateral liquidation credit settles
+  premium; it is omitted when no premium is paid or written off).
 - Rebalance: `MarginfiAccountPlaceRebalanceOrderEvent`, `MarginfiAccountUpdateRebalanceOrderEvent`,
   `MarginfiAccountCloseRebalanceOrderEvent`, `KeeperCloseRebalanceOrderEvent`,
   `RebalanceFeePoolTopUpEvent`, `RebalanceFeePoolWithdrawEvent`, `RebalanceExecutedEvent`,
