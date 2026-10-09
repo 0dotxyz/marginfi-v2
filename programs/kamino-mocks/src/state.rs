@@ -1,6 +1,7 @@
 use crate::{math_error, KaminoMocksError};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
+use marginfi_type_crate::constants::SECONDS_PER_YEAR;
 use marginfi_type_crate::types::price::{
     collateral_to_liquidity_from_scaled, convert_decimals as shared_convert_decimals,
     liquidity_to_collateral_from_scaled, scale_supplies,
@@ -46,7 +47,9 @@ pub struct ReserveConfig {
     pub block_ctoken_usage: u8,
     pub early_repay_remaining_interest_pct: u8,
     pub emergency_mode: u8,
-    pub _padding1: [u8; 4],
+    /// klend `InterestRateBasis` as its raw byte. Read through [`InterestRateBasis::from_u8`].
+    pub interest_rate_basis: u8,
+    pub _padding1: [u8; 3],
     pub protocol_order_execution_fee_pct: u8,
     /// Percentage of interest taken by the protocol (0..100). Read as `from_percent(pct)`.
     pub protocol_take_rate_pct: u8,
@@ -61,8 +64,9 @@ pub struct ReserveConfig {
     pub _padding5: [u8; 128],
     pub _padding6: [u8; 96],
     pub _padding7: [u8; 24],
-    /// Reward tokens emitted per slot, native mint units.
-    pub rewards_amount_per_slot: u64,
+    /// Reward tokens emitted per accrual unit (a slot or a second, by `interest_rate_basis`),
+    /// native mint units.
+    pub rewards_amount_per_accrual_unit: u64,
     pub _padding8: [u8; 8],
 }
 
@@ -311,10 +315,10 @@ impl MinimalReserve {
     ///   3. read the exchange rate -> happens during marginfi's post-operation health check
     ///
     /// At step 3 the reserve has `stale = true` but `slot == current`. The exchange rate does not
-    /// change within a slot once the reserve has been refreshed (interest accrues per slot, and a
-    /// same-slot deposit/withdraw does not move the rate), so "refreshed in this slot" is the only
-    /// property we need. If this function also failed on the `stale` flag, step 3 would
-    /// always fail
+    /// change within a slot once the reserve has been refreshed (interest accrues per slot or per
+    /// second, neither of which advances within a slot, and a same-slot deposit/withdraw does not
+    /// move the rate), so "refreshed in this slot" is the only property we need. If this function
+    /// also failed on the `stale` flag, step 3 would always fail
     pub fn is_stale(&self, current_slot: u64) -> bool {
         // Stale once the reserve's recorded slot falls behind the current slot; a `refresh_reserve`
         // in the same slot brings it current. Keepers reading a venue rate must refresh in-tx.
@@ -341,8 +345,8 @@ impl BorrowRateCurve {
 impl MinimalReserve {
     /// Net lender supply APR (I80F48, 1.0 == 100%): `borrow_rate(util) * util * (1 - protocol_take_rate)`
     /// with `util = borrowed / total_supply`. The caller must ensure the reserve was refreshed this
-    /// slot (see [`MinimalReserve::is_stale`]). Returns `None` on zero supply or overflow. Mirrors
-    /// klend's net-supply derivation:
+    /// slot (see [`MinimalReserve::is_stale`]). Returns `None` on zero supply, overflow, or an
+    /// interest rate basis klend does not define. Mirrors klend's net-supply derivation:
     /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L559
     pub fn supply_apr(&self, slots_per_second: I80F48) -> Option<I80F48> {
         self.supply_apr_at(I80F48::ZERO, slots_per_second)
@@ -356,6 +360,7 @@ impl MinimalReserve {
             self.borrowed_amount_sf(),
             &self.config.borrow_rate_curve.points,
             self.config.protocol_take_rate_pct,
+            InterestRateBasis::from_u8(self.config.interest_rate_basis)?,
             slots_per_second,
         )
     }
@@ -377,10 +382,11 @@ impl MinimalReserve {
     ) -> Option<I80F48> {
         kamino_rewards_apr_from_parts(
             self.calculate_total_supply_i80f48().checked_add(extra)?,
-            self.config.rewards_amount_per_slot,
+            self.config.rewards_amount_per_accrual_unit,
             self.rewards_amount_available,
             self.mint_total_supply,
             max_apr_bps,
+            InterestRateBasis::from_u8(self.config.interest_rate_basis)?,
             slots_per_second,
         )
     }
@@ -410,29 +416,62 @@ const KAMINO_SLOTS_PER_YEAR: u128 = 63_072_000;
 /// The slots-per-second [`KAMINO_SLOTS_PER_YEAR`] is built on.
 pub const KLEND_SLOTS_PER_SECOND: u8 = 2;
 
-/// Scales a klend rate from its slot-denominated year to a wall-clock year: klend divides by
-/// [`KAMINO_SLOTS_PER_YEAR`] but accrues over real elapsed slots.
-fn wall_clock_scalar(slots_per_second: I80F48) -> Option<I80F48> {
-    slots_per_second.checked_div(I80F48::from_num(KLEND_SLOTS_PER_SECOND))
+/// Mirrors klend's `InterestRateBasis`: the unit a reserve accrues interest and rewards over.
+/// https://github.com/Kamino-Finance/klend/blob/release/v1.25.0/programs/klend/src/state/reserve.rs#L168-L175
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterestRateBasis {
+    /// Per slot, against a year of [`KAMINO_SLOTS_PER_YEAR`] slots.
+    Legacy,
+    /// Per second, against a wall-clock year.
+    TrueApr,
+}
+
+impl InterestRateBasis {
+    /// `None` for a value klend does not define.
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Legacy),
+            1 => Some(Self::TrueApr),
+            _ => None,
+        }
+    }
+
+    /// Accrual units in the year klend quotes a rate over.
+    fn units_per_year(self) -> I80F48 {
+        match self {
+            Self::Legacy => I80F48::from_num(KAMINO_SLOTS_PER_YEAR),
+            Self::TrueApr => SECONDS_PER_YEAR,
+        }
+    }
+
+    /// Scales a klend rate to the wall-clock rate a depositor realizes. `Legacy` accrues over real
+    /// elapsed slots, so its rate scales with chain pacing; `TrueApr` pays its rate as quoted.
+    fn wall_clock_scalar(self, slots_per_second: I80F48) -> Option<I80F48> {
+        match self {
+            Self::Legacy => slots_per_second.checked_div(I80F48::from_num(KLEND_SLOTS_PER_SECOND)),
+            Self::TrueApr => Some(I80F48::ONE),
+        }
+    }
 }
 
 /// Pure reward-APR computation from reserve parts, decoupled from account loading for unit testing
-/// and off-chain reuse. Mirrors `distribute_rewards`: the per-slot emission, capped by the market's
-/// APR ceiling and by the remaining reward balance, annualized over the supply base. Returns `None`
-/// on arithmetic failure, and zero when rewards are unconfigured.
+/// and off-chain reuse. Mirrors `distribute_rewards`: the emission per accrual unit, capped by the
+/// market's APR ceiling and by the remaining reward balance, annualized over the supply base.
+/// Returns `None` on arithmetic failure, and zero when rewards are unconfigured.
 ///
-/// The cap is kept fractional where klend floors it against elapsed slots, so this reads slightly
-/// high for a reserve refreshed every slot.
+/// The cap is kept fractional where klend floors it against elapsed units, so this reads slightly
+/// high for a reserve refreshed every unit.
 pub fn kamino_rewards_apr_from_parts(
     total_supply: I80F48,
-    rewards_amount_per_slot: u64,
+    rewards_amount_per_accrual_unit: u64,
     rewards_amount_available: u64,
     mint_total_supply: u64,
     max_apr_bps: u16,
+    basis: InterestRateBasis,
     slots_per_second: I80F48,
 ) -> Option<I80F48> {
     if max_apr_bps == 0
-        || rewards_amount_per_slot == 0
+        || rewards_amount_per_accrual_unit == 0
         || rewards_amount_available == 0
         || mint_total_supply == 0
         || total_supply <= I80F48::ZERO
@@ -440,29 +479,30 @@ pub fn kamino_rewards_apr_from_parts(
         return Some(I80F48::ZERO);
     }
 
-    let slots_per_year = I80F48::from_num(KAMINO_SLOTS_PER_YEAR);
-    let cap_per_slot = total_supply
+    let units_per_year = basis.units_per_year();
+    let cap_per_unit = total_supply
         .checked_mul(I80F48::from_num(max_apr_bps))?
-        .checked_div(I80F48::from_num(10_000u32).checked_mul(slots_per_year)?)?;
-    let per_slot = I80F48::from_num(rewards_amount_per_slot)
-        .min(cap_per_slot)
+        .checked_div(I80F48::from_num(10_000u32).checked_mul(units_per_year)?)?;
+    let per_unit = I80F48::from_num(rewards_amount_per_accrual_unit)
+        .min(cap_per_unit)
         .min(I80F48::from_num(rewards_amount_available));
-    per_slot
-        .checked_mul(slots_per_year)?
+    per_unit
+        .checked_mul(units_per_year)?
         .checked_div(total_supply)?
-        .checked_mul(wall_clock_scalar(slots_per_second)?)
+        .checked_mul(basis.wall_clock_scalar(slots_per_second)?)
 }
 
 /// Pure net-supply-APR computation from reserve parts, decoupled from account loading for unit
 /// testing and off-chain reuse. `total_supply`/`borrowed` are dimensionless I80F48 token units;
-/// `take_rate_pct` is 0..100; `slots_per_second` is real chain pacing, which converts klend's
-/// slot-denominated year into the wall-clock rate a depositor realizes. Returns `None` on zero
-/// supply or arithmetic overflow.
+/// `take_rate_pct` is 0..100; `slots_per_second` is real chain pacing, which a `Legacy` reserve's
+/// rate scales with (see [`InterestRateBasis`]). Returns `None` on zero supply or arithmetic
+/// overflow.
 pub fn kamino_supply_apr_from_parts(
     total_supply: I80F48,
     borrowed: I80F48,
     points: &[CurvePoint; 11],
     take_rate_pct: u8,
+    basis: InterestRateBasis,
     slots_per_second: I80F48,
 ) -> Option<I80F48> {
     if total_supply <= I80F48::ZERO {
@@ -475,7 +515,7 @@ pub fn kamino_supply_apr_from_parts(
     borrow_rate
         .checked_mul(utilization)?
         .checked_mul(I80F48::ONE - protocol_take_rate)?
-        .checked_mul(wall_clock_scalar(slots_per_second)?)
+        .checked_mul(basis.wall_clock_scalar(slots_per_second)?)
 }
 
 /// klend `Fraction::from_bps`: bps / 10_000.
@@ -679,6 +719,7 @@ mod capacity_tests {
 
 #[cfg(test)]
 mod rate_tests {
+    use super::InterestRateBasis::{Legacy, TrueApr};
     use super::*;
 
     /// Rewards are annualized from the per-slot emission and bounded by both the market's APR cap
@@ -687,21 +728,24 @@ mod rate_tests {
     fn rewards_apr_is_bounded_by_cap_and_balance() {
         let supply = I80F48::from_num(63_072_000u64); // 1 token/slot == 100% APR on this base
         assert_eq!(
-            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 20_000, klend_pace()).unwrap(),
+            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 20_000, Legacy, klend_pace())
+                .unwrap(),
             I80F48::ONE
         );
         // The market cap binds first: 625 bps == 6.25%.
         assert_eq!(
-            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 625, klend_pace()).unwrap(),
+            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 625, Legacy, klend_pace())
+                .unwrap(),
             I80F48::from_num(0.0625)
         );
         // Unconfigured rewards contribute nothing.
         assert_eq!(
-            kamino_rewards_apr_from_parts(supply, 0, u64::MAX, 1, 20_000, klend_pace()).unwrap(),
+            kamino_rewards_apr_from_parts(supply, 0, u64::MAX, 1, 20_000, Legacy, klend_pace())
+                .unwrap(),
             I80F48::ZERO
         );
         assert_eq!(
-            kamino_rewards_apr_from_parts(supply, 1, 0, 1, 20_000, klend_pace()).unwrap(),
+            kamino_rewards_apr_from_parts(supply, 1, 0, 1, 20_000, Legacy, klend_pace()).unwrap(),
             I80F48::ZERO
         );
     }
@@ -759,6 +803,7 @@ mod rate_tests {
             I80F48::from_num(500),
             &pts,
             25,
+            Legacy,
             klend_pace(),
         );
         assert_eq!(r.unwrap(), I80F48::from_num(0.09375));
@@ -772,13 +817,14 @@ mod rate_tests {
             I80F48::from_num(500),
             &pts,
             10,
+            Legacy,
             klend_pace()
         )
         .is_none());
     }
 
-    /// klend prices per slot against a year fixed at two slots per second but accrues over real
-    /// slots, so both legs scale by actual pacing. At 2.5 slots/s a depositor realizes 1.25x.
+    /// A `Legacy` reserve prices per slot against a year fixed at two slots per second but accrues
+    /// over real slots, so both legs scale by actual pacing: 1.25x at 2.5 slots/s.
     #[test]
     fn rates_scale_with_real_chain_pacing() {
         let pace = I80F48::from_num(2.5);
@@ -786,19 +832,45 @@ mod rate_tests {
         let pts = linear_curve(5000);
         let (supply, borrowed) = (I80F48::from_num(1000), I80F48::from_num(500));
         assert_eq!(
-            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, klend_pace()).unwrap(),
+            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, Legacy, klend_pace()).unwrap(),
             I80F48::from_num(0.125)
         );
         assert_eq!(
-            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, pace).unwrap(),
+            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, Legacy, pace).unwrap(),
             I80F48::from_num(0.15625)
         );
         // 1 token/slot over a 63_072_000 base is 100% at klend's pacing.
         let base = I80F48::from_num(63_072_000u64);
         assert_eq!(
-            kamino_rewards_apr_from_parts(base, 1, u64::MAX, 1, 20_000, pace).unwrap(),
+            kamino_rewards_apr_from_parts(base, 1, u64::MAX, 1, 20_000, Legacy, pace).unwrap(),
             I80F48::from_num(1.25)
         );
+    }
+
+    /// A `TrueApr` reserve prices per second against a wall-clock year, so both legs pay as quoted
+    /// at any chain pacing.
+    #[test]
+    fn true_apr_rates_ignore_chain_pacing() {
+        // util 0.5 -> borrow 0.25; supply = 0.25 * 0.5 = 0.125.
+        let pts = linear_curve(5000);
+        let (supply, borrowed) = (I80F48::from_num(1000), I80F48::from_num(500));
+        // 1 token/second over a 31_536_000 base is 100%.
+        let base = I80F48::from_num(31_536_000u64);
+        for pace in [klend_pace(), I80F48::from_num(2.5)] {
+            assert_eq!(
+                kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, TrueApr, pace).unwrap(),
+                I80F48::from_num(0.125)
+            );
+            assert_eq!(
+                kamino_rewards_apr_from_parts(base, 1, u64::MAX, 1, 20_000, TrueApr, pace).unwrap(),
+                I80F48::ONE
+            );
+            // The market cap binds first: 625 bps == 6.25%.
+            assert_eq!(
+                kamino_rewards_apr_from_parts(base, 1, u64::MAX, 1, 625, TrueApr, pace).unwrap(),
+                I80F48::from_num(0.0625)
+            );
+        }
     }
 
     /// `supply_apr()` decodes the U68F60 `borrowed_amount_sf` and nets the three fee balances out of
@@ -817,5 +889,34 @@ mod rate_tests {
         r.config.protocol_take_rate_pct = 25;
         r.config.borrow_rate_curve.points = linear_curve(5000);
         assert_eq!(r.supply_apr(klend_pace()), Some(I80F48::from_num(0.09375)));
+    }
+
+    /// `supply_apr()` and `rewards_apr()` price by the reserve's `interest_rate_basis` byte, and a
+    /// value klend does not define prices nothing.
+    #[test]
+    fn rate_methods_decode_the_interest_rate_basis() {
+        use bytemuck::Zeroable;
+        let pace = I80F48::from_num(2.5);
+        // Supply of 31_536_000, half borrowed: util 0.5 -> borrow 0.25, supply 0.125 as quoted.
+        // 1 token per unit on that base is 100% over a second-year and 200% over a slot-year.
+        let mut r = MinimalReserve::zeroed();
+        r.available_amount = 15_768_000;
+        r.borrowed_amount_sf = (15_768_000u128 << 60).to_le_bytes();
+        r.mint_total_supply = 1;
+        r.rewards_amount_available = u64::MAX;
+        r.config.rewards_amount_per_accrual_unit = 1;
+        r.config.borrow_rate_curve.points = linear_curve(5000);
+
+        // Legacy, the zeroed byte: both legs carry the 1.25x wall-clock scalar.
+        assert_eq!(r.supply_apr(pace), Some(I80F48::from_num(0.15625)));
+        assert_eq!(r.rewards_apr(20_000, pace), Some(I80F48::from_num(2.5)));
+
+        r.config.interest_rate_basis = 1; // TrueApr
+        assert_eq!(r.supply_apr(pace), Some(I80F48::from_num(0.125)));
+        assert_eq!(r.rewards_apr(20_000, pace), Some(I80F48::ONE));
+
+        r.config.interest_rate_basis = 2;
+        assert_eq!(r.supply_apr(pace), None);
+        assert_eq!(r.rewards_apr(20_000, pace), None);
     }
 }

@@ -524,6 +524,7 @@ mod tests {
     fn minimal_reserve_field_offsets_match_kamino() {
         assert_eq!(std::mem::offset_of!(MinimalReserve, config), 4848);
         assert_eq!(std::mem::offset_of!(ReserveConfig, emergency_mode), 8);
+        assert_eq!(std::mem::offset_of!(ReserveConfig, interest_rate_basis), 9);
         assert_eq!(std::mem::offset_of!(MinimalReserve, price_status), 17);
         assert_eq!(std::mem::offset_of!(MinimalReserve, lending_market), 24);
     }
