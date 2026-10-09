@@ -973,3 +973,29 @@ async fn close_legs_are_bound_to_the_order() -> anyhow::Result<()> {
     assert_custom_error!(res.unwrap_err(), MarginfiError::ForbiddenIx);
     Ok(())
 }
+
+/// Both ends finish on a passing health check, which clears the account's liquidation tag as a
+/// direct borrow or withdraw does.
+#[tokio::test]
+async fn a_fill_clears_the_liquidation_tag() -> anyhow::Result<()> {
+    let mut fx = setup(Params {
+        amount: 100.0,
+        ..Default::default()
+    })
+    .await?;
+    fx.advance(WINDOW).await;
+    fx.fill(100.0).await?;
+    fx.tag_for_liquidation(&[fx.sol()]).await?;
+    assert_eq!(fx.account_f.load().await.liquidation_tagged_at, fx.now);
+    fx.update(Some(usdc(250.0)), None).await?;
+    fx.fill(150.0).await?;
+    assert_eq!(fx.account_f.load().await.liquidation_tagged_at, 0);
+
+    let mut fx = setup(round_trip()).await?;
+    let _driver = fx.open_then_spike().await?;
+    fx.tag_for_liquidation(&[fx.sol(), fx.dst()]).await?;
+    assert_eq!(fx.account_f.load().await.liquidation_tagged_at, fx.now);
+    fx.close(1_000.0, false).await?;
+    assert_eq!(fx.account_f.load().await.liquidation_tagged_at, 0);
+    Ok(())
+}

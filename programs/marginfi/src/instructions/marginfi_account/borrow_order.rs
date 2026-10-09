@@ -37,7 +37,7 @@ use crate::{
             remaining_borrow_capacity, BorrowDestination, BorrowOrderImpl, BorrowOrderRecordImpl,
         },
         marginfi_account::{
-            check_account_init_health, check_account_maint_health, run_cb_price_gate,
+            check_account_init_health_and_clear_tag, check_account_maint_health, run_cb_price_gate,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
@@ -700,7 +700,8 @@ fn end_sandwich<'info>(
     )
 }
 
-/// Health at `requirement` plus the premium refresh; out of line for the end instruction's stack.
+/// Health at `requirement`, which clears the liquidation tag, plus the premium refresh; out of line
+/// for the end instruction's stack.
 #[inline(never)]
 fn check_fill_health_and_refresh_premium<'info>(
     account: &mut MarginfiAccount,
@@ -714,7 +715,7 @@ fn check_fill_health_and_refresh_premium<'info>(
     let mut premium_scratch = PremiumScratch::default();
     match requirement {
         RequirementType::Initial => {
-            check_account_init_health(
+            check_account_init_health_and_clear_tag(
                 account,
                 group,
                 health_obs,
@@ -726,13 +727,16 @@ fn check_fill_health_and_refresh_premium<'info>(
                 MarginfiError::PremiumSnapshotUnavailable
             );
         }
-        _ => check_account_maint_health(
-            account,
-            group,
-            health_obs,
-            &mut Some(&mut health_cache),
-            &mut Some(&mut premium_scratch),
-        )?,
+        _ => {
+            check_account_maint_health(
+                account,
+                group,
+                health_obs,
+                &mut Some(&mut health_cache),
+                &mut Some(&mut premium_scratch),
+            )?;
+            account.liquidation_tagged_at = 0;
+        }
     }
     account.update_premium_snapshots(group, &premium_scratch, now as u64, false)?;
     health_cache.program_version = PROGRAM_VERSION;

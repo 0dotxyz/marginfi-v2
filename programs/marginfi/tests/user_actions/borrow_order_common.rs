@@ -11,7 +11,9 @@ use fixtures::test::{DEFAULT_USDC_TEST_BANK_CONFIG, PYTH_SOL_FEED, PYTH_USDC_FEE
 use fixtures::{native, prelude::*};
 use marginfi::state::{bank::BankImpl, rate::borrow_rate_at};
 use marginfi_type_crate::constants::{BORROW_ORDER_RECORD_SEED, INTEREST_MIN_WINDOW_SECONDS};
-use marginfi_type_crate::types::{milli_to_u32, InterestRateConfigOpt, PremiumEntry};
+use marginfi_type_crate::types::{
+    milli_to_u32, BankConfigOpt, InterestRateConfigOpt, PremiumEntry,
+};
 use solana_program_test::BanksClientError;
 use solana_sdk::{
     instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer as _,
@@ -598,6 +600,43 @@ impl BorrowOrderFixture {
             .try_bank_borrow(driver_usdc.key, usdc, FLOAT * fraction)
             .await?;
         Ok((driver, driver_usdc.key))
+    }
+
+    /// Tag the account for liquidation by leaving `collateral` nearly weightless for the one
+    /// instruction, so it is healthy again once the weights are back.
+    pub async fn tag_for_liquidation(&self, collateral: &[&BankFixture]) -> anyhow::Result<()> {
+        let group_f = &self.test_f.marginfi_group;
+        let weightless = I80F48::from_num(0.01).into();
+        let mut weights = Vec::with_capacity(collateral.len());
+        for bank in collateral {
+            let config = bank.load().await.config;
+            weights.push((config.asset_weight_init, config.asset_weight_maint));
+            group_f
+                .try_lending_pool_configure_bank(
+                    bank,
+                    BankConfigOpt {
+                        asset_weight_init: Some(weightless),
+                        asset_weight_maint: Some(weightless),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+        }
+        let tag_ix = self.account_f.make_tag_liquidation_record_ix().await;
+        self.process(&[tag_ix], &self.payer()).await?;
+        for (bank, (init, maint)) in collateral.iter().zip(weights) {
+            group_f
+                .try_lending_pool_configure_bank(
+                    bank,
+                    BankConfigOpt {
+                        asset_weight_init: Some(init),
+                        asset_weight_maint: Some(maint),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     /// Open the round trip, then hold 90% utilization for a window (252% on the test curve).
