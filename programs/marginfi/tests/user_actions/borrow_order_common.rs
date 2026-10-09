@@ -240,7 +240,15 @@ impl BorrowOrderFixture {
         ixs: &[Instruction],
         signer: &Keypair,
     ) -> Result<(), BanksClientError> {
-        let blockhash = self.test_f.get_latest_blockhash().await;
+        // A retry of a rejected fill builds a byte-identical message; a forced-fresh blockhash keeps
+        // its signature distinct so the banks server doesn't dedup it as a replay.
+        let blockhash = self
+            .test_f
+            .context
+            .borrow_mut()
+            .get_new_latest_blockhash()
+            .await
+            .unwrap();
         let tx =
             Transaction::new_signed_with_payer(ixs, Some(&signer.pubkey()), &[signer], blockhash);
         self.test_f.banks_client().process_transaction(tx).await
