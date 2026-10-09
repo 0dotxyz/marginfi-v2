@@ -33,8 +33,8 @@ use crate::{
     state::{
         bank::BankImpl,
         borrow_order::{
-            available_liquidity, realized_borrow_apr, record_native_reading,
-            remaining_borrow_capacity, BorrowDestination, BorrowOrderImpl, BorrowOrderRecordImpl,
+            available_liquidity, record_native_reading, remaining_borrow_capacity,
+            BorrowDestination, BorrowOrderImpl, BorrowOrderRecordImpl,
         },
         marginfi_account::{
             check_account_init_health_and_clear_tag, check_account_maint_health, run_cb_price_gate,
@@ -42,7 +42,7 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
-        rate::{borrow_rate_at, debt_index_of},
+        rate::{borrow_rate_at, debt_index_of, realized_borrow_apr},
     },
 };
 use anchor_lang::prelude::*;

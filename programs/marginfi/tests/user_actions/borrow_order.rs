@@ -41,7 +41,7 @@ async fn a_fill_before_the_window_has_no_measurement() -> anyhow::Result<()> {
 
     fx.advance(WINDOW - 1).await;
     let res = fx.fill(100.0).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::BorrowOrderHistoryTooShort);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
     Ok(())
 }
 
