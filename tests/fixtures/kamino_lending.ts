@@ -8,7 +8,7 @@ export type KaminoLending = {
   "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
   "metadata": {
     "name": "kaminoLending",
-    "version": "1.14.0",
+    "version": "1.25.0",
     "spec": "0.1.0"
   },
   "instructions": [
@@ -42,6 +42,9 @@ export type KaminoLending = {
         },
         {
           "name": "rent"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -76,6 +79,9 @@ export type KaminoLending = {
         {
           "name": "lendingMarket",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -114,6 +120,9 @@ export type KaminoLending = {
         {
           "name": "lendingMarket",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": []
@@ -180,9 +189,54 @@ export type KaminoLending = {
         },
         {
           "name": "systemProgram"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": []
+    },
+    {
+      "name": "cloneReserveConfig",
+      "discriminator": [
+        244,
+        5,
+        198,
+        113,
+        17,
+        10,
+        71,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "targetLendingMarket"
+        },
+        {
+          "name": "sourceReserve"
+        },
+        {
+          "name": "targetReserve",
+          "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": [
+        {
+          "name": "customizations",
+          "type": {
+            "defined": {
+              "name": "reserveConfigCustomizationArgs"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "initFarmsForReserve",
@@ -230,6 +284,9 @@ export type KaminoLending = {
         },
         {
           "name": "systemProgram"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -265,6 +322,9 @@ export type KaminoLending = {
         {
           "name": "reserve",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -364,6 +424,9 @@ export type KaminoLending = {
         },
         {
           "name": "tokenProgram"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -413,6 +476,52 @@ export type KaminoLending = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "topupReserveRewards",
+      "discriminator": [
+        63,
+        255,
+        130,
+        211,
+        110,
+        216,
+        88,
+        173
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "lendingMarket"
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserveLiquidityMint"
+        },
+        {
+          "name": "reserveLiquiditySupply",
+          "writable": true
+        },
+        {
+          "name": "sourceLiquidity",
+          "writable": true
+        },
+        {
+          "name": "liquidityTokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "socializeLoss",
@@ -541,6 +650,9 @@ export type KaminoLending = {
         },
         {
           "name": "lendingMarket"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -608,6 +720,30 @@ export type KaminoLending = {
           "type": "bool"
         }
       ]
+    },
+    {
+      "name": "calculateCtokenExchangeRate",
+      "discriminator": [
+        32,
+        253,
+        220,
+        13,
+        19,
+        165,
+        131,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "reserve"
+        }
+      ],
+      "args": [],
+      "returns": {
+        "defined": {
+          "name": "exchangeRateWithDecimals"
+        }
+      }
     },
     {
       "name": "depositReserveLiquidity",
@@ -2804,47 +2940,23 @@ export type KaminoLending = {
       "accounts": [
         {
           "name": "owner",
-          "docs": [
-            "The [Self::obligation]'s owner."
-          ],
           "signer": true
         },
         {
           "name": "obligation",
-          "docs": [
-            "The obligation to set the [BorrowOrder] on."
-          ],
           "writable": true
         },
         {
-          "name": "lendingMarket",
-          "docs": [
-            "The [Self::obligation]'s market - needed to validate feature flags and minimum order value."
-          ]
+          "name": "lendingMarket"
         },
         {
-          "name": "reserve",
-          "docs": [
-            "The reserve matching the [Self::debt_liquidity_mint] - needed for the minimum order value",
-            "check (and refreshed internally). On cancellation, this account is ignored (but still must",
-            "belong to the same market)."
-          ]
+          "name": "reserve"
         },
         {
-          "name": "filledDebtDestination",
-          "docs": [
-            "The [BorrowOrder::filled_debt_destination] to set on order creation. Not editable on order",
-            "updates.",
-            "Ignored when cancelling the order."
-          ]
+          "name": "filledDebtDestination"
         },
         {
-          "name": "debtLiquidityMint",
-          "docs": [
-            "The [BorrowOrder::debt_liquidity_mint] to set on order creation. Not editable on order",
-            "updates.",
-            "Ignored when cancelling the order."
-          ]
+          "name": "debtLiquidityMint"
         },
         {
           "name": "instructionSysvarAccount"
@@ -2872,6 +2984,206 @@ export type KaminoLending = {
       ]
     },
     {
+      "name": "setBorrowOrderV2",
+      "discriminator": [
+        87,
+        255,
+        30,
+        4,
+        156,
+        230,
+        167,
+        126
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "lendingMarket"
+        },
+        {
+          "name": "reserve"
+        },
+        {
+          "name": "filledDebtDestination"
+        },
+        {
+          "name": "debtLiquidityMint"
+        },
+        {
+          "name": "instructionSysvarAccount"
+        },
+        {
+          "name": "eventAuthority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "orderIdx",
+          "type": "u8"
+        },
+        {
+          "name": "orderConfig",
+          "type": {
+            "defined": {
+              "name": "borrowOrderConfigArgs"
+            }
+          }
+        },
+        {
+          "name": "minExpectedCurrentRemainingDebtAmount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "updateObligationConfig",
+      "discriminator": [
+        82,
+        152,
+        213,
+        69,
+        250,
+        0,
+        157,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "borrowReserve",
+          "optional": true
+        },
+        {
+          "name": "depositReserve",
+          "optional": true
+        },
+        {
+          "name": "lendingMarket"
+        }
+      ],
+      "args": [
+        {
+          "name": "mode",
+          "type": {
+            "defined": {
+              "name": "updateObligationConfigMode"
+            }
+          }
+        },
+        {
+          "name": "value",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "rolloverFixedTermBorrow",
+      "discriminator": [
+        85,
+        30,
+        155,
+        225,
+        224,
+        186,
+        141,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "rolloverAccounts",
+          "accounts": [
+            {
+              "name": "payer",
+              "signer": true
+            },
+            {
+              "name": "obligation",
+              "writable": true
+            },
+            {
+              "name": "lendingMarket"
+            },
+            {
+              "name": "lendingMarketAuthority"
+            },
+            {
+              "name": "sourceBorrowReserve",
+              "writable": true
+            },
+            {
+              "name": "targetBorrowReserve",
+              "writable": true
+            },
+            {
+              "name": "liquidityMint"
+            },
+            {
+              "name": "sourceBorrowReserveLiquidity",
+              "writable": true
+            },
+            {
+              "name": "targetBorrowReserveLiquidity",
+              "writable": true
+            },
+            {
+              "name": "tokenProgram"
+            }
+          ]
+        },
+        {
+          "name": "sourceFarmsAccounts",
+          "accounts": [
+            {
+              "name": "obligationFarmUserState",
+              "writable": true,
+              "optional": true
+            },
+            {
+              "name": "reserveFarmState",
+              "writable": true,
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "targetFarmsAccounts",
+          "accounts": [
+            {
+              "name": "obligationFarmUserState",
+              "writable": true,
+              "optional": true
+            },
+            {
+              "name": "reserveFarmState",
+              "writable": true,
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "farmsProgram"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "fillBorrowOrder",
       "discriminator": [
         102,
@@ -2893,77 +3205,40 @@ export type KaminoLending = {
             },
             {
               "name": "obligation",
-              "docs": [
-                "The obligation with a [BorrowOrder]."
-              ],
               "writable": true
             },
             {
-              "name": "lendingMarket",
-              "docs": [
-                "The [Self::obligation]'s market - needed for borrowing-related configuration."
-              ]
+              "name": "lendingMarket"
             },
             {
-              "name": "lendingMarketAuthority",
-              "docs": [
-                "The [Self::lending_market]'s authority, needed to transfer the newly-borrowed funds out of",
-                "the [Self::reserve_source_liquidity]."
-              ]
+              "name": "lendingMarketAuthority"
             },
             {
               "name": "borrowReserve",
-              "docs": [
-                "The reserve to borrow from.",
-                "",
-                "Its mint must match the asset requested by the [BorrowOrder::debt_liquidity_mint]."
-              ],
               "writable": true
             },
             {
-              "name": "borrowReserveLiquidityMint",
-              "docs": [
-                "The mint of [Self::borrow_reserve] - needed to execute the transfer."
-              ]
+              "name": "borrowReserveLiquidityMint"
             },
             {
               "name": "reserveSourceLiquidity",
-              "docs": [
-                "The vault of [Self::borrow_reserve], from which the funds are transferred."
-              ],
               "writable": true
             },
             {
               "name": "borrowReserveLiquidityFeeReceiver",
-              "docs": [
-                "The fee vault of [Self::borrow_reserve], to which the fees are transferred."
-              ],
               "writable": true
             },
             {
               "name": "userDestinationLiquidity",
-              "docs": [
-                "The destination token account that should receive the newly borrowed funds.",
-                "",
-                "It must match [BorrowOrder::filled_debt_destination], owner and mint.",
-                "",
-                "**Warning:** An altered destination account will prevent an order from being filled."
-              ],
               "writable": true
             },
             {
               "name": "referrerTokenState",
-              "docs": [
-                "The referrer's account, for accumulating fees - needed if the [Obligation::has_referrer]."
-              ],
               "writable": true,
               "optional": true
             },
             {
-              "name": "tokenProgram",
-              "docs": [
-                "The token program of [Self::borrow_reserve] - needed to execute the transfer."
-              ]
+              "name": "tokenProgram"
             },
             {
               "name": "instructionSysvarAccount"
@@ -2998,6 +3273,219 @@ export type KaminoLending = {
       "args": []
     },
     {
+      "name": "fillBorrowOrderV2",
+      "discriminator": [
+        197,
+        85,
+        193,
+        139,
+        40,
+        94,
+        194,
+        143
+      ],
+      "accounts": [
+        {
+          "name": "borrowAccounts",
+          "accounts": [
+            {
+              "name": "payer",
+              "signer": true
+            },
+            {
+              "name": "obligation",
+              "writable": true
+            },
+            {
+              "name": "lendingMarket"
+            },
+            {
+              "name": "lendingMarketAuthority"
+            },
+            {
+              "name": "borrowReserve",
+              "writable": true
+            },
+            {
+              "name": "borrowReserveLiquidityMint"
+            },
+            {
+              "name": "reserveSourceLiquidity",
+              "writable": true
+            },
+            {
+              "name": "borrowReserveLiquidityFeeReceiver",
+              "writable": true
+            },
+            {
+              "name": "userDestinationLiquidity",
+              "writable": true
+            },
+            {
+              "name": "referrerTokenState",
+              "writable": true,
+              "optional": true
+            },
+            {
+              "name": "tokenProgram"
+            },
+            {
+              "name": "instructionSysvarAccount"
+            }
+          ]
+        },
+        {
+          "name": "farmsAccounts",
+          "accounts": [
+            {
+              "name": "obligationFarmUserState",
+              "writable": true,
+              "optional": true
+            },
+            {
+              "name": "reserveFarmState",
+              "writable": true,
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "farmsProgram"
+        },
+        {
+          "name": "eventAuthority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "orderIdx",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initiateObligationOwnershipTransfer",
+      "discriminator": [
+        127,
+        42,
+        81,
+        218,
+        147,
+        171,
+        76,
+        153
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": [
+        {
+          "name": "newOwner",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "approveObligationOwnershipTransfer",
+      "discriminator": [
+        61,
+        227,
+        231,
+        46,
+        196,
+        124,
+        60,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "globalAdmin",
+          "signer": true
+        },
+        {
+          "name": "globalConfig"
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "pendingOwner"
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "acceptObligationOwnership",
+      "discriminator": [
+        249,
+        130,
+        70,
+        176,
+        151,
+        187,
+        239,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "pendingOwner",
+          "signer": true
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "abortObligationOwnershipTransfer",
+      "discriminator": [
+        103,
+        217,
+        83,
+        65,
+        164,
+        5,
+        195,
+        227
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "obligation",
+          "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "enqueueToWithdraw",
       "discriminator": [
         134,
@@ -3012,9 +3500,6 @@ export type KaminoLending = {
       "accounts": [
         {
           "name": "owner",
-          "docs": [
-            "The depositor holding ctokens."
-          ],
           "writable": true,
           "signer": true
         },
@@ -3022,10 +3507,7 @@ export type KaminoLending = {
           "name": "lendingMarket"
         },
         {
-          "name": "lendingMarketAuthority",
-          "docs": [
-            "The market's authority, needed to initialize the [Self::owner_queued_collateral_vault]."
-          ]
+          "name": "lendingMarketAuthority"
         },
         {
           "name": "reserve",
@@ -3033,17 +3515,10 @@ export type KaminoLending = {
         },
         {
           "name": "userSourceCollateralTa",
-          "docs": [
-            "The source of collateral to be enqueued."
-          ],
           "writable": true
         },
         {
-          "name": "userDestinationLiquidityTa",
-          "docs": [
-            "The account to which the liquidity should be finally transferred later (to be recorded in",
-            "the ticket)."
-          ]
+          "name": "userDestinationLiquidityTa"
         },
         {
           "name": "reserveLiquidityMint"
@@ -3052,32 +3527,26 @@ export type KaminoLending = {
           "name": "reserveCollateralMint"
         },
         {
-          "name": "collateralTokenProgram",
-          "docs": [
-            "The collateral's program - needed for invoking the transfer to the vault *and* (implicitly)",
-            "for handling the `init_if_needed`."
-          ]
+          "name": "collateralTokenProgram"
         },
         {
           "name": "withdrawTicket",
-          "docs": [
-            "The new account to be initialized with the issued ticket's data."
-          ],
           "writable": true
         },
         {
           "name": "ownerQueuedCollateralVault",
-          "docs": [
-            "The per-owner \"this reserve's queued collateral\" vault (in which the collateral will be",
-            "locked)."
-          ],
           "writable": true
         },
         {
-          "name": "systemProgram",
-          "docs": [
-            "The System program - needed only for `init` / `init_if_needed` of the accounts above."
-          ]
+          "name": "systemProgram"
+        },
+        {
+          "name": "progressCallbackCustomAccount0",
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount1",
+          "optional": true
         },
         {
           "name": "instructionSysvarAccount"
@@ -3087,6 +3556,14 @@ export type KaminoLending = {
         {
           "name": "collateralAmount",
           "type": "u64"
+        },
+        {
+          "name": "progressCallbackType",
+          "type": {
+            "defined": {
+              "name": "progressCallbackType"
+            }
+          }
         }
       ]
     },
@@ -3105,111 +3582,69 @@ export type KaminoLending = {
       "accounts": [
         {
           "name": "payer",
-          "docs": [
-            "The executor of the permissionless tx (not necessarily the ticket owner)."
-          ],
           "writable": true,
           "signer": true
         },
         {
-          "name": "lendingMarket",
-          "docs": [
-            "The lending market."
-          ]
+          "name": "lendingMarket"
         },
         {
-          "name": "lendingMarketAuthority",
-          "docs": [
-            "The market's authority, needed for burning the collateral (from",
-            "[Self::owner_queued_collateral_vault]) and transferring the liquidity (from",
-            "[Self::reserve_liquidity_supply])."
-          ]
+          "name": "lendingMarketAuthority"
         },
         {
           "name": "reserve",
-          "docs": [
-            "The reserve."
-          ],
           "writable": true
         },
         {
-          "name": "reserveLiquidityMint",
-          "docs": [
-            "The liquidity mint, needed to invoke the transfer."
-          ]
+          "name": "reserveLiquidityMint"
         },
         {
           "name": "reserveCollateralMint",
-          "docs": [
-            "The collateral mint, needed to burn (`mut`!) the queued collateral."
-          ],
           "writable": true
         },
         {
           "name": "reserveLiquiditySupply",
-          "docs": [
-            "The liquidity supply vault (to withdraw the liquidity from)."
-          ],
           "writable": true
         },
         {
           "name": "ownerQueuedCollateralVault",
-          "docs": [
-            "The per-owner \"this reserve's queued collateral\" vault (from which the collateral will be",
-            "burnt)."
-          ],
           "writable": true
         },
         {
           "name": "userDestinationLiquidity",
-          "docs": [
-            "The token account to which the liquidity should be transferred (the one recorded in the",
-            "ticket)."
-          ],
           "writable": true
         },
         {
-          "name": "collateralTokenProgram",
-          "docs": [
-            "The program of [Self::reserve_collateral_mint], needed for transfer."
-          ]
+          "name": "collateralTokenProgram"
         },
         {
-          "name": "liquidityTokenProgram",
-          "docs": [
-            "The program of [Self::reserve_liquidity_mint], needed for transfer."
-          ]
+          "name": "liquidityTokenProgram"
         },
         {
           "name": "withdrawTicket",
-          "docs": [
-            "The ticket's data itself.",
-            "",
-            "Note: in case of complete withdrawal, this account will be closed. In case of partial",
-            "withdrawal, its [WithdrawTicket::queued_collateral_amount] will simply be reduced, and the",
-            "ticket will maintain its position in the queue."
-          ],
           "writable": true
         },
         {
           "name": "withdrawTicketOwner",
-          "docs": [
-            "The owner of the [Self::withdraw_ticket]; needed only to return the rent of the",
-            "[WithdrawTicket] account (if it is getting fully-consumed and closed here)."
-          ],
           "writable": true
         },
         {
-          "name": "associatedTokenProgram",
-          "docs": [
-            "The ATA program - needed for potential destination ATA creation."
-          ]
+          "name": "associatedTokenProgram"
         },
         {
-          "name": "systemProgram",
-          "docs": [
-            "The System program - needed for potential destination ATA creation."
-          ]
+          "name": "systemProgram"
+        },
+        {
+          "name": "progressCallbackProgram",
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount0",
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount1",
+          "optional": true
         },
         {
           "name": "instructionSysvarAccount"
@@ -3233,78 +3668,37 @@ export type KaminoLending = {
       "accounts": [
         {
           "name": "payer",
-          "docs": [
-            "The transaction executor.",
-            "",
-            "This instruction is, in principle, permissionless. However, only the ticket owner can use",
-            "arbitrary token account as destination for recovered collateral. Other signers can only",
-            "transfer the collateral to the ticket owner's ATA (see [Self::user_source_collateral])."
-          ],
           "signer": true
         },
         {
-          "name": "lendingMarket",
-          "docs": [
-            "The lending market."
-          ]
+          "name": "lendingMarket"
         },
         {
-          "name": "lendingMarketAuthority",
-          "docs": [
-            "The market's authority, needed for transferring the collateral (from",
-            "[Self::owner_queued_collateral_vault])."
-          ]
+          "name": "lendingMarketAuthority"
         },
         {
-          "name": "reserve",
-          "docs": [
-            "The reserve, needed only to validate the other accounts."
-          ]
+          "name": "reserve"
         },
         {
-          "name": "reserveCollateralMint",
-          "docs": [
-            "The collateral mint, needed to invoke the transfer."
-          ]
+          "name": "reserveCollateralMint"
         },
         {
           "name": "ownerQueuedCollateralVault",
-          "docs": [
-            "The per-owner \"this reserve's queued collateral\" vault (from which the collateral will be",
-            "recovered)."
-          ],
           "writable": true
         },
         {
           "name": "userSourceCollateral",
-          "docs": [
-            "The ticket's owner token account to which the ticket-locked collateral should be returned.",
-            "",
-            "Only the ticket's owner can indicate an arbitrary token account here. Permissionless",
-            "executors must indicate the ticket's owner ATA."
-          ],
           "writable": true
         },
         {
-          "name": "collateralTokenProgram",
-          "docs": [
-            "The program of [Self::reserve_collateral_mint], needed for transfer."
-          ]
+          "name": "collateralTokenProgram"
         },
         {
           "name": "withdrawTicket",
-          "docs": [
-            "The ticket's account, necessarily marked as [WithdrawTicket::invalid] first (by the",
-            "`handler_withdraw_queued_liquidity`)."
-          ],
           "writable": true
         },
         {
           "name": "withdrawTicketOwner",
-          "docs": [
-            "The owner of the [Self::withdraw_ticket]; needed only to return the rent of the",
-            "[WithdrawTicket] account."
-          ],
           "writable": true
         },
         {
@@ -3314,6 +3708,63 @@ export type KaminoLending = {
       "args": [
         {
           "name": "ticketSequenceNumber",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancelWithdrawTicket",
+      "discriminator": [
+        180,
+        83,
+        122,
+        44,
+        120,
+        211,
+        47,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "lendingMarket"
+        },
+        {
+          "name": "lendingMarketAuthority"
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "reserveCollateralMint"
+        },
+        {
+          "name": "ownerQueuedCollateralVault",
+          "writable": true
+        },
+        {
+          "name": "userDestinationCollateral",
+          "writable": true
+        },
+        {
+          "name": "collateralTokenProgram"
+        },
+        {
+          "name": "withdrawTicket",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "ticketSequenceNumber",
+          "type": "u64"
+        },
+        {
+          "name": "collateralAmountToCancel",
           "type": "u64"
         }
       ]
@@ -3348,6 +3799,9 @@ export type KaminoLending = {
         },
         {
           "name": "rent"
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": []
@@ -3372,6 +3826,9 @@ export type KaminoLending = {
         {
           "name": "globalConfig",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -3409,6 +3866,9 @@ export type KaminoLending = {
         {
           "name": "globalConfig",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": []
@@ -3439,6 +3899,9 @@ export type KaminoLending = {
         {
           "name": "reserve",
           "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
         }
       ],
       "args": [
@@ -4311,7 +4774,7 @@ export type KaminoLending = {
     {
       "code": 6123,
       "name": "orderIndexOutOfBounds",
-      "msg": "Obligation order of the given index cannot exist"
+      "msg": "Order of the given index cannot exist"
     },
     {
       "code": 6124,
@@ -4467,14 +4930,210 @@ export type KaminoLending = {
       "code": 6154,
       "name": "withdrawTicketValueTooSmall",
       "msg": "Withdraw ticket's value would be below the market-configured minimum"
+    },
+    {
+      "code": 6155,
+      "name": "invalidWithdrawTicketProgressCallbackConfig",
+      "msg": "Invalid configuration or required custom accounts for the requested withdraw ticket callback type"
+    },
+    {
+      "code": 6156,
+      "name": "withdrawTicketProgressCallbackAccountsMissing",
+      "msg": "One or more accounts required by the ticket's configured progress callback are missing"
+    },
+    {
+      "code": 6157,
+      "name": "borrowRolloverConfigurationDisabled",
+      "msg": "Configuring auto-rollover on loans is disabled by market owner"
+    },
+    {
+      "code": 6158,
+      "name": "invalidObligationConfigUpdateSubject",
+      "msg": "Invalid specification of the Obligation's part to be configured"
+    },
+    {
+      "code": 6159,
+      "name": "borrowRolloverLiquidityMintMismatch",
+      "msg": "Auto-rollover must use a target reserve of the same token"
+    },
+    {
+      "code": 6160,
+      "name": "obligationBorrowRolloverNotApplicable",
+      "msg": "The given borrow is not fixed-term and does not require rolling over"
+    },
+    {
+      "code": 6161,
+      "name": "obligationBorrowOutsideRolloverWindow",
+      "msg": "The given borrow is outside the corresponding market-configured rollover window"
+    },
+    {
+      "code": 6162,
+      "name": "obligationBorrowRolloverNotEnabledByOwner",
+      "msg": "Obligation's owner did not opt-in for auto-rollover of the given borrow"
+    },
+    {
+      "code": 6163,
+      "name": "obligationBorrowRolloverTargetReserveMismatch",
+      "msg": "Obligation's owner did not allow to roll over into terms offered by the given reserve"
+    },
+    {
+      "code": 6164,
+      "name": "borrowRolloverExecutionDisabled",
+      "msg": "Executing auto-rollover is disabled by market owner"
+    },
+    {
+      "code": 6165,
+      "name": "obligationAccountingMismatch",
+      "msg": "Obligation internal state accounting has been unexpectedly modified"
+    },
+    {
+      "code": 6166,
+      "name": "partialRolloverValueTooSmall",
+      "msg": "Partial rollover amount is below the market-configured minimum value"
+    },
+    {
+      "code": 6167,
+      "name": "obligationBorrowRolloverConfigMismatch",
+      "msg": "Pre-existing rollover configuration of the loan cannot be overwritten by the operation"
+    },
+    {
+      "code": 6168,
+      "name": "obligationBorrowRolloverMustProlongDebtTerm",
+      "msg": "Rollover into existing borrow must prolong the remaining debt term"
+    },
+    {
+      "code": 6169,
+      "name": "rolloverNotSupportedInElevationGroup",
+      "msg": "Rollover is not supported for obligations in an elevation group"
+    },
+    {
+      "code": 6170,
+      "name": "withdrawTicketCancellationDisabled",
+      "msg": "Cancelling withdraw tickets is disabled by the market"
+    },
+    {
+      "code": 6171,
+      "name": "withdrawTicketFullyCancelled",
+      "msg": "Cannot use ticket that was already fully-cancelled"
+    },
+    {
+      "code": 6172,
+      "name": "cloneSourceReserveDisabled",
+      "msg": "Cannot clone config from a reserve that is disabled"
+    },
+    {
+      "code": 6173,
+      "name": "cloneTargetReserveAlreadyInUse",
+      "msg": "Cannot clone config into a reserve that has been in use"
+    },
+    {
+      "code": 6174,
+      "name": "clonedReserveLiquidityMintMismatch",
+      "msg": "Cannot clone config between reserves of different mints"
+    },
+    {
+      "code": 6175,
+      "name": "reserveEmergencyMode",
+      "msg": "Reserve emergency mode is enabled"
+    },
+    {
+      "code": 6176,
+      "name": "obligationOwnershipTransferInProgress",
+      "msg": "Obligation ownership transfer is in progress"
+    },
+    {
+      "code": 6177,
+      "name": "obligationOwnershipTransferNotInInitiatedState",
+      "msg": "Obligation ownership transfer is not in initiated state"
+    },
+    {
+      "code": 6178,
+      "name": "obligationPendingOwnerNotSet",
+      "msg": "Obligation pending owner not set"
+    },
+    {
+      "code": 6179,
+      "name": "obligationInvalidPendingOwner",
+      "msg": "Invalid pending owner address"
+    },
+    {
+      "code": 6180,
+      "name": "obligationOwnershipTransferNotApproved",
+      "msg": "Obligation ownership transfer not approved by admin"
+    },
+    {
+      "code": 6181,
+      "name": "obligationHasActiveBorrowOrders",
+      "msg": "Obligation has active borrow orders"
+    },
+    {
+      "code": 6182,
+      "name": "onlyComputeBudgetCompanionIxsAllowed",
+      "msg": "Only ComputeBudget instructions may accompany this instruction"
+    },
+    {
+      "code": 6183,
+      "name": "missingPermissioner",
+      "msg": "Required permissioning account is missing"
+    },
+    {
+      "code": 6184,
+      "name": "reserveRewardsDisabled",
+      "msg": "Reserve rewards are disabled on this market (reserve_rewards_max_apr_bps is 0)"
+    },
+    {
+      "code": 6185,
+      "name": "transactionIncludesNonceInstruction",
+      "msg": "Transaction includes a nonce instruction, which is not allowed for admin operations"
     }
   ],
   "types": [
     {
+      "name": "exchangeRateWithDecimals",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "exchangeRateSf",
+            "type": "u128"
+          },
+          {
+            "name": "mintDecimals",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reserveConfigCustomizationArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "overrideFixedRateBps",
+            "type": "u8"
+          },
+          {
+            "name": "fixedBorrowRateBps",
+            "type": "u32"
+          },
+          {
+            "name": "overrideDebtTermSeconds",
+            "type": "u8"
+          },
+          {
+            "name": "debtTermSeconds",
+            "type": "u64"
+          },
+          {
+            "name": "clearElevationGroups",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "borrowOrderConfigArgs",
-      "docs": [
-        "A subset of [BorrowOrderConfig] excluding the accounts passed via [SetBorrowOrder]."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -4493,6 +5152,10 @@ export type KaminoLending = {
           {
             "name": "fillableUntilTimestamp",
             "type": "u64"
+          },
+          {
+            "name": "enableAutoRolloverOnFilledBorrows",
+            "type": "bool"
           }
         ]
       }
@@ -4666,6 +5329,21 @@ export type KaminoLending = {
           },
           {
             "name": "updateDebtTermSeconds"
+          },
+          {
+            "name": "updateEarlyRepayRemainingInterestPct"
+          },
+          {
+            "name": "updateReserveEmergencyMode"
+          },
+          {
+            "name": "updateRewardsAmountPerAccrualUnit"
+          },
+          {
+            "name": "updateReservePermissionedOps"
+          },
+          {
+            "name": "updateInterestRateBasis"
           }
         ]
       }
@@ -4855,6 +5533,42 @@ export type KaminoLending = {
           },
           {
             "name": "updateMinWithdrawQueuedLiquidityValue"
+          },
+          {
+            "name": "updateFixedTermRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "updateOpenTermRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "updateObligationBorrowRolloverConfigurationEnabled"
+          },
+          {
+            "name": "updateTermBasedFullLiquidationDurationSecs"
+          },
+          {
+            "name": "updateObligationBorrowMigrationToFixedExecutionEnabled"
+          },
+          {
+            "name": "updateMinPartialRolloverValue"
+          },
+          {
+            "name": "updateWithdrawTicketCancellationEnabled"
+          },
+          {
+            "name": "updatePermissioningAuthority"
+          },
+          {
+            "name": "updatePermissionedOps"
+          },
+          {
+            "name": "deprecatedUpdateReserveRewardsMaxAprPct"
+          },
+          {
+            "name": "updateReserveRewardsMaxAprBps"
+          },
+          {
+            "name": "updateDisableNonceBlock"
           }
         ]
       }
@@ -4875,41 +5589,33 @@ export type KaminoLending = {
     },
     {
       "name": "lastUpdate",
-      "docs": [
-        "Last update state"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "slot",
-            "docs": [
-              "Last slot when updated"
-            ],
             "type": "u64"
           },
           {
             "name": "stale",
-            "docs": [
-              "True when marked stale, false when slot updated"
-            ],
             "type": "u8"
           },
           {
             "name": "priceStatus",
-            "docs": [
-              "Status of the prices used to calculate the last update"
-            ],
             "type": "u8"
           },
           {
-            "name": "placeholder",
+            "name": "alignmentPadding",
             "type": {
               "array": [
                 "u8",
-                6
+                2
               ]
             }
+          },
+          {
+            "name": "timestamp",
+            "type": "u32"
           }
         ]
       }
@@ -4949,9 +5655,6 @@ export type KaminoLending = {
           },
           {
             "name": "debtReserve",
-            "docs": [
-              "Mandatory debt reserve for this elevation group"
-            ],
             "type": "pubkey"
           },
           {
@@ -4968,126 +5671,102 @@ export type KaminoLending = {
     },
     {
       "name": "borrowOrder",
-      "docs": [
-        "A borrow order.",
-        "",
-        "When the [Obligation::borrow_order] is populated (i.e. non-zeroed) on an Obligation, then the",
-        "permissionless \"fill\" operations may borrow liquidity to the owner according to this",
-        "specification."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "debtLiquidityMint",
-            "docs": [
-              "The asset to be borrowed.",
-              "The reserves used for [Obligation::borrows] *must* all provide exactly this asset."
-            ],
             "type": "pubkey"
           },
           {
             "name": "remainingDebtAmount",
-            "docs": [
-              "The amount of debt that still needs to be filled, in lamports."
-            ],
             "type": "u64"
           },
           {
             "name": "filledDebtDestination",
-            "docs": [
-              "The token account owned by the [Obligation::owner] and holding [Self::debt_liquidity_mint],",
-              "where the filled funds should be transferred to."
-            ],
             "type": "pubkey"
           },
           {
             "name": "minDebtTermSeconds",
-            "docs": [
-              "The minimum allowed debt term that the obligation owner agrees to.",
-              "The reserves used to fill this order *cannot* define their debt term *lower* than this.",
-              "",
-              "If zeroed, then only indefinite-term reserves may be used."
-            ],
             "type": "u64"
           },
           {
             "name": "fillableUntilTimestamp",
-            "docs": [
-              "The time until which the borrow order can still be filled."
-            ],
             "type": "u64"
           },
           {
             "name": "placedAtTimestamp",
-            "docs": [
-              "The time at which this order was placed.",
-              "Currently, this is only a piece of metadata."
-            ],
             "type": "u64"
           },
           {
             "name": "lastUpdatedAtTimestamp",
-            "docs": [
-              "The time at which this order was most-recently updated (including: created).",
-              "Currently, this is only a piece of metadata."
-            ],
             "type": "u64"
           },
           {
             "name": "requestedDebtAmount",
-            "docs": [
-              "The amount of debt that was originally requested when this order was most-recently updated.",
-              "In other words: this field holds a value of [Self::remaining_debt_amount] captured at",
-              "[Self::last_updated_at_timestamp].",
-              "Currently, this is only a piece of metadata."
-            ],
             "type": "u64"
           },
           {
             "name": "maxBorrowRateBps",
-            "docs": [
-              "The maximum borrow rate that the obligation owner agrees to.",
-              "The reserves used for [Obligation::borrows] *cannot* define their maximum borrow rate",
-              "*higher* than this."
-            ],
             "type": "u32"
           },
           {
             "name": "active",
-            "docs": [
-              "Whether the [Self::remaining_debt_amount] is non-zero.",
-              "",
-              "This field is *not* used by smart contract logic (which prefers to treat the above",
-              "[Self::remaining_debt_amount]-based definition as the single source of truth). However, it",
-              "is useful for off-chain bots (order-searchers) to efficiently list (i.e. `memcmp` filter)",
-              "just the obligations that have active borrow orders."
-            ],
+            "type": "u8"
+          },
+          {
+            "name": "enableAutoRolloverOnFilledBorrows",
             "type": "u8"
           },
           {
             "name": "padding1",
-            "docs": [
-              "Alignment padding."
-            ],
             "type": {
               "array": [
                 "u8",
-                3
+                2
               ]
             }
           },
           {
             "name": "endPadding",
-            "docs": [
-              "End padding."
-            ],
             "type": {
               "array": [
                 "u64",
                 5
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixedTermBorrowRolloverConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "autoRolloverEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "openTermAllowed",
+            "type": "u8"
+          },
+          {
+            "name": "migrationToFixedEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "fixedTermRolloverWindowDurationDays",
+            "type": "u8"
+          },
+          {
+            "name": "maxBorrowRateBps",
+            "type": "u32"
+          },
+          {
+            "name": "minDebtTermSeconds",
+            "type": "u64"
           }
         ]
       }
@@ -5110,41 +5789,23 @@ export type KaminoLending = {
     },
     {
       "name": "obligationCollateral",
-      "docs": [
-        "Obligation collateral state"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "depositReserve",
-            "docs": [
-              "Reserve collateral is deposited to"
-            ],
             "type": "pubkey"
           },
           {
             "name": "depositedAmount",
-            "docs": [
-              "Amount of collateral deposited"
-            ],
             "type": "u64"
           },
           {
             "name": "marketValueSf",
-            "docs": [
-              "Collateral market value in quote currency (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "borrowedAmountAgainstThisCollateralInElevationGroup",
-            "docs": [
-              "Debt amount (lamport) taken against this collateral.",
-              "(only meaningful if this obligation is part of an elevation group, otherwise 0)",
-              "This is only indicative of the debt computed on the last refresh obligation.",
-              "If the obligation have multiple collateral this value is the same for all of them."
-            ],
             "type": "u64"
           },
           {
@@ -5161,24 +5822,15 @@ export type KaminoLending = {
     },
     {
       "name": "obligationLiquidity",
-      "docs": [
-        "Obligation liquidity state"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "borrowReserve",
-            "docs": [
-              "Reserve liquidity is borrowed from"
-            ],
             "type": "pubkey"
           },
           {
             "name": "cumulativeBorrowRateBsf",
-            "docs": [
-              "Borrow rate used for calculating interest (big scaled fraction)"
-            ],
             "type": {
               "defined": {
                 "name": "bigFractionBytes"
@@ -5186,45 +5838,35 @@ export type KaminoLending = {
             }
           },
           {
-            "name": "firstBorrowedAtTimestamp",
-            "docs": [
-              "The timestamp at which this debt was taken.",
-              "More specifically: when the *first* borrow operation from this reserve happened.",
-              "This means that:",
-              "- adding debt of the same reserve does *not* change this timestamp,",
-              "- repaying the entire debt of this reserve *does* reset this timestamp.",
-              "",
-              "Note: this field is *not* only metadata: it is used in the logic, e.g. for enforcing the",
-              "fixed-term borrows (i.e. those induced by [ReserveConfig::debt_term_seconds])."
-            ],
+            "name": "lastBorrowedAtTimestamp",
             "type": "u64"
           },
           {
             "name": "borrowedAmountSf",
-            "docs": [
-              "Amount of liquidity borrowed plus interest (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "marketValueSf",
-            "docs": [
-              "Liquidity market value in quote currency (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "borrowFactorAdjustedMarketValueSf",
-            "docs": [
-              "Risk adjusted liquidity market value in quote currency - DEBUG ONLY - use market_value instead"
-            ],
             "type": "u128"
           },
           {
             "name": "borrowedAmountOutsideElevationGroups",
-            "docs": [
-              "Amount of liquidity borrowed outside of an elevation group"
-            ],
+            "type": "u64"
+          },
+          {
+            "name": "fixedTermBorrowRolloverConfig",
+            "type": {
+              "defined": {
+                "name": "fixedTermBorrowRolloverConfig"
+              }
+            }
+          },
+          {
+            "name": "borrowedAmountAtExpiration",
             "type": "u64"
           },
           {
@@ -5232,7 +5874,7 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u64",
-                7
+                4
               ]
             }
           }
@@ -5241,109 +5883,35 @@ export type KaminoLending = {
     },
     {
       "name": "obligationOrder",
-      "docs": [
-        "A single obligation order.",
-        "See [Obligation::obligation_orders]."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "conditionThresholdSf",
-            "docs": [
-              "A threshold value used by the condition (scaled [Fraction]).",
-              "The exact meaning depends on the specific [Self::condition_type].",
-              "",
-              "Examples:",
-              "- when `condition_type == 2 (UserLtvBelow)`:",
-              "then a value of `0.455` here means that the order is active only when the obligation's",
-              "user LTV is less than `0.455` (i.e. < 45.5%).",
-              "- when `condition_type == 3 (DebtCollPriceRatioAbove)`:",
-              "assuming the obligation uses BTC collateral for SOL debt, then a value of `491.3` here",
-              "means that the order is active only when the BTC-SOL price is greater than `491.3` (i.e.",
-              "> 491.3 SOL per BTC)."
-            ],
             "type": "u128"
           },
           {
             "name": "opportunityParameterSf",
-            "docs": [
-              "A configuration parameter used by the opportunity (scaled [Fraction]).",
-              "The exact meaning depends on the specific [Self::opportunity_type].",
-              "",
-              "Examples:",
-              "- when `opportunity_type == 0 (DeleverageSingleDebtAmount)`:",
-              "Assuming the obligation uses BTC collateral for SOL debt, then a value of `1_234_000_000`",
-              "here means that a liquidator may repay up to 1234000000 lamports (i.e. 1.234 SOL) on this",
-              "obligation.",
-              "Note: the special value of [Fraction::MAX] is *not* allowed in this case.",
-              "- when `opportunity_type == 1 (DeleverageAllDebtAmount)`:",
-              "The only allowed value in this case is [Fraction::MAX] (to emphasize that *all* debt",
-              "should be repaid)."
-            ],
             "type": "u128"
           },
           {
             "name": "minExecutionBonusBps",
-            "docs": [
-              "A *minimum* additional fraction of collateral transferred to the liquidator, in bps.",
-              "",
-              "The minimum bonus is applied exactly when the [Self::condition_threshold_sf] is met, and",
-              "grows linearly towards the [Self::max_execution_bonus_bps].",
-              "",
-              "Example: a value of `50` here means 50bps == 0.5% bonus for an \"LTV > 65%\" order, when",
-              "executed precisely at the moment LTV exceeds 65%."
-            ],
             "type": "u16"
           },
           {
             "name": "maxExecutionBonusBps",
-            "docs": [
-              "A *maximum* additional fraction of collateral transferred to the liquidator, in bps.",
-              "",
-              "The maximum bonus is applied at the relevant \"extreme\" state of the obligation, i.e.:",
-              "- for a stop-loss condition, it is a point at which the obligation becomes liquidatable;",
-              "- for a take-profit condition, it is a point at which obligation has 0% LTV.",
-              "",
-              "In non-extreme states, the actual bonus value is interpolated linearly, starting from",
-              "[Self::min_execution_bonus_bps] (at the point specified by the order's condition).",
-              "",
-              "Example: a value of `300` here means 300bps == 3.0% bonus for a \"debt/coll price > 140\"",
-              "order, when executed at a higher price = 200, at which the obligation's LTV happens to",
-              "be equal to its liquidation LTV."
-            ],
             "type": "u16"
           },
           {
             "name": "conditionType",
-            "docs": [
-              "Serialized [ConditionType].",
-              "The entire order is void when this is zeroed (i.e. representing [ConditionType::Never]).",
-              "",
-              "Example: a value of `2` here denotes `UserLtvBelow` condition type. Of course, to",
-              "interpret this condition, we also need to take the [Self::condition_threshold_sf] into",
-              "account."
-            ],
             "type": "u8"
           },
           {
             "name": "opportunityType",
-            "docs": [
-              "Serialized [OpportunityType].",
-              "",
-              "Example: a value of `0` here denotes `DeleverageSingleDebtAmount` opportunity. Of course, to",
-              "interpret this opportunity, we also need to take the [Self::opportunity_parameter_sf] into",
-              "account."
-            ],
             "type": "u8"
           },
           {
             "name": "padding1",
-            "docs": [
-              "Alignment padding.",
-              "The fields above take up 2+2+1+1 bytes = 48 bits, which means we need 80 bits = 10 bytes to",
-              "align with `u128`s."
-            ],
             "type": {
               "array": [
                 "u8",
@@ -5353,16 +5921,38 @@ export type KaminoLending = {
           },
           {
             "name": "padding2",
-            "docs": [
-              "End padding.",
-              "The total size of a single instance is 8*u128 = 128 bytes."
-            ],
             "type": {
               "array": [
                 "u128",
                 5
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "updateObligationConfigMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "fixedTermRolloverEnabled"
+          },
+          {
+            "name": "fixedTermRolloverMaxBorrowRateBps"
+          },
+          {
+            "name": "fixedTermRolloverMinDebtTermSeconds"
+          },
+          {
+            "name": "fixedTermRolloverOpenTermAllowed"
+          },
+          {
+            "name": "migrationToFixedEnabled"
+          },
+          {
+            "name": "fixedTermRolloverWindowDurationDays"
           }
         ]
       }
@@ -5395,9 +5985,6 @@ export type KaminoLending = {
     },
     {
       "name": "feeCalculation",
-      "docs": [
-        "Calculate fees exlusive or inclusive of an amount"
-      ],
       "type": {
         "kind": "enum",
         "variants": [
@@ -5412,31 +5999,19 @@ export type KaminoLending = {
     },
     {
       "name": "reserveCollateral",
-      "docs": [
-        "Reserve collateral"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "mintPubkey",
-            "docs": [
-              "Reserve collateral mint address"
-            ],
             "type": "pubkey"
           },
           {
             "name": "mintTotalSupply",
-            "docs": [
-              "Reserve collateral mint supply, used for exchange rate"
-            ],
             "type": "u64"
           },
           {
             "name": "supplyVault",
-            "docs": [
-              "Reserve collateral supply address"
-            ],
             "type": "pubkey"
           },
           {
@@ -5462,140 +6037,92 @@ export type KaminoLending = {
     },
     {
       "name": "reserveConfig",
-      "docs": [
-        "Reserve configuration values"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "status",
-            "docs": [
-              "Status of the reserve Active/Obsolete/Hidden"
-            ],
             "type": "u8"
           },
           {
             "name": "paddingDeprecatedAssetTier",
-            "docs": [
-              "Asset tier -> 0 - regular (collateral & debt), 1 - isolated collateral, 2 - isolated debt"
-            ],
             "type": "u8"
           },
           {
             "name": "hostFixedInterestRateBps",
-            "docs": [
-              "Flat rate that goes to the host"
-            ],
             "type": "u16"
           },
           {
             "name": "minDeleveragingBonusBps",
-            "docs": [
-              "Starting bonus for deleveraging-related liquidations, in bps."
-            ],
             "type": "u16"
           },
           {
             "name": "blockCtokenUsage",
-            "docs": [
-              "Boolean flag to block minting/redeeming of ctokens",
-              "Blocks usage of ctokens (minting or withdrawing from obligation)",
-              "Effectively blocks deposit_reserve_liquidity and withdraw_obligation_collateral"
-            ],
+            "type": "u8"
+          },
+          {
+            "name": "earlyRepayRemainingInterestPct",
+            "type": "u8"
+          },
+          {
+            "name": "emergencyMode",
+            "type": "u8"
+          },
+          {
+            "name": "interestRateBasis",
             "type": "u8"
           },
           {
             "name": "reserved1",
-            "docs": [
-              "Past reserved space - feel free to reuse."
-            ],
             "type": {
               "array": [
                 "u8",
-                6
+                3
               ]
             }
           },
           {
             "name": "protocolOrderExecutionFeePct",
-            "docs": [
-              "Cut of the order execution bonus that the protocol receives, as a percentage"
-            ],
             "type": "u8"
           },
           {
             "name": "protocolTakeRatePct",
-            "docs": [
-              "Protocol take rate is the amount borrowed interest protocol receives, as a percentage"
-            ],
             "type": "u8"
           },
           {
             "name": "protocolLiquidationFeePct",
-            "docs": [
-              "Cut of the liquidation bonus that the protocol receives, as a percentage"
-            ],
             "type": "u8"
           },
           {
             "name": "loanToValuePct",
-            "docs": [
-              "Target ratio of the value of borrows to deposits, as a percentage",
-              "0 if use as collateral is disabled"
-            ],
             "type": "u8"
           },
           {
             "name": "liquidationThresholdPct",
-            "docs": [
-              "Loan to value ratio at which an obligation can be liquidated, as percentage"
-            ],
             "type": "u8"
           },
           {
             "name": "minLiquidationBonusBps",
-            "docs": [
-              "Minimum bonus a liquidator receives when repaying part of an unhealthy obligation, as bps"
-            ],
             "type": "u16"
           },
           {
             "name": "maxLiquidationBonusBps",
-            "docs": [
-              "Maximum bonus a liquidator receives when repaying part of an unhealthy obligation, as bps"
-            ],
             "type": "u16"
           },
           {
             "name": "badDebtLiquidationBonusBps",
-            "docs": [
-              "Bad debt liquidation bonus for an undercollateralized obligation, as bps"
-            ],
             "type": "u16"
           },
           {
             "name": "deleveragingMarginCallPeriodSecs",
-            "docs": [
-              "Time in seconds that must pass before redemptions are enabled after the deposit limit is",
-              "crossed.",
-              "Only relevant when `autodeleverage_enabled == 1`, and must not be 0 in such case."
-            ],
             "type": "u64"
           },
           {
             "name": "deleveragingThresholdDecreaseBpsPerDay",
-            "docs": [
-              "The rate at which the deleveraging threshold decreases, in bps per day.",
-              "Only relevant when `autodeleverage_enabled == 1`, and must not be 0 in such case."
-            ],
             "type": "u64"
           },
           {
             "name": "fees",
-            "docs": [
-              "Program owner fees assessed, separate from gains due to interest accrual"
-            ],
             "type": {
               "defined": {
                 "name": "reserveFees"
@@ -5604,9 +6131,6 @@ export type KaminoLending = {
           },
           {
             "name": "borrowRateCurve",
-            "docs": [
-              "Borrow rate curve based on utilization"
-            ],
             "type": {
               "defined": {
                 "name": "borrowRateCurve"
@@ -5615,30 +6139,18 @@ export type KaminoLending = {
           },
           {
             "name": "borrowFactorPct",
-            "docs": [
-              "Borrow factor in percentage - used for risk adjustment"
-            ],
             "type": "u64"
           },
           {
             "name": "depositLimit",
-            "docs": [
-              "Maximum deposit limit of liquidity in native units, u64::MAX for inf"
-            ],
             "type": "u64"
           },
           {
             "name": "borrowLimit",
-            "docs": [
-              "Maximum amount borrowed, u64::MAX for inf, 0 to disable borrows (protected deposits)"
-            ],
             "type": "u64"
           },
           {
             "name": "tokenInfo",
-            "docs": [
-              "Token id from TokenInfos struct"
-            ],
             "type": {
               "defined": {
                 "name": "tokenInfo"
@@ -5647,9 +6159,6 @@ export type KaminoLending = {
           },
           {
             "name": "depositWithdrawalCap",
-            "docs": [
-              "Deposit withdrawal caps - deposit & redeem"
-            ],
             "type": {
               "defined": {
                 "name": "withdrawalCaps"
@@ -5658,9 +6167,6 @@ export type KaminoLending = {
           },
           {
             "name": "debtWithdrawalCap",
-            "docs": [
-              "Debt withdrawal caps - borrow & repay"
-            ],
             "type": {
               "defined": {
                 "name": "withdrawalCaps"
@@ -5682,49 +6188,22 @@ export type KaminoLending = {
           },
           {
             "name": "utilizationLimitBlockBorrowingAbovePct",
-            "docs": [
-              "Utilization (in percentage) above which borrowing is blocked. 0 to disable."
-            ],
             "type": "u8"
           },
           {
             "name": "autodeleverageEnabled",
-            "docs": [
-              "Whether this reserve should be subject to auto-deleveraging after deposit or borrow limit is",
-              "crossed.",
-              "Besides this flag, the lending market's flag also needs to be enabled (logical `AND`).",
-              "**NOTE:** the manual \"target LTV\" deleveraging is NOT affected by this flag."
-            ],
             "type": "u8"
           },
           {
             "name": "proposerAuthorityLocked",
-            "docs": [
-              "Boolean flag indicating whether the reserve is locked for the proposer authority.",
-              "",
-              "Once the proposer have finished preparing the reserve, it must be locked to prevent",
-              "further changes to the reserve configuration allowing review and voting on the proposal",
-              "without alteration during the voting period."
-            ],
             "type": "u8"
           },
           {
             "name": "borrowLimitOutsideElevationGroup",
-            "docs": [
-              "Maximum amount liquidity of this reserve borrowed outside all elevation groups",
-              "- u64::MAX for inf",
-              "- 0 to disable borrows outside elevation groups"
-            ],
             "type": "u64"
           },
           {
             "name": "borrowLimitAgainstThisCollateralInElevationGroup",
-            "docs": [
-              "Defines the maximum amount (in lamports of elevation group debt asset)",
-              "that can be borrowed when this reserve is used as collateral.",
-              "- u64::MAX for inf",
-              "- 0 to disable borrows in this elevation group (expected value for the debt asset)"
-            ],
             "type": {
               "array": [
                 "u64",
@@ -5734,33 +6213,22 @@ export type KaminoLending = {
           },
           {
             "name": "deleveragingBonusIncreaseBpsPerDay",
-            "docs": [
-              "The rate at which the deleveraging-related liquidation bonus increases, in bps per day.",
-              "Only relevant when `autodeleverage_enabled == 1`, and must not be 0 in such case."
-            ],
             "type": "u64"
           },
           {
             "name": "debtMaturityTimestamp",
-            "docs": [
-              "The timestamp at which all [Obligation::borrows] using this reserve become liquidatable",
-              "(on the same terms as reserve-wide deleveraging).",
-              "Inactive when zeroed (i.e. debt never matures).",
-              "",
-              "Note: this feature is independent of [Self::debt_term_seconds] - the liquidation mechanism",
-              "is based directly on the timestamp defined here, on Reserve's level."
-            ],
             "type": "u64"
           },
           {
             "name": "debtTermSeconds",
-            "docs": [
-              "The duration after which any debt coming from this Reserve must be repaid.",
-              "Inactive when zeroed (i.e. funds can be borrowed indefinitely).",
-              "",
-              "Note: this feature is independent of [Self::debt_maturity_timestamp] - the liquidation",
-              "mechanism is based on the [ObligationLiquidity::first_borrowed_at_timestamp]."
-            ],
+            "type": "u64"
+          },
+          {
+            "name": "rewardsAmountPerAccrualUnit",
+            "type": "u64"
+          },
+          {
+            "name": "permissionedOps",
             "type": "u64"
           }
         ]
@@ -5782,41 +6250,19 @@ export type KaminoLending = {
     },
     {
       "name": "reserveFees",
-      "docs": [
-        "Additional fee information on a reserve",
-        "",
-        "These exist separately from interest accrual fees, and are specifically for the program owner",
-        "and referral fee. The fees are paid out as a percentage of liquidity token amounts during",
-        "repayments and liquidations."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "originationFeeSf",
-            "docs": [
-              "Fee assessed on `BorrowObligationLiquidity`, as scaled fraction (60 bits fractional part)",
-              "Must be between `0` and `2^60`, such that `2^60 = 1`.  A few examples for",
-              "clarity:",
-              "1% = (1 << 60) / 100 = 11529215046068470",
-              "0.01% (1 basis point) = 115292150460685",
-              "0.00001% (Aave origination fee) = 115292150461"
-            ],
             "type": "u64"
           },
           {
             "name": "flashLoanFeeSf",
-            "docs": [
-              "Fee for flash loan, expressed as scaled fraction.",
-              "0.3% (Aave flash loan fee) = 0.003 * 2^60 = 3458764513820541"
-            ],
             "type": "u64"
           },
           {
             "name": "padding",
-            "docs": [
-              "Used for allignment"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -5829,93 +6275,51 @@ export type KaminoLending = {
     },
     {
       "name": "reserveLiquidity",
-      "docs": [
-        "Reserve liquidity"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "mintPubkey",
-            "docs": [
-              "Reserve liquidity mint address"
-            ],
             "type": "pubkey"
           },
           {
             "name": "supplyVault",
-            "docs": [
-              "Reserve liquidity supply address"
-            ],
             "type": "pubkey"
           },
           {
             "name": "feeVault",
-            "docs": [
-              "Reserve liquidity fee collection address"
-            ],
             "type": "pubkey"
           },
           {
             "name": "totalAvailableAmount",
-            "docs": [
-              "Total reserve liquidity available.",
-              "",
-              "Note: not all of this liquidity can be freely used for any purpose. Production code should",
-              "use the specialized getters - see e.g. [Reserve::total_available_liquidity_amount()],",
-              "[Reserve::freely_available_liquidity_amount()]."
-            ],
             "type": "u64"
           },
           {
             "name": "borrowedAmountSf",
-            "docs": [
-              "Reserve liquidity borrowed (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "marketPriceSf",
-            "docs": [
-              "Reserve liquidity market price in quote currency (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "marketPriceLastUpdatedTs",
-            "docs": [
-              "Unix timestamp of the market price (from the oracle)"
-            ],
             "type": "u64"
           },
           {
             "name": "mintDecimals",
-            "docs": [
-              "Reserve liquidity mint decimals"
-            ],
             "type": "u64"
           },
           {
             "name": "depositLimitCrossedTimestamp",
-            "docs": [
-              "Timestamp when the last refresh reserve detected that the liquidity amount is above the deposit cap. When this threshold is crossed, then redemptions (auto-deleverage) are enabled.",
-              "If the threshold is not crossed, then the timestamp is set to 0"
-            ],
             "type": "u64"
           },
           {
             "name": "borrowLimitCrossedTimestamp",
-            "docs": [
-              "Timestamp when the last refresh reserve detected that the borrowed amount is above the borrow cap. When this threshold is crossed, then redemptions (auto-deleverage) are enabled.",
-              "If the threshold is not crossed, then the timestamp is set to 0"
-            ],
             "type": "u64"
           },
           {
             "name": "cumulativeBorrowRateBsf",
-            "docs": [
-              "Reserve liquidity cumulative borrow rate (scaled fraction)"
-            ],
             "type": {
               "defined": {
                 "name": "bigFractionBytes"
@@ -5924,45 +6328,34 @@ export type KaminoLending = {
           },
           {
             "name": "accumulatedProtocolFeesSf",
-            "docs": [
-              "Reserve cumulative protocol fees (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "accumulatedReferrerFeesSf",
-            "docs": [
-              "Reserve cumulative referrer fees (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "pendingReferrerFeesSf",
-            "docs": [
-              "Reserve pending referrer fees, to be claimed in refresh_obligation by referrer or protocol (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "absoluteReferralRateSf",
-            "docs": [
-              "Reserve referrer fee absolute rate calculated at each refresh_reserve operation (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "tokenProgram",
-            "docs": [
-              "Token program of the liquidity mint"
-            ],
             "type": "pubkey"
+          },
+          {
+            "name": "rewardsAmountAvailable",
+            "type": "u64"
           },
           {
             "name": "padding2",
             "type": {
               "array": [
                 "u64",
-                51
+                50
               ]
             }
           },
@@ -5997,34 +6390,19 @@ export type KaminoLending = {
     },
     {
       "name": "withdrawQueue",
-      "docs": [
-        "A tracker of ticket-based withdrawals."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "queuedCollateralAmount",
-            "docs": [
-              "The part of [ReserveLiquidity::total_available_amount] locked for ticketed withdrawals."
-            ],
             "type": "u64"
           },
           {
             "name": "nextIssuedTicketSequenceNumber",
-            "docs": [
-              "The sequence number of the next ticket to be issued when enqueueing to withdraw.",
-              "Note: it is also a number of tickets issued so far."
-            ],
             "type": "u64"
           },
           {
             "name": "nextWithdrawableTicketSequenceNumber",
-            "docs": [
-              "The sequence number of the next ticket to be used for actually transferring the withdrawn",
-              "liquidity (assuming it is available in the reserve).",
-              "Note: it is also a number of fully-consumed tickets so far."
-            ],
             "type": "u64"
           }
         ]
@@ -6032,9 +6410,6 @@ export type KaminoLending = {
     },
     {
       "name": "withdrawalCaps",
-      "docs": [
-        "Reserve Withdrawal Caps State"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -6064,23 +6439,14 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "lower",
-            "docs": [
-              "Lower value of acceptable price"
-            ],
             "type": "u64"
           },
           {
             "name": "upper",
-            "docs": [
-              "Upper value of acceptable price"
-            ],
             "type": "u64"
           },
           {
             "name": "exp",
-            "docs": [
-              "Number of decimals of the previously defined values"
-            ],
             "type": "u64"
           }
         ]
@@ -6093,9 +6459,6 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "price",
-            "docs": [
-              "Pubkey of the base price feed (disabled if `null` or `default`)"
-            ],
             "type": "pubkey"
           }
         ]
@@ -6108,16 +6471,10 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "priceFeed",
-            "docs": [
-              "Pubkey of the scope price feed (disabled if `null` or `default`)"
-            ],
             "type": "pubkey"
           },
           {
             "name": "priceChain",
-            "docs": [
-              "This is the scope_id price chain that results in a price for the token"
-            ],
             "type": {
               "array": [
                 "u16",
@@ -6127,9 +6484,6 @@ export type KaminoLending = {
           },
           {
             "name": "twapChain",
-            "docs": [
-              "This is the scope_id price chain for the twap"
-            ],
             "type": {
               "array": [
                 "u16",
@@ -6147,9 +6501,6 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "priceAggregator",
-            "docs": [
-              "Pubkey of the base price feed (disabled if `null` or `default`)"
-            ],
             "type": "pubkey"
           },
           {
@@ -6166,9 +6517,6 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "name",
-            "docs": [
-              "UTF-8 encoded name of the token (null-terminated)"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6178,9 +6526,6 @@ export type KaminoLending = {
           },
           {
             "name": "heuristic",
-            "docs": [
-              "Heuristics limits of acceptable price"
-            ],
             "type": {
               "defined": {
                 "name": "priceHeuristic"
@@ -6189,9 +6534,6 @@ export type KaminoLending = {
           },
           {
             "name": "maxTwapDivergenceBps",
-            "docs": [
-              "Max divergence between twap and price in bps"
-            ],
             "type": "u64"
           },
           {
@@ -6204,9 +6546,6 @@ export type KaminoLending = {
           },
           {
             "name": "scopeConfiguration",
-            "docs": [
-              "Scope price configuration"
-            ],
             "type": {
               "defined": {
                 "name": "scopeConfiguration"
@@ -6215,9 +6554,6 @@ export type KaminoLending = {
           },
           {
             "name": "switchboardConfiguration",
-            "docs": [
-              "Switchboard configuration"
-            ],
             "type": {
               "defined": {
                 "name": "switchboardConfiguration"
@@ -6226,9 +6562,6 @@ export type KaminoLending = {
           },
           {
             "name": "pythConfiguration",
-            "docs": [
-              "Pyth configuration"
-            ],
             "type": {
               "defined": {
                 "name": "pythConfiguration"
@@ -6256,6 +6589,20 @@ export type KaminoLending = {
                 19
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "progressCallbackType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "none"
+          },
+          {
+            "name": "klendQueueAccountingHandlerOnKvault"
           }
         ]
       }
@@ -6405,30 +6752,18 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "globalAdmin",
-            "docs": [
-              "Global admin of the program"
-            ],
             "type": "pubkey"
           },
           {
             "name": "pendingAdmin",
-            "docs": [
-              "Pending admin must sign a specific transaction to become the global admin"
-            ],
             "type": "pubkey"
           },
           {
             "name": "feeCollector",
-            "docs": [
-              "Fee collector is the only allowed owner of token accounts receiving protocol fees"
-            ],
             "type": "pubkey"
           },
           {
             "name": "padding",
-            "docs": [
-              "Padding to make the struct size 1024 bytes"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6446,38 +6781,22 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "version",
-            "docs": [
-              "Version of lending market"
-            ],
             "type": "u64"
           },
           {
             "name": "bumpSeed",
-            "docs": [
-              "Bump seed for derived authority address"
-            ],
             "type": "u64"
           },
           {
             "name": "lendingMarketOwner",
-            "docs": [
-              "Owner authority which can add new reserves"
-            ],
             "type": "pubkey"
           },
           {
             "name": "lendingMarketOwnerCached",
-            "docs": [
-              "Temporary cache of the lending market owner, used in update_lending_market_owner"
-            ],
             "type": "pubkey"
           },
           {
             "name": "quoteCurrency",
-            "docs": [
-              "Currency market prices are quoted in",
-              "e.g. \"USD\" null padded (`*b\"USD\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\"`) or a SPL token mint pubkey"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6487,9 +6806,6 @@ export type KaminoLending = {
           },
           {
             "name": "referralFeeBps",
-            "docs": [
-              "Referral fee for the lending market, as bps out of the total protocol fee"
-            ],
             "type": "u16"
           },
           {
@@ -6498,12 +6814,6 @@ export type KaminoLending = {
           },
           {
             "name": "autodeleverageEnabled",
-            "docs": [
-              "Whether the obligations on this market should be subject to auto-deleveraging after deposit",
-              "or borrow limit is crossed.",
-              "Besides this flag, the particular reserve's flag also needs to be enabled (logical `AND`).",
-              "**NOTE:** this also affects the individual \"target LTV\" deleveraging."
-            ],
             "type": "u8"
           },
           {
@@ -6512,47 +6822,26 @@ export type KaminoLending = {
           },
           {
             "name": "priceRefreshTriggerToMaxAgePct",
-            "docs": [
-              "Refresh price from oracle only if it's older than this percentage of the price max age.",
-              "e.g. if the max age is set to 100s and this is set to 80%, the price will be refreshed if it's older than 80s.",
-              "Price is always refreshed if this set to 0."
-            ],
             "type": "u8"
           },
           {
             "name": "liquidationMaxDebtCloseFactorPct",
-            "docs": [
-              "Percentage of the total borrowed value in an obligation available for liquidation"
-            ],
             "type": "u8"
           },
           {
             "name": "insolvencyRiskUnhealthyLtvPct",
-            "docs": [
-              "Minimum acceptable unhealthy LTV before max_debt_close_factor_pct becomes 100%"
-            ],
             "type": "u8"
           },
           {
             "name": "minFullLiquidationValueThreshold",
-            "docs": [
-              "Minimum liquidation value threshold triggering full liquidation for an obligation, in full",
-              "units of the quote currency (e.g. `2` means \"$2\", not \"2 lamports of USDC\")."
-            ],
             "type": "u64"
           },
           {
             "name": "maxLiquidatableDebtMarketValueAtOnce",
-            "docs": [
-              "Max allowed liquidation value in one ix call"
-            ],
             "type": "u64"
           },
           {
             "name": "reserved0",
-            "docs": [
-              "[DEPRECATED] Global maximum unhealthy borrow value allowed for any obligation"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6562,23 +6851,14 @@ export type KaminoLending = {
           },
           {
             "name": "globalAllowedBorrowValue",
-            "docs": [
-              "Global maximum allowed borrow value allowed for any obligation"
-            ],
             "type": "u64"
           },
           {
             "name": "emergencyCouncil",
-            "docs": [
-              "The address of the emergency council, in charge of taking emergency actions on the market (e.g., enabling emergency mode)"
-            ],
             "type": "pubkey"
           },
           {
             "name": "reserved1",
-            "docs": [
-              "[DEPRECATED] Reward points multiplier per obligation type"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6588,9 +6868,6 @@ export type KaminoLending = {
           },
           {
             "name": "elevationGroups",
-            "docs": [
-              "Elevation groups are used to group together reserves that have the same risk parameters and can bump the ltv and liquidation threshold"
-            ],
             "type": {
               "array": [
                 {
@@ -6613,23 +6890,14 @@ export type KaminoLending = {
           },
           {
             "name": "minNetValueInObligationSf",
-            "docs": [
-              "Min net value accepted to be found in a position after any lending action in an obligation (scaled by quote currency decimals)"
-            ],
             "type": "u128"
           },
           {
             "name": "minValueSkipLiquidationLtvChecks",
-            "docs": [
-              "Minimum value to enforce smallest ltv priority checks on the collateral reserves on liquidation"
-            ],
             "type": "u64"
           },
           {
             "name": "name",
-            "docs": [
-              "Market name, zero-padded."
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6639,138 +6907,110 @@ export type KaminoLending = {
           },
           {
             "name": "minValueSkipLiquidationBfChecks",
-            "docs": [
-              "Minimum value to enforce highest borrow factor priority checks on the debt reserves on liquidation"
-            ],
             "type": "u64"
           },
           {
             "name": "individualAutodeleverageMarginCallPeriodSecs",
-            "docs": [
-              "Time (in seconds) that must pass before liquidation is allowed on an obligation that has",
-              "been individually marked for auto-deleveraging."
-            ],
             "type": "u64"
           },
           {
             "name": "minInitialDepositAmount",
-            "docs": [
-              "Minimum amount of deposit at creation of a reserve to prevent artificial inflation",
-              "Note: this amount cannot be recovered, the ctoken associated are never minted"
-            ],
             "type": "u64"
           },
           {
             "name": "obligationOrderExecutionEnabled",
-            "docs": [
-              "Whether the obligation orders should be evaluated during liquidations."
-            ],
             "type": "u8"
           },
           {
             "name": "immutable",
-            "docs": [
-              "Whether the lending market is set as immutable."
-            ],
             "type": "u8"
           },
           {
             "name": "obligationOrderCreationEnabled",
-            "docs": [
-              "Whether new obligation orders can be created.",
-              "Note: updating or cancelling existing orders is *not* affected by this flag."
-            ],
             "type": "u8"
           },
           {
             "name": "priceTriggeredLiquidationDisabled",
-            "docs": [
-              "Whether the liquidation operations that are triggered by price changes should be disabled.",
-              "This includes regular liquidation (i.e. LTV exceeding the unhealthy threshold) and some",
-              "obligation orders' execution.",
-              "",
-              "*Caution:* this flag is *disabling* the liquidations when `1` - contrary to all the other",
-              "liquidation-driving flags (see e.g. [Self::autodeleverage_enabled])."
-            ],
             "type": "u8"
           },
           {
             "name": "matureReserveDebtLiquidationEnabled",
-            "docs": [
-              "Whether the debts that reached their reserve's [ReserveConfig::debt_maturity_timestamp] can",
-              "be liquidated."
-            ],
             "type": "u8"
           },
           {
             "name": "obligationBorrowDebtTermLiquidationEnabled",
-            "docs": [
-              "Whether the [Obligation::borrows] that reached their [ReserveConfig::debt_term_seconds] can",
-              "be liquidated."
-            ],
             "type": "u8"
           },
           {
             "name": "borrowOrderCreationEnabled",
-            "docs": [
-              "Whether new borrow orders can be created.",
-              "Note: updating or cancelling existing orders is *not* affected by this flag."
-            ],
             "type": "u8"
           },
           {
             "name": "borrowOrderExecutionEnabled",
-            "docs": [
-              "Whether the existing borrow orders can be filled."
-            ],
             "type": "u8"
           },
           {
             "name": "proposerAuthority",
-            "docs": [
-              "Authority that can propose creating of new reserves but cannot enable them."
-            ],
             "type": "pubkey"
           },
           {
             "name": "minBorrowOrderFillValue",
-            "docs": [
-              "Minimum value that can be filled in a single `fill_borrow_order()` call, in full units of",
-              "the quote currency (e.g. `2` means \"$2\", not \"2 lamports of USDC\")."
-            ],
             "type": "u64"
           },
           {
             "name": "withdrawTicketIssuanceEnabled",
-            "docs": [
-              "Whether any new withdraw tickets can be issued (i.e. whether new requests can enter the",
-              "withdraw queue)."
-            ],
             "type": "u8"
           },
           {
             "name": "withdrawTicketRedemptionEnabled",
-            "docs": [
-              "Whether the existing withdraw tickets can be redeemed (i.e. whether the tickets can be used",
-              "to transfer accumulated pending liquidity to destination accounts)."
-            ],
             "type": "u8"
           },
           {
-            "name": "padding2",
-            "type": {
-              "array": [
-                "u8",
-                6
-              ]
-            }
+            "name": "obligationBorrowRolloverConfigurationEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "obligationBorrowMigrationToFixedExecutionEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "withdrawTicketCancellationEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "disableNonceBlock",
+            "type": "u8"
+          },
+          {
+            "name": "reserveRewardsMaxAprBps",
+            "type": "u16"
           },
           {
             "name": "minWithdrawQueuedLiquidityValue",
-            "docs": [
-              "Minimum value that can be withdrawn in a single `withdraw_queued_liquidity()` call, in full",
-              "units of the quote currency (e.g. `2` means \"$2\", not \"2 lamports of USDC\")."
-            ],
+            "type": "u64"
+          },
+          {
+            "name": "fixedTermRolloverWindowDurationSeconds",
+            "type": "u64"
+          },
+          {
+            "name": "openTermRolloverWindowDurationSeconds",
+            "type": "u64"
+          },
+          {
+            "name": "minPartialRolloverValue",
+            "type": "u64"
+          },
+          {
+            "name": "termBasedFullLiquidationDurationSecs",
+            "type": "u64"
+          },
+          {
+            "name": "permissioningAuthority",
+            "type": "pubkey"
+          },
+          {
+            "name": "permissionedOps",
             "type": "u64"
           },
           {
@@ -6778,7 +7018,7 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u64",
-                162
+                153
               ]
             }
           }
@@ -6787,24 +7027,15 @@ export type KaminoLending = {
     },
     {
       "name": "obligation",
-      "docs": [
-        "Lending market obligation state"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "tag",
-            "docs": [
-              "Version of the struct"
-            ],
             "type": "u64"
           },
           {
             "name": "lastUpdate",
-            "docs": [
-              "Last update to collateral, liquidity, or their market values"
-            ],
             "type": {
               "defined": {
                 "name": "lastUpdate"
@@ -6813,23 +7044,14 @@ export type KaminoLending = {
           },
           {
             "name": "lendingMarket",
-            "docs": [
-              "Lending market address"
-            ],
             "type": "pubkey"
           },
           {
             "name": "owner",
-            "docs": [
-              "Owner authority which can borrow liquidity"
-            ],
             "type": "pubkey"
           },
           {
             "name": "deposits",
-            "docs": [
-              "Deposited collateral for the obligation, unique by deposit reserve address"
-            ],
             "type": {
               "array": [
                 {
@@ -6843,23 +7065,14 @@ export type KaminoLending = {
           },
           {
             "name": "lowestReserveDepositLiquidationLtv",
-            "docs": [
-              "Worst LTV for the collaterals backing the loan, represented as a percentage"
-            ],
             "type": "u64"
           },
           {
             "name": "depositedValueSf",
-            "docs": [
-              "Market value of deposits (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "borrows",
-            "docs": [
-              "Borrowed liquidity for the obligation, unique by borrow reserve address"
-            ],
             "type": {
               "array": [
                 {
@@ -6873,37 +7086,22 @@ export type KaminoLending = {
           },
           {
             "name": "borrowFactorAdjustedDebtValueSf",
-            "docs": [
-              "Risk adjusted market value of borrows/debt (sum of price * borrowed_amount * borrow_factor) (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "borrowedAssetsMarketValueSf",
-            "docs": [
-              "Market value of borrows - used for max_liquidatable_borrowed_amount (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "allowedBorrowValueSf",
-            "docs": [
-              "The maximum borrow value at the weighted average loan to value ratio (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "unhealthyBorrowValueSf",
-            "docs": [
-              "The dangerous borrow value at the weighted average liquidation threshold (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "paddingDeprecatedAssetTiers",
-            "docs": [
-              "The asset tier of the deposits"
-            ],
             "type": {
               "array": [
                 "u8",
@@ -6913,59 +7111,38 @@ export type KaminoLending = {
           },
           {
             "name": "elevationGroup",
-            "docs": [
-              "The elevation group id the obligation opted into."
-            ],
             "type": "u8"
           },
           {
             "name": "numOfObsoleteDepositReserves",
-            "docs": [
-              "The number of obsolete reserves the obligation has a deposit in"
-            ],
             "type": "u8"
           },
           {
             "name": "hasDebt",
-            "docs": [
-              "Marked = 1 if borrows array is not empty, 0 = borrows empty"
-            ],
             "type": "u8"
           },
           {
             "name": "referrer",
-            "docs": [
-              "Wallet address of the referrer"
-            ],
             "type": "pubkey"
           },
           {
             "name": "borrowingDisabled",
-            "docs": [
-              "Marked = 1 if borrowing disabled, 0 = borrowing enabled"
-            ],
             "type": "u8"
           },
           {
             "name": "autodeleverageTargetLtvPct",
-            "docs": [
-              "A target LTV set by the market owner when marking this obligation for deleveraging.",
-              "Only effective when `deleveraging_margin_call_started_slot != 0`."
-            ],
             "type": "u8"
           },
           {
             "name": "lowestReserveDepositMaxLtvPct",
-            "docs": [
-              "The lowest max LTV found amongst the collateral deposits"
-            ],
             "type": "u8"
           },
           {
             "name": "numOfObsoleteBorrowReserves",
-            "docs": [
-              "The number of obsolete reserves the obligation has a borrow in"
-            ],
+            "type": "u8"
+          },
+          {
+            "name": "ownershipTransferState",
             "type": "u8"
           },
           {
@@ -6973,7 +7150,7 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u8",
-                4
+                3
               ]
             }
           },
@@ -6983,18 +7160,10 @@ export type KaminoLending = {
           },
           {
             "name": "autodeleverageMarginCallStartedTimestamp",
-            "docs": [
-              "A timestamp at which the market owner most-recently marked this obligation for deleveraging.",
-              "Zero if not currently subject to deleveraging."
-            ],
             "type": "u64"
           },
           {
             "name": "obligationOrders",
-            "docs": [
-              "Owner-defined, permissionlessly-executed repay orders.",
-              "Typical use-cases would be a stop-loss and a take-profit (possibly co-existing)."
-            ],
             "type": {
               "array": [
                 {
@@ -7007,11 +7176,7 @@ export type KaminoLending = {
             }
           },
           {
-            "name": "borrowOrder",
-            "docs": [
-              "Owner-defined, permissionlessly-executed borrow order applicable to this obligation.",
-              "Non-zeroed only on a newly-initialized fixed-rate, fixed-term obligation."
-            ],
+            "name": "headBorrowOrder",
             "type": {
               "defined": {
                 "name": "borrowOrder"
@@ -7019,11 +7184,28 @@ export type KaminoLending = {
             }
           },
           {
+            "name": "pendingOwner",
+            "type": "pubkey"
+          },
+          {
+            "name": "tailBorrowOrders",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "borrowOrder"
+                  }
+                },
+                2
+              ]
+            }
+          },
+          {
             "name": "padding3",
             "type": {
               "array": [
                 "u64",
-                73
+                29
               ]
             }
           }
@@ -7048,45 +7230,27 @@ export type KaminoLending = {
     },
     {
       "name": "referrerTokenState",
-      "docs": [
-        "Referrer account -> each owner can have multiple accounts for specific reserves"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "referrer",
-            "docs": [
-              "Pubkey of the referrer/owner"
-            ],
             "type": "pubkey"
           },
           {
             "name": "mint",
-            "docs": [
-              "Token mint for the account"
-            ],
             "type": "pubkey"
           },
           {
             "name": "amountUnclaimedSf",
-            "docs": [
-              "Amount that has been accumulated and not claimed yet -> available to claim (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "amountCumulativeSf",
-            "docs": [
-              "Amount that has been accumulated in total -> both already claimed and unclaimed (scaled fraction)"
-            ],
             "type": "u128"
           },
           {
             "name": "bump",
-            "docs": [
-              "Referrer token state bump, used for address validation"
-            ],
             "type": "u64"
           },
           {
@@ -7119,38 +7283,23 @@ export type KaminoLending = {
     },
     {
       "name": "userMetadata",
-      "docs": [
-        "Referrer account -> each owner can have multiple accounts for specific reserves"
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "referrer",
-            "docs": [
-              "Pubkey of the referrer/owner - pubkey::default if no referrer"
-            ],
             "type": "pubkey"
           },
           {
             "name": "bump",
-            "docs": [
-              "Bump used for validation of account address"
-            ],
             "type": "u64"
           },
           {
             "name": "userLookupTable",
-            "docs": [
-              "User lookup table - used to store all user accounts - atas for each reserve mint, each obligation PDA, UserMetadata itself and all referrer_token_states if there is a referrer"
-            ],
             "type": "pubkey"
           },
           {
             "name": "owner",
-            "docs": [
-              "User metadata account owner"
-            ],
             "type": "pubkey"
           },
           {
@@ -7181,16 +7330,10 @@ export type KaminoLending = {
         "fields": [
           {
             "name": "version",
-            "docs": [
-              "Version of the reserve"
-            ],
             "type": "u64"
           },
           {
             "name": "lastUpdate",
-            "docs": [
-              "Last slot when supply and rates updated"
-            ],
             "type": {
               "defined": {
                 "name": "lastUpdate"
@@ -7199,9 +7342,6 @@ export type KaminoLending = {
           },
           {
             "name": "lendingMarket",
-            "docs": [
-              "Lending market address"
-            ],
             "type": "pubkey"
           },
           {
@@ -7214,9 +7354,6 @@ export type KaminoLending = {
           },
           {
             "name": "liquidity",
-            "docs": [
-              "Reserve liquidity"
-            ],
             "type": {
               "defined": {
                 "name": "reserveLiquidity"
@@ -7234,9 +7371,6 @@ export type KaminoLending = {
           },
           {
             "name": "collateral",
-            "docs": [
-              "Reserve collateral"
-            ],
             "type": {
               "defined": {
                 "name": "reserveCollateral"
@@ -7254,9 +7388,6 @@ export type KaminoLending = {
           },
           {
             "name": "config",
-            "docs": [
-              "Reserve configuration values"
-            ],
             "type": {
               "defined": {
                 "name": "reserveConfig"
@@ -7268,7 +7399,7 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u64",
-                114
+                112
               ]
             }
           },
@@ -7278,10 +7409,6 @@ export type KaminoLending = {
           },
           {
             "name": "borrowedAmountsAgainstThisReserveInElevationGroups",
-            "docs": [
-              "Amount of token borrowed in lamport of debt asset in the given",
-              "elevation group when this reserve is part of the collaterals."
-            ],
             "type": {
               "array": [
                 "u64",
@@ -7291,9 +7418,6 @@ export type KaminoLending = {
           },
           {
             "name": "withdrawQueue",
-            "docs": [
-              "The tracker of ticket-based withdrawals."
-            ],
             "type": {
               "defined": {
                 "name": "withdrawQueue"
@@ -7314,106 +7438,65 @@ export type KaminoLending = {
     },
     {
       "name": "withdrawTicket",
-      "docs": [
-        "A finite-lifecycle account representing a specific depositor's place in the withdraw queue of",
-        "a specific reserve.",
-        "",
-        "The lifecycle:",
-        "1. The depositor holding ctokens wants to withdraw funds from the reserve, and finds out that",
-        "the required amount is not available (due to high utilization).",
-        "2. The depositor calls the `enqueue_to_withdraw` handler.",
-        "3. The handler transfers the depositor's ctokens to the reserve's internal \"pending\" vault.",
-        "4. The handler initializes a new [WithdrawTicket] account, with the next available sequence",
-        "number.",
-        "5. The depositor waits until his ticket is the next expected one for actual withdraw, and until",
-        "the reserve has enough liquidity.",
-        "6. Anyone (the depositor or a bot) calls the permissionless `withdraw_queued_liquidity`",
-        "handler. If the ticket became invalid (e.g. destination account no longer exists), then the",
-        "depositor can call the `recover_invalid_ticket_collateral` handler instead.",
-        "7. The handler transfers the liquidity amount according to the current exchange rate.",
-        "8. The handler closes the ticket account."
-      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "sequenceNumber",
-            "docs": [
-              "This ticket's place in the queue; the same as used for PDA derivation."
-            ],
             "type": "u64"
           },
           {
             "name": "owner",
-            "docs": [
-              "The funds' owner (the user who called the `enqueue_to_withdraw` handler)."
-            ],
             "type": "pubkey"
           },
           {
             "name": "reserve",
-            "docs": [
-              "The reserve to withdraw from."
-            ],
             "type": "pubkey"
           },
           {
             "name": "userDestinationLiquidityTa",
-            "docs": [
-              "The token account to which the finally-available liquidity should be transferred (by the",
-              "`withdraw_queued_liquidity` handler)."
-            ],
             "type": "pubkey"
           },
           {
             "name": "queuedCollateralAmount",
-            "docs": [
-              "The amount of collateral still waiting to be withdrawn using this ticket."
-            ],
             "type": "u64"
           },
           {
             "name": "createdAtTimestamp",
-            "docs": [
-              "The timestamp at which the queue was entered.",
-              "",
-              "This is currently only a piece of metadata, not used by the logic."
-            ],
             "type": "u64"
           },
           {
             "name": "invalid",
-            "docs": [
-              "Whether the ticket has been found to be invalid (e.g. the [Self::user_destination_liquidity]",
-              "has been repurposed) by the `withdraw_queued_liquidity` handler.",
-              "To be specific: valid = `0`, invalid = `1`.",
-              "",
-              "An invalid ticket cannot be made valid again, and can only be passed to the",
-              "`recover_invalid_ticket_collateral` handler."
-            ],
+            "type": "u8"
+          },
+          {
+            "name": "progressCallbackType",
             "type": "u8"
           },
           {
             "name": "alignmentPadding",
-            "docs": [
-              "Inner padding, for alignment."
-            ],
             "type": {
               "array": [
                 "u8",
-                7
+                6
+              ]
+            }
+          },
+          {
+            "name": "progressCallbackCustomAccounts",
+            "type": {
+              "array": [
+                "pubkey",
+                2
               ]
             }
           },
           {
             "name": "endPadding",
-            "docs": [
-              "Trailing padding, for future developments."
-            ],
             "type": {
               "array": [
                 "u64",
-                48
+                40
               ]
             }
           }

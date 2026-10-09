@@ -165,7 +165,7 @@ pub struct KaminoDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_REBALANCE)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), ALLOW_REBALANCE)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

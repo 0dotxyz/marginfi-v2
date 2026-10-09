@@ -119,13 +119,10 @@ pub fn lending_pool_add_bank_drift(
 #[derive(Accounts)]
 #[instruction(bank_config: DriftConfigCompact, bank_seed: u64)]
 pub struct LendingPoolAddBankDrift<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

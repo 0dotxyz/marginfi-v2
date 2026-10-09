@@ -109,15 +109,14 @@ pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
 pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
 
-/// Default span an interest-trigger order measures its realized rates over. The rates are read as
-/// share-index growth across the span, so this is also how long a rate move must persist to count.
+/// Default span an interest-trigger order measures its realized rates over.
 pub const INTEREST_DEFAULT_WINDOW_SECONDS: u32 = 86_400; // 24 hours
 
-/// Shortest measurement span an order may configure, and so the floor on how briefly a rate can be
-/// pushed to trigger an exit.
+/// Shortest span an order measures its realized rates over. A rate pushed up for less than the span
+/// counts only for the yield it paid in that time.
 pub const INTEREST_MIN_WINDOW_SECONDS: u32 = 21_600; // 6 hours
 
-/// Longest measurement span an order may configure: the history a full bank reading ring is
+/// Longest span an order measures its realized rates over: the history a full bank reading ring is
 /// guaranteed to hold.
 pub const INTEREST_MAX_WINDOW_SECONDS: u32 = 172_800; // 48 hours
 
@@ -179,6 +178,12 @@ pub const BANK_SAME_ASSET_EMODE_ELIGIBLE: u64 = 1 << 12;
 /// Liability-bank flag: balances borrowing from this bank accrue the pairwise variable-borrow
 /// premium and project it in health checks.
 pub const PREMIUM_ACTIVE: u64 = 1 << 13;
+
+/// Kamino-bank flag: the reserve's lending market is in emergency mode. Cached here because the
+/// market account is not passed on the health path, and refreshed permissionlessly by
+/// `propagate_kamino_market_emergency`. Worth zero for Initial margin, exactly like a reserve in
+/// emergency mode.
+pub const KAMINO_MARKET_EMERGENCY: u64 = 1 << 14;
 
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
@@ -278,14 +283,18 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 ///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
-/// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
-///   limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
-///   liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
-///   + reserve/spot-market), so they share the same limit.
+/// Maximum number of costly positions per account. Integration (Kamino + Drift + Solend +
+///   JupLend) and staked balances share this cap: they never mix on an account, and both cost 3-5
+///   remaining accounts per position against the 64 accounts a transaction may lock.
+///
+/// At 4, classic liquidation covers a full 16-balance account in one transaction even in the worst
+///   case (JupLend). Receivership covers 3 of the 4 in one transaction, and all 4 with the venue
+///   refreshes moved to a separate same-slot transaction. See `m03`/`m05` for the measured
+///   thresholds.
 ///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 ///   eventually get rid of this limit altogether.
-pub const MAX_INTEGRATION_POSITIONS: usize = 8;
+pub const MAX_COSTLY_POSITIONS: usize = 4;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 //   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 //   live in prod.

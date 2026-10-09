@@ -7,9 +7,13 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
+use marginfi_type_crate::constants::{
+    EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+    REBALANCE_CONSERVATION_DUST_ATOMS, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+    REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+};
 use marginfi_type_crate::types::{
-    MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
+    Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
     WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
 
@@ -30,6 +34,14 @@ pub trait RebalanceOrderImpl {
 
     /// Replace the venue allowlist, validating the count and zeroing unused slots.
     fn set_allowed_banks(&mut self, allowed_banks: &[Pubkey]) -> MarginfiResult;
+
+    /// Seconds of history a move's realized rates are measured over: the cooldown, held to the
+    /// spans the bank rate readings serve.
+    fn rate_window(&self) -> u32;
+
+    /// Seconds a keeper tip stays escrowed before it can be settled: the cooldown, held to the
+    /// settle delay bounds.
+    fn settle_delay(&self) -> u64;
 }
 
 impl RebalanceOrderImpl for RebalanceOrder {
@@ -74,20 +86,33 @@ impl RebalanceOrderImpl for RebalanceOrder {
         }
         Ok(())
     }
+
+    fn rate_window(&self) -> u32 {
+        u32::try_from(self.cooldown_seconds)
+            .unwrap_or(u32::MAX)
+            .clamp(INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS)
+    }
+
+    fn settle_delay(&self) -> u64 {
+        self.cooldown_seconds.clamp(
+            REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+            REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        )
+    }
 }
 
 pub trait RebalanceRecordImpl {
-    /// Record every referenced bank's start underlying-token amount + the declared moves, and snapshot
-    /// every active balance NOT in the referenced set, so `end_rebalance` can reconcile the moves
-    /// against real token deltas, prove conservation, and prove untouched balances kept side and shares.
-    /// The referenced set is the order's whole allowlist, so a bank no move touches is still recorded
-    /// and must come back with a zero net delta.
+    /// Record every referenced bank's start underlying-token amount and order tag + the declared
+    /// moves, and snapshot every non-empty active balance NOT in the referenced set, so
+    /// `end_rebalance` can reconcile the moves against real token deltas, prove conservation, and
+    /// prove untouched balances kept side and shares. The referenced set is the order's whole
+    /// allowlist, so a bank no move touches is still recorded and must return a zero net delta.
     fn initialize(
         &mut self,
         order: Pubkey,
         marginfi_account_key: Pubkey,
         executor: Pubkey,
-        ref_banks: &[(Pubkey, I80F48)],
+        ref_banks: &[RebalanceRefBank],
         pre_rates: &[I80F48],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
@@ -120,8 +145,13 @@ pub trait RebalanceRecordImpl {
     ) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
 
     /// Verify the non-referenced balance set is exactly what it was at start: every snapshotted
-    /// balance still holds its side and shares, and no balance outside the referenced set was added.
+    /// balance still holds its side, order tag, and shares, and no non-empty balance outside the
+    /// referenced set was added.
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
+
+    /// Carry each drained tagged source's order tag onto its destination balance, and verify every
+    /// other tagged referenced balance still holds its tag.
+    fn carry_tags(&self, marginfi_account: &mut MarginfiAccount) -> MarginfiResult;
 }
 
 impl RebalanceRecordImpl for RebalanceRecord {
@@ -130,7 +160,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         order: Pubkey,
         marginfi_account_key: Pubkey,
         executor: Pubkey,
-        ref_banks: &[(Pubkey, I80F48)],
+        ref_banks: &[RebalanceRefBank],
         pre_rates: &[I80F48],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
@@ -160,12 +190,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         self.marginfi_account = marginfi_account_key;
         self.executor = executor;
         self.ref_banks = [RebalanceRefBank::default(); MAX_REBALANCE_BANKS];
-        for (i, (bank, val)) in ref_banks.iter().enumerate() {
-            self.ref_banks[i] = RebalanceRefBank {
-                bank: *bank,
-                pre_underlying: (*val).into(),
-            };
-        }
+        self.ref_banks[..ref_banks.len()].copy_from_slice(ref_banks);
         self.ref_bank_count = ref_banks.len() as u8;
         self.pre_rate = [WrappedI80F48::default(); MAX_REBALANCE_BANKS];
         for (slot, rate) in self.pre_rate.iter_mut().zip(pre_rates.iter()) {
@@ -177,7 +202,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
 
         self.active_balance_count =
             snapshot_balances_outside(&mut self.balance_states, marginfi_account, |bank| {
-                ref_banks.iter().any(|(b, _)| b == bank)
+                ref_banks.iter().any(|r| r.bank == *bank)
             })?;
         Ok(())
     }
@@ -246,7 +271,6 @@ impl RebalanceRecordImpl for RebalanceRecord {
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {
         // A balance added mid-sandwich occupies no snapshot slot, so the loop below cannot see it.
-        // Any signer may run the deposit legs, and no leg is bound to a referenced bank.
         let ref_banks = &self.ref_banks[..self.ref_bank_count as usize];
         verify_balances_outside_unchanged(
             &self.balance_states[..self.active_balance_count as usize],
@@ -255,15 +279,62 @@ impl RebalanceRecordImpl for RebalanceRecord {
             MarginfiError::RebalanceUntrackedBalance,
         )
     }
+
+    fn carry_tags(&self, marginfi_account: &mut MarginfiAccount) -> MarginfiResult {
+        let balances = &mut marginfi_account.lending_account.balances;
+        let slot_of = |balances: &[Balance], bank: &Pubkey| {
+            balances
+                .iter()
+                .position(|b| b.is_active() && b.bank_pk == *bank)
+        };
+        let n = self.ref_bank_count as usize;
+        for (i, rb) in self.ref_banks[..n].iter().enumerate() {
+            if rb.tag == 0 {
+                continue;
+            }
+            match self
+                .active_moves()
+                .iter()
+                .find(|m| m.src_index as usize == i)
+            {
+                None => {
+                    let idx =
+                        slot_of(balances, &rb.bank).ok_or(MarginfiError::IllegalBalanceState)?;
+                    check!(
+                        balances[idx].tag == rb.tag,
+                        MarginfiError::IllegalBalanceState
+                    );
+                }
+                Some(m) => {
+                    check!(
+                        slot_of(balances, &rb.bank).is_none(),
+                        MarginfiError::RebalanceTaggedBalanceSplit
+                    );
+                    let dst = &self.ref_banks[m.dst_index as usize].bank;
+                    let idx = slot_of(balances, dst).ok_or(MarginfiError::IllegalBalanceState)?;
+                    check!(balances[idx].tag == 0, MarginfiError::IllegalBalanceState);
+                    balances[idx].tag = rb.tag;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RebalanceRecordImpl;
+    use super::{RebalanceOrderImpl, RebalanceRecordImpl};
+    use crate::errors::MarginfiError;
+    use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
-    use marginfi_type_crate::constants::EXP_10_I80F48;
-    use marginfi_type_crate::types::RebalanceRecord;
+    use marginfi_type_crate::constants::{
+        EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+    };
+    use marginfi_type_crate::types::{
+        Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
+    };
 
     fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
         let mut record = RebalanceRecord::zeroed();
@@ -289,5 +360,147 @@ mod tests {
         // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
         assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
         assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
+    }
+
+    #[test]
+    fn the_rate_window_is_the_cooldown_held_to_the_reading_spans() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, window) in [
+            (0, INTEREST_MIN_WINDOW_SECONDS),
+            (86_400, 86_400),
+            (u64::MAX, INTEREST_MAX_WINDOW_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.rate_window(), window);
+        }
+    }
+
+    #[test]
+    fn the_settle_delay_is_the_cooldown_held_to_its_bounds() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, delay) in [
+            (0, REBALANCE_SETTLE_DELAY_MIN_SECONDS),
+            (1_800, 1_800),
+            (u64::MAX, REBALANCE_SETTLE_DELAY_MAX_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.settle_delay(), delay);
+        }
+    }
+
+    fn balance(bank: Pubkey, tag: u16) -> Balance {
+        let mut balance = Balance::zeroed();
+        balance.active = 1;
+        balance.bank_pk = bank;
+        balance.tag = tag;
+        balance.asset_shares = I80F48::ONE.into();
+        balance
+    }
+
+    fn ref_bank(bank: Pubkey, tag: u16) -> RebalanceRefBank {
+        RebalanceRefBank {
+            bank,
+            pre_underlying: I80F48::ONE.into(),
+            tag,
+            _pad0: [0; 6],
+        }
+    }
+
+    /// A record over `ref_banks` with a single whole move from bank 0 to bank 1.
+    fn record_for(account: &MarginfiAccount, ref_banks: &[RebalanceRefBank]) -> RebalanceRecord {
+        let mv = RebalanceMove {
+            src_index: 0,
+            dst_index: 1,
+            _pad0: [0; 6],
+            amount: I80F48::ONE.into(),
+        };
+        let mut record = RebalanceRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                ref_banks,
+                &vec![I80F48::ZERO; ref_banks.len()],
+                &[mv],
+                account,
+            )
+            .unwrap();
+        record
+    }
+
+    /// The snapshot pins each non-referenced balance's order tag alongside its side and shares.
+    #[test]
+    fn verify_others_unchanged_rejects_a_cleared_tag() {
+        let src = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 0);
+        account.lending_account.balances[1] = balance(Pubkey::new_unique(), 7);
+        let record = record_for(
+            &account,
+            &[ref_bank(src, 0), ref_bank(Pubkey::new_unique(), 0)],
+        );
+        assert!(record.verify_others_unchanged(&account).is_ok());
+
+        account.lending_account.balances[1].tag = 0;
+        let err = record.verify_others_unchanged(&account).unwrap_err();
+        assert_eq!(err, MarginfiError::IllegalBalanceState.into());
+    }
+
+    /// A drained tagged source hands its tag to the balance its move opened.
+    #[test]
+    fn carry_tags_moves_the_tag_of_a_drained_source() {
+        let src = Pubkey::new_unique();
+        let dst = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 7);
+        let record = record_for(&account, &[ref_bank(src, 7), ref_bank(dst, 0)]);
+
+        let err = record.carry_tags(&mut account).unwrap_err();
+        assert_eq!(err, MarginfiError::RebalanceTaggedBalanceSplit.into());
+
+        account.lending_account.balances[0] = balance(dst, 0);
+        record.carry_tags(&mut account).unwrap();
+        assert_eq!(account.lending_account.balances[0].tag, 7);
+    }
+
+    /// An active slot below `EMPTY_BALANCE_THRESHOLD` is left out of the snapshot on both sides.
+    #[test]
+    fn record_ignores_an_empty_slot() {
+        let src = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 0);
+        let mut empty = balance(Pubkey::new_unique(), 0);
+        empty.asset_shares = I80F48::from_num(0.5).into();
+        account.lending_account.balances[1] = empty;
+        let record = record_for(
+            &account,
+            &[ref_bank(src, 0), ref_bank(Pubkey::new_unique(), 0)],
+        );
+        assert_eq!(record.active_balance_count, 0);
+        assert!(record.verify_others_unchanged(&account).is_ok());
+    }
+
+    /// A tagged referenced bank no move drains must still hold its tag at end.
+    #[test]
+    fn carry_tags_rejects_a_cleared_tag_on_an_untouched_bank() {
+        let src = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(other, 7);
+        account.lending_account.balances[1] = balance(src, 0);
+        let record = record_for(
+            &account,
+            &[
+                ref_bank(src, 0),
+                ref_bank(Pubkey::new_unique(), 0),
+                ref_bank(other, 7),
+            ],
+        );
+        assert!(record.carry_tags(&mut account).is_ok());
+
+        account.lending_account.balances[0].tag = 0;
+        let err = record.carry_tags(&mut account).unwrap_err();
+        assert_eq!(err, MarginfiError::IllegalBalanceState.into());
     }
 }

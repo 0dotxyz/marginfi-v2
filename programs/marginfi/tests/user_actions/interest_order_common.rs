@@ -5,16 +5,17 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::prelude::*;
+use fixtures::rebalance::fund_keeper_for_fees;
 use fixtures::test::{
-    PYTH_PUSH_SOL_FULLV_FEED, PYTH_PUSH_SOL_PARTV_FEED, PYTH_PYUSD_FEED, PYTH_SOL_EQUIVALENT_FEED,
-    PYTH_SOL_FEED, PYTH_USDC_FEED,
+    BASE_TS, PYTH_PUSH_SOL_FULLV_FEED, PYTH_PUSH_SOL_PARTV_FEED, PYTH_PYUSD_FEED,
+    PYTH_SOL_EQUIVALENT_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED,
 };
 use marginfi_type_crate::constants::{
     INTEREST_DEFAULT_EXIT_BUDGET_SECONDS, INTEREST_MAX_EXIT_BUDGET_SECONDS,
     INTEREST_MAX_WINDOW_SECONDS,
 };
 use marginfi_type_crate::types::{
-    centi_to_u32, milli_to_u32, Bank, InterestTriggerConfig, OrderTrigger,
+    centi_to_u32, milli_to_u32, Bank, InterestTriggerConfig, OrderTrigger, PremiumEntry,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::BanksClientError;
@@ -26,17 +27,15 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-/// `program-test` boots at timestamp 0, which a rate reading treats as never written, so tests pin
-/// a real time.
-const BASE_TS: i64 = 1_700_000_000;
 const ASSET_DEPOSIT: f64 = 1_000.0; // USDC, $1,000 at the $1 test oracle
 const LIABILITY_BORROW: f64 = 10.0; // SOL, $100 at the $10 test oracle
 const SOL_PRICE: f64 = 10.0;
 
 pub const TAG_COLLATERAL: u16 = 100;
 pub const TAG_LIABILITY: u16 = 200;
+pub const PREMIUM_APR: f64 = 0.25;
 
-// A near-idle borrow leg (1 SOL against a 1,000 SOL float) so its baseline rate is negligible and
+// A near-idle borrow (1 SOL against a 1,000 SOL float) so its baseline rate is negligible and
 // whatever a driver does to utilization is the only thing the window measures.
 pub const SPIKE_LENDER_SOL: f64 = 1_000.0;
 const SPIKE_BORROW_SOL: f64 = 1.0;
@@ -48,7 +47,7 @@ pub const TEST_WINDOW: i64 = TEST_WINDOW_SECONDS as i64;
 /// Above anything the near-idle baseline produces, below what a held ~90% utilization does.
 const SPIKE_MARGIN_APR: f64 = 0.02;
 
-/// A near-idle borrow leg at the default size, with a margin small enough that base rates alone
+/// A near-idle borrow at the default size, with a margin small enough that base rates alone
 /// miss it and a premium alone clears it.
 pub fn premium_params() -> Params {
     Params {
@@ -200,7 +199,7 @@ pub async fn setup(p: Params) -> anyhow::Result<InterestFixture> {
         .try_bank_borrow(borrower_sol.key, sol, p.borrow_sol)
         .await?;
 
-    // The borrow priced the SOL bank, which took its first reading. The lend leg has only been
+    // The borrow priced the SOL bank, which took its first reading. The asset bank has only been
     // deposited into, which prices nothing, so it is pulsed for its own.
     test_f
         .marginfi_group
@@ -216,18 +215,18 @@ pub async fn setup(p: Params) -> anyhow::Result<InterestFixture> {
         threshold: p.stop_loss.into(),
         max_slippage: slippage(p.max_slippage_pct),
     };
-    let legs = vec![usdc.key, sol.key];
+    let bank_keys = vec![usdc.key, sol.key];
     let order = match p.interest {
         Some(interest) => {
             account_f
-                .try_place_interest_order(legs, trigger, interest)
+                .try_place_interest_order(bank_keys, trigger, interest)
                 .await?
         }
-        None => account_f.try_place_order(legs, trigger).await?,
+        None => account_f.try_place_order(bank_keys, trigger).await?,
     };
 
     let keeper = Keypair::new();
-    test_f.fund_keeper(&keeper).await?;
+    fund_keeper_for_fees(&test_f, &keeper).await?;
     let keeper_sol = sol
         .mint
         .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 100_000.0)
@@ -298,11 +297,32 @@ impl InterestFixture {
         Ok(())
     }
 
-    /// Close out the borrow leg's accrual at the current rate, so the next span accrues only at
+    /// Close out the SOL bank's accrual at the current rate, so the next span accrues only at
     /// whatever rate a driver then sets.
     pub async fn settle_borrow_rate(&self) -> anyhow::Result<()> {
         let sol = self.test_f.get_bank(&BankMint::Sol);
         self.test_f.marginfi_group.try_accrue_interest(sol).await?;
+        Ok(())
+    }
+
+    /// Charge `PREMIUM_APR` on the SOL liability, collateralised by the USDC asset balance, and
+    /// it to the account's snapshot, which only an oracle-carrying instruction does.
+    pub async fn charge_premium(&self) -> anyhow::Result<()> {
+        let group_f = &self.test_f.marginfi_group;
+        group_f
+            .try_configure_group_premium(PremiumEntry {
+                collateral_tag: TAG_COLLATERAL,
+                liability_tag: TAG_LIABILITY,
+                rate: milli_to_u32(I80F48::from_num(PREMIUM_APR)),
+            })
+            .await?;
+        group_f
+            .try_configure_bank_premium(self.test_f.get_bank(&BankMint::Usdc), TAG_COLLATERAL, true)
+            .await?;
+        group_f
+            .try_configure_bank_premium(self.test_f.get_bank(&BankMint::Sol), TAG_LIABILITY, true)
+            .await?;
+        self.account_f.try_lending_account_pulse_health().await?;
         Ok(())
     }
 
@@ -312,10 +332,6 @@ impl InterestFixture {
 
     pub async fn bank_last_update(&self, mint: &BankMint) -> i64 {
         self.load_bank(mint).await.last_update
-    }
-
-    pub async fn recorded_readings(&self, mint: &BankMint) -> usize {
-        self.load_bank(mint).await.recorded_rate_readings().count()
     }
 
     /// Repay the SOL liability from the keeper's own tokens, pull `scale` times the covering USDC

@@ -110,8 +110,8 @@ pub enum MarginfiError {
     WrongOracleAccountKeys,
     #[msg("Stake oracles are temporarily disabled")] // 6053
     StakeOraclesDisabled,
-    #[msg("Interest trigger requires both order banks writable to accrue their indices")] // 6054
-    OrderInterestBankNotWritable,
+    #[msg("Account is already tagged for liquidation")] // 6054
+    AccountAlreadyTagged,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -148,8 +148,8 @@ pub enum MarginfiError {
     TooSevereLiquidation,
     #[msg("Liquidation would worsen account health")] // 6072
     WorseHealthPostLiquidation,
-    #[msg("Exceeded the maximum allowed integration positions")] // 6073
-    IntegrationPositionLimitExceeded,
+    #[msg("Exceeded the maximum allowed integration or staked positions")] // 6073
+    CostlyPositionLimitExceeded,
     #[msg("Maximum initial leverage exceeded")] // 6074
     MaxInitLeverageExceeded,
     #[msg("The Emode config was invalid")] // 6075
@@ -282,6 +282,19 @@ pub enum MarginfiError {
     InvalidPtStartPrice, // 6138
     #[msg("Stake pool balance has not been updated recently enough")]
     StakePoolStale, // 6139
+
+    #[msg("Deprecated: bank configuration now uses explicit fast and governance instructions")]
+    MixedBankConfigAuthority, // 6140
+    #[msg("Governance admin cannot be set to the default pubkey (all zeros); this would disable slow-authority operations")]
+    InvalidGovernanceAdmin, // 6141
+    #[msg("Deprecated: group configuration now uses explicit fast and governance instructions")]
+    MixedGroupConfigAuthority, // 6142
+    #[msg("Fast bank configuration may only make a risk-reducing operational-state transition")]
+    InvalidFastBankOperationalState, // 6143
+    #[msg("Governance bank configuration may only transition a bank to Operational")]
+    InvalidGovernanceBankOperationalState, // 6144
+    #[msg("A bank has no rate reading as old as the order's rate window")]
+    RateHistoryTooShort, // 6145
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -516,6 +529,14 @@ pub enum MarginfiError {
     RebalanceStaleExecutionSeq, // 6716
     #[msg("Rebalance allowlist contains a bank the account owes into")]
     RebalanceAllowlistLiability, // 6717
+    #[msg("Rebalance moves use a bank as both a source and a destination")]
+    RebalanceBankSourceAndDestination, // 6718
+    #[msg("Rebalance deposit/withdraw legs must all act on a bank the order allows")]
+    RebalanceForeignBankLeg, // 6719
+    #[msg("Rebalance must move an order-tagged balance whole, alone, into an empty bank")]
+    RebalanceTaggedBalanceSplit, // 6720
+    #[msg("Rebalance cannot move a balance held by an interest trigger order")]
+    RebalanceInterestTaggedBalance, // 6721
     // ************** END AUTO-REBALANCE ERRORS
     // ************** BEGIN SCOPE ERRORS (starting at 6800)
     #[msg("Scope oracle account is not owned by the Scope program or is malformed")]
@@ -528,14 +549,14 @@ pub enum MarginfiError {
     UseConfigureBankOracleScope, // 6803
     // **************END SCOPE ERRORS
     // ************** BEGIN INTEREST ORDER ERRORS (starting at 6900)
-    #[msg("An order bank has no rate reading as old as the order's measurement window yet")]
-    OrderInterestHistoryTooShort = 900, // 6900
     #[msg("Realized carry does not meet the order's negative-rate margin")]
-    OrderInterestNotNegative, // 6901
+    OrderInterestNotNegative = 900, // 6900
     #[msg("Unwind cost exceeds the carry loss the order is willing to spend to exit")]
-    OrderInterestCostExceedsCarry, // 6902
+    OrderInterestCostExceedsCarry, // 6901
     #[msg("Interest trigger window or exit budget is outside the permitted range")]
-    OrderInterestInvalidConfig, // 6903
+    OrderInterestInvalidConfig, // 6902
+    #[msg("Interest trigger requires both order banks writable to accrue their indices")]
+    OrderInterestBankNotWritable, // 6903
     // ************** END INTEREST ORDER ERRORS
     // Borrow order errors (7000 block)
     #[msg("Bank has no rate reading old enough to cover the order's window")]
@@ -653,7 +674,7 @@ impl From<u32> for MarginfiError {
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
             6053 => MarginfiError::StakeOraclesDisabled,
-            6054 => MarginfiError::OrderInterestBankNotWritable,
+            6054 => MarginfiError::AccountAlreadyTagged,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -672,7 +693,7 @@ impl From<u32> for MarginfiError {
             6070 => MarginfiError::TooSeverePayoff,
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
-            6073 => MarginfiError::IntegrationPositionLimitExceeded,
+            6073 => MarginfiError::CostlyPositionLimitExceeded,
             6074 => MarginfiError::MaxInitLeverageExceeded,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,
@@ -734,10 +755,17 @@ impl From<u32> for MarginfiError {
             6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6135 => MarginfiError::SlippageTooHigh,
             6136 => MarginfiError::MarinadeStateValidationFailed,
             6137 => MarginfiError::ExponentVaultValidationFailed,
             6138 => MarginfiError::InvalidPtStartPrice,
             6139 => MarginfiError::StakePoolStale,
+            6140 => MarginfiError::MixedBankConfigAuthority,
+            6141 => MarginfiError::InvalidGovernanceAdmin,
+            6142 => MarginfiError::MixedGroupConfigAuthority,
+            6143 => MarginfiError::InvalidFastBankOperationalState,
+            6144 => MarginfiError::InvalidGovernanceBankOperationalState,
+            6145 => MarginfiError::RateHistoryTooShort,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -843,6 +871,10 @@ impl From<u32> for MarginfiError {
             6715 => MarginfiError::RebalanceNotBestVenue,
             6716 => MarginfiError::RebalanceStaleExecutionSeq,
             6717 => MarginfiError::RebalanceAllowlistLiability,
+            6718 => MarginfiError::RebalanceBankSourceAndDestination,
+            6719 => MarginfiError::RebalanceForeignBankLeg,
+            6720 => MarginfiError::RebalanceTaggedBalanceSplit,
+            6721 => MarginfiError::RebalanceInterestTaggedBalance,
 
             // Premium-specific errors (starting at 6610)
             6610 => MarginfiError::PremiumEntryInvalid,
@@ -859,10 +891,10 @@ impl From<u32> for MarginfiError {
             6803 => MarginfiError::UseConfigureBankOracleScope,
 
             // Interest order errors (starting at 6900)
-            6900 => MarginfiError::OrderInterestHistoryTooShort,
-            6901 => MarginfiError::OrderInterestNotNegative,
-            6902 => MarginfiError::OrderInterestCostExceedsCarry,
-            6903 => MarginfiError::OrderInterestInvalidConfig,
+            6900 => MarginfiError::OrderInterestNotNegative,
+            6901 => MarginfiError::OrderInterestCostExceedsCarry,
+            6902 => MarginfiError::OrderInterestInvalidConfig,
+            6903 => MarginfiError::OrderInterestBankNotWritable,
 
             // Borrow order errors (7000 block)
             7000 => MarginfiError::BorrowOrderHistoryTooShort,

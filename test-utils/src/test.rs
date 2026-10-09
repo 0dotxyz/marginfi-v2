@@ -17,7 +17,7 @@ use juplend_mocks::lending_reward_rate_model::client as juplend_rewards;
 use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
-use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use kamino_mocks::state::{MinimalLendingMarket, MinimalObligation, MinimalReserve};
 use marginfi::state::{
     bank::BankImpl, drift::DriftConfigCompact, juplend::JuplendConfigCompact,
     kamino::KaminoConfigCompact,
@@ -307,6 +307,66 @@ impl KaminoBankSetup {
             .await
     }
 
+    /// Put the reserve into emergency mode, in the state a later `refresh_reserve` leaves it:
+    /// current slot, not stale, price status cleared.
+    pub async fn set_reserve_emergency_mode(&self) {
+        let slot = self.test_f.get_clock().await.slot;
+        let reserve_key = self.bank_f.load().await.integration_acc_1;
+        let mut account = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut account.data[8..]);
+        reserve.config.emergency_mode = 1;
+        reserve.slot = slot;
+        reserve.stale = 0;
+        reserve.price_status = 0;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(account));
+    }
+
+    /// Flip `LendingMarket.emergency_mode` on the market behind this bank, as Kamino's
+    /// `update_lending_market` would. Writes the one byte directly: the rest of the account is
+    /// real klend state the mock must keep.
+    pub async fn set_market_emergency_mode(&self, on: bool) {
+        let market_key = self.load_reserve().await.lending_market;
+        let mut account = self.test_f.try_load(&market_key).await.unwrap().unwrap();
+        let offset = 8 + std::mem::offset_of!(MinimalLendingMarket, emergency_mode);
+        account.data[offset] = u8::from(on);
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&market_key, &AccountSharedData::from(account));
+    }
+
+    /// Permissionlessly copy the market's emergency flag onto the bank.
+    pub async fn try_propagate_market_emergency(
+        &self,
+    ) -> std::result::Result<(), BanksClientError> {
+        let reserve_key = self.bank_f.load().await.config.oracle_keys[1];
+        let lending_market = self.load_reserve().await.lending_market;
+        let ctx = self.test_f.context.borrow_mut();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PropagateKaminoMarketEmergency {
+                reserve: reserve_key,
+                lending_market,
+                bank: self.bank_f.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::PropagateKaminoMarketEmergency {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        ctx.banks_client.process_transaction(tx).await
+    }
+
     pub async fn load_user_accounted_collateral(
         &self,
         user: &MarginfiAccountFixture,
@@ -471,6 +531,10 @@ pub const PYTH_PUSH_SOL_REAL_FEED: Pubkey = pubkey!("PythPushSo1Rea1Price1111111
 
 pub const SWITCH_PULL_SOL_REAL_FEED: Pubkey =
     pubkey!("BSzfJs4d1tAkSDqkepnfzEVcx2WtDVnwwXa2giy9PLeP");
+
+/// `program-test` boots at timestamp 0, which a rate reading treats as never written, so tests that
+/// read rate history pin a real time.
+pub const BASE_TS: i64 = 1_700_000_000;
 
 pub fn get_oracle_id_from_feed_id(feed_id: Pubkey) -> Option<Pubkey> {
     match feed_id.to_bytes() {
@@ -727,10 +791,10 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift", drift_mocks::drift::ID, None);
-            program.add_program("juplend_lending", juplend_mocks::ID, None);
-            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program("juplend_earn", juplend_mocks::ID, None);
+            program.add_program("liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
-                "juplend_rewards_rate_model",
+                "lending_reward_rate_model",
                 juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
@@ -1203,22 +1267,6 @@ impl TestFixture {
         }
     }
 
-    /// Give `keeper` a SOL balance to pay fees and rent from.
-    pub async fn fund_keeper(&self, keeper: &Keypair) -> anyhow::Result<()> {
-        let rent = self.banks_client().get_rent().await?;
-        let account = Account {
-            lamports: rent.minimum_balance(0) + 1_000_000_000,
-            data: vec![],
-            owner: solana_system_interface::program::ID,
-            executable: false,
-            rent_epoch: 0,
-        };
-        self.context
-            .borrow_mut()
-            .set_account(&keeper.pubkey(), &account.into());
-        Ok(())
-    }
-
     /// A handle on the banks client that holds no borrow of the context across an await.
     pub fn banks_client(&self) -> BanksClient {
         self.context.borrow().banks_client.clone()
@@ -1257,19 +1305,6 @@ impl TestFixture {
             .get_latest_blockhash()
             .await
             .unwrap()
-    }
-
-    /// Refresh the cached blockhash in the test context.
-    /// Call this in long-running tests to prevent BlockhashNotFound errors.
-    pub async fn refresh_blockhash(&self) {
-        let blockhash = self
-            .context
-            .borrow_mut()
-            .banks_client
-            .get_latest_blockhash()
-            .await
-            .unwrap();
-        self.context.borrow_mut().last_blockhash = blockhash;
     }
 
     async fn process_ixs(
@@ -1432,7 +1467,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankKamino {
             group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
+            governance_admin: test_f.payer(),
             fee_payer: test_f.payer(),
             bank_mint: reserve_mint.key,
             bank: bank_key,
@@ -1522,8 +1557,6 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-
-        test_f.refresh_blockhash().await;
 
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
@@ -1670,7 +1703,7 @@ impl TestFixture {
 
         let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
             group: self.marginfi_group.key,
-            admin: self.payer(),
+            governance_admin: self.payer(),
             fee_payer: self.payer(),
             bank_mint: mint.key,
             bank: bank_key,
@@ -2133,7 +2166,7 @@ impl TestFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolAddBankJuplend {
                 group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                governance_admin: test_f.payer(),
                 fee_payer: test_f.payer(),
                 bank_mint: mint,
                 bank: bank_key,

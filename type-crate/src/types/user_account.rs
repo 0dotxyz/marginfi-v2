@@ -11,7 +11,7 @@ use fixed::types::I80F48;
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
 
-use super::{HealthCache, WrappedI80F48};
+use super::{HealthCache, OrderTagType, WrappedI80F48};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -84,7 +84,13 @@ pub struct MarginfiAccount {
     pub indexer_flags: IndexerFlags,
     /// Monotonic counter. seeding each rebalance execution's `RebalanceRecord`.
     pub rebalance_execution_seq: u64,
-    pub _padding0: [u64; 3],
+    /// Unix timestamp when this account was tagged as unhealthy, growing the allowed liquidation
+    /// premium over time. Cleared once an instruction proves the account healthy again (deposit
+    /// and repay do not), restarted when a liquidation erases a material share of the health
+    /// deficit or repays a material share of the debt.
+    /// * 0 if not tagged
+    pub liquidation_tagged_at: i64,
+    pub _padding0: [u64; 2],
 }
 
 impl MarginfiAccount {
@@ -333,8 +339,11 @@ pub struct Balance {
     /// Unix timestamp (u64) of the last premium accrual (claim) for this position. Set at
     /// balance creation and bumped on every `claim_premium`.
     pub last_update: u64,
+    /// The `OrderTagType` of the order holding `tag`. An interest order sets it, and it stays until
+    /// the tag is cleared.
+    pub tag_type: u8,
     /// Reserved for future use
-    pub _padding: [u64; 1],
+    pub _padding: [u8; 7],
 }
 
 impl Balance {
@@ -376,6 +385,11 @@ impl Balance {
         }
     }
 
+    pub fn clear_tag(&mut self) {
+        self.tag = 0;
+        self.tag_type = OrderTagType::default() as u8;
+    }
+
     pub fn empty_deactivated() -> Self {
         Balance {
             active: 0,
@@ -387,7 +401,8 @@ impl Balance {
             liability_shares: WrappedI80F48::from(I80F48::ZERO),
             premium_outstanding: WrappedI80F48::from(I80F48::ZERO),
             last_update: 0,
-            _padding: [0; 1],
+            tag_type: OrderTagType::default() as u8,
+            _padding: [0; 7],
         }
     }
 }

@@ -5,6 +5,7 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
+use fixtures::rebalance::fund_keeper_for_fees;
 use fixtures::spl::{balance_of, TokenAccountFixture};
 use fixtures::test::{DEFAULT_USDC_TEST_BANK_CONFIG, PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{native, prelude::*};
@@ -193,7 +194,7 @@ pub async fn setup(p: Params) -> anyhow::Result<BorrowOrderFixture> {
     };
 
     let keeper = Keypair::new();
-    test_f.fund_keeper(&keeper).await?;
+    fund_keeper_for_fees(&test_f, &keeper).await?;
     // A full close's repay rounds up to the atom, which the keeper covers out of a small float.
     let keeper_usdc = usdc
         .mint

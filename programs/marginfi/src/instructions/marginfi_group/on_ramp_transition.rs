@@ -19,12 +19,10 @@ pub fn disable_staked_oracles(ctx: Context<DisableStakedOracles>) -> MarginfiRes
 
 #[derive(Accounts)]
 pub struct DisableStakedOracles<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,
@@ -57,12 +55,10 @@ pub fn enable_staked_oracle_onramp(ctx: Context<EnableStakedOracleOnramp>) -> Ma
 
 #[derive(Accounts)]
 pub struct EnableStakedOracleOnramp<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,

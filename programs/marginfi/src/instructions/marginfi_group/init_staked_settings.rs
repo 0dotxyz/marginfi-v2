@@ -1,4 +1,5 @@
-// Used by the group admin to enable staked collateral banks and configure their default features
+// Used by the slow governance admin to enable staked collateral banks and configure their default
+// features.
 use crate::ix_utils;
 use crate::state::staked_settings::StakedSettingsImpl;
 use crate::utils::wrapped_i80f48_to_f64;
@@ -51,12 +52,10 @@ pub fn initialize_staked_settings(
 
 #[derive(Accounts)]
 pub struct InitStakedSettings<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     /// Pays the init fee
     #[account(mut)]

@@ -56,7 +56,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account._pad0, [0u8; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -83,7 +84,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from(balance_1.last_update),
         I80F48::from_str("1711158766").unwrap()
     );
-    assert_eq!(balance_1._padding, [0; 1]);
+    assert_eq!(balance_1.tag_type, 0);
+    assert_eq!(balance_1._padding, [0; 7]);
 
     let balance_2 = account.lending_account.balances[1];
     assert!(balance_2.is_active());
@@ -110,7 +112,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from(balance_2.last_update),
         I80F48::from_str("1711158793").unwrap()
     );
-    assert_eq!(balance_2._padding, [0; 1]);
+    assert_eq!(balance_2.tag_type, 0);
+    assert_eq!(balance_2._padding, [0; 7]);
 
     // Sample 2
 
@@ -137,7 +140,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_flags, 0);
     assert_eq!(account.last_update, 0);
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -164,7 +168,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from(balance_1.last_update),
         I80F48::from_str("1705760628").unwrap()
     );
-    assert_eq!(balance_1._padding, [0; 1]);
+    assert_eq!(balance_1.tag_type, 0);
+    assert_eq!(balance_1._padding, [0; 7]);
 
     let balance_2 = account.lending_account.balances[1];
     assert!(!balance_2.is_active());
@@ -191,7 +196,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from(balance_2.last_update),
         I80F48::from_str("0").unwrap()
     );
-    assert_eq!(balance_2._padding, [0; 1]);
+    assert_eq!(balance_2.tag_type, 0);
+    assert_eq!(balance_2._padding, [0; 7]);
 
     // Sample 3
 
@@ -223,7 +229,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account._pad0, [0; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
-    assert_eq!(account._padding0, [0; 3]);
+    assert_eq!(account.liquidation_tagged_at, 0);
+    assert_eq!(account._padding0, [0; 2]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(!balance_1.is_active());
@@ -250,7 +257,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from(balance_1.last_update),
         I80F48::from_str("0").unwrap()
     );
-    assert_eq!(balance_1._padding, [0; 1]);
+    assert_eq!(balance_1.tag_type, 0);
+    assert_eq!(balance_1._padding, [0; 7]);
 
     Ok(())
 }

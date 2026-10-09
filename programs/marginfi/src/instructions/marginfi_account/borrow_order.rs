@@ -734,7 +734,7 @@ fn check_fill_health_and_refresh_premium<'info>(
             &mut Some(&mut premium_scratch),
         )?,
     }
-    account.update_premium_snapshots(group, &premium_scratch, now as u64)?;
+    account.update_premium_snapshots(group, &premium_scratch, now as u64, false)?;
     health_cache.program_version = PROGRAM_VERSION;
     health_cache.set_engine_ok(true);
     Ok(health_cache)

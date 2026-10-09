@@ -70,7 +70,7 @@ pub struct LendingAccountCloseBalance<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), 0)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), 0)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

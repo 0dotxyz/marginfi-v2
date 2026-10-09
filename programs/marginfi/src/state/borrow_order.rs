@@ -208,13 +208,13 @@ impl BorrowOrderImpl for BorrowOrder {
 }
 
 pub trait BorrowOrderRecordImpl {
-    /// Snapshot every active balance outside `excluded` (the order's two banks), so `end` can prove
-    /// the fill touched nothing else.
+    /// Snapshot every non-empty active balance outside `excluded` (the order's two banks), so `end`
+    /// can prove the fill touched nothing else.
     fn snapshot_others(&mut self, account: &MarginfiAccount, excluded: &[Pubkey])
         -> MarginfiResult;
 
-    /// Every snapshotted balance still holds its side and shares, and no active balance exists
-    /// outside the snapshot and `excluded`.
+    /// Every snapshotted balance still holds its side, order tag and shares, and no other non-empty
+    /// active balance exists outside `excluded`.
     fn verify_others_unchanged(
         &self,
         account: &MarginfiAccount,

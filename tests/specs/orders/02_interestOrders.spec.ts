@@ -42,11 +42,11 @@ import {
 import { expectFailedTxWithError } from "../../utils/genericTests";
 import { Clock } from "../../utils/litesvm";
 import { toI80Scaled } from "../../utils/bn-utils";
+import {
+  INTEREST_MAX_WINDOW_SECONDS,
+  INTEREST_MIN_WINDOW_SECONDS,
+} from "../../utils/rate-readings";
 
-/** Matches `INTEREST_MIN_WINDOW_SECONDS`. */
-const MIN_WINDOW = 21_600;
-/** Matches `INTEREST_MAX_WINDOW_SECONDS`. */
-const MAX_WINDOW = 172_800;
 /** Matches `INTEREST_DEFAULT_EXIT_BUDGET_SECONDS`. */
 const DEFAULT_EXIT_BUDGET = 1_209_600;
 
@@ -64,8 +64,8 @@ describe("Interest trigger orders", () => {
   const SOL_SEED = new BN(8_901);
   const USDC_SEED = new BN(8_902);
 
-  let solBank: PublicKey; // the lend leg
-  let usdcBank: PublicKey; // the borrow leg
+  let solBank: PublicKey; // the asset bank
+  let usdcBank: PublicKey; // the liability bank
   let owner: (typeof users)[number];
   let lender: (typeof users)[number];
   let ownerAcc: PublicKey;
@@ -166,7 +166,7 @@ describe("Interest trigger orders", () => {
       // the repayment out of its own pocket and skims nothing from the position.
       amount: new BN(0.6 * 10 ** ecosystem.wsolDecimals),
       withdrawAll: false,
-      // The borrow leg is closed by the repay above, so only the lend leg remains observable.
+      // The liability balance is closed by the repay above, so only the asset balance remains.
       remaining: composeRemainingAccounts([
         [solBank, oracles.wsolOracle.publicKey],
       ]),
@@ -288,7 +288,7 @@ describe("Interest trigger orders", () => {
       ),
     );
 
-    // The borrow leg needs liquidity, and its utilization is what gives it a real rate.
+    // The liability bank needs liquidity, and its utilization is what gives it a real rate.
     await lender.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await depositIx(lender.mrgnProgram, {
@@ -325,7 +325,7 @@ describe("Interest trigger orders", () => {
       ),
     );
 
-    // The borrow priced the USDC bank, which took its first rate reading. The SOL lend leg has
+    // The borrow priced the USDC bank, which took its first rate reading. The SOL asset bank has
     // only been deposited into, which prices nothing, so pulse it for its own.
     await owner.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -340,20 +340,20 @@ describe("Interest trigger orders", () => {
   it("rejects a window under the floor - OrderInterestInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
-        await place(interest(MIN_WINDOW - 1, null));
+        await place(interest(INTEREST_MIN_WINDOW_SECONDS - 1, null));
       },
       "OrderInterestInvalidConfig",
-      6903,
+      6902,
     );
   });
 
   it("rejects a window over the ceiling - OrderInterestInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
-        await place(interest(MAX_WINDOW + 1, null));
+        await place(interest(INTEREST_MAX_WINDOW_SECONDS + 1, null));
       },
       "OrderInterestInvalidConfig",
-      6903,
+      6902,
     );
   });
 
@@ -363,7 +363,7 @@ describe("Interest trigger orders", () => {
         await place(interest(null, 0));
       },
       "OrderInterestInvalidConfig",
-      6903,
+      6902,
     );
   });
 
@@ -388,11 +388,11 @@ describe("Interest trigger orders", () => {
   });
 
   it("carries the interest policy with no accounts beyond a plain order", async () => {
-    order = await place(interest(MIN_WINDOW, null));
+    order = await place(interest(INTEREST_MIN_WINDOW_SECONDS, null));
     const fetched = await program.account.order.fetch(order);
 
     assert.equal(fetched.interestFlags, 1);
-    assert.equal(fetched.interestWindowSeconds, MIN_WINDOW);
+    assert.equal(fetched.interestWindowSeconds, INTEREST_MIN_WINDOW_SECONDS);
     assert.equal(fetched.interestExitBudgetSeconds, DEFAULT_EXIT_BUDGET);
     assert.equal(fetched.interestMinNegativeApr, 0);
   });
@@ -408,20 +408,20 @@ describe("Interest trigger orders", () => {
     assert.equal(fetched.maxSlippage, maxSlippage);
   });
 
-  it("cannot execute before the banks hold a window of history - OrderInterestHistoryTooShort", async () => {
-    await advance(MIN_WINDOW - 60);
+  it("cannot execute before the banks hold a window of history - RateHistoryTooShort", async () => {
+    await advance(INTEREST_MIN_WINDOW_SECONDS - 60);
     await expectFailedTxWithError(
       async () => {
         await keeper.mrgnProgram.provider.sendAndConfirm!(await sandwich());
       },
-      "OrderInterestHistoryTooShort",
-      6900,
+      "RateHistoryTooShort",
+      6145,
     );
   });
 
   it("unwinds the pair through the keeper sandwich", async () => {
-    // A full window since both banks' first readings. The borrow leg charged over it while the
-    // idle lend leg earned nothing, so the measured carry is negative and any negative carry fires.
+    // A full window since both banks' first readings. The liability bank charged interest over it
+    // and the idle asset bank earned none, so the measured carry is negative and fires.
     await advance(120);
     await keeper.mrgnProgram.provider.sendAndConfirm!(await sandwich());
 
@@ -434,7 +434,7 @@ describe("Interest trigger orders", () => {
       acc.lendingAccount.balances.find(
         (b: any) => b.active !== 0 && b.bankPk.equals(usdcBank),
       ),
-      "the borrow leg should be closed",
+      "the liability balance should be closed",
     );
   });
 });

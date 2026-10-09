@@ -39,15 +39,15 @@ const READING_SPACING = 10_800;
 /**
  * Staked is the only non-integration asset tag whose multiplier is not 1, and `validate_asset_tags`
  * pairs it with nothing but SOL, so an LST lend against a SOL borrow is the one shape that
- * exercises a staked lend leg. Placing the order needs no history; the one clock step here is the
- * reading spacing the last test has to clear.
+ * exercises a staked asset balance. Placing the order needs no history; the one clock step here is
+ * the reading spacing the last test has to clear.
  */
-describe("Interest trigger on a staked lend leg", () => {
+describe("Interest trigger on a staked asset balance", () => {
   const solBank = stakedBankKeypairSol.publicKey;
   const U32_MAX = 0xffff_ffff;
   const maxSlippage = Math.floor((100 / 10_000) * U32_MAX);
 
-  /** The staked leg needs its LST mint, SOL pool and on-ramp alongside the oracle. */
+  /** The staked bank needs its LST mint, SOL pool and on-ramp alongside the oracle. */
   const stakedLegAccounts = () => [
     validators[0].bank,
     oracles.wsolOracle.publicKey, // the staked bank prices off the wsol oracle too
@@ -142,13 +142,13 @@ describe("Interest trigger on a staked lend leg", () => {
     assert.equal(fetched.interestFlags, 1);
   });
 
-  it("reads the staked lend leg at the pool's NAV per LST, not the share value", async () => {
+  it("reads the staked asset balance at the pool's NAV per LST, not the share value", async () => {
     // Earlier specs priced this bank at the current clock, and a bank records at most one reading
     // per spacing, so step past it and republish the oracles at the new time.
     await advanceBankrunClock(bankrunContext, READING_SPACING);
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
-    // Pricing the bank takes its reading; the staked leg prices off its pool accounts too.
+    // Pricing the bank takes its reading; the staked bank prices off its pool accounts too.
     const pulseTx = new Transaction().add(
       await pulseBankPrice(bankrunProgram, {
         bank: validators[0].bank,

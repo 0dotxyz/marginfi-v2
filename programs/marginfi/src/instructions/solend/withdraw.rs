@@ -5,7 +5,7 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
             is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
             MarginfiAccountImpl, ALLOW_RECEIVERSHIP,
         },
@@ -107,6 +107,7 @@ pub fn solend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
+                marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE),
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
@@ -262,8 +263,8 @@ pub fn solend_withdraw<'info>(
             // Check account health, if below threshold fail transaction
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
             let mut premium_scratch = PremiumScratch::default();
-            check_account_init_health(
-                &marginfi_account,
+            check_account_init_health_and_clear_tag(
+                &mut marginfi_account,
                 &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
@@ -279,6 +280,7 @@ pub fn solend_withdraw<'info>(
                     &group,
                     &premium_scratch,
                     Clock::get()?.unix_timestamp as u64,
+                    true,
                 )?;
             }
 
@@ -347,7 +349,7 @@ pub struct SolendWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), ALLOW_RECEIVERSHIP)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

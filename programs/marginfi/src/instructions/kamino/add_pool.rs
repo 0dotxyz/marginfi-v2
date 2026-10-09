@@ -111,13 +111,10 @@ pub fn lending_pool_add_bank_kamino(
 #[derive(Accounts)]
 #[instruction(bank_config: KaminoConfigCompact, bank_seed: u64)]
 pub struct LendingPoolAddBankKamino<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut, has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

@@ -21,7 +21,8 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
+        EMPTY_BALANCE_THRESHOLD, TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE,
+        ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
@@ -101,6 +102,14 @@ pub fn lending_account_repay<'info>(
             .checked_sub(premium_settled)
             .ok_or_else(crate::math_error!())?;
         let share_amount = bank_account.repay(principal)?;
+
+        let resulting_liability_shares: I80F48 = bank_account.balance.liability_shares.into();
+        check!(
+            resulting_liability_shares <= I80F48::ZERO
+                || resulting_liability_shares >= EMPTY_BALANCE_THRESHOLD,
+            MarginfiError::IllegalBalanceState,
+            "Partial repay would leave positive liability shares below the empty balance threshold"
+        );
 
         (amount, share_amount)
     };
@@ -229,7 +238,7 @@ pub struct LendingAccountRepay<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_BORROW_ORDER)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_BORROW_ORDER)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

@@ -1,7 +1,6 @@
 use crate::{
     check, check_eq, constants::MAX_ORDER_SLIPPAGE, errors::MarginfiError, math_error,
     prelude::MarginfiResult, state::marginfi_account::LendingAccountImpl,
-    state::rate::realized_apr,
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -18,20 +17,6 @@ use marginfi_type_crate::{
     },
 };
 
-/// One leg's share index at the bank reading it is measured from and now, `elapsed` seconds later.
-pub struct LegSpan {
-    pub start: I80F48,
-    pub end: I80F48,
-    pub elapsed: i64,
-}
-
-impl LegSpan {
-    /// The time-weighted rate realized over the span.
-    pub fn apr(&self) -> MarginfiResult<I80F48> {
-        realized_apr(self.start, self.end, self.elapsed)
-    }
-}
-
 pub trait OrderImpl {
     fn initialize(
         &mut self,
@@ -47,15 +32,15 @@ pub trait OrderImpl {
     /// the accrued premium receivable, which then also pays the borrow rate (accepted overstatement).
     fn realized_carry(
         &self,
-        asset: &LegSpan,
-        debt: &LegSpan,
+        supply_apr: I80F48,
+        borrow_apr: I80F48,
         assets: I80F48,
         liabs: I80F48,
         premium_apr: I80F48,
     ) -> MarginfiResult<I80F48>;
 
     /// Whether `carry` clears the trigger margin: an annualized loss of at least
-    /// `interest_min_negative_apr` measured against the lend leg.
+    /// `interest_min_negative_apr` measured against `assets`.
     fn interest_condition_met(&self, carry: I80F48, assets: I80F48) -> MarginfiResult<bool>;
 
     /// USD the unwind may cost: what the pair loses to `carry` over `interest_exit_budget_seconds`.
@@ -161,19 +146,17 @@ impl OrderImpl for Order {
 
     fn realized_carry(
         &self,
-        asset: &LegSpan,
-        debt: &LegSpan,
+        supply_apr: I80F48,
+        borrow_apr: I80F48,
         assets: I80F48,
         liabs: I80F48,
         premium_apr: I80F48,
     ) -> MarginfiResult<I80F48> {
-        let supply_apr = asset.apr()?;
-        let borrow_apr = debt
-            .apr()?
+        let cost_apr = borrow_apr
             .checked_add(premium_apr)
             .ok_or_else(math_error!())?;
         let earned = assets.checked_mul(supply_apr).ok_or_else(math_error!())?;
-        let paid = liabs.checked_mul(borrow_apr).ok_or_else(math_error!())?;
+        let paid = liabs.checked_mul(cost_apr).ok_or_else(math_error!())?;
         earned
             .checked_sub(paid)
             .ok_or_else(math_error!())
@@ -250,6 +233,9 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
             if balance.tag != 0 && order_tags.contains(&balance.tag) {
                 continue;
             }
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
 
             check!(
                 idx < self.balance_states.len(),
@@ -263,10 +249,6 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 shares,
                 ..
             } = &mut self.balance_states[idx];
-
-            let side = balance
-                .get_side()
-                .ok_or_else(|| error!(MarginfiError::IllegalBalanceState))?;
 
             *bank = balance.bank_pk;
             *tag = balance.tag;
@@ -328,6 +310,8 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 MarginfiError::IllegalBalanceState
             );
 
+            check_eq!(record.tag, balance.tag, MarginfiError::IllegalBalanceState);
+
             let expected_shares = match side {
                 BalanceSide::Assets => balance.asset_shares,
                 BalanceSide::Liabilities => balance.liability_shares,
@@ -354,8 +338,8 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
     }
 }
 
-/// Snapshot every active balance whose bank is not `excluded` into `slots`, in account order.
-/// Returns how many were written.
+/// Snapshot every non-empty active balance whose bank is not `excluded` into `slots`, in account
+/// order. Returns how many were written.
 pub fn snapshot_balances_outside(
     slots: &mut [ExecuteOrderBalanceRecord],
     account: &MarginfiAccount,
@@ -366,9 +350,9 @@ pub fn snapshot_balances_outside(
         if !balance.is_active() || excluded(&balance.bank_pk) {
             continue;
         }
-        let side = balance
-            .get_side()
-            .ok_or(MarginfiError::IllegalBalanceState)?;
+        let Some(side) = balance.get_side() else {
+            continue;
+        };
         let slot = slots
             .get_mut(count as usize)
             .ok_or(MarginfiError::IllegalBalanceState)?;
@@ -384,8 +368,8 @@ pub fn snapshot_balances_outside(
     Ok(count)
 }
 
-/// Every snapshotted balance still holds its side and shares, and no active balance exists outside
-/// the snapshot and `excluded`; a balance the snapshot cannot see reports `untracked_err`.
+/// Every snapshotted balance still holds its side, order tag and shares. Any other non-empty active
+/// balance outside `excluded` reports `untracked_err`.
 pub fn verify_balances_outside_unchanged(
     slots: &[ExecuteOrderBalanceRecord],
     account: &MarginfiAccount,
@@ -396,7 +380,7 @@ pub fn verify_balances_outside_unchanged(
         .lending_account
         .balances
         .iter()
-        .filter(|b| b.is_active() && !excluded(&b.bank_pk))
+        .filter(|b| b.is_active() && b.get_side().is_some() && !excluded(&b.bank_pk))
         .count();
     check!(untracked == slots.len(), untracked_err);
 
@@ -412,6 +396,7 @@ pub fn verify_balances_outside_unchanged(
         };
         check!(
             rec.is_asset == matches!(side, BalanceSide::Assets) as u8
+                && rec.tag == balance.tag
                 && I80F48::from(rec.shares) == I80F48::from(shares),
             MarginfiError::IllegalBalanceState
         );
@@ -422,6 +407,7 @@ pub fn verify_balances_outside_unchanged(
 #[cfg(test)]
 mod tests {
     use super::ExecuteOrderRecordImpl;
+    use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
@@ -472,11 +458,70 @@ mod tests {
             "initialize should succeed when only non-order balances are recorded"
         );
     }
+
+    /// An active non-order slot below `EMPTY_BALANCE_THRESHOLD` is left out of the record.
+    #[test]
+    fn execute_order_record_ignores_an_empty_slot() {
+        let mut account = MarginfiAccount::zeroed();
+        let order_tags = [111u16, 222u16];
+        account.lending_account.balances[0] = balance_with_bank_and_tag(1u8, order_tags[0]);
+        let mut empty = balance_with_bank_and_tag(2u8, 0);
+        empty.asset_shares = I80F48::from_num(0.5).into();
+        account.lending_account.balances[1] = empty;
+
+        let mut record = ExecuteOrderRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                &account,
+                &order_tags,
+                &I80F48::ZERO,
+                0,
+                I80F48::ZERO,
+            )
+            .unwrap();
+        assert_eq!(record.active_balance_count, 0);
+        assert!(record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .is_ok());
+    }
+
+    /// The record pins each non-order balance's tag alongside its side and shares.
+    #[test]
+    fn execute_order_record_rejects_a_cleared_tag() {
+        let mut account = MarginfiAccount::zeroed();
+        let order_tags = [111u16, 222u16];
+        account.lending_account.balances[0] = balance_with_bank_and_tag(1u8, order_tags[0]);
+        account.lending_account.balances[1] = balance_with_bank_and_tag(2u8, 7);
+
+        let mut record = ExecuteOrderRecord::zeroed();
+        record
+            .initialize(
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                &account,
+                &order_tags,
+                &I80F48::ZERO,
+                0,
+                I80F48::ZERO,
+            )
+            .unwrap();
+        assert!(record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .is_ok());
+
+        account.lending_account.balances[1].tag = 0;
+        let err = record
+            .check_health_and_verify_unchanged(&account, 0, &I80F48::ZERO, true)
+            .unwrap_err();
+        assert_eq!(err, MarginfiError::IllegalBalanceState.into());
+    }
 }
 
 #[cfg(test)]
 mod interest_trigger {
-    use super::{LegSpan, OrderImpl};
+    use super::OrderImpl;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
@@ -492,15 +537,6 @@ mod interest_trigger {
 
     fn f(v: f64) -> I80F48 {
         I80F48::from_num(v)
-    }
-
-    /// A leg whose index grew from 1 to `end` over `elapsed`, so at a year `end - 1` is its rate.
-    fn grew(end: f64, elapsed: i64) -> LegSpan {
-        LegSpan {
-            start: I80F48::ONE,
-            end: f(end),
-            elapsed,
-        }
     }
 
     fn order(exit_budget_seconds: u32, min_negative_apr: u32) -> Order {
@@ -539,37 +575,20 @@ mod interest_trigger {
     #[test]
     fn carry_is_the_pair_rate_difference_and_the_premium_is_a_cost() {
         let order = order(YEAR as u32, 0);
-        let (asset, debt) = (grew(1.0625, YEAR), grew(1.125, YEAR));
+        let (supply_apr, borrow_apr) = (f(0.0625), f(0.125));
         // 6.25% earned on a 1000 lend against 12.5% paid on a 900 borrow: 62.5 - 112.5.
         assert_eq!(
             order
-                .realized_carry(&asset, &debt, f(1000.0), f(900.0), I80F48::ZERO)
+                .realized_carry(supply_apr, borrow_apr, f(1000.0), f(900.0), I80F48::ZERO)
                 .unwrap(),
             f(-50.0)
         );
-        // A 3.125% variable-borrow premium lands on the borrow leg: 900 * 15.625% = 140.625.
+        // A 3.125% variable-borrow premium adds to the borrow rate: 900 * 15.625% = 140.625.
         assert_eq!(
             order
-                .realized_carry(&asset, &debt, f(1000.0), f(900.0), f(0.03125))
+                .realized_carry(supply_apr, borrow_apr, f(1000.0), f(900.0), f(0.03125))
                 .unwrap(),
             f(-78.125)
-        );
-    }
-
-    #[test]
-    fn each_leg_annualizes_over_its_own_span() {
-        // The same 6.25% growth over half a year is a 12.5% rate: 62.5 - 112.5.
-        assert_eq!(
-            order(YEAR as u32, 0)
-                .realized_carry(
-                    &grew(1.0625, YEAR),
-                    &grew(1.0625, YEAR / 2),
-                    f(1000.0),
-                    f(900.0),
-                    I80F48::ZERO
-                )
-                .unwrap(),
-            f(-50.0)
         );
     }
 
@@ -577,13 +596,7 @@ mod interest_trigger {
     fn a_profitable_pair_neither_fires_nor_earns_an_exit_budget() {
         let order = order(YEAR as u32, 0);
         let carry = order
-            .realized_carry(
-                &grew(1.25, YEAR),
-                &grew(1.0625, YEAR),
-                f(1000.0),
-                f(900.0),
-                I80F48::ZERO,
-            )
+            .realized_carry(f(0.25), f(0.0625), f(1000.0), f(900.0), I80F48::ZERO)
             .unwrap();
         assert_eq!(carry, f(193.75));
         assert!(!order.interest_condition_met(carry, f(1000.0)).unwrap());
@@ -591,7 +604,7 @@ mod interest_trigger {
     }
 
     #[test]
-    fn the_budget_span_converts_the_annual_loss_into_usd() {
+    fn the_exit_budget_converts_the_annual_loss_into_usd() {
         assert_eq!(
             order(YEAR as u32, 0)
                 .interest_allowed_cost(f(-50.0))
@@ -607,7 +620,7 @@ mod interest_trigger {
     }
 
     #[test]
-    fn the_trigger_margin_is_strict_and_scales_with_the_lend_leg() {
+    fn the_trigger_margin_is_strict_and_scales_with_the_assets() {
         let stored = milli_to_u32(f(0.0625));
         let order = order(YEAR as u32, stored);
         let assets = f(1000.0);
