@@ -4330,6 +4330,55 @@ async fn rebalance_rejects_no_op_move() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A deposit the keeper funds itself, with nothing withdrawn from the source, is not a move: it
+/// passes per-bank reconciliation (within dust) but no tokens left any bank.
+#[tokio::test]
+async fn rebalance_rejects_a_keeper_funded_deposit() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let keeper_funded = f
+        .test_f
+        .usdc_mint
+        .create_token_account_and_mint_to_with_owner(&f.keeper.pubkey(), 0.000001)
+        .await
+        .key;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, 0.000001)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(
+            keeper_funded,
+            &f.dst_bank_f,
+            0.000001,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix, deposit_ix, end_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceIncompleteMove);
+    Ok(())
+}
+
 /// Placing an order requires an existing position in at least one allowed bank.
 #[tokio::test]
 async fn rebalance_place_requires_allowlist_position() -> anyhow::Result<()> {
