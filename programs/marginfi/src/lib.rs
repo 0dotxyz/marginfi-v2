@@ -499,8 +499,9 @@ pub mod marginfi {
 
     /// (permissionless keeper) Begin an auto-rebalance. `moves` declares each value relocation as
     /// `(src_index, dst_index, amount)` over the banks passed in remaining_accounts; validates
-    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
-    /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
+    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement, both now and
+    /// as realized over the order's cooldown. Opens the start/end sandwich; `end_rebalance` must be
+    /// the last ix; CPI forbidden.
     pub fn marginfi_account_start_rebalance<'info>(
         ctx: Context<'info, StartRebalance<'info>>,
         moves: Vec<RebalanceMove>,
@@ -520,8 +521,8 @@ pub mod marginfi {
 
     /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
     /// recorded keeper only if the destinations realized more yield than the sources over the window
-    /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
-    /// record, returning its rent to the recorded keeper.
+    /// (makes cross-tx rate manipulation costly); otherwise refunds the tip to the fee pool. Closes
+    /// the record, returning its rent to the recorded keeper.
     pub fn marginfi_account_settle_rebalance_tip<'info>(
         ctx: Context<'info, SettleRebalanceTip<'info>>,
     ) -> MarginfiResult {
@@ -828,7 +829,8 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
-    /// (Permissionless) Refresh the cached oracle price for a bank.
+    /// (Permissionless) Refresh the cached oracle price for a bank and record a rate reading.
+    /// While the protocol is paused, a native bank takes no reading.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {

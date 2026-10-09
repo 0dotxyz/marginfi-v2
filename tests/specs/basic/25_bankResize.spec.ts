@@ -3,6 +3,7 @@ import { assert } from "chai";
 import { resizeBankAccount } from "../../utils/group-instructions";
 import {
   BANK_ACCOUNT_LEN,
+  BANK_V1_ACCOUNT_LEN,
   bankrunContext,
   bankrunProgram,
   banksClient,
@@ -10,12 +11,15 @@ import {
   groupAdmin,
 } from "../../rootHooks";
 import { assertBankrunTxFailed } from "../../utils/genericTests";
+import {
+  BANK_RATE_READINGS,
+  RATE_READING_LEN,
+} from "../../utils/rate-readings";
 import { getBankrunBlockhash } from "../../utils/tools";
 
-/** 
- * v1 bank layout size (8-byte discriminator + Bank::V1_LEN), as on mainnet in 0.1.11 and earlier 
- * */
-const BANK_V1_ACCOUNT_LEN = 8 + 1856;
+/** Where the reserve starts: past the rate readings that follow the v1 layout. */
+const BANK_RESERVE_OFFSET =
+  BANK_V1_ACCOUNT_LEN + BANK_RATE_READINGS * RATE_READING_LEN;
 
 describe("25: Bank resize (v1 accounts grow to the current layout)", () => {
   const bank = bankKeypairUsdc.publicKey;
@@ -37,7 +41,7 @@ describe("25: Bank resize (v1 accounts grow to the current layout)", () => {
     assert.equal(account.data.length, BANK_ACCOUNT_LEN);
     assert.isTrue(
       Buffer.from(account.data)
-        .subarray(BANK_V1_ACCOUNT_LEN)
+        .subarray(BANK_RESERVE_OFFSET)
         .every((b) => b === 0),
     );
   });
@@ -58,8 +62,9 @@ describe("25: Bank resize (v1 accounts grow to the current layout)", () => {
     assert.isTrue(data.subarray(0, BANK_V1_ACCOUNT_LEN).equals(v1Data));
     assert.isTrue(data.subarray(BANK_V1_ACCOUNT_LEN).every((b) => b === 0));
 
+    // The rate readings sit past the v1 struct, so the grown bank starts with none.
     const after = await bankrunProgram.account.bank.fetch(bank);
-    assert.deepEqual(after, before);
+    assert.deepEqual(after, { ...before, rateReadings: after.rateReadings });
   });
 
   it("a bank already at the current size cannot be resized", async () => {

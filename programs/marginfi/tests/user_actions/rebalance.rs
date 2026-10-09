@@ -4,13 +4,15 @@ use fixtures::{
     assert_custom_error,
     prelude::*,
     rebalance::{
-        drive_utilization, rebalance_move, setup, setup_multi_venue_fixture, DEPOSIT_USDC,
-        DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
+        drive_rate, drive_utilization, rebalance_move, setup, setup_live,
+        setup_multi_venue_fixture, spike_params, LiveParams, RebalanceFixture, DEPOSIT_USDC,
+        DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, SPIKE_BORROW, SPIKE_COLLATERAL, TEST_WINDOW,
+        VENUE_DEPOSIT_NATIVE,
     },
 };
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
-    constants::REBALANCE_ORDER_SEED,
+    constants::{INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS, REBALANCE_ORDER_SEED},
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
     types::{BankConfig, BankConfigOpt, WrappedI80F48, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES},
 };
@@ -21,6 +23,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use test_case::test_case;
 
 /// The per-venue deposit (`VENUE_DEPOSIT_NATIVE`, 100 USDC of 6-decimal native) as USD value, at the
 /// $1 test oracle.
@@ -48,11 +51,165 @@ async fn rebalance_rejects_when_not_improving() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Assert the whole deposit left the source and sits in the destination at its share value.
+async fn assert_moved_to_dst(f: &RebalanceFixture) {
+    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO);
+    assert_eq!(
+        f.asset_shares(f.dst_bank_f.key).await,
+        I80F48::from_num(DEPOSIT_USDC * 1_000_000.0) / f.share_value(&f.dst_bank_f).await
+    );
+}
+
+/// The rate window is the order's cooldown, held between the shortest and longest spans the bank
+/// readings serve: a move waits for a window of history and no longer.
+#[test_case(0, INTEREST_MIN_WINDOW_SECONDS)]
+#[test_case(86_400, 86_400)]
+#[test_case(7 * 86_400, INTEREST_MAX_WINDOW_SECONDS)]
+#[tokio::test]
+async fn rebalance_rate_window_follows_the_cooldown(
+    cooldown_seconds: u64,
+    window: u32,
+) -> anyhow::Result<()> {
+    let f = setup_live(LiveParams {
+        cooldown_seconds,
+        ..Default::default()
+    })
+    .await?;
+
+    f.advance_clock(i64::from(window) - 1).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
+
+    f.advance_clock(1).await;
+    // A compute-budget ix keeps this retry's signature distinct from the rejected attempt's.
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    ixs.insert(0, ComputeBudgetInstruction::set_compute_unit_limit(400_000));
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebalance_moves_on_history_recorded_before_the_order_was_placed() -> anyhow::Result<()> {
+    let f = setup_live(LiveParams {
+        history_before_placement: TEST_WINDOW,
+        ..Default::default()
+    })
+    .await?;
+
+    // Placed a full window after the banks' first readings, so it is executable at once.
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
+/// A keeper that lifts the destination's rate just ahead of its own move clears the spot gates but
+/// not the window: ten minutes of that rate pays a sliver of the yield the window asks for.
+#[tokio::test]
+async fn rebalance_counts_a_spike_before_the_move_only_for_what_it_paid() -> anyhow::Result<()> {
+    let f = setup_live(spike_params()).await?;
+
+    f.advance_clock(TEST_WINDOW).await;
+    drive_rate(&f.test_f, &f.dst_bank_f, SPIKE_BORROW, SPIKE_COLLATERAL).await?;
+    f.advance_clock(600).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebalance_moves_on_the_same_rate_sustained_across_the_window() -> anyhow::Result<()> {
+    let f = setup_live(spike_params()).await?;
+
+    drive_rate(&f.test_f, &f.dst_bank_f, SPIKE_BORROW, SPIKE_COLLATERAL).await?;
+    f.advance_clock(TEST_WINDOW).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebalance_pulse_at_the_moment_of_maturity_cannot_displace_the_measurement(
+) -> anyhow::Result<()> {
+    let f = setup_live(LiveParams::default()).await?;
+
+    f.advance_clock(TEST_WINDOW).await;
+
+    // A third party prices both banks the instant the move became executable.
+    f.pulse(&f.src_bank_f).await?;
+    f.pulse(&f.dst_bank_f).await?;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
+/// A bank cannot take a move until it holds a window of history, however its rate stands.
+#[tokio::test]
+async fn rebalance_rejects_a_destination_without_a_window_of_history() -> anyhow::Result<()> {
+    let f = setup_live(LiveParams::default()).await?;
+
+    f.advance_clock(TEST_WINDOW).await;
+    let fresh = f.add_bank_without_history().await?;
+    // Pushed past the first destination's rate, so only its history stands in the way.
+    drive_rate(&f.test_f, &fresh, SPIKE_BORROW, SPIKE_COLLATERAL).await?;
+
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            vec![
+                f.bank_meta(f.src_bank_f.key),
+                f.bank_meta(f.dst_bank_f.key),
+                f.bank_meta(fresh.key),
+            ],
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RateHistoryTooShort);
+    Ok(())
+}
+
+/// History is asked only of the banks a move touches: an allowlisted bank that was never priced
+/// does not hold the order up.
+#[tokio::test]
+async fn rebalance_needs_no_history_on_a_bank_no_move_touches() -> anyhow::Result<()> {
+    let f = setup_live(LiveParams::default()).await?;
+
+    f.advance_clock(TEST_WINDOW).await;
+    let idle = f.add_bank_without_history().await?;
+    assert_eq!(idle.load().await.recorded_rate_readings().count(), 0);
+
+    let ixs = f
+        .build_sandwich_among(f.src_bank_f.key, f.dst_bank_f.key, &[idle.key])
+        .await;
+    f.process(&ixs).await?;
+
+    assert_moved_to_dst(&f).await;
+    Ok(())
+}
+
 #[tokio::test]
 async fn rebalance_enforces_cooldown() -> anyhow::Result<()> {
     // The untipped record closes at end, so the 2h cooldown is the only thing standing in the way.
     let f = setup(I80F48::from_num(0.0001), 7_200).await?;
-    let base = 10_000i64; // >= cooldown so the first execution clears the gate
+    let base = BASE_TS; // >= cooldown so the first execution clears the gate
     f.pin_clock(base).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
@@ -75,7 +232,7 @@ async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> 
     let tip = 200_000u64;
     f.set_keeper_tip(tip).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
 
     let pool_before = f.lamports_of(f.fee_pool()).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
@@ -125,7 +282,7 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
     let tip = 200_000u64;
     f.set_keeper_tip(tip).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
 
     let pool_before = f.lamports_of(f.fee_pool()).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
@@ -141,7 +298,7 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
     // move diluted its deposit), so the source out-yields the destination over the window. The
     // driver's borrower posts SOL collateral, so refresh the SOL oracle to the pinned clock first.
     f.test_f
-        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, BASE_TS)
         .await;
     drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
 
@@ -180,7 +337,7 @@ async fn rebalance_settle_pays_full_tip_on_a_margin_far_under_min_improvement() 
     let tip = 200_000u64;
     f.set_keeper_tip(tip).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
 
     // Start demands dst beat src by 5%: the idle source against the utilized destination clears it.
     let pool_before = f.lamports_of(f.fee_pool()).await;
@@ -191,7 +348,7 @@ async fn rebalance_settle_pays_full_tip_on_a_margin_far_under_min_improvement() 
     // Collapse the advantage to a sliver: the arriving deposit left dst near 25% utilization, so the
     // source is driven just under it. The driver's borrower posts SOL collateral.
     f.test_f
-        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, BASE_TS)
         .await;
     drive_utilization(&f.test_f, &f.src_bank_f, 240.0, 300.0).await?;
 
@@ -253,7 +410,7 @@ async fn rebalance_settle_forfeits_escrow_when_pool_drained() -> anyhow::Result<
     assert!(tip < rent_floor);
     f.set_keeper_tip(tip).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
@@ -271,7 +428,7 @@ async fn rebalance_settle_forfeits_escrow_when_pool_drained() -> anyhow::Result<
 
     // Make the source out-yield the destination so settlement takes the refund branch.
     f.test_f
-        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, BASE_TS)
         .await;
     drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
     f.advance_clock(601).await;
@@ -303,7 +460,7 @@ async fn rebalance_settle_rejects_before_delay() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.set_keeper_tip(200_000).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
@@ -419,10 +576,10 @@ async fn rebalance_borrowing_account_passes_health() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_end_stamps_the_health_cache() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
-    assert_eq!(f.user.load().await.health_cache.timestamp, 1_000);
+    assert_eq!(f.user.load().await.health_cache.timestamp, BASE_TS);
     Ok(())
 }
 
@@ -430,7 +587,7 @@ async fn rebalance_end_stamps_the_health_cache() -> anyhow::Result<()> {
 /// the premium-growth tag the same way `pulse_health` does.
 #[tokio::test]
 async fn rebalance_clears_the_liquidation_tag() -> anyhow::Result<()> {
-    const TAG_TIME: i64 = 1_000;
+    const TAG_TIME: i64 = BASE_TS;
 
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
@@ -3693,6 +3850,7 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
         .marginfi_group
         .try_accrue_interest(&low_dst)
         .await?;
+    low_dst.seed_native_rate_history().await;
 
     // User borrows 60 SOL ($600) against its 1000 USDC in src: healthy at weight 1 (buffer 400).
     let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
@@ -4062,7 +4220,7 @@ async fn rebalance_fee_pool_topup_seeds_reserve_after_dust_presend() -> anyhow::
 #[tokio::test]
 async fn rebalance_untipped_execution_closes_its_record() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
     assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed at end");
@@ -4084,7 +4242,7 @@ async fn rebalance_close_allowed_while_tip_unsettled() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.set_keeper_tip(200_000).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
 
@@ -4110,7 +4268,7 @@ async fn rebalance_settle_after_account_closed() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.set_keeper_tip(200_000).await?;
     f.top_up_pool(5_000_000).await?;
-    f.pin_clock(1_000).await;
+    f.pin_clock(BASE_TS).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
 
@@ -4208,7 +4366,7 @@ async fn rebalance_end_cb_gate_rejects_price_jump() -> anyhow::Result<()> {
     f.user.try_bank_borrow(user_sol.key, sol_bank, 10.0).await?;
 
     // Warm the SOL bank's price cache at $10 and enable the breaker (reference seeds at $10).
-    let warm_time: i64 = 100;
+    let warm_time: i64 = BASE_TS + 100;
     let warm_slot: u64 = 1_000;
     f.test_f
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, warm_time)
