@@ -213,6 +213,7 @@ pub trait BankImpl {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()>;
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
+    fn take_rate_reading(&mut self, multiplier: I80F48, now: i64) -> MarginfiResult;
     fn update_cache_price(
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
@@ -853,6 +854,19 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    /// Takes a rate reading at `now` from the bank's indices under the venue `multiplier`. An
+    /// index past the encodable range goes unrecorded.
+    fn take_rate_reading(&mut self, multiplier: I80F48, now: i64) -> MarginfiResult {
+        if let Some(reading) = RateReading::new(
+            yield_index_of(self, multiplier)?,
+            debt_index_of(self, multiplier)?,
+            now,
+        ) {
+            self.record_rate_reading(reading);
+        }
+        Ok(())
+    }
+
     /// Records the live oracle price on the cache, feeds the circuit breaker and takes a rate
     /// reading if the bank's indices are current. Every pricing path calls it; repeats are no-ops.
     fn update_cache_price(
@@ -869,14 +883,7 @@ impl BankImpl for Bank {
         let indices_current = is_integration_asset_tag(self.config.asset_tag)
             || self.last_update == clock.unix_timestamp;
         if indices_current {
-            // An index past the encodable range goes unrecorded; the price update proceeds.
-            if let Some(reading) = RateReading::new(
-                yield_index_of(self, multiplier)?,
-                debt_index_of(self, multiplier)?,
-                clock.unix_timestamp,
-            ) {
-                self.record_rate_reading(reading);
-            }
+            self.take_rate_reading(multiplier, clock.unix_timestamp)?;
         }
 
         if self.cache.is_liquidation_price_cache_locked() {

@@ -33,8 +33,8 @@ use crate::{
     state::{
         bank::BankImpl,
         borrow_order::{
-            available_liquidity, record_native_reading, remaining_borrow_capacity,
-            BorrowDestination, BorrowOrderImpl, BorrowOrderRecordImpl,
+            available_liquidity, remaining_borrow_capacity, BorrowDestination, BorrowOrderImpl,
+            BorrowOrderRecordImpl,
         },
         marginfi_account::{
             check_account_init_health_and_clear_tag, check_account_maint_health, run_cb_price_gate,
@@ -411,7 +411,7 @@ fn accrue(bank_loader: &AccountLoader<Bank>, group: &MarginfiGroup, now: i64) ->
         bank_loader.key(),
     )?;
     bank.update_bank_cache(group)?;
-    record_native_reading(&mut bank, now)
+    bank.take_rate_reading(I80F48::ONE, now)
 }
 
 /// The record an `end` closes out, once the instruction is confirmed top-level and of `kind`.

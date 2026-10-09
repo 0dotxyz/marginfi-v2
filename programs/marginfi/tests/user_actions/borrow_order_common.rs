@@ -7,7 +7,7 @@ use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::rebalance::fund_keeper_for_fees;
 use fixtures::spl::{balance_of, TokenAccountFixture};
-use fixtures::test::{DEFAULT_USDC_TEST_BANK_CONFIG, PYTH_SOL_FEED, PYTH_USDC_FEED};
+use fixtures::test::{BASE_TS, DEFAULT_USDC_TEST_BANK_CONFIG, PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{native, prelude::*};
 use marginfi::state::{bank::BankImpl, rate::borrow_rate_at};
 use marginfi_type_crate::constants::{BORROW_ORDER_RECORD_SEED, INTEREST_MIN_WINDOW_SECONDS};
@@ -20,8 +20,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-/// `program-test` boots at timestamp 0, which a rate reading treats as never written.
-pub const BASE_TS: i64 = 1_700_000_000;
 pub const WINDOW: i64 = INTEREST_MIN_WINDOW_SECONDS as i64;
 /// USDC the lender floats, against which the order borrows.
 pub const FLOAT: f64 = 10_000.0;

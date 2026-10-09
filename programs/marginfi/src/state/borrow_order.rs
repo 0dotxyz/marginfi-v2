@@ -7,7 +7,6 @@ use crate::{
         bank::BankImpl,
         bank_config::BankConfigImpl,
         order::{snapshot_balances_outside, verify_balances_outside_unchanged},
-        rate::{debt_index_of, yield_index_of},
     },
 };
 use anchor_lang::prelude::*;
@@ -17,7 +16,7 @@ use marginfi_type_crate::{
         BORROW_ORDER_DEFAULT_COOLDOWN_SECONDS, INTEREST_DEFAULT_WINDOW_SECONDS,
         INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
     },
-    types::{Bank, BorrowOrder, BorrowOrderRecord, MarginfiAccount, RateReading},
+    types::{Bank, BorrowOrder, BorrowOrderRecord, MarginfiAccount},
 };
 
 /// Where a fill's borrowed funds land.
@@ -27,18 +26,6 @@ pub enum BorrowDestination {
     Bank(Pubkey),
     /// Sent to the authority's wallet.
     Wallet,
-}
-
-/// Take a rate reading of a native bank at `now`; a no-op inside the ring's spacing.
-pub fn record_native_reading(bank: &mut Bank, now: i64) -> MarginfiResult {
-    let reading = RateReading::new(
-        yield_index_of(bank, I80F48::ONE)?,
-        debt_index_of(bank, I80F48::ONE)?,
-        now,
-    )
-    .ok_or_else(math_error!())?;
-    bank.record_rate_reading(reading);
-    Ok(())
 }
 
 /// Tokens a native bank can pay out before its liabilities exceed its assets.

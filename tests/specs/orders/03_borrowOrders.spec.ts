@@ -35,6 +35,10 @@ import {
 import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "../../utils/types";
 import { deriveBankWithSeed, deriveBorrowOrderPda } from "../../utils/pdas";
 import {
+  INTEREST_MAX_WINDOW_SECONDS,
+  INTEREST_MIN_WINDOW_SECONDS,
+} from "../../utils/rate-readings";
+import {
   expectFailedTxWithError,
   getTokenBalance,
 } from "../../utils/genericTests";
@@ -50,9 +54,6 @@ import {
 
 const I80F48_ONE = I80F48_SCALE;
 
-/** Matches `INTEREST_MIN_WINDOW_SECONDS` / `INTEREST_MAX_WINDOW_SECONDS`. */
-const MIN_WINDOW = 21_600;
-const MAX_WINDOW = 172_800;
 const U32_MAX = 0xffff_ffff;
 /** `milli_to_u32`: a percent on the 0-1000% scale. */
 const aprPercent = (pct: number) => Math.floor((pct / 1000) * U32_MAX);
@@ -391,14 +392,14 @@ describe("Borrow orders", () => {
   it("rejects a window outside the range the bank ring covers - BorrowOrderInvalidConfig", async () => {
     await expectFailedTxWithError(
       async () => {
-        await place({ windowSeconds: MIN_WINDOW - 1 });
+        await place({ windowSeconds: INTEREST_MIN_WINDOW_SECONDS - 1 });
       },
       "BorrowOrderInvalidConfig",
       7000,
     );
     await expectFailedTxWithError(
       async () => {
-        await place({ windowSeconds: MAX_WINDOW + 1 });
+        await place({ windowSeconds: INTEREST_MAX_WINDOW_SECONDS + 1 });
       },
       "BorrowOrderInvalidConfig",
       7000,
@@ -416,12 +417,12 @@ describe("Borrow orders", () => {
   });
 
   it("places a wallet-destination order, live from placement", async () => {
-    order = await place({ windowSeconds: MIN_WINDOW });
+    order = await place({ windowSeconds: INTEREST_MIN_WINDOW_SECONDS });
     const fetched = await program.account.borrowOrder.fetch(order);
     assert.isTrue(fetched.bank.equals(usdcBank));
     assert.equal(bnToBigIntSafe(fetched.amount), bnToBigIntSafe(AMOUNT));
     assert.equal(bnToBigIntSafe(fetched.filled), 0n);
-    assert.equal(fetched.windowSeconds, MIN_WINDOW);
+    assert.equal(fetched.windowSeconds, INTEREST_MIN_WINDOW_SECONDS);
     assert.equal(fetched.openBelowApr, aprPercent(100));
     assert.equal(fetched.flags, 1); // DESTINATION_WALLET
     assert.isTrue(fetched.destinationBank.equals(PublicKey.default));
@@ -432,12 +433,12 @@ describe("Borrow orders", () => {
       marginfiAccount: ownerAcc,
       authority: owner.wallet.publicKey,
       order,
-      windowSeconds: MIN_WINDOW * 2,
+      windowSeconds: INTEREST_MIN_WINDOW_SECONDS * 2,
       openBelowApr: aprPercent(50),
     });
     await owner.mrgnProgram.provider.sendAndConfirm(new Transaction().add(ix));
     const fetched = await program.account.borrowOrder.fetch(order);
-    assert.equal(fetched.windowSeconds, MIN_WINDOW * 2);
+    assert.equal(fetched.windowSeconds, INTEREST_MIN_WINDOW_SECONDS * 2);
     assert.equal(fetched.openBelowApr, aprPercent(50));
 
     // Back to the minimum window for the fills below.
@@ -445,7 +446,7 @@ describe("Borrow orders", () => {
       marginfiAccount: ownerAcc,
       authority: owner.wallet.publicKey,
       order,
-      windowSeconds: MIN_WINDOW,
+      windowSeconds: INTEREST_MIN_WINDOW_SECONDS,
       openBelowApr: aprPercent(100),
     });
     await owner.mrgnProgram.provider.sendAndConfirm(
@@ -454,7 +455,7 @@ describe("Borrow orders", () => {
   });
 
   it("cannot fill before the bank's reading is a window old - RateHistoryTooShort", async () => {
-    await advance(MIN_WINDOW - 60);
+    await advance(INTEREST_MIN_WINDOW_SECONDS - 60);
     await expectFailedTxWithError(
       async () => {
         await fill(AMOUNT);
@@ -553,7 +554,7 @@ describe("Borrow orders", () => {
 
   it("a redeploying order deposits the borrowed funds into the destination bank", async () => {
     order = await place({
-      windowSeconds: MIN_WINDOW,
+      windowSeconds: INTEREST_MIN_WINDOW_SECONDS,
       destinationBank: usdcDstBank,
       closeAboveApr: CLOSE_LEVEL,
     });
@@ -614,7 +615,7 @@ describe("Borrow orders", () => {
         }),
       ),
     );
-    await advance(MIN_WINDOW);
+    await advance(INTEREST_MIN_WINDOW_SECONDS);
     const sharesBefore = await liabilitySharesIn(usdcBank);
     const before = await program.account.borrowOrder.fetch(order);
     const orderSharesBefore = toI80Scaled(before.liabilityShares);
