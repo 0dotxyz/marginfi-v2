@@ -262,7 +262,7 @@ pub const ACCOUNT_IN_BORROW_ORDER_INTERNAL: u64 = 1 << 10;
 
 /// Account states that block placing or starting an order/rebalance sandwich (disabled, in a
 /// flashloan, frozen, in receivership, or being deleveraged). The transient in-flight flags
-/// (`ACCOUNT_IN_ORDER_EXECUTION` / `ACCOUNT_IN_REBALANCE`) are checked separately per entry point.
+/// (order execution, rebalance, borrow-order fill) are checked separately per entry point.
 pub const ORDER_BLOCKING_FLAGS: u64 = ACCOUNT_DISABLED
     | ACCOUNT_IN_FLASHLOAN
     | ACCOUNT_FROZEN

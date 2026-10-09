@@ -91,8 +91,8 @@ use marginfi_type_crate::{
     types::{
         BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OrderTagType,
         RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
-        ORDER_BLOCKING_FLAGS,
+        ACCOUNT_IN_BORROW_ORDER, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
 use std::cell::RefMut;
@@ -242,6 +242,7 @@ pub struct PlaceRebalanceOrder<'info> {
         has_one = authority @ MarginfiError::Unauthorized,
         constraint = !marginfi_account.load()?.get_flag(
             ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER
         ) @ MarginfiError::UnexpectedOrderExecutionState,
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -1045,6 +1046,7 @@ pub struct StartRebalance<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = !marginfi_account.load()?.get_flag(
             ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER
         ) @ MarginfiError::UnexpectedOrderExecutionState,
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

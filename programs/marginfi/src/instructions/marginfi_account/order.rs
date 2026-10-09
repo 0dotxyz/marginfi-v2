@@ -40,8 +40,8 @@ use marginfi_type_crate::{
     types::{
         u32_to_milli, BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache,
         HealthPriceMode, InterestTriggerConfig, MarginfiAccount, MarginfiGroup, Order,
-        OrderTagType, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
+        OrderTagType, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_IN_BORROW_ORDER,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
     },
 };
 
@@ -740,6 +740,7 @@ pub struct PlaceOrder<'info> {
         has_one = authority @ MarginfiError::Unauthorized,
         constraint = !marginfi_account.load()?.get_flag(
             ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER
         ) @ MarginfiError::UnexpectedOrderExecutionState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -881,6 +882,7 @@ pub struct StartExecuteOrder<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = !marginfi_account.load()?.get_flag(
             ORDER_BLOCKING_FLAGS | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER
         ) @ MarginfiError::UnexpectedOrderExecutionState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
