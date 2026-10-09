@@ -7,8 +7,9 @@ use {
     kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
     marginfi_type_crate::{
         constants::{
-            EMISSIONS_TOKEN_ACCOUNT_SEED, EXECUTE_ORDER_SEED, FEE_STATE_SEED,
-            LIQUIDATION_RECORD_SEED, ORDER_SEED,
+            BORROW_ORDER_RECORD_SEED, BORROW_ORDER_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED,
+            EXECUTE_ORDER_SEED, FEE_STATE_SEED, LIQUIDATION_RECORD_SEED, ORDER_SEED,
+            REBALANCE_FEE_POOL_SEED,
         },
         pdas::{
             derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
@@ -273,6 +274,38 @@ pub fn find_order_pda(
             marginfi_account.as_ref(),
             &bank_keys_hash,
         ],
+        program_id,
+    )
+}
+
+pub fn find_borrow_order_pda(
+    marginfi_account: &Pubkey,
+    bank: &Pubkey,
+    program_id: &Pubkey,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            BORROW_ORDER_SEED.as_bytes(),
+            marginfi_account.as_ref(),
+            bank.as_ref(),
+        ],
+        program_id,
+    )
+}
+
+pub fn find_rebalance_fee_pool_pda(marginfi_account: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            REBALANCE_FEE_POOL_SEED.as_bytes(),
+            marginfi_account.as_ref(),
+        ],
+        program_id,
+    )
+}
+
+pub fn find_borrow_order_record_pda(order: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[BORROW_ORDER_RECORD_SEED.as_bytes(), order.as_ref()],
         program_id,
     )
 }

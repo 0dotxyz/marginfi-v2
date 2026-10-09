@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger, RebalanceMove,
-    WrappedI80F48,
+    Bank, BankVaultType, BorrowOrder, FeeState, InterestTriggerConfig, MarginfiAccount, Order,
+    OrderTrigger, RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -103,7 +103,7 @@ fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
     )
 }
 
-fn should_include_integration_observation_meta(bank: &Bank) -> bool {
+pub(crate) fn should_include_integration_observation_meta(bank: &Bank) -> bool {
     matches!(
         bank.config.oracle_setup,
         OracleSetup::KaminoPythPush
@@ -2413,6 +2413,26 @@ impl MarginfiAccountFixture {
         bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
     ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.place_order_inner(bank_keys, trigger, None).await
+    }
+
+    /// Place an order that also exits on negative carry. Same accounts as a plain order.
+    pub async fn try_place_interest_order(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: InterestTriggerConfig,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.place_order_inner(bank_keys, trigger, Some(interest))
+            .await
+    }
+
+    pub(crate) async fn place_order_inner(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+        interest: Option<InterestTriggerConfig>,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
         let marginfi_account = self.load().await;
         // Compute fee_state PDA and fetch the global_fee_wallet from it so we can pass both
         // accounts to the PlaceOrder instruction.
@@ -2438,20 +2458,32 @@ impl MarginfiAccountFixture {
 
         let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
 
+        let accounts = marginfi::accounts::PlaceOrder {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            fee_payer: ctx.payer.pubkey(),
+            authority: ctx.payer.pubkey(),
+            order: order_pda,
+            fee_state: fee_state_key,
+            global_fee_wallet,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+
+        let data = match interest {
+            Some(interest) => marginfi::instruction::MarginfiAccountPlaceInterestOrder {
+                bank_keys,
+                trigger,
+                interest,
+            }
+            .data(),
+            None => marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        };
+
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::PlaceOrder {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                fee_payer: ctx.payer.pubkey(),
-                authority: ctx.payer.pubkey(),
-                order: order_pda,
-                fee_state: fee_state_key,
-                global_fee_wallet,
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+            accounts,
+            data,
         };
 
         let tx = Transaction::new_signed_with_payer(
@@ -2574,6 +2606,63 @@ impl MarginfiAccountFixture {
             .banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
+    }
+
+    /// This account's borrow order PDA for `bank`.
+    pub fn borrow_order_pda(&self, bank: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                marginfi_type_crate::constants::BORROW_ORDER_SEED.as_bytes(),
+                self.key.as_ref(),
+                bank.as_ref(),
+            ],
+            &marginfi::ID,
+        )
+        .0
+    }
+
+    /// The authority-signed `place_borrow_order` ix on `bank`. `destination_bank` is `None` for an
+    /// order that pays the wallet.
+    pub fn make_place_borrow_order_ix(
+        &self,
+        group_f: &MarginfiGroupFixture,
+        bank: Pubkey,
+        destination_bank: Option<Pubkey>,
+        args: marginfi::instruction::MarginfiAccountPlaceBorrowOrder,
+    ) -> Instruction {
+        let payer = self.ctx.borrow().payer.pubkey();
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PlaceBorrowOrder {
+                group: group_f.key,
+                marginfi_account: self.key,
+                authority: payer,
+                bank,
+                destination_bank,
+                borrow_order: self.borrow_order_pda(bank),
+                fee_state: group_f.fee_state,
+                global_fee_wallet: group_f.fee_wallet,
+                fee_payer: payer,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: args.data(),
+        }
+    }
+
+    pub async fn make_borrow_ix_with_authority<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: Pubkey,
+    ) -> Instruction {
+        self.make_bank_borrow_ix_internal(destination_account, bank, ui_amount, authority)
+            .await
+    }
+
+    pub async fn load_borrow_order(&self, order: Pubkey) -> BorrowOrder {
+        load_and_deserialize::<BorrowOrder>(self.ctx.clone(), &order).await
     }
 
     pub async fn load_order(&self, order: Pubkey) -> Order {

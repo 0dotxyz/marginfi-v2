@@ -1,13 +1,20 @@
 use crate::{
-    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
-    state::marginfi_account::LendingAccountImpl,
+    check,
+    errors::MarginfiError,
+    math_error,
+    prelude::MarginfiResult,
+    state::order::{snapshot_balances_outside, verify_balances_outside_unchanged},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{EXP_10_I80F48, REBALANCE_CONSERVATION_DUST_ATOMS};
+use marginfi_type_crate::constants::{
+    EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+    REBALANCE_CONSERVATION_DUST_ATOMS, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+    REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+};
 use marginfi_type_crate::types::{
-    Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
-    RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+    Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
+    WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
 
 pub trait RebalanceOrderImpl {
@@ -27,6 +34,14 @@ pub trait RebalanceOrderImpl {
 
     /// Replace the venue allowlist, validating the count and zeroing unused slots.
     fn set_allowed_banks(&mut self, allowed_banks: &[Pubkey]) -> MarginfiResult;
+
+    /// Seconds of history a move's realized rates are measured over: the cooldown, held to the
+    /// spans the bank rate readings serve.
+    fn rate_window(&self) -> u32;
+
+    /// Seconds a keeper tip stays escrowed before it can be settled: the cooldown, held to the
+    /// settle delay bounds.
+    fn settle_delay(&self) -> u64;
 }
 
 impl RebalanceOrderImpl for RebalanceOrder {
@@ -70,6 +85,19 @@ impl RebalanceOrderImpl for RebalanceOrder {
             *slot = *bank;
         }
         Ok(())
+    }
+
+    fn rate_window(&self) -> u32 {
+        u32::try_from(self.cooldown_seconds)
+            .unwrap_or(u32::MAX)
+            .clamp(INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS)
+    }
+
+    fn settle_delay(&self) -> u64 {
+        self.cooldown_seconds.clamp(
+            REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+            REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        )
     }
 }
 
@@ -172,32 +200,10 @@ impl RebalanceRecordImpl for RebalanceRecord {
         self.moves[..moves.len()].copy_from_slice(moves);
         self.move_count = moves.len() as u8;
 
-        let mut active: u8 = 0;
-        for balance in marginfi_account.lending_account.balances.iter() {
-            if !balance.is_active() {
-                continue;
-            }
-            if ref_banks.iter().any(|r| r.bank == balance.bank_pk) {
-                continue;
-            }
-            let Some(side) = balance.get_side() else {
-                continue;
-            };
-            let slot = self
-                .balance_states
-                .get_mut(active as usize)
-                .ok_or(MarginfiError::IllegalBalanceState)?;
-            slot.bank = balance.bank_pk;
-            slot.is_asset = matches!(side, BalanceSide::Assets) as u8;
-            slot.tag = balance.tag;
-            slot.shares = if matches!(side, BalanceSide::Assets) {
-                balance.asset_shares
-            } else {
-                balance.liability_shares
-            };
-            active = active.saturating_add(1);
-        }
-        self.active_balance_count = active;
+        self.active_balance_count =
+            snapshot_balances_outside(&mut self.balance_states, marginfi_account, |bank| {
+                ref_banks.iter().any(|r| r.bank == *bank)
+            })?;
         Ok(())
     }
 
@@ -266,42 +272,12 @@ impl RebalanceRecordImpl for RebalanceRecord {
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {
         // A balance added mid-sandwich occupies no snapshot slot, so the loop below cannot see it.
         let ref_banks = &self.ref_banks[..self.ref_bank_count as usize];
-        let untracked = marginfi_account
-            .lending_account
-            .balances
-            .iter()
-            .filter(|b| {
-                b.is_active()
-                    && b.get_side().is_some()
-                    && !ref_banks.iter().any(|r| r.bank == b.bank_pk)
-            })
-            .count();
-        check!(
-            untracked == self.active_balance_count as usize,
-            MarginfiError::RebalanceUntrackedBalance
-        );
-
-        for rec in self.balance_states[..self.active_balance_count as usize].iter() {
-            let idx = marginfi_account
-                .lending_account
-                .get_balance_index(&rec.bank)?;
-            let balance: &Balance = &marginfi_account.lending_account.balances[idx];
-            let side = balance
-                .get_side()
-                .ok_or(MarginfiError::IllegalBalanceState)?;
-            check_eq_u8(rec.is_asset, matches!(side, BalanceSide::Assets) as u8)?;
-            check!(rec.tag == balance.tag, MarginfiError::IllegalBalanceState);
-            let now: WrappedI80F48 = if matches!(side, BalanceSide::Assets) {
-                balance.asset_shares
-            } else {
-                balance.liability_shares
-            };
-            check!(
-                I80F48::from(rec.shares) == I80F48::from(now),
-                MarginfiError::IllegalBalanceState
-            );
-        }
-        Ok(())
+        verify_balances_outside_unchanged(
+            &self.balance_states[..self.active_balance_count as usize],
+            marginfi_account,
+            |bank| ref_banks.iter().any(|r| r.bank == *bank),
+            MarginfiError::RebalanceUntrackedBalance,
+        )
     }
 
     fn carry_tags(&self, marginfi_account: &mut MarginfiAccount) -> MarginfiResult {
@@ -345,22 +321,19 @@ impl RebalanceRecordImpl for RebalanceRecord {
     }
 }
 
-#[inline]
-fn check_eq_u8(a: u8, b: u8) -> MarginfiResult {
-    check!(a == b, MarginfiError::IllegalBalanceState);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::RebalanceRecordImpl;
+    use super::{RebalanceOrderImpl, RebalanceRecordImpl};
     use crate::errors::MarginfiError;
     use anchor_lang::prelude::Pubkey;
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
-    use marginfi_type_crate::constants::EXP_10_I80F48;
+    use marginfi_type_crate::constants::{
+        EXP_10_I80F48, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+    };
     use marginfi_type_crate::types::{
-        Balance, MarginfiAccount, RebalanceMove, RebalanceRecord, RebalanceRefBank,
+        Balance, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank,
     };
 
     fn dust(move_count: u8, mint_decimals: u8, multiplier: f64) -> I80F48 {
@@ -387,6 +360,32 @@ mod tests {
         // A venue settling in tokens worth 2.5 native units rounds by 2.5x as much per leg.
         assert_eq!(dust(1, 6, 2.5), units(7.5, 6));
         assert_eq!(dust(4, 9, 2.5), units(30.0, 9));
+    }
+
+    #[test]
+    fn the_rate_window_is_the_cooldown_held_to_the_reading_spans() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, window) in [
+            (0, INTEREST_MIN_WINDOW_SECONDS),
+            (86_400, 86_400),
+            (u64::MAX, INTEREST_MAX_WINDOW_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.rate_window(), window);
+        }
+    }
+
+    #[test]
+    fn the_settle_delay_is_the_cooldown_held_to_its_bounds() {
+        let mut order = RebalanceOrder::zeroed();
+        for (cooldown, delay) in [
+            (0, REBALANCE_SETTLE_DELAY_MIN_SECONDS),
+            (1_800, 1_800),
+            (u64::MAX, REBALANCE_SETTLE_DELAY_MAX_SECONDS),
+        ] {
+            order.cooldown_seconds = cooldown;
+            assert_eq!(order.settle_delay(), delay);
+        }
     }
 
     fn balance(bank: Pubkey, tag: u16) -> Balance {

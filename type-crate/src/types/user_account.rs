@@ -11,7 +11,7 @@ use fixed::types::I80F48;
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
 
-use super::{HealthCache, WrappedI80F48};
+use super::{HealthCache, OrderTagType, WrappedI80F48};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -253,10 +253,16 @@ pub const ACCOUNT_IN_ORDER_EXECUTION: u64 = 1 << 7;
 /// The account is mid auto-rebalance (keeper moving one asset between same-mint venues). Transient,
 /// only set within a `start_rebalance`..`end_rebalance` sandwich.
 pub const ACCOUNT_IN_REBALANCE: u64 = 1 << 8;
+/// The account is mid borrow-rate-order fill (keeper borrowing on its behalf, and optionally
+/// redeploying). Transient, only set within a `start`..`end` sandwich.
+pub const ACCOUNT_IN_BORROW_ORDER: u64 = 1 << 9;
+/// Set alongside `ACCOUNT_IN_BORROW_ORDER` while the fill moves tokens between two marginfi banks
+/// (a redeploying open, any close), which the rate limiter does not count as outflow.
+pub const ACCOUNT_IN_BORROW_ORDER_INTERNAL: u64 = 1 << 10;
 
 /// Account states that block placing or starting an order/rebalance sandwich (disabled, in a
 /// flashloan, frozen, in receivership, or being deleveraged). The transient in-flight flags
-/// (`ACCOUNT_IN_ORDER_EXECUTION` / `ACCOUNT_IN_REBALANCE`) are checked separately per entry point.
+/// (order execution, rebalance, borrow-order fill) are checked separately per entry point.
 pub const ORDER_BLOCKING_FLAGS: u64 = ACCOUNT_DISABLED
     | ACCOUNT_IN_FLASHLOAN
     | ACCOUNT_FROZEN
@@ -333,8 +339,11 @@ pub struct Balance {
     /// Unix timestamp (u64) of the last premium accrual (claim) for this position. Set at
     /// balance creation and bumped on every `claim_premium`.
     pub last_update: u64,
+    /// The `OrderTagType` of the order holding `tag`. An interest or borrow order sets it, and it
+    /// stays until the tag is cleared.
+    pub tag_type: u8,
     /// Reserved for future use
-    pub _padding: [u64; 1],
+    pub _padding: [u8; 7],
 }
 
 impl Balance {
@@ -376,6 +385,11 @@ impl Balance {
         }
     }
 
+    pub fn clear_tag(&mut self) {
+        self.tag = 0;
+        self.tag_type = OrderTagType::default() as u8;
+    }
+
     pub fn empty_deactivated() -> Self {
         Balance {
             active: 0,
@@ -387,7 +401,8 @@ impl Balance {
             liability_shares: WrappedI80F48::from(I80F48::ZERO),
             premium_outstanding: WrappedI80F48::from(I80F48::ZERO),
             last_update: 0,
-            _padding: [0; 1],
+            tag_type: OrderTagType::default() as u8,
+            _padding: [0; 7],
         }
     }
 }

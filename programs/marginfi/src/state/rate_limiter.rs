@@ -3,8 +3,8 @@ use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::{DAILY_RESET_INTERVAL, HOURLY_RESET_DURATION},
     types::{
-        BankRateLimiter, GroupRateLimiter, RateLimitWindow, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        BankRateLimiter, GroupRateLimiter, RateLimitWindow, ACCOUNT_IN_BORROW_ORDER_INTERNAL,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 /// Converts a `u64` amount into the signed counter representation, returning
@@ -388,14 +388,16 @@ impl_dual_window_rate_limiter!(
 );
 
 /// Checks if rate limiting should be skipped based on account flags.
-/// Returns true for flashloan, liquidation, deleverage, and auto-rebalance operations.
-/// Rebalance is an internal same-mint move (withdraw from one bank, deposit into another), so it
-/// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
+/// Returns true for flashloan, liquidation, deleverage, auto-rebalance, and bank-to-bank borrow-rate
+/// fills. Those last two are internal same-mint moves (withdraw or borrow from one bank, deposit or
+/// repay into another), so they are net-neutral to protocol outflow and must not consume a bank's
+/// rate-limit budget.
 pub fn should_skip_rate_limit(account_flags: u64) -> bool {
     (account_flags & ACCOUNT_IN_FLASHLOAN) != 0
         || (account_flags & ACCOUNT_IN_RECEIVERSHIP) != 0
         || (account_flags & ACCOUNT_IN_DELEVERAGE) != 0
         || (account_flags & ACCOUNT_IN_REBALANCE) != 0
+        || (account_flags & ACCOUNT_IN_BORROW_ORDER_INTERNAL) != 0
 }
 
 #[cfg(test)]

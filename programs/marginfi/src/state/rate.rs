@@ -15,14 +15,18 @@
 //! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
 //!   post-deposit utilization (rewards APR is layered on OFF-CHAIN by the keeper).
 //!
+//! [`yield_index_of`] / [`debt_index_of`] serve the REALIZED rate: growth of a monotonic share
+//! index across a span, which a single-transaction rate spike cannot move.
+//!
 //! Integration reserve/market accounts MUST be refreshed in the same slot by the caller
 //! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend liquidity-program
 //! `update_exchange_price`, which refreshes the `TokenReserve` the supply rate reads).
 
 use crate::state::bank::BankImpl;
-use crate::state::interest_rate::LendingCurve;
+use crate::state::interest_rate::{InterestRateConfigImpl, LendingCurve};
 use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,
+    OraclePriceFeedAdapter,
 };
 use crate::{check, math_error, prelude::*, utils::is_integration_asset_tag};
 use anchor_lang::prelude::*;
@@ -35,10 +39,10 @@ use juplend_mocks::state::{
 use kamino_mocks::state::{MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, SECONDS_PER_YEAR,
 };
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
-use marginfi_type_crate::types::{Bank, BankConfig};
+use marginfi_type_crate::types::{Bank, BankConfig, MarginfiGroup, OraclePriceType, RateReading};
 
 /// Accounts a venue needs beyond its rate-bearing account to price a deposit and its reward
 /// emissions, each bound to the bank's own venue state; reading the stored rate needs none.
@@ -184,6 +188,116 @@ pub fn rate_of<'info>(
         0,
         clock,
     )
+}
+
+/// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
+/// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
+/// accounts. The spot price itself is discarded, but reading it applies the bank's staleness and
+/// confidence gates, so every caller blocks while the oracle is untrustworthy.
+pub fn venue_multiplier<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult<I80F48> {
+    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+        bank,
+        oracle_ais,
+        clock,
+        OraclePriceType::RealTime,
+    )?;
+    Ok(priced.price_multiplier)
+}
+
+/// Monotonic per-share supply index for `bank`: `asset_share_value` times the venue exchange-rate
+/// multiplier, excluding the oracle spot price. Growth over a window is the realized supply yield a
+/// depositor earned; being an accrued integral, a single-tx rate spike cannot move it.
+pub fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
+    I80F48::from(bank.asset_share_value)
+        .checked_mul(multiplier)
+        .ok_or_else(math_error!())
+        .map_err(Into::into)
+}
+
+/// Debt-side counterpart to [`yield_index_of`]: `liability_share_value` times the venue multiplier,
+/// which staked collateral needs because it is borrowable and prices above 1.
+pub fn debt_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
+    I80F48::from(bank.liability_share_value)
+        .checked_mul(multiplier)
+        .ok_or_else(math_error!())
+        .map_err(Into::into)
+}
+
+/// `(current / anchor - 1) * SECONDS_PER_YEAR / elapsed`: the time-weighted rate realized over the
+/// span, so a spike contributes only its own duration. Negative when the index fell.
+pub fn realized_apr(anchor: I80F48, current: I80F48, elapsed: i64) -> MarginfiResult<I80F48> {
+    check!(anchor > I80F48::ZERO, MarginfiError::MathError);
+    check!(elapsed > 0, MarginfiError::MathError);
+    current
+        .checked_div(anchor)
+        .and_then(|g| g.checked_sub(I80F48::ONE))
+        .and_then(|growth| growth.checked_mul(SECONDS_PER_YEAR))
+        .and_then(|annual| annual.checked_div(I80F48::from_num(elapsed)))
+        .ok_or_else(math_error!())
+        .map_err(Into::into)
+}
+
+/// The reading a rate window of `window` seconds starts at, and the seconds elapsed since it.
+fn rate_window_start(bank: &Bank, window: u32, now: i64) -> MarginfiResult<(&RateReading, i64)> {
+    let reading = bank
+        .rate_reading_at_least(i64::from(window), now)
+        .ok_or(MarginfiError::RateHistoryTooShort)?;
+    let elapsed = now
+        .checked_sub(reading.timestamp)
+        .ok_or_else(math_error!())?;
+    Ok((reading, elapsed))
+}
+
+/// The supply APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its yield index `yield_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_supply_apr(
+    bank: &Bank,
+    window: u32,
+    yield_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let (reading, elapsed) = rate_window_start(bank, window, now)?;
+    realized_apr(reading.asset_index(), yield_index_now, elapsed)
+}
+
+/// The borrow APR `bank` has realized since its youngest reading at least `window` seconds old,
+/// given its debt index `debt_index_now`. A gap in the readings only lengthens the span.
+pub fn realized_borrow_apr(
+    bank: &Bank,
+    window: u32,
+    debt_index_now: I80F48,
+    now: i64,
+) -> MarginfiResult<I80F48> {
+    let (reading, elapsed) = rate_window_start(bank, window, now)?;
+    realized_apr(reading.debt_index(), debt_index_now, elapsed)
+}
+
+/// The bank's borrow APR at the utilization `extra_native` more of borrowing would produce. Pass
+/// `0` for the current rate. Native banks only, which is every borrowable bank.
+pub fn borrow_rate_at(
+    bank: &Bank,
+    group: &MarginfiGroup,
+    extra_native: u64,
+) -> MarginfiResult<I80F48> {
+    let total_assets = bank.get_asset_amount(bank.total_asset_shares.into())?;
+    check!(total_assets > I80F48::ZERO, MarginfiError::MathError);
+    let total_liabilities = bank
+        .get_liability_amount(bank.total_liability_shares.into())?
+        .checked_add(I80F48::from_num(extra_native))
+        .ok_or_else(math_error!())?;
+    let utilization = total_liabilities
+        .checked_div(total_assets)
+        .ok_or_else(math_error!())?;
+    Ok(bank
+        .config
+        .interest_rate_config
+        .create_interest_rate_calculator(group)
+        .calc_interest_rate(utilization)?
+        .borrowing_rate_apr)
 }
 
 /// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`
@@ -607,5 +721,107 @@ mod slot_pacing {
         );
         assert!(slots_per_second_from(3_599, 3_600).is_none());
         assert!(slots_per_second_from(14_401, 3_600).is_none());
+    }
+}
+
+/// Realized rates are read as share-index growth across a span, so the annualization must be exact
+/// and a fall in the index must read as a negative rate.
+#[cfg(test)]
+mod realized_rates {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::INTEREST_MIN_WINDOW_SECONDS;
+
+    const YEAR: i64 = 31_536_000;
+    const WINDOW: u32 = INTEREST_MIN_WINDOW_SECONDS;
+
+    /// A bank whose ring holds one reading `age` seconds before `now`, at a supply index of 1 and
+    /// a debt index of 2.
+    fn bank_with_reading(age: i64, now: i64) -> Bank {
+        let mut bank = Bank::zeroed();
+        let reading = RateReading::new(I80F48::ONE, I80F48::from_num(2), now - age).unwrap();
+        bank.record_rate_reading(reading);
+        bank
+    }
+
+    /// Growth is annualized over the reading's actual age, which is the youngest reading at least
+    /// a window old; a reading older than the window lengthens the span.
+    #[test]
+    fn the_realized_rate_spans_the_youngest_reading_at_least_a_window_old() {
+        let now = 1_700_000_000;
+        let per_year = |age: i64| SECONDS_PER_YEAR / I80F48::from_num(age);
+
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&bank, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(i64::from(WINDOW))
+        );
+
+        let older = bank_with_reading(2 * i64::from(WINDOW), now);
+        assert_eq!(
+            realized_supply_apr(&older, WINDOW, I80F48::from_num(1.0625), now).unwrap(),
+            I80F48::from_num(0.0625) * per_year(2 * i64::from(WINDOW))
+        );
+    }
+
+    #[test]
+    fn the_borrow_rate_is_measured_on_the_debt_index() {
+        let now = 1_700_000_000;
+        let bank = bank_with_reading(i64::from(WINDOW), now);
+        assert_eq!(
+            realized_borrow_apr(&bank, WINDOW, I80F48::from_num(2.125), now).unwrap(),
+            I80F48::from_num(0.0625) * SECONDS_PER_YEAR / I80F48::from_num(WINDOW)
+        );
+    }
+
+    #[test]
+    fn a_ring_with_no_reading_old_enough_has_no_measurement() {
+        let now = 1_700_000_000;
+        let young = bank_with_reading(i64::from(WINDOW) - 1, now);
+        for bank in [young, Bank::zeroed()] {
+            assert_eq!(
+                realized_supply_apr(&bank, WINDOW, I80F48::ONE, now).unwrap_err(),
+                MarginfiError::RateHistoryTooShort.into()
+            );
+        }
+    }
+
+    #[test]
+    fn growth_annualizes_over_the_span_it_was_measured_on() {
+        // A quarter of a year at 25% growth annualizes to 100%.
+        assert_eq!(
+            realized_apr(I80F48::ONE, I80F48::from_num(1.25), YEAR / 4).unwrap(),
+            I80F48::ONE
+        );
+        // The same growth over half a year is half the rate, and the anchor's scale cancels.
+        assert_eq!(
+            realized_apr(I80F48::from_num(2), I80F48::from_num(2.5), YEAR / 2).unwrap(),
+            I80F48::from_num(0.5)
+        );
+        // A full year of growth is the growth itself.
+        assert_eq!(
+            realized_apr(I80F48::ONE, I80F48::from_num(1.0625), YEAR).unwrap(),
+            I80F48::from_num(0.0625)
+        );
+    }
+
+    #[test]
+    fn a_flat_index_is_zero_and_a_falling_one_is_negative() {
+        assert_eq!(
+            realized_apr(I80F48::from_num(3), I80F48::from_num(3), YEAR).unwrap(),
+            I80F48::ZERO
+        );
+        // Only a venue drawdown moves a supply index down; it reads as negative yield earned.
+        assert_eq!(
+            realized_apr(I80F48::ONE, I80F48::from_num(0.5), YEAR).unwrap(),
+            I80F48::from_num(-0.5)
+        );
+    }
+
+    #[test]
+    fn a_zero_anchor_or_span_is_rejected() {
+        assert!(realized_apr(I80F48::ZERO, I80F48::ONE, YEAR).is_err());
+        assert!(realized_apr(I80F48::ONE, I80F48::ONE, 0).is_err());
+        assert!(realized_apr(I80F48::ONE, I80F48::ONE, -1).is_err());
     }
 }
