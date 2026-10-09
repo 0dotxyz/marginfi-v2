@@ -8,8 +8,8 @@
 //!
 //! - Native marginfi banks: the bank's own interest curve at its utilization after the deposit (net
 //!   by construction; fees fall on borrowers). The caller accrues the bank first.
-//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`, rescaled from klend's slot-year
-//!   to a wall-clock year at measured chain pacing.
+//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`. A reserve that accrues per slot
+//!   is rescaled from klend's slot-year to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
 //! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
@@ -515,7 +515,9 @@ mod unit_consistency {
     use bytemuck::Zeroable;
     use drift_mocks::state::drift_deposit_rate_from_parts;
     use juplend_mocks::state::juplend_supply_rate_from_parts;
-    use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND};
+    use kamino_mocks::state::{
+        kamino_supply_apr_from_parts, CurvePoint, InterestRateBasis, KLEND_SLOTS_PER_SECOND,
+    };
     use marginfi_type_crate::types::{
         make_points, milli_to_u32, u32_to_milli, InterestRateConfig, INTEREST_CURVE_SEVEN_POINT,
     };
@@ -558,6 +560,7 @@ mod unit_consistency {
             I80F48::from_num(1), // borrowed -> 100% utilization
             &points,
             0, // protocol_take_rate_pct
+            InterestRateBasis::Legacy,
             I80F48::from_num(KLEND_SLOTS_PER_SECOND),
         )
         .unwrap();
