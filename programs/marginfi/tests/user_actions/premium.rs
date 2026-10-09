@@ -3680,3 +3680,233 @@ async fn premium_liquidator_bad_oracle_ratchets_own_snapshots() -> anyhow::Resul
     );
     Ok(())
 }
+
+/// A stale oracle on zero-weight collateral never blocks a borrow: the leg weighs nothing in
+/// the premium mix, so the pass stays complete and the rate comes from the priced legs.
+#[tokio::test]
+async fn premium_borrow_skips_stale_zero_weight_collateral() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(0).into(),
+                    asset_weight_maint: I80F48!(0).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_eq_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+
+    // Only the zero-weight SOL oracle goes stale. Health passes on $9,990 of SolEq alone.
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+    // Only the priced SolEq leg weighs in: pair(SOL -> STABLE) = 1%.
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!((rate - 1.0).abs() < 0.001, "snapshot {} != 1%", rate);
+
+    // Same stale zero-weight leg, but ReduceOnly: health soft-zeroes it without recording an
+    // error and the premium pass never needs its price, so the borrow goes through.
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::ReduceOnly),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    advance_clock_with_feeds(&test_f, 60, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+
+    Ok(())
+}
+
+/// A Paused/ReduceOnly leg is worth zero to health at Initial but still weighs in the premium
+/// mix, so its price is read for premium only. A wide confidence band on that read must not
+/// revert the instruction.
+#[tokio::test]
+async fn premium_reduce_only_wide_conf_does_not_block_initial_checks() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+    let now = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+        clock.unix_timestamp
+    };
+
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Borrower: $9,990 SOL + $9,990 SolEq, $100 USDC debt. USDC is NOT premium-active.
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+
+    // SolEq is sunset (ReduceOnly) and its feed reports $10 +/- $1: a 21.2% band after the
+    // 2.12x multiplier, above the 10% default cap.
+    test_f
+        .get_bank_mut(&BankMint::SolEquivalent)
+        .update_config(
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::ReduceOnly),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_EQUIVALENT_FEED, 10_000_000_000, 1_000_000_000, now)
+        .await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // Control: empty premium matrix -> the ReduceOnly leg is never priced; both actions work.
+    borrower
+        .try_bank_withdraw(borrower_sol.key, sol_bank_f, 1, None)
+        .await?;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1)
+        .await?;
+
+    // One matrix entry, no bank tagged, no premium debt anywhere.
+    test_f
+        .marginfi_group
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+
+    borrower
+        .try_bank_withdraw(borrower_sol.key, sol_bank_f, 1, None)
+        .await?;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1)
+        .await?;
+
+    // Escape: withdraw_all of the ReduceOnly leg closes the balance, after which SOL moves.
+    borrower
+        .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 0, Some(true))
+        .await?;
+    borrower
+        .try_bank_withdraw(borrower_sol.key, sol_bank_f, 1, None)
+        .await?;
+    Ok(())
+}
