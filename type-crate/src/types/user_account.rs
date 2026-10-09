@@ -339,8 +339,8 @@ pub struct Balance {
     /// Unix timestamp (u64) of the last premium accrual (claim) for this position. Set at
     /// balance creation and bumped on every `claim_premium`.
     pub last_update: u64,
-    /// The `OrderTagType` of the order holding `tag`. An interest order sets it, and it stays until
-    /// the tag is cleared.
+    /// The `OrderTagType` of the order holding `tag`. An interest or borrow order sets it, and it
+    /// stays until the tag is cleared.
     pub tag_type: u8,
     /// Reserved for future use
     pub _padding: [u8; 7],

@@ -8,7 +8,7 @@ use marginfi::{
     constants::ORDER_INIT_FLAT_FEE_DEFAULT, prelude::MarginfiError, state::bank::BankImpl,
 };
 use marginfi_type_crate::constants::BORROW_ORDER_FILL_DUST_ATOMS;
-use marginfi_type_crate::types::BankConfigOpt;
+use marginfi_type_crate::types::{BankConfigOpt, OrderTagType};
 use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{instruction::Instruction, signer::Signer as _, transaction::Transaction};
 
@@ -281,6 +281,15 @@ async fn a_redeploying_fill_deposits_into_the_destination_bank() -> anyhow::Resu
     assert_eq!(
         I80F48::from(fx.order_state().await.liability_shares),
         shares
+    );
+
+    // The order's two balances are tagged as a borrow order's; the collateral is not its own.
+    let borrow = OrderTagType::Borrow as u8;
+    assert_eq!(fx.order_tag(fx.usdc().key).await, (1, borrow));
+    assert_eq!(fx.order_tag(fx.dst().key).await, (2, borrow));
+    assert_eq!(
+        fx.order_tag(fx.sol().key).await,
+        (0, OrderTagType::TpSl as u8)
     );
     Ok(())
 }

@@ -2621,6 +2621,35 @@ impl MarginfiAccountFixture {
         .0
     }
 
+    /// The authority-signed `place_borrow_order` ix on `bank`. `destination_bank` is `None` for an
+    /// order that pays the wallet.
+    pub fn make_place_borrow_order_ix(
+        &self,
+        group_f: &MarginfiGroupFixture,
+        bank: Pubkey,
+        destination_bank: Option<Pubkey>,
+        args: marginfi::instruction::MarginfiAccountPlaceBorrowOrder,
+    ) -> Instruction {
+        let payer = self.ctx.borrow().payer.pubkey();
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PlaceBorrowOrder {
+                group: group_f.key,
+                marginfi_account: self.key,
+                authority: payer,
+                bank,
+                destination_bank,
+                borrow_order: self.borrow_order_pda(bank),
+                fee_state: group_f.fee_state,
+                global_fee_wallet: group_f.fee_wallet,
+                fee_payer: payer,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: args.data(),
+        }
+    }
+
     pub async fn make_borrow_ix_with_authority<T: Into<f64>>(
         &self,
         destination_account: Pubkey,

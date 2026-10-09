@@ -56,8 +56,9 @@ use marginfi_type_crate::{
     },
     types::{
         Bank, BorrowOrder, BorrowOrderRecord, FeeState, HealthCache, MarginfiAccount,
-        MarginfiGroup, RequirementType, ACCOUNT_IN_BORROW_ORDER, ACCOUNT_IN_BORROW_ORDER_INTERNAL,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
+        MarginfiGroup, OrderTagType, RequirementType, ACCOUNT_IN_BORROW_ORDER,
+        ACCOUNT_IN_BORROW_ORDER_INTERNAL, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ORDER_BLOCKING_FLAGS,
     },
 };
 use std::cell::Ref;
@@ -170,6 +171,9 @@ pub fn place_borrow_order(
             destination,
             ctx.bumps.borrow_order,
         )?;
+        account
+            .lending_account
+            .tag_balances(&order.banks(), Some(OrderTagType::Borrow));
         (
             order.amount,
             order.open_below_apr,
@@ -469,7 +473,7 @@ pub fn end_borrow_order_open<'info>(
     let clock = Clock::get()?;
 
     let (delivered, filled, remaining, spot_apr_after) = {
-        let account = ctx.accounts.marginfi_account.load()?;
+        let mut account = ctx.accounts.marginfi_account.load_mut()?;
         let mut order = ctx.accounts.borrow_order.load_mut()?;
         let bank = ctx.accounts.bank.load()?;
         let group = ctx.accounts.group.load()?;
@@ -520,8 +524,12 @@ pub fn end_borrow_order_open<'info>(
         }
         check!(maximal, MarginfiError::BorrowOrderFillNotMaximal);
 
-        record.verify_others_unchanged(&account, &order.banks())?;
+        let banks = order.banks();
+        record.verify_others_unchanged(&account, &banks)?;
         order.record_fill(delivered_atoms, borrowed_shares, clock.unix_timestamp)?;
+        account
+            .lending_account
+            .tag_balances(&banks, Some(OrderTagType::Borrow));
         (
             delivered_atoms,
             order.filled,

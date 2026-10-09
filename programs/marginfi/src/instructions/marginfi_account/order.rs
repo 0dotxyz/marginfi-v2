@@ -107,35 +107,14 @@ fn init_order(
         _ => return err!(MarginfiError::InvalidAssetOrLiabilitiesCount),
     };
 
-    // Reserve tags for the balances if necessary
-    let balance_1_needs_tag = lending_account.balances[balance_index_1].tag == 0;
-    let balance_2_needs_tag = lending_account.balances[balance_index_2].tag == 0;
-
-    let empty_tag_count = balance_1_needs_tag as usize + balance_2_needs_tag as usize;
-
-    if empty_tag_count > 0 {
-        let new_tags = lending_account.reserve_n_tags(empty_tag_count);
-        let mut tag_index = 0;
-
-        if balance_1_needs_tag {
-            lending_account.balances[balance_index_1].tag = new_tags[tag_index];
-            tag_index += 1;
-        }
-
-        if balance_2_needs_tag {
-            lending_account.balances[balance_index_2].tag = new_tags[tag_index];
-        }
-    }
-
+    lending_account.tag_balances(
+        &bank_keys,
+        interest.is_some().then_some(OrderTagType::Interest),
+    );
     let tags = [
         lending_account.balances[balance_index_1].tag,
         lending_account.balances[balance_index_2].tag,
     ];
-    if interest.is_some() {
-        for index in [balance_index_1, balance_index_2] {
-            lending_account.balances[index].tag_type = OrderTagType::Interest as u8;
-        }
-    }
 
     let marginfi_account_key = marginfi_account_loader.key();
 

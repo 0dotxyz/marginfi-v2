@@ -204,6 +204,11 @@ handed its funds over and cannot be closed by a Keeper. Setting the close level 
 close side. The order counts what its own fills borrowed; repaying some of that yourself does not
 shrink the count, so update or cancel the order if you no longer want a Keeper closing the rest.
 
+An auto-rebalance does not move a balance a borrow order uses, so a close finds the deposit in the
+destination bank you chose. An order tags the balances it finds when it is placed, and again at
+every fill that opens. They stay held until their Order tag is cleared with `SetKeeperCloseFlags`,
+including after the order is cancelled.
+
 ### What a Keeper Can and Cannot Do
 
 While a fill is running, the Keeper holds borrow authority on your account (withdraw and repay

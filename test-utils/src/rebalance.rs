@@ -582,6 +582,29 @@ impl RebalanceFixture {
         Ok(order)
     }
 
+    /// Place a borrow order on `borrow_bank` that redeploys into `destination`.
+    pub async fn place_borrow_order_into(
+        &self,
+        borrow_bank: &BankFixture,
+        destination: &BankFixture,
+    ) -> anyhow::Result<()> {
+        let ix = self.user.make_place_borrow_order_ix(
+            &self.test_f.marginfi_group,
+            borrow_bank.key,
+            Some(destination.key),
+            marginfi::instruction::MarginfiAccountPlaceBorrowOrder {
+                amount: 1,
+                open_below_apr: 1,
+                close_above_apr: None,
+                cooldown_seconds: None,
+                window_seconds: None,
+                keeper_tip: None,
+            },
+        );
+        self.process_as_payer(&[ix]).await?;
+        Ok(())
+    }
+
     /// The order tag on the user's balance in `bank`, or `None` without one.
     pub async fn balance_tag(&self, bank: Pubkey) -> Option<u16> {
         self.user

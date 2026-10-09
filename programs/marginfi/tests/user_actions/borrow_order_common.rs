@@ -276,33 +276,20 @@ impl BorrowOrderFixture {
     }
 
     pub async fn place_on(&self, bank: Pubkey, p: &Params) -> Result<(), BanksClientError> {
-        let payer = self.payer();
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::PlaceBorrowOrder {
-                group: self.test_f.marginfi_group.key,
-                marginfi_account: self.account_f.key,
-                authority: payer.pubkey(),
-                bank,
-                destination_bank: self.redeploy_bank.as_ref().map(|b| b.key),
-                borrow_order: self.account_f.borrow_order_pda(bank),
-                fee_state: self.test_f.marginfi_group.fee_state,
-                global_fee_wallet: self.test_f.marginfi_group.fee_wallet,
-                fee_payer: payer.pubkey(),
-                system_program: anchor_lang::system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceBorrowOrder {
+        let ix = self.account_f.make_place_borrow_order_ix(
+            &self.test_f.marginfi_group,
+            bank,
+            self.redeploy_bank.as_ref().map(|b| b.key),
+            marginfi::instruction::MarginfiAccountPlaceBorrowOrder {
                 amount: usdc(p.amount),
                 open_below_apr: p.open_below,
                 close_above_apr: p.close_above,
                 cooldown_seconds: Some(p.cooldown),
                 window_seconds: Some(p.window),
                 keeper_tip: Some(p.keeper_tip),
-            }
-            .data(),
-        };
-        self.process(&[ix], &payer).await
+            },
+        );
+        self.process(&[ix], &self.payer()).await
     }
 
     pub async fn update(
@@ -519,6 +506,13 @@ impl BorrowOrderFixture {
 
     pub async fn order_state(&self) -> marginfi_type_crate::types::BorrowOrder {
         self.account_f.load_borrow_order(self.order).await
+    }
+
+    /// The order tag and tag type on the account's balance in `bank`.
+    pub async fn order_tag(&self, bank: Pubkey) -> (u16, u8) {
+        let account = self.account_f.load().await;
+        let balance = account.lending_account.get_balance(&bank).unwrap();
+        (balance.tag, balance.tag_type)
     }
 
     /// The account's USDC debt as of now, and its shares.

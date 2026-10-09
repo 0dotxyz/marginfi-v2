@@ -2090,6 +2090,7 @@ pub trait LendingAccountImpl {
     fn get_first_empty_balance(&self) -> Option<usize>;
     fn sort_balances(&mut self);
     fn reserve_n_tags(&mut self, n: usize) -> [u16; ORDER_ACTIVE_TAGS];
+    fn tag_balances(&mut self, banks: &[Pubkey], tag_type: Option<OrderTagType>);
     fn get_balance_index(&self, bank_pk: &Pubkey) -> MarginfiResult<usize>;
     fn has_liabilities(&self) -> bool;
 }
@@ -2149,6 +2150,38 @@ impl LendingAccountImpl for LendingAccount {
         }
 
         tags
+    }
+
+    /// Gives the active balance in each of `banks` a tag if it has none, reserving them in the
+    /// order of `banks`, and sets `tag_type` on each when one is given.
+    fn tag_balances(&mut self, banks: &[Pubkey], tag_type: Option<OrderTagType>) {
+        let index_of = |balances: &[Balance], bank: &Pubkey| {
+            balances
+                .iter()
+                .position(|b| b.is_active() && b.bank_pk == *bank)
+        };
+        let untagged = |balances: &[Balance], bank: &Pubkey| {
+            index_of(balances, bank).filter(|&index| balances[index].tag == 0)
+        };
+        let count = banks
+            .iter()
+            .filter(|bank| untagged(&self.balances, bank).is_some())
+            .count();
+        if count > 0 {
+            let mut tags = self.reserve_n_tags(count).into_iter();
+            for bank in banks {
+                if let Some(index) = untagged(&self.balances, bank) {
+                    self.balances[index].tag = tags.next().unwrap_or_default();
+                }
+            }
+        }
+        if let Some(tag_type) = tag_type {
+            for bank in banks {
+                if let Some(index) = index_of(&self.balances, bank) {
+                    self.balances[index].tag_type = tag_type as u8;
+                }
+            }
+        }
     }
 
     fn get_balance_index(&self, bank_pk: &Pubkey) -> MarginfiResult<usize> {

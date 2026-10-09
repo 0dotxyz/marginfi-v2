@@ -2384,18 +2384,14 @@ async fn rebalance_carries_the_order_tag_with_a_whole_move() -> anyhow::Result<(
     Ok(())
 }
 
-#[tokio::test]
-async fn rebalance_moves_an_interest_tagged_balance_only_once_its_tag_is_cleared(
+/// A rebalance of the source is refused with `refusal`, and goes through once its tag is cleared.
+async fn assert_held_until_tag_cleared(
+    f: &RebalanceFixture,
+    refusal: MarginfiError,
 ) -> anyhow::Result<()> {
-    let f = setup(I80F48::from_num(0.0001), 0).await?;
-    f.place_interest_order_on(&f.src_bank_f).await?;
-
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs).await;
-    assert_custom_error!(
-        res.unwrap_err(),
-        MarginfiError::RebalanceInterestTaggedBalance
-    );
+    assert_custom_error!(res.unwrap_err(), refusal);
 
     f.user.try_set_keeper_close_flags(None).await?;
     // A compute-budget ix keeps this retry's signature distinct from the rejected attempt's.
@@ -2403,8 +2399,27 @@ async fn rebalance_moves_an_interest_tagged_balance_only_once_its_tag_is_cleared
     ixs.insert(0, ComputeBudgetInstruction::set_compute_unit_limit(400_000));
     f.process(&ixs).await?;
 
-    assert_moved_to_dst(&f).await;
+    assert_moved_to_dst(f).await;
     Ok(())
+}
+
+#[tokio::test]
+async fn rebalance_moves_an_interest_tagged_balance_only_once_its_tag_is_cleared(
+) -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.place_interest_order_on(&f.src_bank_f).await?;
+    assert_held_until_tag_cleared(&f, MarginfiError::RebalanceInterestTaggedBalance).await
+}
+
+/// A borrow order tags its destination deposit when it is placed, which holds the deposit in its
+/// bank until the tag is cleared.
+#[tokio::test]
+async fn rebalance_moves_a_borrow_tagged_balance_only_once_its_tag_is_cleared() -> anyhow::Result<()>
+{
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.place_borrow_order_into(&f.dst_bank_f, &f.src_bank_f)
+        .await?;
+    assert_held_until_tag_cleared(&f, MarginfiError::RebalanceBorrowTaggedBalance).await
 }
 
 /// A partial move of a tagged balance is rejected at end.

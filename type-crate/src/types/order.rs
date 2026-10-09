@@ -32,6 +32,7 @@ pub enum OrderTagType {
     #[default]
     TpSl, // 0
     Interest, // 1
+    Borrow,   // 2
 }
 
 #[repr(C)]
