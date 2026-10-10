@@ -20,9 +20,9 @@ use marginfi_type_crate::{
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint,
-        EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
+        centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
+        BankMetadata, BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
+        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -75,6 +75,7 @@ fn make_write_bank_metadata_ix(
             bank,
             metadata_admin,
             metadata,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
@@ -191,7 +192,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
-            _padding_1,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -233,7 +237,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 2] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -348,7 +355,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
-            _padding_1,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -390,7 +400,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 2] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 
@@ -689,7 +702,8 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
@@ -979,7 +993,8 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                governance_admin: ctx.payer.pubkey(),
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
@@ -1289,10 +1304,10 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
-    let copy_to_bank_admin = test_f.get_bank(&BankMint::Sol);
+    let copy_to_bank = test_f.get_bank(&BankMint::Sol);
     let copy_to_bank_emode_admin = test_f.get_bank(&BankMint::PyUSD);
 
-    let copy_to_before = copy_to_bank_admin.load().await;
+    let copy_to_before = copy_to_bank.load().await;
     assert_eq!(copy_to_before.emode.flags, 0);
     assert_eq!(copy_to_before.emode.emode_tag, 0);
 
@@ -1319,16 +1334,16 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
     // Admin can clone emode settings.
     test_f
         .marginfi_group
-        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank_admin)
+        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank)
         .await?;
 
     let copy_from_after = copy_from_bank.load().await;
-    let copy_to_after = copy_to_bank_admin.load().await;
+    let copy_to_after = copy_to_bank.load().await;
 
     assert_eq!(copy_to_after.emode, copy_from_after.emode);
     assert_eq!(copy_to_after.config, copy_to_before.config);
 
-    // A dedicated emode admin can also clone emode settings.
+    // A dedicated eMode admin cannot clone eMode settings; this remains a slow-admin action.
     let group_before = test_f.marginfi_group.load().await;
     let new_emode_admin = Keypair::new();
     test_f
@@ -1344,17 +1359,19 @@ async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
         )
         .await?;
 
-    test_f
+    let err = test_f
         .marginfi_group
         .try_lending_pool_clone_emode_with_signer(
             &new_emode_admin,
             &copy_from_bank,
             &copy_to_bank_emode_admin,
         )
-        .await?;
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
 
     let copy_to_after = copy_to_bank_emode_admin.load().await;
-    assert_eq!(copy_to_after.emode, copy_from_after.emode);
+    assert_eq!(copy_to_after.emode, copy_to_before.emode);
 
     Ok(())
 }
@@ -2389,6 +2406,50 @@ async fn configure_bank_oracle_min_age_validation() -> anyhow::Result<()> {
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
     assert_eq!(bank_after.config.oracle_max_age, 30);
+
+    Ok(())
+}
+
+/// The fee and the leverage it has to clear are validated from whichever side moves.
+#[tokio::test]
+async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let collateral = test_f.get_bank(&BankMint::Sol);
+    let debt = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(collateral, 1, &[])
+        .await?;
+    // 0.9 against the 1.0 USDC liability weight is 10x, so both cuts together must stay under 10%
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            debt,
+            2,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: 1,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+
+    let raise_fees = |liquidator: f64, insurance: f64| BankConfigOpt {
+        liquidation_liquidator_fee: Some(centi_to_u32(I80F48::from_num(liquidator))),
+        liquidation_insurance_fee: Some(centi_to_u32(I80F48::from_num(insurance))),
+        ..Default::default()
+    };
+    // 4% + 5% still clears 10x
+    debt.update_config(raise_fees(0.04, 0.05), None).await?;
+    // 5% + 6% does not
+    let res = debt.update_config(raise_fees(0.05, 0.06), None).await;
+    assert_custom_error!(
+        res.unwrap_err().downcast::<BanksClientError>().unwrap(),
+        MarginfiError::MaxMaintLeverageExceeded
+    );
 
     Ok(())
 }

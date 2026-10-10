@@ -1,6 +1,6 @@
 use crate::events::{GroupEventHeader, MarginfiGroupCreateEvent};
 use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::MarginfiResult;
+use crate::{ix_utils, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
@@ -8,6 +8,8 @@ use marginfi_type_crate::{
 };
 
 pub fn initialize_group(ctx: Context<MarginfiGroupInitialize>) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_init()?;
 
     marginfi_group.set_initial_configuration(ctx.accounts.admin.key());
@@ -69,4 +71,8 @@ pub struct MarginfiGroupInitialize<'info> {
     pub fee_state: AccountLoader<'info, FeeState>,
 
     pub system_program: Program<'info, System>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

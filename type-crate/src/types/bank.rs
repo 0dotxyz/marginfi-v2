@@ -7,8 +7,11 @@ use crate::{
         DRIFT_SCALED_BALANCE_DECIMALS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
         LIQUIDITY_VAULT_SEED, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP,
+        TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
-    types::{BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType},
+    types::{
+        calc_value, BalanceSide, BankCache, BankConfig, ReconciledEmodeConfig, RequirementType,
+    },
 };
 
 #[cfg(feature = "anchor")]
@@ -21,7 +24,7 @@ use fixed::types::I80F48;
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
 
-assert_struct_size!(Bank, 1856);
+assert_struct_size!(Bank, 3904);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -116,6 +119,10 @@ pub struct Bank {
     ///   single-pool on-ramp account in NAV.
     /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
     /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
+    /// - Bit 13 (8192): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
+    ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
+    /// - Bit 14 (16384): `KAMINO_MARKET_EMERGENCY` — the Kamino lending market behind this bank is
+    ///   in emergency mode, so the bank backs no new borrowing.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -186,7 +193,10 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16], // 16B
+    /// Realized variable-borrow premium sitting in the liquidity vault, pending sweep to the
+    /// protocol premium wallet's canonical ATA for `mint`. Only incremented when premium tokens
+    /// are actually received (repay); never by mere accrual.
+    pub collected_premium_outstanding: WrappedI80F48, // 16B
 
     /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
     ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
@@ -228,12 +238,28 @@ pub struct Bank {
     /// a paused pulse; the next accrual excludes these on top of the current halt. Zero normally.
     pub cb_frozen_seconds_pending: u64,
 
-    pub _padding_1: [u64; 2],
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
+
+    pub _padding_1: [[u64; 8]; 32],
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+    /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
+    /// `_padding_1` existed, and a byte-identical prefix of the current layout.
+    pub const V1_LEN: usize = 1856;
 
     #[inline]
     pub fn asset_amount(&self, shares: I80F48) -> Option<I80F48> {
@@ -243,6 +269,27 @@ impl Bank {
     #[inline]
     pub fn liability_amount(&self, shares: I80F48) -> Option<I80F48> {
         shares.checked_mul(self.liability_share_value.into())
+    }
+
+    /// Deposits past the bank's USD cap count only in proportion to it for Initial margin: the
+    /// factor to apply to the asset weight, `1` when the cap does not bind, `None` on overflow.
+    pub fn asset_weight_init_discount(&self, price: I80F48) -> Option<I80F48> {
+        let limit = self.config.total_asset_value_init_limit;
+        if limit == TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE {
+            return Some(I80F48::ONE);
+        }
+        let deposits = calc_value(
+            self.asset_amount(self.total_asset_shares.into())?,
+            price,
+            self.get_balance_decimals(),
+            None,
+        )?;
+        let limit = I80F48::from_num(limit);
+        if deposits > limit {
+            limit.checked_div(deposits)
+        } else {
+            Some(I80F48::ONE)
+        }
     }
 
     pub fn get_balance_decimals(&self) -> u8 {
@@ -388,6 +435,8 @@ pub enum OracleSetup {
     JuplendLST,             // 24
     PTPyth,                 // 25
     PTFixed,                // 26
+    ScopeKamino,            // 27
+    ScopeJuplend,           // 28
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -422,6 +471,8 @@ impl OracleSetup {
             24 => Some(Self::JuplendLST),
             25 => Some(Self::PTPyth),
             26 => Some(Self::PTFixed),
+            27 => Some(Self::ScopeKamino),
+            28 => Some(Self::ScopeJuplend),
             _ => None,
         }
     }
@@ -470,8 +521,11 @@ impl OracleSetup {
             | Self::FixedDrift
             | Self::FixedJuplend
             // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
-            // covers `oracle_keys[0]` cannot express that, so Scope banks never pair.
+            // covers `oracle_keys[0]` cannot express that, so Scope banks (venue-wrapped or not)
+            // never pair.
             | Self::Scope
+            | Self::ScopeKamino
+            | Self::ScopeJuplend
             | Self::PTFixed => None,
         }
     }
@@ -528,6 +582,19 @@ mod feed_family_tests {
             OracleSetup::FixedDrift,
             OracleSetup::FixedJuplend,
             OracleSetup::PTFixed,
+        ] {
+            assert_eq!(setup.feed_family(), None);
+        }
+    }
+
+    /// A Scope bank is identified by `(oracle_keys[0], scope_entry_index)`, which no family can
+    /// express, so neither the plain setup nor its venue wrappers may ever pair with anything.
+    #[test]
+    fn scope_setups_have_no_feed_family() {
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
         ] {
             assert_eq!(setup.feed_family(), None);
         }

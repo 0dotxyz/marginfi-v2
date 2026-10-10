@@ -42,6 +42,7 @@ import {
   assertI80F48Equal,
   assertKeyDefault,
   assertKeysEqual,
+  expectFailedTxWithMessage,
 } from "../../utils/genericTests";
 import {
   ASSET_TAG_DEFAULT,
@@ -203,7 +204,7 @@ describe("Init group and add banks with asset category flags", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        governanceAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();
@@ -249,7 +250,7 @@ describe("Init group and add banks with asset category flags", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        governanceAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();
@@ -833,17 +834,17 @@ describe("Init group and add banks with asset category flags", () => {
       await disableStakedOracles(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
       ),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
-    const result = await banksClient.tryProcessTransaction(tx);
-    // Unauthorized
-    assertBankrunTxFailed(result, 6042);
+    await expectFailedTxWithMessage(
+      () => banksClient.tryProcessTransaction(tx).then(() => undefined),
+      "Missing signature for",
+    );
   });
 
-  it("(admin) Disables stakes oracles - happy path", async () => {
+  it("(governance admin) Disables stakes oracles - happy path", async () => {
     let tx = new Transaction();
     tx.add(
       await disableStakedOracles(
@@ -910,17 +911,17 @@ describe("Init group and add banks with asset category flags", () => {
       await enableStakedOracleOnramp(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
       ),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
-    const result = await banksClient.tryProcessTransaction(tx);
-    // Unauthorized
-    assertBankrunTxFailed(result, 6042);
+    await expectFailedTxWithMessage(
+      () => banksClient.tryProcessTransaction(tx).then(() => undefined),
+      "Missing signature for",
+    );
   });
 
-  it("(admin) Enables staked on-ramp oracle pricing - happy path", async () => {
+  it("(governance admin) Enables staked on-ramp oracle pricing - happy path", async () => {
     const [settingsKey] = deriveStakedSettings(
       program.programId,
       marginfiGroup.publicKey,

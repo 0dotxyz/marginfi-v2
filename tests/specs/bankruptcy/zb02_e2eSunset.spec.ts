@@ -281,10 +281,12 @@ describe("Bank e2e sunset due to illiquid asset", () => {
   // Imagine at this point that all b1 liquidity is gone: there is no b1 token in any AMM! This
   // means we can't repay debts! The risk admin will set it into tokenless repayment mode.
   it("(admin) Allows tokenless repayments for bank 1", async () => {
-    let config = defaultBankConfigOptRaw();
-    config.tokenlessRepaymentsAllowed = true;
-    config.assetWeightInit = bigNumberToWrappedI80F48(0.9);
-    config.assetWeightMaint = bigNumberToWrappedI80F48(0.9);
+    let adminConfig = blankBankConfigOptRaw();
+    adminConfig.tokenlessRepaymentsAllowed = true;
+
+    let governanceConfig = blankBankConfigOptRaw();
+    governanceConfig.assetWeightInit = bigNumberToWrappedI80F48(0.9);
+    governanceConfig.assetWeightMaint = bigNumberToWrappedI80F48(0.9);
 
     const bankBefore = await groupAdmin.mrgnBankrunProgram.account.bank.fetch(
       banks[1]
@@ -295,12 +297,19 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       false
     );
 
-    let tx = new Transaction().add(
-      await configureBank(groupAdmin.mrgnBankrunProgram, {
-        bank: banks[1],
-        bankConfigOpt: config,
-      })
-    );
+    let tx = new Transaction()
+      .add(
+        await configureBank(groupAdmin.mrgnBankrunProgram, {
+          bank: banks[1],
+          bankConfigOpt: adminConfig,
+        })
+      )
+      .add(
+        await configureBank(groupAdmin.mrgnBankrunProgram, {
+          bank: banks[1],
+          bankConfigOpt: governanceConfig,
+        })
+      );
 
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
@@ -314,7 +323,7 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     );
   });
 
-  // Note: Typically the bank admin would put the bank in reduce-only mode at this point anyways,
+  // Note: the fast admin would typically put the bank in reduce-only mode before this point;
   // this is just to prevent a footgun where they forget and users continue to borrow the asset
   // about to be deleveraged
   it("(user 0) Tries to borrow bank 1 again - should fail", async () => {
@@ -662,7 +671,9 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     const tx = new Transaction();
     tx.add(
       await closeBank(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: throwawayGroup.publicKey,
         bank: banks[1],
+        admin: groupAdmin.wallet.publicKey,
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);

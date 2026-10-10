@@ -31,7 +31,7 @@ import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { CONF_INTERVAL_MULTIPLE, defaultBankConfigOptRaw } from "../../utils/types";
+import { CONF_INTERVAL_MULTIPLE, blankBankConfigOptRaw, defaultBankConfigOptRaw } from "../../utils/types";
 import { configureBank } from "../../utils/group-instructions";
 import { getBankrunTime } from "../../utils/tools";
 
@@ -144,7 +144,7 @@ describe("Liquidate user", () => {
   });
 
   it("(admin) vastly reduce Token A bank collateral ratio to induce liquidation", async () => {
-    let config = defaultBankConfigOptRaw();
+    let config = blankBankConfigOptRaw();
     config.assetWeightInit = bigNumberToWrappedI80F48(0.05);
     config.assetWeightMaint = bigNumberToWrappedI80F48(0.1);
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(

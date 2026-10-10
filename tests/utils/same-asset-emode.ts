@@ -7,11 +7,12 @@ import {
   WrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
+import { blankBankConfigOptRaw, CONF_INTERVAL_MULTIPLE_FLOAT, u32_MAX } from "./types";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "target/types/marginfi";
 import { bigIntToBnSafe, bnToDecimalStringSafe } from "./bn-utils";
 import {
+  configureBank,
   initSameAssetEmodeRegistry,
   setBankSameAssetEmodeEligibility,
 } from "./group-instructions";
@@ -109,6 +110,27 @@ export const enableSameAssetEmodeForBanks = async ({
       }),
     );
     await processBankrunTransaction(bankrunContext, initTx, [signer]);
+  }
+
+  // Both liquidation cuts have to fit inside 1/leverage. 0.8% combined covers up to ~123x, which
+  // spans the same-asset leverage these specs configure.
+  // A full `BankConfigOpt` is a large payload, so these are batched to stay under the tx limit.
+  const FEE_IXS_PER_TX = 4;
+  for (let i = 0; i < banks.length; i += FEE_IXS_PER_TX) {
+    const feeTx = new Transaction();
+    for (const bank of banks.slice(i, i + FEE_IXS_PER_TX)) {
+      feeTx.add(
+        await configureBank(program, {
+          bank,
+          bankConfigOpt: {
+            ...blankBankConfigOptRaw(),
+            liquidationLiquidatorFee: Math.floor(u32_MAX * 0.004),
+            liquidationInsuranceFee: Math.floor(u32_MAX * 0.004),
+          },
+        }),
+      );
+    }
+    await processBankrunTransaction(bankrunContext, feeTx, [signer]);
   }
 
   const tx = new Transaction();

@@ -5,10 +5,9 @@ use crate::state::emode::{
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::basis_to_u32;
 use marginfi_type_crate::{
     constants::DAILY_RESET_INTERVAL,
-    types::{MarginfiGroup, PROGRAM_FEES_ENABLED},
+    types::{basis_to_u32, MarginfiGroup, MAX_PREMIUM_ENTRIES, PROGRAM_FEES_ENABLED},
 };
 use std::fmt::Debug;
 
@@ -22,6 +21,7 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
@@ -38,6 +38,8 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -148,12 +150,27 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_governance_admin(&mut self, new_governance_admin: Pubkey) {
+        if self.governance_admin == new_governance_admin {
+            msg!("No change to governance admin: {:?}", new_governance_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set governance admin from {:?} to {:?}",
+                self.governance_admin,
+                new_governance_admin
+            );
+            self.governance_admin = new_governance_admin;
+        }
+    }
+
     /// Set the group parameters when initializing a group.
     /// This should be called only when the group is first initialized.
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
         self.delegate_flow_admin = admin_pk;
+        self.governance_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
@@ -161,6 +178,7 @@ impl MarginfiGroupImpl for MarginfiGroup {
             basis_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
         self.same_asset_emode_maint_leverage =
             basis_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.premium_settings.entry_capacity = MAX_PREMIUM_ENTRIES as u16;
     }
 
     fn get_group_bank_config(&self) -> GroupBankConfig {
@@ -256,6 +274,16 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
+
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
+
+    fn require_governance_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.governance_admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
 }
 
 trait MarginfiGroupDeleverageLimitExt {
@@ -290,4 +318,94 @@ impl MarginfiGroupDeleverageLimitExt for MarginfiGroup {
 #[derive(Clone, Debug)]
 pub struct GroupBankConfig {
     pub program_fees: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::{Balance, Bank, PremiumEntry, PremiumSettings};
+    use std::mem::{offset_of, size_of};
+
+    /// The premium matrix must occupy exactly the bytes that were `_padding_0` (32B) and
+    /// `_padding_1` (512B, last field) before 0.1.10, so pre-existing groups read as an empty
+    /// matrix (count 0, flags 0).
+    #[test]
+    fn group_premium_field_layout() {
+        use std::mem::align_of;
+
+        assert_eq!(size_of::<MarginfiGroup>(), 9248);
+        assert_eq!(offset_of!(MarginfiGroup, premium_settings), 512);
+        assert_eq!(offset_of!(MarginfiGroup, premium_entries), 544);
+        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`).
+        // The dedicated governance admin begins in the post-v1 extension.
+        assert_eq!(
+            offset_of!(MarginfiGroup, governance_admin),
+            MarginfiGroup::V1_LEN
+        );
+        assert_eq!(
+            offset_of!(MarginfiGroup, _padding_2),
+            MarginfiGroup::V1_LEN + 32
+        );
+
+        // PremiumSettings internals: 8 + 2 + 2 + 4 + 16 = 32, 8-aligned, no implicit padding
+        // (Pod derive would reject implicit padding at compile time; these pin the EXPLICIT
+        // pad placement so a future field reorder trips a test, not mainnet).
+        assert_eq!(size_of::<PremiumSettings>(), 32);
+        assert_eq!(align_of::<PremiumSettings>(), 8);
+        assert_eq!(offset_of!(PremiumSettings, timestamp), 0);
+        assert_eq!(offset_of!(PremiumSettings, entry_count), 8);
+        assert_eq!(offset_of!(PremiumSettings, entry_capacity), 10);
+        assert_eq!(offset_of!(PremiumSettings, _pad0), 12);
+        assert_eq!(offset_of!(PremiumSettings, _reserved0), 16);
+
+        // PremiumEntry: 2 + 2 + 4 = 8, 4-aligned; the array of 64 fills exactly the old
+        // `_padding_1` region (544 + 512 = 1056, the v1 struct end).
+        assert_eq!(size_of::<PremiumEntry>(), 8);
+        assert_eq!(align_of::<PremiumEntry>(), 4);
+        assert_eq!(offset_of!(PremiumEntry, collateral_tag), 0);
+        assert_eq!(offset_of!(PremiumEntry, liability_tag), 2);
+        assert_eq!(offset_of!(PremiumEntry, rate), 4);
+
+        // Zeroed (= any pre-0.1.10 mainnet group) reads as matrix off.
+        let group = MarginfiGroup::zeroed();
+        assert_eq!(group.premium_settings.entry_count, 0);
+        assert_eq!(group.find_premium_rate(100, 200), 0);
+    }
+
+    /// The premium fields must occupy exactly zero-padding reserves of the pre-premium
+    /// layout, so pre-existing banks read as untagged and with no collected premium:
+    /// `collected_premium_outstanding` takes the former `_pad_0: [u8; 16]` (after
+    /// `rate_limiter`). `cb_frozen_seconds_pending` takes the first 8 bytes of the former
+    /// `_padding_1: [u64; 3]` tail, as introduced in 0.1.10; `premium_tag` and
+    /// `premium_activated_at` take its remaining 16 bytes. The liquidation-fee fields own the
+    /// former `_padding_0` after `borrowing_position_count`, while `bank_seed` and the rest of
+    /// the circuit-breaker block stay at their 0.1.10 positions.
+    #[test]
+    fn bank_premium_field_layout() {
+        assert_eq!(size_of::<Bank>(), 3904);
+        assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
+        assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
+        assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
+        assert_eq!(offset_of!(Bank, bank_seed), 1744);
+        assert_eq!(offset_of!(Bank, cb_halt_started_at), 1752);
+        assert_eq!(offset_of!(Bank, cb_frozen_seconds_pending), 1832);
+        assert_eq!(offset_of!(Bank, premium_tag), 1840);
+        assert_eq!(offset_of!(Bank, _pad3), 1842);
+        assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
+        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN);
+    }
+
+    /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and
+    /// `emissions_outstanding` before 0.1.10 — both zeroed on-chain by the emissions wind-down
+    /// migration, so pre-existing balances read as rate 0 / nothing outstanding. (As
+    /// defense-in-depth the engine additionally honors `premium_outstanding` only on
+    /// `PREMIUM_ACTIVE` banks.)
+    #[test]
+    fn balance_premium_field_layout() {
+        assert_eq!(size_of::<Balance>(), 104);
+        assert_eq!(offset_of!(Balance, premium_rate_snapshot), 36);
+        assert_eq!(offset_of!(Balance, premium_outstanding), 72);
+        assert_eq!(offset_of!(Balance, last_update), 88);
+    }
 }

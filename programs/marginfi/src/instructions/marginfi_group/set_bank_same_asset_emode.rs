@@ -1,5 +1,7 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetSameAssetEmodeEligibilityEvent};
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
+use crate::state::emode::check_same_asset_fee;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -19,12 +21,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
     enabled: bool,
 ) -> MarginfiResult {
-    let group = ctx.accounts.group.load()?;
-
-    check!(
-        ctx.accounts.signer.key() == group.admin || ctx.accounts.signer.key() == group.emode_admin,
-        MarginfiError::Unauthorized
-    );
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let mut bank = ctx.accounts.bank.load_mut()?;
 
@@ -57,11 +54,13 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     }
 
     bank.update_flag(enabled, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+    let group = ctx.accounts.group.load()?;
+    check_same_asset_fee(&bank, &group)?;
 
     emit!(LendingPoolBankSetSameAssetEmodeEligibilityEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(ctx.accounts.signer.key()),
+            signer: Some(ctx.accounts.governance_admin.key()),
         },
         bank: ctx.accounts.bank.key(),
         mint: bank.mint,
@@ -145,9 +144,10 @@ fn remove_bank_from_registry(registry: &mut SameAssetEmodeRegistry, bank_key: Pu
 
 #[derive(Accounts)]
 pub struct LendingPoolSetBankSameAssetEmodeEligibility<'info> {
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub signer: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,
@@ -165,4 +165,8 @@ pub struct LendingPoolSetBankSameAssetEmodeEligibility<'info> {
         bump,
     )]
     pub same_asset_emode_registry: AccountLoader<'info, SameAssetEmodeRegistry>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }

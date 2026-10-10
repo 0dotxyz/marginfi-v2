@@ -20,10 +20,7 @@ impl StakedSettingsImpl for StakedSettings {
             MarginfiError::InvalidConfig
         );
         check!(asset_maint_w >= asset_init_w, MarginfiError::InvalidConfig);
-        check!(
-            asset_maint_w <= (I80F48::ONE + I80F48::ONE),
-            MarginfiError::InvalidConfig
-        );
+        check!(asset_maint_w <= I80F48::ONE, MarginfiError::InvalidConfig);
         if self.risk_tier == RiskTier::Isolated {
             check!(asset_init_w == I80F48::ZERO, MarginfiError::InvalidConfig);
             check!(asset_maint_w == I80F48::ZERO, MarginfiError::InvalidConfig);

@@ -1,4 +1,5 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetOraclePriceEvent};
+use crate::ix_utils;
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, errors::MarginfiError, MarginfiResult};
@@ -30,6 +31,8 @@ pub fn lending_pool_set_oracle_price(
     price: WrappedI80F48,
     setup: u8,
 ) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -113,7 +116,7 @@ pub fn lending_pool_set_oracle_price(
     emit!(LendingPoolBankSetOraclePriceEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(*ctx.accounts.admin.key),
+            signer: Some(*ctx.accounts.governance_admin.key),
         },
         bank: ctx.accounts.bank.key(),
         price,
@@ -124,16 +127,18 @@ pub fn lending_pool_set_oracle_price(
 
 #[derive(Accounts)]
 pub struct LendingPoolSetOraclePrice<'info> {
-    #[account(
-        has_one = admin
-    )]
+    #[account(has_one = governance_admin @ MarginfiError::Unauthorized)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub governance_admin: Signer<'info>,
 
     #[account(
         mut,
         has_one = group
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// CHECK: instruction sysvar
+    #[account(address = solana_instructions_sysvar::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
