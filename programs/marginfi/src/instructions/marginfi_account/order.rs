@@ -304,6 +304,14 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         order_asset_count + order_liab_count == ORDER_ACTIVE_TAGS,
         MarginfiError::LendingAccountBalanceNotFound
     );
+    // Prevents a footgun where a repaid liability is later deposited as an asset without clearing
+    // the tag. For example, user opens order 1: A/B and 2: C/B, Order 1 fulfills A/B with repay_all
+    // = false. Then later, user deposits B, which turns it into an asset. Keeper could, if the user
+    // didn't first close C/B, fullfill C/B without repaying anything: this blocks that.
+    check!(
+        order_asset_count == 1 && order_liab_count == 1,
+        MarginfiError::InvalidAssetOrLiabilitiesCount
+    );
 
     // Also gate at start: the order can close a tagged balance before the end gate runs, so a bank
     // whose breaching price sets the trigger must be caught here while it's still active.

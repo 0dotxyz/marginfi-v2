@@ -7,7 +7,9 @@ use fixtures::{
 };
 use marginfi::constants::PROGRAM_VERSION;
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
+use marginfi_type_crate::types::{
+    centi_to_u32, u32_to_centi, BalanceSide, OrderTrigger, WrappedI80F48,
+};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -1386,6 +1388,450 @@ async fn keeper_close_order_success_after_clearing_side(
         "order should be closed after keeper_close_order"
     );
     assert_active_orders(&borrower_mfi_account_f, 0).await;
+
+    Ok(())
+}
+
+/// A full repayment with `repay_all = false` leaves the balance slot live, but it must clear any
+/// order tag. Neither a later deposit nor borrow may revive a stale order's authorization.
+/// Essentially, for Order purposes, it is the same as if the user used repay_all on the balance.
+/// This avoids a footgun where a liability is flipped to an asset while retaining an old Order tag.
+#[tokio::test]
+async fn non_repay_all_full_repayment_clears_tag_before_redeposit_or_reborrow() -> anyhow::Result<()>
+{
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // The order starts valid, and its take-profit is initially unmet: $100 SOL - $50 USDC = $50.
+    let borrower = create_borrower_with_positions(&test_f, sol_bank, 10.0, usdc_bank, 50.0).await?;
+    let order_pda = borrower
+        .try_place_order(
+            vec![sol_bank.key, usdc_bank.key],
+            take_profit_trigger(fp!(500.0), 0),
+        )
+        .await?;
+    assert_active_orders(&borrower, 1).await;
+
+    let order = borrower.load_order(order_pda).await;
+    let account_before_repay = borrower.load().await;
+    let original_usdc_tag = account_before_repay
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("USDC liability must exist before repayment")
+        .tag;
+    assert!(
+        original_usdc_tag != 0 && order.tags.contains(&original_usdc_tag),
+        "the USDC liability must carry an order tag"
+    );
+
+    // Repay the USDC debt without closing its balance.
+    let repay_account = usdc_bank.mint.create_token_account_and_mint_to(50.0).await;
+    borrower
+        .try_bank_repay(repay_account.key, usdc_bank, 50.0, Some(false))
+        .await?;
+
+    let account_after_repay = borrower.load().await;
+    let repaid_usdc_balance = account_after_repay
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("non-repay_all must keep the cleared balance slot active");
+    assert!(
+        repaid_usdc_balance.get_side().is_none(),
+        "the USDC liability must be fully cleared"
+    );
+    assert_eq!(
+        repaid_usdc_balance.tag, 0,
+        "a side-less balance must not retain an order tag"
+    );
+
+    // Reuse the same balance as an asset; it must not regain the old order tag.
+    let redeposit_account = usdc_bank
+        .mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(redeposit_account.key, usdc_bank, 1_000.0, None)
+        .await?;
+    let account_after_redeposit = borrower.load().await;
+    let redeposited_usdc_balance = account_after_redeposit
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("USDC asset must exist after redeposit");
+    assert!(matches!(
+        redeposited_usdc_balance.get_side(),
+        Some(BalanceSide::Assets)
+    ));
+    assert_eq!(
+        redeposited_usdc_balance.tag, 0,
+        "a deposit must not revive the cleared order tag"
+    );
+
+    // Close that asset and reopen the bank as a liability. This must remain untagged too.
+    let withdraw_destination = usdc_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_withdraw(withdraw_destination.key, usdc_bank, 0.0, Some(true))
+        .await?;
+    let borrow_destination = usdc_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrow_destination.key, usdc_bank, 50.0)
+        .await?;
+    let account_after_reborrow = borrower.load().await;
+    let reborrowed_usdc_balance = account_after_reborrow
+        .lending_account
+        .get_balance(&usdc_bank.key)
+        .expect("USDC liability must exist after reborrow");
+    assert!(matches!(
+        reborrowed_usdc_balance.get_side(),
+        Some(BalanceSide::Liabilities)
+    ));
+    assert_eq!(
+        reborrowed_usdc_balance.tag, 0,
+        "a borrow must not revive the cleared order tag"
+    );
+
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let (start_ix, _execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::LendingAccountBalanceNotFound
+    );
+    assert_active_orders(&borrower, 1).await;
+
+    Ok(())
+}
+
+/// When two orders share a liability tag, executing either order must orphan the other one.
+/// Depositing into the repaid bank afterwards creates a new, untagged balance, so it cannot give a
+/// keeper authority to execute the remaining order without repaying its liability.
+#[tokio::test]
+async fn shared_liability_order_cannot_execute_after_other_order_closes_and_redeposit(
+) -> anyhow::Result<()> {
+    let (
+        test_f,
+        borrower,
+        asset_mint,
+        liability_mint,
+        uninvolved_mint,
+        order_ab,
+        keeper,
+        keeper_liab_account,
+        keeper_asset_account,
+        _keeper_uninvolved_account,
+    ) = setup_execution_fixture_with_params(
+        BankMint::Fixed,
+        100.0,
+        BankMint::Usdc,
+        50.0,
+        BankMint::Sol,
+        take_profit_trigger(fp!(1.0), 0),
+    )
+    .await?;
+
+    let asset_bank = test_f.get_bank(&asset_mint);
+    let liability_bank = test_f.get_bank(&liability_mint);
+    let uninvolved_bank = test_f.get_bank(&uninvolved_mint);
+
+    // A/B and C/B share B's balance tag.
+    let order_cb = borrower
+        .try_place_order(
+            vec![uninvolved_bank.key, liability_bank.key],
+            take_profit_trigger(fp!(1.0), 0),
+        )
+        .await?;
+    let order_ab_state = borrower.load_order(order_ab).await;
+    let order_cb_state = borrower.load_order(order_cb).await;
+    let before_execution = borrower.load().await;
+    let liability_tag = before_execution
+        .lending_account
+        .get_balance(&liability_bank.key)
+        .expect("shared liability must exist")
+        .tag;
+    assert!(
+        order_ab_state.tags.contains(&liability_tag)
+            && order_cb_state.tags.contains(&liability_tag),
+        "both orders must reference the same liability tag"
+    );
+    assert_active_orders(&borrower, 2).await;
+
+    // Execute A/B normally. B is closed with repay_all, which removes its tag and invalidates C/B.
+    let (start_ix, execute_record) = borrower
+        .make_start_execute_ix(order_ab, keeper.pubkey())
+        .await;
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            liability_bank,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            asset_bank,
+            estimate_withdraw_amount(50.0, default_price_for_mint(&asset_mint)),
+            None,
+            keeper.pubkey(),
+        )
+        .await;
+    let end_ix = borrower
+        .make_end_execute_ix(
+            order_ab,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank.key],
+        )
+        .await;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, repay_ix, withdraw_ix, end_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+    assert_active_orders(&borrower, 1).await;
+
+    // Reopening B as an asset must not restore the order's old tag.
+    let redeposit_account = liability_bank
+        .mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(redeposit_account.key, liability_bank, 1_000.0, None)
+        .await?;
+    let after_redeposit = borrower.load().await;
+    let redeposited_liability_bank = after_redeposit
+        .lending_account
+        .get_balance(&liability_bank.key)
+        .expect("reopened liability bank must exist");
+    assert_eq!(redeposited_liability_bank.tag, 0);
+
+    // The shared-liability order is now orphaned: its B tag is absent, despite a new B asset.
+    let (start_ix, _execute_record) = borrower
+        .make_start_execute_ix(order_cb, keeper.pubkey())
+        .await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::LendingAccountBalanceNotFound
+    );
+    assert_active_orders(&borrower, 1).await;
+
+    Ok(())
+}
+
+/// Order execution must reject `repay_all = false` even if the supplied amount would otherwise
+/// fully repay the liability.
+#[tokio::test]
+async fn order_execution_rejects_non_repay_all_and_rolls_back() -> anyhow::Result<()> {
+    let (
+        test_f,
+        borrower,
+        asset_mint,
+        liability_mint,
+        _uninvolved_mint,
+        order_pda,
+        keeper,
+        keeper_liab_account,
+        keeper_asset_account,
+        _keeper_uninvolved_account,
+    ) = setup_execution_fixture_with_params(
+        BankMint::Fixed,
+        100.0,
+        BankMint::Usdc,
+        50.0,
+        BankMint::Sol,
+        take_profit_trigger(fp!(1.0), 0),
+    )
+    .await?;
+    let asset_bank = test_f.get_bank(&asset_mint);
+    let liability_bank = test_f.get_bank(&liability_mint);
+    let before = borrower.load().await;
+    let asset_balance_before = *before
+        .lending_account
+        .get_balance(&asset_bank.key)
+        .expect("order asset must exist");
+    let liability_balance_before = *before
+        .lending_account
+        .get_balance(&liability_bank.key)
+        .expect("order liability must exist");
+
+    let (start_ix, execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            asset_bank,
+            estimate_withdraw_amount(50.0, default_price_for_mint(&asset_mint)),
+            None,
+            keeper.pubkey(),
+        )
+        .await;
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            liability_bank,
+            50.0,
+            Some(false),
+            keeper.pubkey(),
+        )
+        .await;
+    let end_ix = borrower
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank.key],
+        )
+        .await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, withdraw_ix, repay_ix, end_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderLiabilityNotClosed);
+
+    // Reverts the tx, so nothing has changed...
+    let after = borrower.load().await;
+    assert_eq!(after.account_flags, before.account_flags);
+    assert_eq!(
+        after.lending_account.get_balance(&asset_bank.key),
+        Some(&asset_balance_before),
+        "the keeper withdrawal must roll back"
+    );
+    assert_eq!(
+        after.lending_account.get_balance(&liability_bank.key),
+        Some(&liability_balance_before),
+        "the non-repay_all attempt must not alter the liability"
+    );
+    assert!(test_f.try_load(&order_pda).await?.is_some());
+    assert_active_orders(&borrower, 1).await;
+
+    Ok(())
+}
+
+/// Legacy accounts can contain a stale pre-upgrade state where both order tags point to assets. The
+/// start gate must reject that state before any keeper-authorized action is possible.
+#[tokio::test]
+async fn start_order_execution_rejects_legacy_two_asset_tags() -> anyhow::Result<()> {
+    let (
+        test_f,
+        borrower,
+        asset_mint,
+        liability_mint,
+        _uninvolved_mint,
+        order_pda,
+        keeper,
+        _keeper_liab_account,
+        _keeper_asset_account,
+        _keeper_uninvolved_account,
+    ) = setup_execution_fixture_with_params(
+        BankMint::Fixed,
+        100.0,
+        BankMint::Usdc,
+        50.0,
+        BankMint::Sol,
+        take_profit_trigger(fp!(1.0), 0),
+    )
+    .await?;
+    let asset_bank = test_f.get_bank(&asset_mint);
+    let liability_bank = test_f.get_bank(&liability_mint);
+
+    // Model an account produced by the old program: the repaid liability's order tag survives
+    // while a subsequent deposit changes that tagged balance into an asset.
+    let mut legacy_account = borrower.load().await;
+    let stale_balance = legacy_account
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|balance| balance.is_active() && balance.bank_pk == liability_bank.key)
+        .expect("order liability must exist");
+    stale_balance.asset_shares = stale_balance.liability_shares;
+    stale_balance.liability_shares = I80F48::ZERO.into();
+    stale_balance.premium_outstanding = I80F48::ZERO.into();
+    stale_balance.premium_rate_snapshot = 0;
+    borrower.set_account(&legacy_account).await?;
+
+    let order = borrower.load_order(order_pda).await;
+    let two_asset_tagged_balances = borrower
+        .load()
+        .await
+        .lending_account
+        .balances
+        .iter()
+        .filter(|balance| {
+            balance.is_active()
+                && order.tags.contains(&balance.tag)
+                && matches!(balance.get_side(), Some(BalanceSide::Assets))
+        })
+        .count();
+    assert_eq!(two_asset_tagged_balances, 2);
+    assert!(
+        borrower
+            .load()
+            .await
+            .lending_account
+            .get_balance(&asset_bank.key)
+            .is_some(),
+        "the original asset leg must remain active"
+    );
+
+    let (start_ix, _execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::InvalidAssetOrLiabilitiesCount
+    );
+    assert_active_orders(&borrower, 1).await;
 
     Ok(())
 }
