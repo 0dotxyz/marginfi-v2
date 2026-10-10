@@ -291,12 +291,12 @@ pub(crate) fn pt_linear_multiplier(
     vault: &MinimalExponentVault,
     clock: &Clock,
     start_price: I80F48,
-    in_deleverage: bool,
+    ignore_pt_emergency: bool,
 ) -> MarginfiResult<I80F48> {
     // Refuse to price a depegged vault: in Exponent's "emergency mode" (SY rate below its all-time
     // high) the linear accretion to par no longer holds and the redemption backing is unreliable.
     check!(
-        in_deleverage || !vault.is_in_emergency_mode(),
+        ignore_pt_emergency || !vault.is_in_emergency_mode(),
         MarginfiError::ExponentVaultValidationFailed
     );
 

@@ -148,7 +148,7 @@ pub(crate) fn load_kamino_reserve<'info>(
 /// Whether a Kamino bank's collateral can still back new borrows. The reserve carries its own
 /// emergency flag; the market's is cached on the bank by `propagate_kamino_market_emergency`,
 /// because the market account never reaches the pricing path.
-fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
+pub fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
     !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
 }
 
@@ -291,7 +291,7 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
-        in_deleverage: bool,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<Self> {
         let context = Self::load_oracle_context_with_max_age(
             bank,
@@ -299,7 +299,7 @@ impl OraclePriceFeedAdapter {
             clock,
             bank.config.get_oracle_max_age(),
             None,
-            in_deleverage,
+            ignore_pt_emergency,
         )?;
         Ok(context.adjusted_price_feed)
     }
@@ -321,7 +321,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
-        in_deleverage: bool,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -1299,7 +1299,8 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
+                let pt_rate =
+                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1329,7 +1330,8 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price = pt_linear_multiplier(&vault, clock, start_price, in_deleverage)?;
+                let pt_price =
+                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
 
                 let feed = FixedPriceFeed {
                     price: pt_price,
@@ -1355,6 +1357,7 @@ impl OraclePriceFeedAdapter {
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
         oracle_price_type: OraclePriceType,
+        ignore_pt_emergency: bool,
     ) -> MarginfiResult<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
         let max_age = bank.config.get_oracle_max_age();
         let max_conf = bank.config.oracle_max_confidence;
@@ -1364,7 +1367,7 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
-            false,
+            ignore_pt_emergency,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -1389,6 +1392,7 @@ impl OraclePriceFeedAdapter {
             ais,
             clock,
             OraclePriceType::RealTime,
+            false,
         )?;
         Ok(cache_price)
     }

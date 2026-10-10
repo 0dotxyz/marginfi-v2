@@ -13,7 +13,6 @@ use crate::{
             calc_interest_rate_accrual_state_changes, InterestRateConfigImpl,
             InterestRateStateChanges,
         },
-        marginfi_account::calc_value,
         price::OraclePriceWithMultiplier,
     },
 };
@@ -412,41 +411,10 @@ impl BankImpl for Bank {
         &self,
         price: I80F48,
     ) -> MarginfiResult<Option<I80F48>> {
-        if self.config.usd_init_limit_active() {
-            let bank_total_assets_value = calc_value(
-                self.get_asset_amount(self.total_asset_shares.into())?,
-                price,
-                self.get_balance_decimals(),
-                None,
-            )?;
-
-            let total_asset_value_init_limit =
-                I80F48::from_num(self.config.total_asset_value_init_limit);
-
-            #[cfg(target_os = "solana")]
-            debug!(
-                "Init limit active, limit: {}, total_assets: {}",
-                total_asset_value_init_limit, bank_total_assets_value
-            );
-
-            if bank_total_assets_value > total_asset_value_init_limit {
-                let discount = total_asset_value_init_limit
-                    .checked_div(bank_total_assets_value)
-                    .ok_or_else(math_error!())?;
-
-                #[cfg(target_os = "solana")]
-                debug!(
-                    "Discounting assets by {:.2} because of total deposits {} over {} usd cap",
-                    discount, bank_total_assets_value, total_asset_value_init_limit
-                );
-
-                Ok(Some(discount))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
+        let discount = self
+            .asset_weight_init_discount(price)
+            .ok_or_else(math_error!())?;
+        Ok((discount < I80F48::ONE).then_some(discount))
     }
 
     fn change_liability_shares(
