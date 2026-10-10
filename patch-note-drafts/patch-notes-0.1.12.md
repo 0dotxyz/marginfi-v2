@@ -217,10 +217,12 @@ set, nothing changes in practice. Integrators should still update now.
   liquidatee's premium stays outstanding.
 - **New oracle requirement.** If the account has premium-bearing debt, `lending_account_borrow` and
   `lending_account_end_flashloan` now fail with `PremiumSnapshotUnavailable` (6615) when any
-  collateral oracle cannot be priced. This applies even to collateral the health check would
-  normally ignore, such as stale or reduce-only balances. Withdrawals do not fail in this case.
-  Instead, the premium rate can only go up, and any collateral that cannot be priced is charged its
-  full pair rate. 
+  premium-relevant collateral oracle cannot be priced. This applies even to stale collateral the
+  health check would normally ignore. A paused, reduce-only, or emergency collateral bank with no
+  initial borrow power may exceed its configured confidence limit: its low-biased price is still
+  used for premium weighting. Its oracle must still be supplied and non-stale. Withdrawals do not
+  fail when collateral cannot be priced. Instead, the premium rate can only go up, and any
+  collateral that cannot be priced is charged its full pair rate.
   
   This breaks an old trick that some integrators may have relied upon. Previously:
 ```
@@ -234,11 +236,13 @@ Valid oracle for A
 Stale oracle for B
 Valid oracle for C
 ```
-As long as the collateral requirement for C was met, the ix succeeds, so callers might pass lazily
-pass A or B, omitting the other one. Now, this ix would fail: if C has variable borrow premium
-enabled, B needs a valid oracle. This is true even if B is not part of the variable borrow premium
-pairs for C. If B is isolated or zero weight, it can continue to be skipped as before. In summary,
-callers should now expect that ALL oracles must be non-stale and valid when processing a borrow ix.
+As long as the collateral requirement for C was met, the ix succeeds, so callers might lazily pass
+A or B, omitting the other one. Now, this ix would fail: if C has variable borrow premium
+enabled, B needs a valid, non-stale oracle. This is true even if B is not part of the variable
+borrow premium pairs for C. If B is isolated or has zero maintenance weight, it can continue to be
+skipped as before. In summary, callers should pass valid, non-stale oracles for all
+premium-relevant collateral when processing a borrow. The confidence-limit exception above applies
+only to collateral with no initial borrow power.
 
 ## Balance field repurposed
 
@@ -552,7 +556,7 @@ New:
 ### Consolidates
 
 #572, #603, #615, #623, #641, #654, #656, #657, #659, #667, #669, #670, #673, #674, #675, #676,
-#677, #678, #685, #686
+#677, #678, #685, #686, #687, #688, #690, #691, #694, #695, #696, #697, #698
 
 ### Minor bugfixes / notes
 
