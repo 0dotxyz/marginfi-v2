@@ -579,6 +579,59 @@ async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A collateral leg that cannot be priced fails the maintenance pass. The withdraw still passes on
+/// init health, and the tag stays until the leg is priced again.
+#[tokio::test]
+async fn withdraw_keeps_the_tag_while_a_leg_is_unpriceable() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+
+    set_timestamp(&test_f, T0).await;
+    refresh_oracles(&test_f).await;
+    send_tag(&test_f, &liquidatee, 0).await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    // 2 + 3 = 5 SOL, worth $12.5 at the 0.25 init weight: SOL alone covers the $10 USDC debt
+    let sol_acc = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 3)
+        .await;
+    liquidatee
+        .try_bank_deposit_with_authority(sol_acc.key, sol_bank, 3.0, None, &liquidatee_authority)
+        .await?;
+
+    // `refresh_oracles` does not touch the SOL_EQ feed, so this leg is stale
+    let sol_eq_acc = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 1)
+        .await;
+    liquidatee
+        .try_bank_deposit_with_authority(
+            sol_eq_acc.key,
+            sol_eq_bank,
+            1.0,
+            None,
+            &liquidatee_authority,
+        )
+        .await?;
+
+    liquidatee
+        .try_bank_withdraw_with_authority(sol_acc.key, sol_bank, 0.1, None, &liquidatee_authority)
+        .await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_EQUIVALENT_FEED, T0)
+        .await;
+    liquidatee
+        .try_bank_withdraw_with_authority(sol_acc.key, sol_bank, 0.2, None, &liquidatee_authority)
+        .await?;
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
 /// Tagged, maintenance-unhealthy borrower with an already-triggered stop-loss order on 2 SOL
 /// against 10 USDC, plus `fixed_borrow` Fixed of debt that survives the order.
 async fn setup_tagged_order_account(

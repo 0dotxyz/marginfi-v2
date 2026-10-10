@@ -1676,7 +1676,8 @@ fn check_account_health<'info>(
 
 /// Runs `check_account_init_health`, then clears the account's premium-growth tag if the account
 /// is also healthy at maintenance weights and real-time prices (the init pass uses EMA prices).
-/// Inside a flashloan, where risk checks are skipped, the tag is left alone.
+/// If the maintenance pass errors, the tag stays and no error is returned. Inside a flashloan,
+/// where risk checks are skipped, the tag is left alone.
 pub fn check_account_init_health_and_clear_tag<'info>(
     marginfi_account: &mut MarginfiAccount,
     group: &MarginfiGroup,
@@ -1696,7 +1697,7 @@ pub fn check_account_init_health_and_clear_tag<'info>(
     {
         return Ok(());
     }
-    let (assets, liabs) = get_health_components(
+    if let Ok((assets, liabs)) = get_health_components(
         marginfi_account,
         group,
         remaining_ais,
@@ -1704,9 +1705,10 @@ pub fn check_account_init_health_and_clear_tag<'info>(
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
         &mut None,
-    )?;
-    if assets > liabs {
-        marginfi_account.liquidation_tagged_at = 0;
+    ) {
+        if assets > liabs {
+            marginfi_account.liquidation_tagged_at = 0;
+        }
     }
     Ok(())
 }
