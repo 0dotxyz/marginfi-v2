@@ -2170,6 +2170,13 @@ impl BalanceImpl for Balance {
     }
 }
 
+fn clear_stale_order_tag(balance: &mut Balance, side_before: Option<BalanceSide>) {
+    let side_after = balance.get_side();
+    if side_after.is_none() || side_after != side_before {
+        balance.tag = 0;
+    }
+}
+
 pub struct BankAccountWrapper<'a> {
     pub balance: &'a mut Balance,
     pub bank: &'a mut Bank,
@@ -2592,6 +2599,7 @@ impl<'a> BankAccountWrapper<'a> {
 
         let balance = &mut self.balance;
         let bank = &mut self.bank;
+        let side_before = balance.get_side();
         // Record if the balance was an asset/liability beforehand
         let had_assets =
             I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
@@ -2702,6 +2710,8 @@ impl<'a> BankAccountWrapper<'a> {
             balance.write_off_premium();
         }
 
+        clear_stale_order_tag(balance, side_before);
+
         let share_amount = match operation_type {
             BalanceIncreaseType::RepayOnly => liability_shares_decrease,
             BalanceIncreaseType::Any
@@ -2727,6 +2737,7 @@ impl<'a> BankAccountWrapper<'a> {
 
         let balance = &mut self.balance;
         let bank = &mut self.bank;
+        let side_before = balance.get_side();
         let had_assets =
             I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
         let had_liabs = I80F48::from(balance.liability_shares)
@@ -2834,6 +2845,8 @@ impl<'a> BankAccountWrapper<'a> {
         if had_liabs && !has_liabs {
             bank.decrement_borrowing_position_count();
         }
+
+        clear_stale_order_tag(balance, side_before);
 
         let share_amount = match operation_type {
             BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::BypassBorrowLimit => {
