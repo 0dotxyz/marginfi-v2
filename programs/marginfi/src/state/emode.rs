@@ -3,7 +3,8 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::constants::BANK_SAME_ASSET_EMODE_ELIGIBLE;
 use marginfi_type_crate::types::{
-    Bank, BankConfig, EmodeSettings, MarginfiGroup, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
+    BalanceSide, Bank, BankConfig, EmodeSettings, MarginfiGroup, RequirementType, EMODE_ON,
+    EMODE_TAG_EMPTY,
 };
 
 use crate::constants::LIQUIDATION_HEALTH_GAIN_MARGIN;
@@ -115,6 +116,66 @@ pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResul
         "same-asset: liquidation fees ({}) leave no room at {} leverage",
         fee,
         leverage
+    );
+    Ok(())
+}
+
+/// The synthesized same-asset collateral weight for one requirement type:
+/// `liability_weight * (1 - 1/leverage)`, or 0 when that type's leverage is disabled.
+fn same_asset_weight_for(leverage: I80F48, liability_weight: I80F48) -> I80F48 {
+    if leverage <= I80F48::ONE {
+        return I80F48::ZERO;
+    }
+    let factor = I80F48::ONE
+        .checked_sub(I80F48::ONE.checked_div(leverage).unwrap_or(I80F48::ZERO))
+        .unwrap_or(I80F48::ZERO);
+    liability_weight.checked_mul(factor).unwrap_or(I80F48::ZERO)
+}
+
+/// Rejects a same-asset e-mode config whose synthesized collateral weight would invert the
+/// init/maintenance ordering (init weight > maintenance weight).
+///
+/// The synthesized weight is `liability_weight * (1 - 1/leverage)`, and both factors are
+/// requirement-type dependent in opposite directions: the group enforces
+/// `same_asset_init_leverage < same_asset_maint_leverage` (so the leverage factor is smaller for
+/// init), while every bank enforces `liability_weight_maint <= liability_weight_init` (so the
+/// multiplier is smaller for maintenance). When the leverage gap is narrow the liability-weight
+/// gap wins and the init weight exceeds the maintenance weight — a bank an account can enter at
+/// init but that is immediately unhealthy at maintenance.
+///
+/// The ordering depends on the bank's own liability weights, so this is checked per bank at
+/// configuration time (where both the bank config and the group leverages are available), not in
+/// `configure_group`.
+pub fn check_same_asset_weight_ordering(bank: &Bank, group: &MarginfiGroup) -> MarginfiResult {
+    if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) {
+        return Ok(());
+    }
+    let init_leverage: I80F48 = u32_to_basis(group.same_asset_emode_init_leverage);
+    let maint_leverage: I80F48 = u32_to_basis(group.same_asset_emode_maint_leverage);
+    // Disabled on either side means no same-asset weight is synthesized for it, so there is
+    // nothing to order. (configure_group already forbids enabling exactly one side.)
+    if init_leverage <= I80F48::ONE || maint_leverage <= I80F48::ONE {
+        return Ok(());
+    }
+
+    let liab_init_w: I80F48 = bank
+        .config
+        .get_weight(RequirementType::Initial, BalanceSide::Liabilities);
+    let liab_maint_w: I80F48 = bank
+        .config
+        .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
+
+    let init_weight = same_asset_weight_for(init_leverage, liab_init_w);
+    let maint_weight = same_asset_weight_for(maint_leverage, liab_maint_w);
+
+    check!(
+        init_weight <= maint_weight,
+        MarginfiError::BadEmodeConfig,
+        "same-asset: synthesized init weight ({}) exceeds maint weight ({}); \
+         liability_weight_maint is too far below liability_weight_init for the \
+         init/maintenance leverage gap",
+        init_weight,
+        maint_weight
     );
     Ok(())
 }
@@ -726,5 +787,82 @@ mod tests {
             result.is_err(),
             "Should fail when leverage exceeds DEFAULT_MAINT_MAX_EMODE_LEVERAGE (20x)"
         );
+    }
+
+    // ---------------------------------------------------------------
+    // check_same_asset_weight_ordering
+    // ---------------------------------------------------------------
+
+    fn same_asset_bank(liab_init: f32, liab_maint: f32) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.flags |= BANK_SAME_ASSET_EMODE_ELIGIBLE;
+        bank.config.liability_weight_init = I80F48::from_num(liab_init).into();
+        bank.config.liability_weight_maint = I80F48::from_num(liab_maint).into();
+        bank
+    }
+
+    fn same_asset_group(init_leverage: f32, maint_leverage: f32) -> MarginfiGroup {
+        MarginfiGroup {
+            same_asset_emode_init_leverage: basis_to_u32(I80F48::from_num(init_leverage)),
+            same_asset_emode_maint_leverage: basis_to_u32(I80F48::from_num(maint_leverage)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn same_asset_weight_ordering_rejects_inversion() {
+        // liab_init (1.2) > liab_maint (1.0) with a narrow leverage gap: the liability-weight gap
+        // outweighs the leverage gap, so the synthesized init weight exceeds the maint weight.
+        //   init_w = 1.2 * (1 - 1/2.0) = 0.60
+        //   maint_w = 1.0 * (1 - 1/2.1) = 0.5238
+        let bank = same_asset_bank(1.2, 1.0);
+        let group = same_asset_group(2.0, 2.1);
+
+        let result = check_same_asset_weight_ordering(&bank, &group);
+        assert!(
+            result.is_err(),
+            "narrow leverage gap with a wide liability-weight gap must be rejected"
+        );
+    }
+
+    #[test]
+    fn same_asset_weight_ordering_accepts_healthy_config() {
+        // A wide leverage gap dominates the liability-weight gap, so init_w < maint_w.
+        //   init_w = 1.2 * (1 - 1/1.5) = 0.40
+        //   maint_w = 1.0 * (1 - 1/3.0) = 0.6667
+        let bank = same_asset_bank(1.2, 1.0);
+        let group = same_asset_group(1.5, 3.0);
+
+        assert!(check_same_asset_weight_ordering(&bank, &group).is_ok());
+    }
+
+    #[test]
+    fn same_asset_weight_ordering_accepts_equal_liability_weights() {
+        // With liab_init == liab_maint the leverage factor alone orders the weights, and the
+        // enforced init < maint leverage keeps init_w < maint_w.
+        let bank = same_asset_bank(1.1, 1.1);
+        let group = same_asset_group(2.0, 2.1);
+
+        assert!(check_same_asset_weight_ordering(&bank, &group).is_ok());
+    }
+
+    #[test]
+    fn same_asset_weight_ordering_skips_ineligible_bank() {
+        // A bank without the same-asset-eligible flag is never synthesized, so any leverages pass.
+        let mut bank = same_asset_bank(1.2, 1.0);
+        bank.flags &= !BANK_SAME_ASSET_EMODE_ELIGIBLE;
+        let group = same_asset_group(2.0, 2.1);
+
+        assert!(check_same_asset_weight_ordering(&bank, &group).is_ok());
+    }
+
+    #[test]
+    fn same_asset_weight_ordering_skips_when_disabled() {
+        // Leverage of 1 disables same-asset on that side; configure_group forbids enabling only
+        // one side, so a disabled pair means nothing is synthesized and there is nothing to order.
+        let bank = same_asset_bank(1.2, 1.0);
+        let group = same_asset_group(1.0, 1.0);
+
+        assert!(check_same_asset_weight_ordering(&bank, &group).is_ok());
     }
 }
