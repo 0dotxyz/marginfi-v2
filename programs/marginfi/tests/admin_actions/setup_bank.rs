@@ -21,8 +21,8 @@ use marginfi_type_crate::{
     },
     types::{
         centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
-        BankMetadata, BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
-        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
+        BankMetadata, BankOperationalState, BankVaultType, EmodeEntry, InterestRateConfigOpt,
+        MarginfiGroup, OracleSetup, RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -2450,6 +2450,103 @@ async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> a
         res.unwrap_err().downcast::<BanksClientError>().unwrap(),
         MarginfiError::MaxMaintLeverageExceeded
     );
+
+    Ok(())
+}
+
+/// Entries left above a lowered group cap do not block unrelated edits such as a pause, while weight
+/// and fee edits still re-check them.
+#[tokio::test]
+async fn configure_bank_revalidates_emode_only_on_weight_or_fee_changes() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+    let loaded_bank = bank.load().await;
+    let group_before = test_f.marginfi_group.load().await;
+
+    test_f
+        .marginfi_group
+        .try_update_with_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(19).into()),
+            Some(I80F48::from_num(20).into()),
+        )
+        .await?;
+    // 0.8 and 0.9 against the 1.0 USDC liability weights are 5x and 10x
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            &bank,
+            1,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: 1,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+    test_f
+        .marginfi_group
+        .try_update_with_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(2).into()),
+            Some(I80F48::from_num(5).into()),
+        )
+        .await?;
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::Paused),
+                ..BankConfigOpt::default()
+            },
+        )
+        .await?;
+    assert_eq!(
+        bank.load().await.config.operational_state,
+        BankOperationalState::Paused
+    );
+
+    let default_fee = centi_to_u32(I80F48::from_num(0.025));
+    for edit in [
+        BankConfigOpt {
+            liability_weight_init: Some(loaded_bank.config.liability_weight_init),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liability_weight_maint: Some(loaded_bank.config.liability_weight_maint),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liquidation_liquidator_fee: Some(default_fee),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liquidation_insurance_fee: Some(default_fee),
+            ..BankConfigOpt::default()
+        },
+    ] {
+        let res = test_f
+            .marginfi_group
+            .try_lending_pool_configure_bank(&bank, edit)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::MaxInitLeverageExceeded);
+    }
 
     Ok(())
 }

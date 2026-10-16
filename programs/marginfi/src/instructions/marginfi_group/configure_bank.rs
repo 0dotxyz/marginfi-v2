@@ -139,16 +139,22 @@ fn configure_bank(
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        let total_liquidation_fee = bank.total_liquidation_fee();
-        bank.emode.validate_entries_with_liability_weights(
-            &bank.config,
-            total_liquidation_fee,
-            group.emode_max_init_leverage,
-            group.emode_max_maint_leverage,
-        )?;
-        if bank_config.liquidation_liquidator_fee.is_some()
-            || bank_config.liquidation_insurance_fee.is_some()
+        let fees_changed = bank_config.liquidation_liquidator_fee.is_some()
+            || bank_config.liquidation_insurance_fee.is_some();
+        // `configure_gov` can lower the group caps below stored entries without re-checking banks.
+        if fees_changed
+            || bank_config.liability_weight_init.is_some()
+            || bank_config.liability_weight_maint.is_some()
         {
+            let total_liquidation_fee = bank.total_liquidation_fee();
+            bank.emode.validate_entries_with_liability_weights(
+                &bank.config,
+                total_liquidation_fee,
+                group.emode_max_init_leverage,
+                group.emode_max_maint_leverage,
+            )?;
+        }
+        if fees_changed {
             check_same_asset_fee(bank, group)?;
         }
 
