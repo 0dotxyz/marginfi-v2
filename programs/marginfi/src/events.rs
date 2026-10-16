@@ -299,6 +299,24 @@ pub struct MarginfiAccountPlaceOrderEvent {
     pub tags: [u16; ORDER_ACTIVE_TAGS],
 }
 
+/// Emitted after end-execution checks pass. Consumers must also verify transaction success.
+#[event]
+pub struct MarginfiAccountExecuteOrderEvent {
+    /// The signer is the executor.
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    /// The validated execution branch: StopLoss or TakeProfit, never Both.
+    pub triggered: OrderTriggerType,
+    /// Protocol-valued equity of the tagged order balances immediately before execution.
+    pub equity_before_usd: WrappedI80F48,
+    /// Protocol-valued equity after execution. The difference is not realized trading P/L.
+    pub equity_after_usd: WrappedI80F48,
+    /// Recipient of the closed accounts' lamports; these proceeds are not trading fees.
+    pub closure_recipient: Pubkey,
+    pub order_lamports_returned: u64,
+    pub execution_record_lamports_returned: u64,
+}
+
 #[event]
 pub struct MarginfiAccountCloseOrderEvent {
     pub header: AccountEventHeader,
