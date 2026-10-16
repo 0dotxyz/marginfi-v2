@@ -1,7 +1,7 @@
 use crate::ix_utils;
 use crate::{
     check,
-    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, JUP_KEY, TITAN_KEY},
+    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, DFLOW_KEY, JUP_KEY, TITAN_KEY},
     ix_utils::{
         get_discrim_hash, load_and_validate_instructions, validate_ix_first, validate_ix_last,
         validate_ixes_exclusive, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar,
@@ -169,6 +169,7 @@ pub fn validate_instructions(
         juplend_mocks::juplend_earn::ID,
         JUP_KEY,
         TITAN_KEY,
+        DFLOW_KEY,
         ASSOCIATED_TOKEN_KEY,
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(allowed_program_ids))?;

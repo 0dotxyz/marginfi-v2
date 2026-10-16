@@ -11,25 +11,35 @@ marginfi-v2 build. It tracks crucible `main`.
 
 ## Build & run
 
-The harness fuzzes a freshly-built program, so build the program from source first:
+`prepare.sh` builds everything the harness loads from the current source — the marginfi
+program (mainnet id, plus an unstripped copy for coverage), `solend_mocks`, the fixture
+programs it CPIs into, and `idls/marginfi_program.json`. CI runs the same script.
 
 ```bash
-anchor build -p marginfi                                    # from repo root
-cp target/deploy/marginfi.so fuzz/crucible/programs/marginfi_program.so
+fuzz/crucible/prepare.sh                                    # from repo root
 cd fuzz/crucible
 cargo build --release --features invariant_test
+SCOUT_CHECK_RUN=local ./target/release/invariant_test       # ctrl-C to stop
 ./build-bundle.sh                                           # → ./bundle
 ```
 
+The IDL is generated, not committed: `declare_fuzz_program!` embeds it at compile time,
+so rerun `prepare.sh` after pulling program changes (`build.rs` makes cargo rebuild when
+it changes). Without an argument it runs `anchor idl build` (a few minutes); if you already
+have a fresh `target/idl/marginfi.json` from `anchor build -p marginfi`, pass its path to
+skip that. If instruction signatures changed, `cargo build` then fails at the drifted call
+sites in `src/main.rs` — update the harness in the same PR.
+
 ## CI
 
-`.github/workflows/fuzzcorp.yml` builds the marginfi program **from the current
-source**, compiles the harness against it, and uploads the bundle to FuzzCorp — so
-every change to the program is compiled and fuzzed. Required repo secrets:
-
-- `FUZZ_API_KEY` — FuzzCorp API key. This is the only secret: crucible is public,
-  so cargo fetches it anonymously.
+The `fuzz-crucible` job in `.github/workflows/test.yaml` runs on PRs into `main` or a
+`*-main` release branch (same guard as trident). It takes the IDL from the `anchor-build`
+artifact, runs `prepare.sh`, builds the harness, smoke-runs it for 60s (it must still be
+fuzzing when killed — a `setup()` panic would otherwise ship and die on every worker) and
+runs `build-bundle.sh`. That is the whole check for PRs into a release branch. The release
+PR into `main` also uploads the bundle to FuzzCorp; every feature merged into the release
+branch updates that PR, so each merge gets a fuzz campaign. The only secret is
+`FUZZ_API_KEY`.
 
 Already-reported findings are muted (`SCOUT_CHECK_MUTE`) so campaigns surface only
-new signal. If the program's instruction/account interface changes, regenerate the
-harness bindings with the generator.
+new signal.
