@@ -280,6 +280,34 @@ fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80
     }
 }
 
+/// Static confidence for oracles that publish none (Switchboard, Scope): `price *
+/// oracle_max_confidence / U32_MAX`. 0 disables it; anything past `MAX_CONF_INTERVAL` (u32::MAX
+/// included) clamps at 5% of price.
+fn compute_confidence_interval(
+    price: I80F48,
+    oracle_max_confidence: u32,
+) -> MarginfiResult<I80F48> {
+    if oracle_max_confidence == 0 {
+        return Ok(I80F48::ZERO);
+    }
+
+    let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
+
+    // Note: negative prices also create negative confidence intervals (though we not anticipate
+    // negative prices in prod)
+    let conf_interval: I80F48 = price
+        .checked_mul(oracle_max_confidence)
+        .ok_or_else(math_error!())?
+        .checked_div(U32_MAX)
+        .ok_or_else(math_error!())?;
+
+    let max_conf_interval: I80F48 = price
+        .checked_mul(MAX_CONF_INTERVAL)
+        .ok_or_else(math_error!())?;
+
+    Ok(min(conf_interval, max_conf_interval))
+}
+
 struct OracleLoadContext {
     adjusted_price_feed: OraclePriceFeedAdapter,
     cache_raw_price: Option<OraclePriceWithConfidence>,
@@ -401,14 +429,18 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
                 price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
-                // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
+                // Apply the Kamino exchange rate in place. The static confidence band is a
+                // fraction of `price`, so it scales with it.
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
@@ -441,12 +473,16 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
+                // Apply the JupLend exchange rate in place. The static confidence band is a
+                // fraction of `price`, so it scales with it.
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
@@ -2035,8 +2071,9 @@ impl OraclePriceFeedAdapter {
 /// Reads one entry out of a Scope feed's `OraclePrices` account.
 ///
 /// Scope stores a fixed array of 512 `DatedPrice` records; a bank names the account in
-/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Scope carries no confidence
-/// interval, so this adapter reports zero confidence and risk is expressed through weights.
+/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Confidence is computed on demand
+/// from `oracle_max_confidence` (matching Switchboard semantics); collateral/debt bias is applied
+/// per `PriceAdapter`.
 #[derive(Copy, Clone, Debug)]
 pub struct ScopePriceFeed {
     pub price: I80F48,
@@ -2126,10 +2163,23 @@ impl PriceAdapter for ScopePriceFeed {
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
-        _bias: Option<PriceBias>,
-        _oracle_max_confidence: u32,
+        bias: Option<PriceBias>,
+        oracle_max_confidence: u32,
     ) -> MarginfiResult<I80F48> {
-        Ok(self.price)
+        let Some(bias) = bias else {
+            return Ok(self.price);
+        };
+        let confidence = compute_confidence_interval(self.price, oracle_max_confidence)?;
+        match bias {
+            PriceBias::Low => Ok(self
+                .price
+                .checked_sub(confidence)
+                .ok_or_else(math_error!())?),
+            PriceBias::High => Ok(self
+                .price
+                .checked_add(confidence)
+                .ok_or_else(math_error!())?),
+        }
     }
 
     fn get_price_and_confidence_of_type(
@@ -2139,8 +2189,7 @@ impl PriceAdapter for ScopePriceFeed {
     ) -> MarginfiResult<OraclePriceWithConfidence> {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
-            // Scope prices carry no confidence interval.
-            confidence: I80F48::ZERO,
+            confidence: compute_confidence_interval(self.price, oracle_max_confidence)?,
             source_time: self.last_updated_timestamp as i64,
         })
     }
@@ -2235,27 +2284,8 @@ impl SwitchboardPullPriceFeed {
     /// 0 disables confidence adjustment, u32::MAX (or anything exceeding `MAX_CONF_INTERVAL`) will
     /// clamp at `MAX_CONF_INTERVAL`.
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
-        if oracle_max_confidence == 0 {
-            return Ok(I80F48::ZERO);
-        }
-
         let price: I80F48 = self.get_price()?;
-        let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
-
-        // Note: negative prices also create negative confidence intervals (though we not anticipate
-        // negative prices in prod)
-        let conf_interval: I80F48 = price
-            .checked_mul(oracle_max_confidence)
-            .ok_or_else(math_error!())?
-            .checked_div(U32_MAX)
-            .ok_or_else(math_error!())?;
-
-        // Clamp to MAX_CONF_INTERVAL (5%) of price
-        let max_conf_interval: I80F48 = price
-            .checked_mul(MAX_CONF_INTERVAL)
-            .ok_or_else(math_error!())?;
-
-        Ok(min(conf_interval, max_conf_interval))
+        compute_confidence_interval(price, oracle_max_confidence)
     }
 }
 
@@ -3435,9 +3465,9 @@ mod tests {
         // value/10^exp, within I80F48 rounding of the decimal literal
         assert!((feed.price - I80F48::from_num(103.445108)).abs() < I80F48::from_num(1e-9));
         assert_eq!(feed.last_updated_timestamp, 1000);
-        // Scope carries no confidence, and bias must not move the price.
+        // With oracle_max_confidence=0, confidence is zero, so bias has no effect.
         assert_eq!(
-            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), u32::MAX)
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
                 .unwrap(),
             feed.price
         );
@@ -3447,6 +3477,84 @@ mod tests {
             ScopePriceFeed::load_checked(&ai, 1061, 60, 42).unwrap_err(),
             MarginfiError::ScopeStalePrice.into()
         );
+    }
+
+    #[test]
+    fn scope_static_confidence_biases_collateral_down_and_debt_up() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        // entry 10 = 100.0
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+        let price = I80F48::from_num(100);
+        assert_eq!(feed.price, price);
+
+        let price_of = |bias, conf| {
+            feed.get_price_of_type(OraclePriceType::RealTime, bias, conf)
+                .unwrap()
+        };
+
+        // 0 disables the band in both directions
+        assert_eq!(price_of(Some(PriceBias::Low), 0), price);
+        assert_eq!(price_of(Some(PriceBias::High), 0), price);
+
+        // 1%: collateral worth ~99, debt ~101, unbiased untouched
+        let one_percent = u32::MAX / 100;
+        let reported = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap();
+        assert_eq!(reported.price, price);
+        assert_eq!(reported.source_time, 1000);
+        assert!((reported.confidence - I80F48::ONE).abs() < I80F48::from_num(1e-6));
+        assert_eq!(price_of(None, one_percent), price);
+        assert_eq!(
+            price_of(Some(PriceBias::Low), one_percent),
+            price - reported.confidence
+        );
+        assert_eq!(
+            price_of(Some(PriceBias::High), one_percent),
+            price + reported.confidence
+        );
+
+        // Anything past 5% clamps at MAX_CONF_INTERVAL
+        let clamped = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, u32::MAX)
+            .unwrap()
+            .confidence;
+        assert_eq!(clamped, price * MAX_CONF_INTERVAL);
+        assert_eq!(price_of(Some(PriceBias::Low), u32::MAX), price - clamped);
+        assert_eq!(price_of(Some(PriceBias::High), u32::MAX), price + clamped);
+    }
+
+    #[test]
+    fn scope_static_confidence_scales_with_exchange_rate() {
+        // ScopeKamino/ScopeJuplend scale `price` in place by the venue exchange rate before bias is
+        // applied; the band is proportional, so it must scale by the same factor.
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let raw = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+        let multiplier = I80F48::from_num(1.5);
+        let mut scaled = raw;
+        scaled.price = raw.price * multiplier;
+
+        let one_percent = u32::MAX / 100;
+        let raw_conf = raw
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap()
+            .confidence;
+        let scaled_conf = scaled
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap()
+            .confidence;
+        assert!((scaled_conf - raw_conf * multiplier).abs() < I80F48::from_num(1e-9));
+
+        let scaled_low = scaled
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), one_percent)
+            .unwrap();
+        assert!((scaled_low - (raw.price - raw_conf) * multiplier).abs() < I80F48::from_num(1e-9));
     }
 
     #[test]

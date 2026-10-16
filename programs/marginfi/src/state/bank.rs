@@ -33,7 +33,7 @@ use marginfi_type_crate::{
     },
     types::{
         u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
-        OraclePriceWithConfidence,
+        OraclePriceWithConfidence, OracleSetup,
     },
 };
 
@@ -62,6 +62,17 @@ pub const CB_MAX_EMA_SHIFT_BPS_PER_PULSE: u64 = 500;
 pub const CB_WINDOW_SECONDS: i64 = 4 * 60 * 60;
 pub const CB_WINDOW_MAX_UP_BPS: u64 = 2_000;
 pub const CB_WINDOW_MAX_DOWN_BPS: u64 = 4_000;
+
+/// Confidence the breaker may discount from a move. A static band (`has_static_confidence`) is a
+/// pricing haircut set by the admin, not feed uncertainty, so it must not widen the breaker's
+/// tolerance; negative confidence is clamped to zero.
+fn cb_confidence(setup: OracleSetup, oracle: &OraclePriceWithConfidence) -> I80F48 {
+    if setup.has_static_confidence() {
+        I80F48::ZERO
+    } else {
+        oracle.confidence.max(I80F48::ZERO)
+    }
+}
 
 fn cb_confidence_adjusted_deviation_bps(
     current: I80F48,
@@ -909,7 +920,7 @@ impl BankImpl for Bank {
         if !self.get_flag(CIRCUIT_BREAKER_ENABLED) {
             return Ok(());
         }
-        let confidence = oracle.confidence.max(I80F48::ZERO);
+        let confidence = cb_confidence(self.config.oracle_setup, &oracle);
 
         // Without a usable reference there is nothing to compare against. The breaker seeds
         // references at enable-time (warm-cache gate) or on the first observation, so this only
@@ -1058,7 +1069,7 @@ impl BankImpl for Bank {
             return Ok(());
         }
 
-        let confidence = oracle.confidence.max(I80F48::ZERO);
+        let confidence = cb_confidence(self.config.oracle_setup, &oracle);
         let deviation_bps = cb_confidence_adjusted_deviation_bps(current, ref_price, confidence);
         let tiers = &self.config.cb_deviation_bps_tiers;
 
@@ -2326,6 +2337,41 @@ mod cb_tests {
                 source_time: 0,
             })
             .is_err());
+    }
+
+    #[test]
+    fn static_confidence_band_does_not_widen_breaker() {
+        // Raw delta 6% with a 2% band: a Pyth bank discounts it to 4% (no breach), but a Scope or
+        // Switchboard band is an admin-set haircut, so the full 6% counts on both CB paths.
+        let banded = |p: u32| OraclePriceWithConfidence {
+            price: price(p),
+            confidence: I80F48::from_num(2),
+            source_time: 0,
+        };
+        for (setup, trips) in [
+            (OracleSetup::PythPushOracle, false),
+            (OracleSetup::Scope, true),
+            (OracleSetup::ScopeKamino, true),
+            (OracleSetup::ScopeJuplend, true),
+            (OracleSetup::SwitchboardPull, true),
+            (OracleSetup::KaminoSwitchboardPull, true),
+        ] {
+            let mut b = make_cb_bank();
+            b.config.oracle_setup = setup;
+            b.cb_reference_price = price(100).into();
+            assert_eq!(
+                b.cb_price_gate(banded(106)).is_err(),
+                trips,
+                "{setup:?} gate"
+            );
+
+            let mut b = make_cb_bank();
+            b.config.oracle_setup = setup;
+            b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+                .unwrap();
+            b.update_circuit_breaker(1_001, 1_002, banded(106)).unwrap();
+            assert_eq!(b.cb_tier != 0, trips, "{setup:?} pulse");
+        }
     }
 
     #[test]

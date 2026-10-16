@@ -113,10 +113,12 @@ pub struct BankConfig {
     /// Oracle confidence configuration. Semantics depend on the oracle type:
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
-    /// * Switchboard: Confidence spread used for price biasing.
+    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend): Static confidence spread used for
+    ///   price biasing.
     ///   - 0 disables confidence adjustment.
     ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
     ///   - Clamped to MAX_CONF_INTERVAL (5% of price).
+    ///   - Pricing only: the circuit breaker ignores this band when measuring price moves.
     pub oracle_max_confidence: u32,
 
     /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
@@ -464,10 +466,12 @@ pub struct BankConfigCompact {
     /// Oracle confidence configuration. Semantics depend on the oracle type.
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
-    /// * Switchboard: Confidence spread used for price biasing.
+    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend): Static confidence spread used for
+    ///   price biasing.
     ///   - 0 disables confidence adjustment.
     ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
     ///   - Clamped to MAX_CONF_INTERVAL (5% of price).
+    ///   - Pricing only: the circuit breaker ignores this band when measuring price moves.
     pub oracle_max_confidence: u32,
 }
 
