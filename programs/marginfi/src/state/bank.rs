@@ -356,13 +356,14 @@ impl BankImpl for Bank {
             I80F48::from_num(self.config.deposit_limit)
         };
 
-        if current_assets >= limit {
+        let headroom = limit
+            .checked_sub(current_assets)
+            .ok_or_else(math_error!())?;
+        if headroom <= I80F48::ONE {
             return Ok(0);
         }
 
-        let remaining = limit
-            .checked_sub(current_assets)
-            .ok_or_else(math_error!())?
+        let remaining = headroom
             .checked_sub(I80F48::ONE) // Subtract 1 to ensure we stay under limit
             .ok_or_else(math_error!())?
             .checked_floor()
@@ -1451,6 +1452,42 @@ impl BankImpl for Bank {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+
+    fn bank(limit: u64, assets: f64) -> Bank {
+        let mut b = Bank::zeroed();
+        b.config.deposit_limit = limit;
+        b.asset_share_value = I80F48::ONE.into();
+        b.total_asset_shares = I80F48::from_num(assets).into();
+        b
+    }
+
+    #[test]
+    fn capacity_is_the_headroom_less_one_unit() {
+        assert_eq!(
+            bank(1_000, 998.0).get_remaining_deposit_capacity().unwrap(),
+            1
+        );
+        assert_eq!(
+            bank(1_000, 999.0).get_remaining_deposit_capacity().unwrap(),
+            0
+        );
+        assert_eq!(
+            bank(1_000, 999.5).get_remaining_deposit_capacity().unwrap(),
+            0
+        );
+        assert_eq!(
+            bank(1_000, 1_000.0)
+                .get_remaining_deposit_capacity()
+                .unwrap(),
+            0
+        );
     }
 }
 
