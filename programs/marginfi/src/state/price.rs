@@ -39,7 +39,7 @@ use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
-use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
+use scope_mocks::state::{ScopeDatedPrice, ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
@@ -2069,6 +2069,23 @@ impl ScopePriceFeed {
             .get(entry_index as usize)
             .ok_or(MarginfiError::ScopeInvalidEntry)?;
 
+        Self::from_entry(entry, true)
+    }
+
+    /// Wraps a Scope entry the caller has already decoded, for off-chain callers that don't
+    /// hold a Solana `AccountInfo`.
+    ///
+    /// Applies the same entry-level validity checks and `value / 10^exp` conversion as
+    /// `read_entry`; the only skipped checks are the ones tied to the account itself
+    /// (owner, discriminator, cast) which the caller has already satisfied by decoding
+    /// the account.
+    ///
+    /// `has_borrow_power` is caller-supplied because it depends on integration-level
+    /// state this struct cannot see. On-chain, `read_entry` seeds it to `true` and
+    /// Kamino-backed setups (`ScopeKamino`, etc.) then overwrite it with
+    /// `kamino_borrow_power(bank, reserve)`; off-chain callers reconstructing a
+    /// Kamino-backed bank must do the same, others pass `true`.
+    pub fn from_entry(entry: &ScopeDatedPrice, has_borrow_power: bool) -> MarginfiResult<Self> {
         // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
         check!(
             entry.price.value > 0 && entry.unix_timestamp > 0,
@@ -2087,7 +2104,7 @@ impl ScopePriceFeed {
         Ok(Self {
             price,
             last_updated_timestamp: entry.unix_timestamp,
-            has_borrow_power: true,
+            has_borrow_power,
         })
     }
 
@@ -2208,6 +2225,21 @@ impl SwitchboardPullPriceFeed {
             has_borrow_power: true,
             feed: Box::new(lite_feed),
         })
+    }
+
+    /// Constructs the feed from already-decoded Switchboard data, for callers
+    /// (off-chain clients) that don't hold a Solana `AccountInfo`.
+    ///
+    /// `has_borrow_power` must be supplied by the caller: it depends on
+    /// integration-level state (Kamino reserve emergency / `KAMINO_MARKET_EMERGENCY`)
+    /// that this struct cannot derive. Non-Kamino callers pass `true`, matching
+    /// what `load_checked` hardcodes.
+    #[cfg(feature = "client")]
+    pub fn from_lite_feed(feed: LitePullFeedAccountData, has_borrow_power: bool) -> Self {
+        Self {
+            feed: Box::new(feed),
+            has_borrow_power,
+        }
     }
 
     fn check_ais(ai: &AccountInfo) -> MarginfiResult {
