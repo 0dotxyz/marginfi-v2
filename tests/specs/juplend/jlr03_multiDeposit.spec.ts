@@ -36,7 +36,7 @@ import {
   HEALTH_CACHE_ORACLE_OK,
   ORACLE_CONF_INTERVAL,
 } from "../../utils/types";
-import { deriveJuplendPoolKeys } from "../../utils/juplend/juplend-pdas";
+import { deriveJuplendPoolKeys, findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
 import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
 import { refreshJupSimple } from "../../utils/juplend/shorthand-instructions";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
@@ -266,6 +266,10 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       const accounts = [balance.bankPk, bank.config.oracleKeys[0]];
       if (!bank.config.oracleKeys[1].equals(PublicKey.default)) {
         accounts.push(bank.config.oracleKeys[1]);
+        if (bank.config.assetTag === ASSET_TAG_JUPLEND) {
+          const [juplendLiquidity] = findJuplendLiquidityPda();
+          accounts.push(juplendLiquidity);
+        }
       }
       remainingGroups.push(accounts);
 
@@ -381,6 +385,10 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       const accounts = [balance.bankPk, bank.config.oracleKeys[0]];
       if (!bank.config.oracleKeys[1].equals(PublicKey.default)) {
         accounts.push(bank.config.oracleKeys[1]);
+        if (bank.config.assetTag === ASSET_TAG_JUPLEND) {
+          const [juplendLiquidity] = findJuplendLiquidityPda();
+          accounts.push(juplendLiquidity);
+        }
       }
       remainingGroups.push(accounts);
       const ctx = jupCtxByBank.get(balance.bankPk.toBase58());

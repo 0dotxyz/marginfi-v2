@@ -15,6 +15,40 @@ pub const RATE_MODEL_DISCRIMINATOR: [u8; 8] = [94, 3, 203, 219, 107, 137, 4, 162
 /// Source: JupLend lending program constant `EXCHANGE_PRICES_PRECISION`.
 pub const EXCHANGE_PRICES_PRECISION: u128 = 1_000_000_000_000;
 
+const LIQUIDITY_DISCRIMINATOR: [u8; 8] = [54, 252, 249, 226, 137, 172, 121, 58];
+/// disc (8) + authority (32) + revenue_collector (32)
+const LIQUIDITY_STATUS_OFFSET: usize = 8 + 32 + 32;
+/// Exact account size: disc (8) + authority (32) + revenue_collector (32) + status: bool (1) + bump: u8 (1) = 74.
+const LIQUIDITY_ACCOUNT_LEN: usize = LIQUIDITY_STATUS_OFFSET + 1 + 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiquidityStatus {
+    Active,
+    Locked,
+}
+
+pub struct MinimalLiquidity;
+
+impl MinimalLiquidity {
+    pub fn read_status(data: &[u8]) -> Option<LiquidityStatus> {
+        if data.len() < LIQUIDITY_ACCOUNT_LEN || data[..8] != LIQUIDITY_DISCRIMINATOR[..] {
+            return None;
+        }
+        Some(if data[LIQUIDITY_STATUS_OFFSET] == 0 {
+            LiquidityStatus::Active
+        } else {
+            LiquidityStatus::Locked
+        })
+    }
+
+    pub fn account_data(status_byte: u8) -> Vec<u8> {
+        let mut d = vec![0u8; LIQUIDITY_ACCOUNT_LEN];
+        d[..8].copy_from_slice(&LIQUIDITY_DISCRIMINATOR);
+        d[LIQUIDITY_STATUS_OFFSET] = status_byte;
+        d
+    }
+}
+
 /// Pure helper for JupLend withdraw preview math.
 ///
 /// Formula (1e12 precision): `shares = ceil(assets * 1e12 / token_exchange_price)`.
@@ -806,5 +840,37 @@ mod rate_tests {
             expected(2_267, 8_181, 1_100_000_000)
         );
         assert!(r.supply_rate_at(100_000_000, None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod liquidity_tests {
+    use super::*;
+
+    #[test]
+    fn read_status_cases() {
+        use LiquidityStatus::*;
+        assert_eq!(
+            MinimalLiquidity::read_status(&MinimalLiquidity::account_data(0)),
+            Some(Active)
+        );
+        for b in [1u8, 2, 255] {
+            assert_eq!(
+                MinimalLiquidity::read_status(&MinimalLiquidity::account_data(b)),
+                Some(Locked)
+            );
+        }
+
+        let mut bad_disc = MinimalLiquidity::account_data(0);
+        bad_disc[0] ^= 0xff;
+        let mut short = MinimalLiquidity::account_data(0);
+        short.pop();
+        let mut long = MinimalLiquidity::account_data(0);
+        long.push(0);
+
+        assert_eq!(MinimalLiquidity::read_status(&bad_disc), None);
+        assert_eq!(MinimalLiquidity::read_status(&short), None);
+        assert_eq!(MinimalLiquidity::read_status(&long), Some(Active));
+        assert_eq!(MinimalLiquidity::read_status(&[]), None);
     }
 }

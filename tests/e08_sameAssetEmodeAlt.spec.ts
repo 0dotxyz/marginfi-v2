@@ -43,6 +43,7 @@ import { refreshJupSimple } from "./utils/juplend/shorthand-instructions";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import { type JuplendPoolKeys } from "./utils/juplend/types";
 import { addJuplendBanksForGroup } from "./utils/multi-limits-juplend-setup";
+import { findJuplendLiquidityPda } from "./utils/juplend/juplend-pdas";
 import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 import {
   deriveBankWithSeed,
@@ -396,8 +397,14 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
     );
   }
 
+  const integrationBankAccounts = [integrationBank, oracles.tokenAOracle.publicKey, integrationRemainingTail!];
+  if (kind === "juplend") {
+    const [juplendLiquidity] = findJuplendLiquidityPda();
+    integrationBankAccounts.push(juplendLiquidity);
+  }
+
   const remaining = composeRemainingAccounts([
-    [integrationBank, oracles.tokenAOracle.publicKey, integrationRemainingTail!],
+    integrationBankAccounts,
     [nativeBank, oracles.tokenAOracle.publicKey],
   ]);
 

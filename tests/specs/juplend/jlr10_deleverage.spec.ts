@@ -44,6 +44,7 @@ import { JUPLEND_STATE_KEYS } from "../../utils/juplend/test-state";
 import {
   deriveJuplendPoolKeys,
   findJuplendClaimAccountPda,
+  findJuplendLiquidityPda,
 } from "../../utils/juplend/juplend-pdas";
 import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
 import {
@@ -86,10 +87,13 @@ describe("jlr10: JupLend deleverage allowlist + flow (bankrun)", () => {
     return value;
   };
 
-  const remainingGroups = (): PublicKey[][] => [
-    [juplendUsdcBankPk, oracles.usdcOracle.publicKey, jupUsdcPool.lending],
-    [regularUsdcBankPk, oracles.usdcOracle.publicKey],
-  ];
+  const remainingGroups = (): PublicKey[][] => {
+    const [juplendLiquidity] = findJuplendLiquidityPda();
+    return [
+      [juplendUsdcBankPk, oracles.usdcOracle.publicKey, jupUsdcPool.lending, juplendLiquidity],
+      [regularUsdcBankPk, oracles.usdcOracle.publicKey],
+    ];
+  };
   const refreshAllOracles = async () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
   };

@@ -70,10 +70,7 @@ pub fn lending_pool_configure_bank_oracle(
                 );
                 bank.config.oracle_keys[1] = ctx.remaining_accounts[1].key();
             }
-            OracleSetup::KaminoMSOL
-            | OracleSetup::JuplendMSOL
-            | OracleSetup::KaminoLST
-            | OracleSetup::JuplendLST => {
+            OracleSetup::KaminoMSOL | OracleSetup::KaminoLST => {
                 require!(
                     ctx.remaining_accounts.len() == 3,
                     MarginfiError::WrongNumberOfOracleAccounts
@@ -81,7 +78,39 @@ pub fn lending_pool_configure_bank_oracle(
                 // Note: integration oracle is not set here to ensure it's only assigned on the bank creation.
                 bank.config.oracle_keys[2] = ctx.remaining_accounts[2].key();
             }
-            _ => {}
+            OracleSetup::JuplendMSOL | OracleSetup::JuplendLST => {
+                let layout = setup_type
+                    .juplend_layout()
+                    .ok_or(MarginfiError::InvalidOracleSetup)?;
+                require!(
+                    ctx.remaining_accounts.len() == layout.len,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                bank.config.oracle_keys[2] = ctx.remaining_accounts[2].key();
+            }
+            OracleSetup::None
+            | OracleSetup::PythLegacy
+            | OracleSetup::SwitchboardV2
+            | OracleSetup::PythPushOracle
+            | OracleSetup::SwitchboardPull
+            | OracleSetup::StakedWithPythPush
+            | OracleSetup::KaminoPythPush
+            | OracleSetup::KaminoSwitchboardPull
+            | OracleSetup::Fixed
+            | OracleSetup::DriftPythPull
+            | OracleSetup::DriftSwitchboardPull
+            | OracleSetup::SolendPythPull
+            | OracleSetup::SolendSwitchboardPull
+            | OracleSetup::FixedKamino
+            | OracleSetup::FixedDrift
+            | OracleSetup::JuplendPythPull
+            | OracleSetup::JuplendSwitchboardPull
+            | OracleSetup::FixedJuplend
+            | OracleSetup::Scope
+            | OracleSetup::PTPyth
+            | OracleSetup::PTFixed
+            | OracleSetup::ScopeKamino
+            | OracleSetup::ScopeJuplend => {}
         }
 
         msg!(
@@ -112,7 +141,7 @@ pub fn lending_pool_configure_bank_oracle(
 /// entry index within it, then validates the feed can be read.
 ///
 /// Remaining accounts: `[oracle_prices]` for a regular bank, `[oracle_prices, reserve]` for a
-/// Kamino bank, `[oracle_prices, lending]` for a JupLend bank. The venue account must match the
+/// Kamino bank, `[oracle_prices, lending, liquidity]` for a JupLend bank. The venue account must match the
 /// one stored in `oracle_keys[1]` at bank creation; it is never rewritten here.
 ///
 /// Separate from `lending_pool_configure_bank_oracle` because a Scope bank needs the entry index

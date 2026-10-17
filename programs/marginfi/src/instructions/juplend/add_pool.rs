@@ -26,7 +26,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 /// Bank starts `Uninitialized` because once the fToken vault exists, the bank can be interacted
 /// with even without a seed deposit. Call `juplend_init_position` to activate.
 ///
-/// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state
+/// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state, 2. JupLend liquidity account
 pub fn lending_pool_add_bank_juplend(
     ctx: Context<LendingPoolAddBankJuplend>,
     bank_config: JuplendConfigCompact,

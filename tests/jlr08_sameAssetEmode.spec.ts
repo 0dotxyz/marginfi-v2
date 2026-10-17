@@ -70,7 +70,7 @@ import {
 import { dummyIx } from "./utils/bankrunConnection";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
-import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
+import { deriveJuplendPoolKeys, findJuplendLiquidityPda } from "./utils/juplend/juplend-pdas";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import { refreshJupSimple } from "./utils/juplend/shorthand-instructions";
 import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
@@ -136,16 +136,20 @@ describe("jlr08: JupLend same-asset emode", () => {
   let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
   let withdrawIntermediaryAta: PublicKey;
 
-  const getSameAssetRemainingGroups = () =>
-    [
-      [juplendTokenABank, oracles.tokenAOracle.publicKey, tokenAPool.lending],
+  const [juplendLiquidityPda] = findJuplendLiquidityPda();
+
+  const getSameAssetRemainingGroups = () => {
+    return [
+      [juplendTokenABank, oracles.tokenAOracle.publicKey, tokenAPool.lending, juplendLiquidityPda],
       [regularTokenABank, oracles.tokenAOracle.publicKey],
     ] as PublicKey[][];
-  const getSameAssetWithUsdcRemainingGroups = () =>
-    [
-      [juplendTokenABank, oracles.tokenAOracle.publicKey, tokenAPool.lending],
+  };
+  const getSameAssetWithUsdcRemainingGroups = () => {
+    return [
+      [juplendTokenABank, oracles.tokenAOracle.publicKey, tokenAPool.lending, juplendLiquidityPda],
       [regularUsdcBank, oracles.usdcOracle.publicKey],
     ] as PublicKey[][];
+  };
 
   const expectedSharesForDeposit = (
     assets: BN,
@@ -538,7 +542,7 @@ describe("jlr08: JupLend same-asset emode", () => {
     assert.equal(accountedUnderlying.toString(), SAME_ASSET_DEPOSIT.toString());
 
     const sameAssetRemaining = [
-      [juplendTokenABank, oracles.tokenAOracle.publicKey, bank.integrationAcc1],
+      [juplendTokenABank, oracles.tokenAOracle.publicKey, bank.integrationAcc1, juplendLiquidityPda],
       [regularTokenABank, oracles.tokenAOracle.publicKey],
     ] as PublicKey[][];
 
@@ -609,7 +613,7 @@ describe("jlr08: JupLend same-asset emode", () => {
     assert.equal(accountedShares.toString(), expectedShares.toString());
 
     const sameAssetRemaining = [
-      [juplendTokenABank, oracles.tokenAOracle.publicKey, bank.integrationAcc1],
+      [juplendTokenABank, oracles.tokenAOracle.publicKey, bank.integrationAcc1, juplendLiquidityPda],
       [regularTokenABank, oracles.tokenAOracle.publicKey],
     ] as PublicKey[][];
 

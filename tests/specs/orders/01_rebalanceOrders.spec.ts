@@ -146,6 +146,7 @@ import {
   deriveJuplendLendingPdas,
   findJuplendLiquidityBorrowPositionPda,
   findJuplendLiquiditySupplyPositionPda,
+  findJuplendLiquidityPda,
 } from "../../utils/juplend/juplend-pdas";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
 import {
@@ -1293,7 +1294,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 type VenueLeg = {
   /** Crank instruction(s) that refresh the venue's rate-bearing account in the same slot. */
   cranks: TransactionInstruction[];
-  /** The bank's rate/health tail: [priceOracle, venueAccount]. */
+  /** The bank's rate/health tail: [priceOracle, venueAccount] (or [priceOracle, venueAccount, liquidityPda] for Juplend). */
   tail: PublicKey[];
   /** JupLend TokenReserve for the start/end ix arg; null for Kamino/Drift. */
   tokenReserve: PublicKey | null;
@@ -1983,7 +1984,10 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
 
   const driftTail = (): PublicKey[] => [usdcOracle, driftMMarket];
   const kaminoTail = (): PublicKey[] => [usdcOracle, kaminoReserve];
-  const juplendTail = (): PublicKey[] => [usdcOracle, juplendPool.lending];
+  const juplendTail = (): PublicKey[] => {
+    const [juplendLiquidity] = findJuplendLiquidityPda();
+    return [usdcOracle, juplendPool.lending, juplendLiquidity];
+  };
 
   // Kamino is slot-based: refresh the reserve (and its obligation) before the start_rebalance rate
   // gate reads it. One refresh in the sandwich tx keeps it fresh for both the gate and the withdraw.

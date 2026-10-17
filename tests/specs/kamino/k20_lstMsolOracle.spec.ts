@@ -19,6 +19,7 @@ import {
   ORACLE_SETUP_KAMINO_MSOL,
 } from "../../utils/types";
 import { ORACLE_SETUP_KAMINO_PYTH_PUSH } from "../../utils/kamino-utils";
+import { findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
 import { assert } from "chai";
 
 const MSOL_STATE = new PublicKey(
@@ -93,8 +94,8 @@ describe("Kamino LST / mSOL oracle setups", () => {
           [reserve, BSOL_POOL],
         );
       },
-      "InvalidOracleSetup",
-      6025,
+      "WrongNumberOfOracleAccounts",
+      6051,
     );
   });
 
@@ -133,6 +134,37 @@ describe("Kamino LST / mSOL oracle setups", () => {
       },
       "StakePoolValidationFailed",
       6048,
+    );
+  });
+
+  it("(admin) tries to configure JuplendLST with insufficient remaining accounts - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(
+          ORACLE_SETUP_JUPLEND_LST,
+          oracles.wsolOracle.publicKey,
+          [reserve],
+        );
+      },
+      "WrongNumberOfOracleAccounts",
+      6051,
+    );
+  });
+
+  it("(admin) tries to configure JuplendLST with correct account count but wrong asset tag - fails", async () => {
+    
+    const validPool = BSOL_POOL; 
+    const [liquidityPda] = findJuplendLiquidityPda();
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(
+          ORACLE_SETUP_JUPLEND_LST,
+          oracles.wsolOracle.publicKey,
+          [reserve, validPool, liquidityPda],
+        );
+      },
+      "InvalidOracleSetup",
+      6025,
     );
   });
 

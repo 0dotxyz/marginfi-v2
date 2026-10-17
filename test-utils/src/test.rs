@@ -28,10 +28,9 @@ use marginfi_type_crate::pdas::{
     derive_drift_state, derive_drift_user, derive_drift_user_stats, derive_juplend_auth_list,
     derive_juplend_borrow_position, derive_juplend_claim_account, derive_juplend_f_token_mint,
     derive_juplend_f_token_vault, derive_juplend_lending, derive_juplend_lending_admin,
-    derive_juplend_liquidity, derive_juplend_rate_model, derive_juplend_rewards_admin,
-    derive_juplend_rewards_rate_model, derive_juplend_supply_position,
-    derive_juplend_token_reserve, derive_kamino_base_obligation,
-    derive_kamino_lending_market_authority, derive_kamino_user_metadata,
+    derive_juplend_rate_model, derive_juplend_rewards_admin, derive_juplend_rewards_rate_model,
+    derive_juplend_supply_position, derive_juplend_token_reserve, derive_kamino_base_obligation,
+    derive_kamino_lending_market_authority, derive_kamino_user_metadata, JUPLEND_LIQUIDITY_PDA,
 };
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
@@ -1803,7 +1802,7 @@ impl TestFixture {
         let mint = mint_f.key;
         let token_program = mint_f.token_program;
 
-        let liquidity = derive_juplend_liquidity().0;
+        let liquidity = JUPLEND_LIQUIDITY_PDA;
         let auth_list = derive_juplend_auth_list().0;
         let token_reserve = derive_juplend_token_reserve(&mint).0;
         let rate_model = derive_juplend_rate_model(&mint).0;
@@ -2196,6 +2195,9 @@ impl TestFixture {
         add_bank_ix
             .accounts
             .push(AccountMeta::new_readonly(lending, false));
+        add_bank_ix
+            .accounts
+            .push(AccountMeta::new_readonly(JUPLEND_LIQUIDITY_PDA, false));
         Self::process_ixs(test_f.context.clone(), &[add_bank_ix])
             .await
             .unwrap();

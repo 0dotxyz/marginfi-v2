@@ -1026,12 +1026,14 @@ impl MultiVenueFixture {
         ]
     }
 
-    /// Per-JupLend-bank oracle slice for start/end: `[oracle, lending]`. The `TokenReserve` is passed
+    /// Per-JupLend-bank oracle slice for start/end: `[oracle, lending, liquidity]`. The `TokenReserve` is passed
     /// separately via the start/end `*_token_reserve` argument, not in this slice.
     pub async fn juplend_slice(&self) -> Vec<AccountMeta> {
+        use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PDA;
         vec![
             AccountMeta::new_readonly(self.oracle, false),
             AccountMeta::new_readonly(self.juplend_bank.load().await.integration_acc_1, false),
+            AccountMeta::new_readonly(JUPLEND_LIQUIDITY_PDA, false),
         ]
     }
 

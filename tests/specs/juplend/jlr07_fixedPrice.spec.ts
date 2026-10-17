@@ -15,6 +15,7 @@ import {
   ecosystem,
   globalProgramAdmin,
   groupAdmin,
+  juplendAccounts,
   oracles,
   users,
   verbose,
@@ -57,6 +58,7 @@ import {
 import {
   deriveJuplendGlobalKeys,
   deriveJuplendMrgnAddresses,
+  findJuplendLiquidityPda,
 } from "../../utils/juplend/juplend-pdas";
 import {
   DEFAULT_BORROW_CONFIG_MIN,
@@ -72,6 +74,9 @@ import {
   initJuplendPool,
   fetchJuplendPool,
 } from "../../utils/juplend/jlr-pool-setup";
+import {
+  JUPLEND_STATE_KEYS,
+} from "../../utils/juplend/test-state";
 import {
   addJuplendBankIx,
   makeJuplendInitPositionIx,
@@ -109,6 +114,7 @@ let borrowBank: PublicKey;
 let adminAccount: PublicKey;
 let userUsdcStart = 0;
 let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
+const [liquidityPda] = findJuplendLiquidityPda();
 
 describe("jlrx: Fixed JupLend price bank", () => {
   const juplendGroup = Keypair.fromSeed(JUPLEND_FX_GROUP_SEED);
@@ -222,12 +228,12 @@ describe("jlrx: Fixed JupLend price bank", () => {
     );
     await processBankrunTransaction(ctx, initPosTx, [groupAdmin.wallet]);
 
-    // 3. Set fixed price — remaining accounts = [lending state]
+    // 3. Set fixed price — remaining accounts = [lending state, liquidity pda]
     const setFixedTx = new Transaction().add(
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
         bank: fixedJuplendBank,
         price: FIXED_PRICE,
-        remaining: [pool.lending],
+        remaining: [pool.lending, liquidityPda],
       }),
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
@@ -253,6 +259,8 @@ describe("jlrx: Fixed JupLend price bank", () => {
     assert.approximately(fixedPrice, FIXED_PRICE, 0.001);
 
     console.log("Fixed JupLend bank:", fixedJuplendBank.toString());
+
+    juplendAccounts.set(JUPLEND_STATE_KEYS.jlr07BankUsdcFixed, fixedJuplendBank);
   });
 
   it("(admin) configure_bank_oracle rejects FixedJuplend setup - use set_oracle_price", async () => {
@@ -358,7 +366,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
         bank: fixedJuplendBank,
-        remaining: [wrongLending],
+        remaining: [wrongLending, liquidityPda],
       }),
     );
     const result = await processBankrunTransaction(
@@ -433,9 +441,9 @@ describe("jlrx: Fixed JupLend price bank", () => {
       user.tokenAAccount,
     );
 
-    // FixedJuplend remaining: [bank, lendingState] (only 2 accounts, no oracle)
+    // FixedJuplend remaining: [bank, lendingState, liquidityPda] (3 accounts, no oracle)
     const remaining = composeRemainingAccounts([
-      [fixedJuplendBank, pool.lending],
+      [fixedJuplendBank, pool.lending, liquidityPda],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
@@ -471,7 +479,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
     const remaining = composeRemainingAccounts([
-      [fixedJuplendBank, pool.lending],
+      [fixedJuplendBank, pool.lending, liquidityPda],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
@@ -552,7 +560,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
     );
 
     const remaining = composeRemainingAccounts([
-      [fixedJuplendBank, pool.lending],
+      [fixedJuplendBank, pool.lending, liquidityPda],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
@@ -592,7 +600,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         amount: BORROW_AMOUNT,
         repayAll: true,
         remaining: composeRemainingAccounts([
-          [fixedJuplendBank, pool.lending],
+          [fixedJuplendBank, pool.lending, liquidityPda],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
       }),
@@ -601,7 +609,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     const remaining = composeRemainingAccounts(
       [
-        [fixedJuplendBank, pool.lending],
+        [fixedJuplendBank, pool.lending, liquidityPda],
         [borrowBank, oracles.tokenAOracle.publicKey],
       ].filter((group) => !group[0].equals(fixedJuplendBank))
     );

@@ -24,13 +24,14 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import {
   ASSET_TAG_DRIFT,
-  ASSET_TAG_JUPLEND,
   ASSET_TAG_KAMINO,
   ASSET_TAG_SOLEND,
   ASSET_TAG_STAKED,
   HEALTH_CACHE_HEALTHY,
 } from "./types";
 import { composeRemainingAccounts } from "./user-instructions";
+import { findJuplendLiquidityPda } from "./juplend/juplend-pdas";
+import { JUPLEND_LAYOUTS, JuplendOracleSetupType } from "./juplend/juplend-layout";
 import {
   globalProgramAdmin,
   bankrunContext,
@@ -684,6 +685,18 @@ export const mintToTokenAccount = async (
   );
 };
 
+const [JUPLEND_LIQUIDITY_PK] = findJuplendLiquidityPda();
+
+const requireOracleKey = (
+  bank: { config: { oracleKeys: PublicKey[] } },
+  idx: number,
+  setup: string,
+): PublicKey => {
+  const key = bank.config.oracleKeys[idx];
+  if (key.equals(PublicKey.default)) throw new Error(`${setup}: oracle_keys[${idx}] is unset`);
+  return key;
+};
+
 /**
  * Useful when building risk accounts in tests where hand-construction is tedious or not neccessary
  * for the flow being demonstrated.
@@ -732,23 +745,62 @@ export const buildHealthRemainingAccounts = async (
     const bankPk = bankPks[i];
     const bank = banks[i];
     const assetTag = bank.config.assetTag;
-    const group: PublicKey[] = [bankPk, bank.config.oracleKeys[0]];
+    const oracleSetup = bank.config.oracleSetup;
 
-    if (
-      assetTag === ASSET_TAG_KAMINO ||
-      assetTag === ASSET_TAG_DRIFT ||
-      assetTag === ASSET_TAG_SOLEND ||
-      assetTag === ASSET_TAG_JUPLEND
-    ) {
-      group.push(bank.config.oracleKeys[1]);
-    }
+    const setupKey = Object.keys(oracleSetup)[0];
 
-    if (assetTag === ASSET_TAG_STAKED) {
-      group.push(
-        bank.config.oracleKeys[1],
-        bank.config.oracleKeys[2],
-        bank.config.oracleKeys[3],
-      );
+    const k = bank.config.oracleKeys;
+    let group: PublicKey[];
+
+    switch (setupKey) {
+      case "fixedJuplend": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.FixedJuplend];
+        group = [bankPk, requireOracleKey(bank, layout.lending, setupKey), JUPLEND_LIQUIDITY_PK];
+        break;
+      }
+      case "juplendPythPull": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.JuplendPythPull];
+        group = [bankPk, k[0], requireOracleKey(bank, layout.lending, setupKey), JUPLEND_LIQUIDITY_PK];
+        break;
+      }
+      case "juplendSwitchboardPull": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.JuplendSwitchboardPull];
+        group = [bankPk, k[0], requireOracleKey(bank, layout.lending, setupKey), JUPLEND_LIQUIDITY_PK];
+        break;
+      }
+      case "scopeJuplend": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.ScopeJuplend];
+        group = [bankPk, k[0], requireOracleKey(bank, layout.lending, setupKey), JUPLEND_LIQUIDITY_PK];
+        break;
+      }
+      case "juplendMsol": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.JuplendMSOL];
+        group = [
+          bankPk,
+          k[0],
+          requireOracleKey(bank, layout.lending, setupKey),
+          requireOracleKey(bank, layout.liquidity, setupKey),
+          JUPLEND_LIQUIDITY_PK,
+        ];
+        break;
+      }
+      case "juplendLst": {
+        const layout = JUPLEND_LAYOUTS[JuplendOracleSetupType.JuplendLST];
+        group = [
+          bankPk,
+          k[0],
+          requireOracleKey(bank, layout.lending, setupKey),
+          requireOracleKey(bank, layout.liquidity, setupKey),
+          JUPLEND_LIQUIDITY_PK,
+        ];
+        break;
+      }
+      default:
+        group = [bankPk, k[0]];
+        if (assetTag === ASSET_TAG_KAMINO || assetTag === ASSET_TAG_DRIFT || assetTag === ASSET_TAG_SOLEND) {
+          group.push(k[1]);
+        }
+        if (assetTag === ASSET_TAG_STAKED) group.push(k[1], k[2], k[3]);
     }
 
     groups.push(group);

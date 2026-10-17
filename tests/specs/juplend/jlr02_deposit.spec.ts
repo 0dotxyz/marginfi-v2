@@ -46,7 +46,9 @@ import {
   deriveJuplendPoolKeys,
   findJuplendLiquidityBorrowPositionPda,
   findJuplendLiquiditySupplyPositionPda,
+  findJuplendLiquidityPda,
 } from "../../utils/juplend/juplend-pdas";
+import { buildJuplendOracleAccounts } from "../../utils/juplend/juplend-layout";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
 import {
   DEFAULT_BORROW_CONFIG,
@@ -76,6 +78,7 @@ const ADMIN_USDC_BORROW_DEBT_CEILING = new BN(
 const ONE_HOUR_IN_SECONDS = 60 * 60;
 const EXCHANGE_PRICES_PRECISION = EXCHANGE_PRICES_PRECISION_BN;
 const I80F48_SCALE_NUMBER = 2 ** 48;
+const [JUPLEND_LIQUIDITY_PDA] = findJuplendLiquidityPda();
 
 describe("jlr02: JupLend deposits (bankrun)", () => {
   let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
@@ -304,9 +307,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const pulseInitialCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
       bank: usdcJupBankPk,
-      remaining: bankAfter.config.oracleKeys.filter(
-        (key) => !key.equals(PublicKey.default),
-      ),
+      remaining: buildJuplendOracleAccounts(bankAfter, JUPLEND_LIQUIDITY_PDA),
     });
     await processBankrunTransaction(
       bankrunContext,
@@ -806,9 +807,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       user.mrgnBankrunProgram!,
       {
         bank: usdcJupBankPk,
-        remaining: bankAfter.config.oracleKeys.filter(
-          (key) => !key.equals(PublicKey.default)
-        ),
+        remaining: buildJuplendOracleAccounts(bankAfter, JUPLEND_LIQUIDITY_PDA),
       }
     );
     await processBankrunTransaction(

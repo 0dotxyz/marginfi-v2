@@ -93,7 +93,7 @@ import {
   DEFAULT_BORROW_CONFIG_MIN,
   JuplendPoolKeys,
 } from "../../utils/juplend/types";
-import { deriveJuplendGlobalKeys } from "../../utils/juplend/juplend-pdas";
+import { deriveJuplendGlobalKeys, findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
@@ -481,6 +481,14 @@ VENUES.forEach(({ venue, groupSeed }) => {
           : isLst
           ? ORACLE_SETUP_JUPLEND_LST
           : ORACLE_SETUP_JUPLEND_MSOL;
+      
+      const juplendLiquidity =
+        venue === "juplend" ? findJuplendLiquidityPda()[0] : undefined;
+      const remaining = [venueState, pricing];
+      if (juplendLiquidity) {
+        remaining.push(juplendLiquidity);
+      }
+      
       await processBankrunTransaction(
         bankrunContext,
         new Transaction().add(
@@ -488,13 +496,16 @@ VENUES.forEach(({ venue, groupSeed }) => {
             bank,
             type,
             oracle: wsolOracle(),
-            remaining: [venueState, pricing],
+            remaining,
           }),
         ),
         [admin.wallet],
       );
 
       out.group = [bank, wsolOracle(), venueState, pricing];
+      if (juplendLiquidity) {
+        out.group.push(juplendLiquidity);
+      }
       venueBanks.push(out);
     };
 

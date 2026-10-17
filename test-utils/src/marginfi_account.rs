@@ -11,8 +11,8 @@ use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi_type_crate::pdas::{
     derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
-    derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
-    derive_juplend_rate_model, derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
+    derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_rate_model,
+    derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID, JUPLEND_LIQUIDITY_PDA,
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
@@ -1497,10 +1497,7 @@ impl MarginfiAccountFixture {
                             is_writable: false,
                         });
                     }
-                    OracleSetup::KaminoMSOL
-                    | OracleSetup::JuplendMSOL
-                    | OracleSetup::KaminoLST
-                    | OracleSetup::JuplendLST => {
+                    OracleSetup::KaminoMSOL | OracleSetup::KaminoLST => {
                         metas.push(AccountMeta {
                             pubkey: bank.config.oracle_keys[1],
                             is_signer: false,
@@ -1508,6 +1505,38 @@ impl MarginfiAccountFixture {
                         });
                         metas.push(AccountMeta {
                             pubkey: bank.config.oracle_keys[2],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    OracleSetup::JuplendMSOL | OracleSetup::JuplendLST => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[2],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: JUPLEND_LIQUIDITY_PDA,
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    OracleSetup::FixedJuplend
+                    | OracleSetup::JuplendPythPull
+                    | OracleSetup::JuplendSwitchboardPull
+                    | OracleSetup::ScopeJuplend => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: JUPLEND_LIQUIDITY_PDA,
                             is_signer: false,
                             is_writable: false,
                         });
@@ -2189,7 +2218,7 @@ impl MarginfiAccountFixture {
         let lending: JuplendLending =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
 
-        let liquidity = derive_juplend_liquidity().0;
+        let liquidity = JUPLEND_LIQUIDITY_PDA;
         let rate_model = derive_juplend_rate_model(&lending.mint).0;
         let vault = get_associated_token_address_with_program_id(
             &liquidity,
@@ -2260,7 +2289,7 @@ impl MarginfiAccountFixture {
         let lending: JuplendLending =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
 
-        let liquidity = derive_juplend_liquidity().0;
+        let liquidity = JUPLEND_LIQUIDITY_PDA;
         let rate_model = derive_juplend_rate_model(&lending.mint).0;
         let vault = get_associated_token_address_with_program_id(
             &liquidity,

@@ -36,47 +36,31 @@ use std::{
 
 /// Returns the number of remaining accounts required for a bank (bank account + oracle/venue accounts).
 ///
-/// Account counts by oracle setup and asset tag:
-/// - `Fixed`: 1 (bank only)
-/// - `FixedKamino`: 2 (bank + reserve)
-/// - `FixedDrift`: 2 (bank + spot market)
-/// - `FixedJuplend`: 2 (bank + lending state)
-/// - `ASSET_TAG_STAKED`: 5 (bank + oracle + lst_mint + stake_pool + onramp)
-/// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
-/// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
+/// Accounts per bank in the remaining-accounts list: the bank itself plus its oracle slice.
+/// JupLend setups: `1 + OracleSetup::juplend_layout().len`. Other setups: see arms below.
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
+    if let Some(layout) = bank.config.oracle_setup.juplend_layout() {
+        return Ok(1 + layout.len);
+    }
     match bank.config.oracle_setup {
-        OracleSetup::Fixed => Ok(1),
-        // Fixed + Kamino: bank + reserve (no oracle)
-        OracleSetup::FixedKamino => Ok(2),
-        // Fixed + Drift: bank + spot market (no oracle)
-        OracleSetup::FixedDrift => Ok(2),
-        // Fixed + JupLend: bank + lending state (no oracle)
-        OracleSetup::FixedJuplend => Ok(2),
-        // PythMSOL: bank + Pyth + Marinade State
-        OracleSetup::PythMSOL => Ok(3),
-        // KaminoMSOL / JuplendMSOL: bank + Pyth + reserve/lending + Marinade State
-        OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => Ok(4),
-        // PythLST: bank + Pyth + SPL StakePool
-        OracleSetup::PythLST => Ok(3),
-        // KaminoLST / JuplendLST: bank + Pyth + reserve/lending + SPL StakePool
-        OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
-        // PTPyth: bank + Pyth + Exponent vault
-        OracleSetup::PTPyth => Ok(3),
-        // PTFixed: bank + Exponent vault (no base feed, i.e. the token is assumed to be ~= $1)
+        OracleSetup::FixedKamino | OracleSetup::FixedDrift => Ok(2),
+        OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => Ok(3),
+        OracleSetup::KaminoMSOL | OracleSetup::KaminoLST => Ok(4),
         OracleSetup::PTFixed => Ok(2),
-        // ScopeKamino / ScopeJuplend: bank + Scope feed + reserve/lending
-        OracleSetup::ScopeKamino | OracleSetup::ScopeJuplend => Ok(3),
+        OracleSetup::ScopeKamino => Ok(3),
+        OracleSetup::Fixed => Ok(1),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
 
 /// 5 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool, onramp), 2 for most others (bank, oracle), 3
-/// for Kamino (bank, oracle, reserve), 1 for Fixed
+/// for Kamino (bank, oracle, reserve). JupLend requires an explicit OracleSetup configuration and is not supported
+/// as a generic asset tag.
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
-        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => Ok(3),
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => Ok(3),
+        ASSET_TAG_JUPLEND => Err(MarginfiError::InvalidOracleSetup.into()),
         ASSET_TAG_STAKED => Ok(5),
         _ => err!(MarginfiError::AssetTagMismatch),
     }
@@ -3918,6 +3902,32 @@ mod test {
             assert_eq!(
                 bank.borrowing_position_count, 0,
                 "borrowing_position_count incorrectly decremented for sub-threshold liability dust"
+            );
+        }
+    }
+
+    #[test]
+    fn get_remaining_accounts_per_bank_juplend_counts() {
+        let mut bank = Bank::zeroed();
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+
+        let cases = [
+            (OracleSetup::FixedJuplend, 3),
+            (OracleSetup::JuplendPythPull, 4),
+            (OracleSetup::JuplendSwitchboardPull, 4),
+            (OracleSetup::ScopeJuplend, 4),
+            (OracleSetup::JuplendMSOL, 5),
+            (OracleSetup::JuplendLST, 5),
+        ];
+
+        for (setup, expected_count) in &cases {
+            bank.config.oracle_setup = *setup;
+            assert_eq!(
+                get_remaining_accounts_per_bank(&bank).unwrap(),
+                *expected_count,
+                "oracle setup {:?} should require {} accounts",
+                setup,
+                expected_count
             );
         }
     }

@@ -837,6 +837,8 @@ impl BankImpl for Bank {
                 price_with_multiplier.oracle_price.confidence.into();
             self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
             self.cache.last_oracle_price_timestamp = clock.unix_timestamp;
+            self.cache
+                .record_borrow_power(price_with_multiplier.has_borrow_power);
             self.update_circuit_breaker(
                 clock.unix_timestamp,
                 clock.slot,

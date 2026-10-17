@@ -529,6 +529,62 @@ impl OracleSetup {
             | Self::PTFixed => None,
         }
     }
+
+    pub fn requires_juplend_liquidity(&self) -> bool {
+        self.juplend_layout().is_some()
+    }
+
+    pub fn juplend_layout(&self) -> Option<JuplendLayout> {
+        match self {
+            Self::FixedJuplend => Some(JuplendLayout {
+                lending: 0,
+                liquidity: 1,
+                len: 2,
+            }),
+            Self::JuplendPythPull | Self::JuplendSwitchboardPull | Self::ScopeJuplend => {
+                Some(JuplendLayout {
+                    lending: 1,
+                    liquidity: 2,
+                    len: 3,
+                })
+            }
+            Self::JuplendMSOL | Self::JuplendLST => Some(JuplendLayout {
+                lending: 1,
+                liquidity: 3,
+                len: 4,
+            }),
+            Self::None
+            | Self::PythLegacy
+            | Self::SwitchboardV2
+            | Self::PythPushOracle
+            | Self::SwitchboardPull
+            | Self::StakedWithPythPush
+            | Self::KaminoPythPush
+            | Self::KaminoSwitchboardPull
+            | Self::Fixed
+            | Self::DriftPythPull
+            | Self::DriftSwitchboardPull
+            | Self::SolendPythPull
+            | Self::SolendSwitchboardPull
+            | Self::FixedKamino
+            | Self::FixedDrift
+            | Self::Scope
+            | Self::PythMSOL
+            | Self::KaminoMSOL
+            | Self::PythLST
+            | Self::KaminoLST
+            | Self::PTPyth
+            | Self::PTFixed
+            | Self::ScopeKamino => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JuplendLayout {
+    pub lending: usize,
+    pub liquidity: usize,
+    pub len: usize,
 }
 
 /// The kind of feed account an `OracleSetup` reads from `oracle_keys[0]`.
@@ -640,6 +696,88 @@ mod feed_family_tests {
             OracleSetup::JuplendLST.feed_family(),
             OracleSetup::PythLST.feed_family()
         );
+    }
+}
+
+#[cfg(test)]
+mod oracle_setup_tests {
+    use super::*;
+
+    #[test]
+    fn requires_juplend_liquidity_correct_setups() {
+        let juplend_setups = [
+            OracleSetup::FixedJuplend,
+            OracleSetup::JuplendPythPull,
+            OracleSetup::JuplendSwitchboardPull,
+            OracleSetup::ScopeJuplend,
+            OracleSetup::JuplendMSOL,
+            OracleSetup::JuplendLST,
+        ];
+
+        for setup in juplend_setups {
+            assert!(
+                setup.requires_juplend_liquidity(),
+                "JupLend setup {:?} must require liquidity",
+                setup
+            );
+        }
+
+        let non_juplend_setups = [
+            OracleSetup::None,
+            OracleSetup::PythLegacy,
+            OracleSetup::PythPushOracle,
+            OracleSetup::SwitchboardPull,
+            OracleSetup::Fixed,
+            OracleSetup::FixedKamino,
+            OracleSetup::FixedDrift,
+            OracleSetup::DriftPythPull,
+            OracleSetup::SolendPythPull,
+            OracleSetup::KaminoPythPush,
+            OracleSetup::KaminoSwitchboardPull,
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::PythMSOL,
+            OracleSetup::KaminoMSOL,
+            OracleSetup::KaminoLST,
+            OracleSetup::PythLST,
+            OracleSetup::PTPyth,
+            OracleSetup::PTFixed,
+        ];
+
+        for setup in non_juplend_setups {
+            assert!(
+                !setup.requires_juplend_liquidity(),
+                "Non-JupLend setup {:?} must not require liquidity",
+                setup
+            );
+        }
+    }
+
+    #[test]
+    fn golden_layouts() {
+        let golden = [
+            (OracleSetup::FixedJuplend, 0, 1, 2),
+            (OracleSetup::JuplendPythPull, 1, 2, 3),
+            (OracleSetup::JuplendSwitchboardPull, 1, 2, 3),
+            (OracleSetup::ScopeJuplend, 1, 2, 3),
+            (OracleSetup::JuplendMSOL, 1, 3, 4),
+            (OracleSetup::JuplendLST, 1, 3, 4),
+        ];
+        for (setup, lending, liquidity, len) in golden {
+            let l = setup.juplend_layout().unwrap();
+            assert_eq!(
+                (l.lending, l.liquidity, l.len),
+                (lending, liquidity, len),
+                "{:?}",
+                setup
+            );
+            assert_eq!(
+                l.liquidity,
+                l.len - 1,
+                "{:?}: liquidity must be last",
+                setup
+            );
+        }
     }
 }
 

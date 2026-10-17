@@ -17,7 +17,9 @@ use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
-use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
+use juplend_mocks::state::{
+    Lending as JuplendLending, LiquidityStatus, MinimalLiquidity, EXCHANGE_PRICES_PRECISION,
+};
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
@@ -28,7 +30,7 @@ use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, MAX_EXP_10_I80F48, U32_MAX,
     },
-    pdas::SCOPE_PROGRAM_ID,
+    pdas::{JUPLEND_LIQUIDITY_PDA, JUPLEND_LIQUIDITY_PROGRAM_ID, SCOPE_PROGRAM_ID},
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
         mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
@@ -54,6 +56,7 @@ use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
 pub struct OraclePriceWithMultiplier {
     pub oracle_price: OraclePriceWithConfidence,
     pub price_multiplier: I80F48,
+    pub has_borrow_power: bool,
 }
 
 impl OraclePriceWithMultiplier {
@@ -76,6 +79,19 @@ impl OraclePriceWithMultiplier {
                 .ok_or_else(math_error!())?,
             source_time: self.oracle_price.source_time,
         })
+    }
+
+    pub fn new(oracle_price: OraclePriceWithConfidence, price_multiplier: I80F48) -> Self {
+        Self {
+            oracle_price,
+            price_multiplier,
+            has_borrow_power: true,
+        }
+    }
+
+    pub fn with_borrow_power(mut self, has_borrow_power: bool) -> Self {
+        self.has_borrow_power = has_borrow_power;
+        self
     }
 }
 
@@ -255,6 +271,101 @@ fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> 
         .ok_or_else(math_error!())?)
 }
 
+pub(crate) fn check_juplend_liquidity_key(liquidity_info: &AccountInfo<'_>) -> MarginfiResult<()> {
+    require_keys_eq!(
+        *liquidity_info.key,
+        JUPLEND_LIQUIDITY_PDA,
+        MarginfiError::JuplendLiquidityValidationFailed
+    );
+    Ok(())
+}
+
+fn juplend_accounts<'a, 'info>(
+    setup: OracleSetup,
+    ais: &'a [AccountInfo<'info>],
+) -> MarginfiResult<(&'a AccountInfo<'info>, &'a AccountInfo<'info>)> {
+    let layout = setup
+        .juplend_layout()
+        .ok_or(MarginfiError::InvalidOracleSetup)?;
+    require_eq!(
+        ais.len(),
+        layout.len,
+        MarginfiError::WrongNumberOfOracleAccounts
+    );
+    Ok((&ais[layout.lending], &ais[layout.liquidity]))
+}
+
+fn validate_juplend_accounts(
+    bank_config: &BankConfig,
+    oracle_ais: &[AccountInfo<'_>],
+) -> MarginfiResult<()> {
+    let layout = bank_config
+        .oracle_setup
+        .juplend_layout()
+        .ok_or(MarginfiError::InvalidOracleSetup)?;
+    require_eq!(
+        bank_config.asset_tag,
+        ASSET_TAG_JUPLEND,
+        MarginfiError::InvalidOracleSetup
+    );
+    require_eq!(
+        oracle_ais.len(),
+        layout.len,
+        MarginfiError::WrongNumberOfOracleAccounts
+    );
+    require_keys_eq!(
+        *oracle_ais[layout.lending].key,
+        bank_config.oracle_keys[1],
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    check_juplend_liquidity_key(&oracle_ais[layout.liquidity])
+}
+
+struct JuplendRate {
+    token_exchange_price: u128,
+    multiplier: I80F48,
+}
+
+fn load_juplend_rate<'info>(
+    bank_config: &BankConfig,
+    lending_info: &'info AccountInfo<'info>,
+    clock: &Clock,
+) -> MarginfiResult<JuplendRate> {
+    let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+    let lending = lending_loader.load()?;
+    ensure_juplend_lending_fresh(&lending, clock)?;
+    Ok(JuplendRate {
+        token_exchange_price: lending.token_exchange_price as u128,
+        multiplier: juplend_price_multiplier(&lending)?,
+    })
+}
+
+pub(crate) fn juplend_has_borrow_power(liquidity_info: &AccountInfo<'_>) -> MarginfiResult<bool> {
+    check_juplend_liquidity_key(liquidity_info)?;
+
+    if *liquidity_info.owner != JUPLEND_LIQUIDITY_PROGRAM_ID {
+        msg!("JupLend liquidity: unexpected owner, borrow power disabled");
+        return Ok(false);
+    }
+
+    let data = match liquidity_info.try_borrow_data() {
+        Ok(data) => data,
+        Err(_) => {
+            msg!("JupLend liquidity: account data unavailable, borrow power disabled");
+            return Ok(false);
+        }
+    };
+
+    match MinimalLiquidity::read_status(&data) {
+        Some(LiquidityStatus::Active) => Ok(true),
+        Some(LiquidityStatus::Locked) => Ok(false),
+        None => {
+            msg!("JupLend liquidity: unexpected length or discriminator, borrow power disabled");
+            Ok(false)
+        }
+    }
+}
+
 /// Applies an `I80F48` exchange-rate multiplier to a Pyth push feed's price/ema and their
 /// confidences, in place. Mirrors the mutation done by the Kamino/Solend integration arms.
 fn apply_i80f48_multiplier(
@@ -421,18 +532,17 @@ impl OraclePriceFeedAdapter {
                 })
             }
             OracleSetup::ScopeJuplend => {
-                // (0) Scope feed (for price) and (1) JupLend Lending state (for exchange rate)
-                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
-
+                // (0) Scope feed, (1) JupLend Lending, (2) JupLend Liquidity.
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
                 let feed_info = &ais[0];
-                let lending_info = &ais[1];
 
                 check_primary_oracle_key(bank_config, feed_info)?;
 
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
-                let multiplier: I80F48 = juplend_price_multiplier(&lending)?;
+                let JuplendRate {
+                    token_exchange_price: _,
+                    multiplier,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let mut price_feed = ScopePriceFeed::load_checked(
                     feed_info,
@@ -440,11 +550,14 @@ impl OraclePriceFeedAdapter {
                     max_age,
                     bank_config.scope_entry_index,
                 )?;
+
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power &= juplend_has_borrow_power(liquidity_info)?;
 
                 // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
                 price_feed.price = price_feed
@@ -929,14 +1042,14 @@ impl OraclePriceFeedAdapter {
 
             OracleSetup::FixedJuplend => {
                 // Fixed base price + JupLend Lending exchange rate
-                // Requires: JupLend Lending state (no oracle needed)
-                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+                // Requires: JupLend Lending state + JupLend Liquidity
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
 
-                let lending_info = &ais[0];
-
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
+                let JuplendRate {
+                    token_exchange_price,
+                    multiplier,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let base_price: I80F48 = bank.config.fixed_price.into();
                 check!(
@@ -944,24 +1057,24 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::FixedOraclePriceNegative
                 );
 
-                // Apply JupLend exchange rate: base_price * token_exchange_price / 1e12
-                let rate = I80F48::from_num(lending.token_exchange_price);
-                let precision = I80F48::from_num(EXCHANGE_PRICES_PRECISION);
-                let adjusted_price = base_price
-                    .checked_mul(rate)
-                    .ok_or_else(math_error!())?
-                    .checked_div(precision)
-                    .ok_or_else(math_error!())?;
-                let multiplier = juplend_price_multiplier(&lending)?;
                 let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
                     price: base_price,
                     confidence: I80F48::ZERO,
                     source_time: 0,
                 });
 
+                let has_borrow_power = juplend_has_borrow_power(liquidity_info)?;
+
+                // Apply JupLend exchange rate: base_price * token_exchange_price / 1e12
+                let adjusted_price = base_price
+                    .checked_mul(I80F48::from_num(token_exchange_price))
+                    .ok_or_else(math_error!())?
+                    .checked_div(I80F48::from_num(EXCHANGE_PRICES_PRECISION))
+                    .ok_or_else(math_error!())?;
+
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                        has_borrow_power: true,
+                        has_borrow_power,
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -970,11 +1083,10 @@ impl OraclePriceFeedAdapter {
             }
 
             OracleSetup::JuplendPythPull => {
-                // (1) Pyth oracle (for price) and (2) JupLend Lending state (for exchange rate)
-                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
-
+                // (0) Pyth oracle, (1) JupLend Lending, (2) JupLend Liquidity.
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
                 let oracle_info = &ais[0];
-                let lending_info = &ais[1];
 
                 require_keys_eq!(
                     *oracle_info.key,
@@ -982,19 +1094,21 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongOracleAccountKeys
                 );
 
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
-                let numerator = lending.token_exchange_price as u128;
-                let multiplier = juplend_price_multiplier(&lending)?;
+                let JuplendRate {
+                    token_exchange_price: numerator,
+                    multiplier,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(oracle_info, clock, max_age)?;
+
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power &= juplend_has_borrow_power(liquidity_info)?;
 
                 // Adjust Pyth prices & confidence in place
                 price_feed.price.price =
@@ -1024,11 +1138,10 @@ impl OraclePriceFeedAdapter {
             }
 
             OracleSetup::JuplendSwitchboardPull => {
-                // (1) Switchboard oracle (for price) and (2) JupLend Lending state (for exchange rate)
-                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
-
+                // (0) Switchboard oracle, (1) JupLend Lending, (2) JupLend Liquidity.
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
                 let oracle_info = &ais[0];
-                let lending_info = &ais[1];
 
                 require_keys_eq!(
                     *oracle_info.key,
@@ -1036,17 +1149,17 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongOracleAccountKeys
                 );
 
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
-                let numerator = lending.token_exchange_price as u128;
-                let multiplier = juplend_price_multiplier(&lending)?;
+                let JuplendRate {
+                    token_exchange_price: numerator,
+                    multiplier,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(
                         price_type,
@@ -1055,6 +1168,8 @@ impl OraclePriceFeedAdapter {
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power &= juplend_has_borrow_power(liquidity_info)?;
 
                 // Adjust Switchboard value (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
@@ -1144,19 +1259,19 @@ impl OraclePriceFeedAdapter {
                 })
             }
             OracleSetup::JuplendMSOL => {
-                // (0) Pyth (SOL/USD), (1) JupLend Lending (exchange rate), (2) Marinade State (mSOL/SOL rate)
-                check!(ais.len() == 3, MarginfiError::WrongNumberOfOracleAccounts);
-
+                // (0) Pyth SOL/USD, (1) JupLend Lending,
+                // (2) Marinade State, (3) JupLend Liquidity.
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
                 let account_info = &ais[0];
-                let lending_info = &ais[1];
                 let state_info = &ais[2];
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
-                let juplend_rate = juplend_price_multiplier(&lending)?;
+                let JuplendRate {
+                    token_exchange_price: _,
+                    multiplier: juplend_rate,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let state_loader = load_marinade_state(bank_config, state_info, 2)?;
                 let state = state_loader.load()?;
@@ -1167,11 +1282,14 @@ impl OraclePriceFeedAdapter {
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
+
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power &= juplend_has_borrow_power(liquidity_info)?;
 
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
@@ -1251,19 +1369,19 @@ impl OraclePriceFeedAdapter {
                 })
             }
             OracleSetup::JuplendLST => {
-                // (0) Pyth (SOL/USD), (1) JupLend Lending (exchange rate), (2) SPL StakePool (LST/SOL rate)
-                check!(ais.len() == 3, MarginfiError::WrongNumberOfOracleAccounts);
-
+                // (0) Pyth SOL/USD, (1) JupLend Lending,
+                // (2) SPL StakePool, (3) JupLend Liquidity.
+                let (lending_info, liquidity_info) =
+                    juplend_accounts(bank_config.oracle_setup, ais)?;
                 let account_info = &ais[0];
-                let lending_info = &ais[1];
                 let stake_pool_info = &ais[2];
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
-                let lending = lending_loader.load()?;
-                ensure_juplend_lending_fresh(&lending, clock)?;
-                let juplend_rate = juplend_price_multiplier(&lending)?;
+                let JuplendRate {
+                    token_exchange_price: _,
+                    multiplier: juplend_rate,
+                } = load_juplend_rate(bank_config, lending_info, clock)?;
 
                 let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, clock)?;
 
@@ -1272,11 +1390,14 @@ impl OraclePriceFeedAdapter {
 
                 // Apply the LST/SOL rate first so the cached raw price is the LST/USD price.
                 apply_i80f48_multiplier(&mut price_feed, lst_rate)?;
+
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
                 } else {
                     None
                 };
+
+                price_feed.has_borrow_power &= juplend_has_borrow_power(liquidity_info)?;
 
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
@@ -1375,10 +1496,8 @@ impl OraclePriceFeedAdapter {
         let raw = context.cache_raw_price.unwrap_or(adjusted);
         Ok((
             adjusted,
-            OraclePriceWithMultiplier {
-                oracle_price: raw,
-                price_multiplier: context.cache_multiplier,
-            },
+            OraclePriceWithMultiplier::new(raw, context.cache_multiplier)
+                .with_borrow_power(context.adjusted_price_feed.has_borrow_power()),
         ))
     }
 
@@ -1518,26 +1637,10 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::ScopeJuplend => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                // (0) Scope feed, (1) JupLend Lending state
-                require_eq!(
-                    oracle_ais.len(),
-                    2,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
-
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
                 Ok(())
             }
             OracleSetup::SwitchboardPull => {
@@ -1783,81 +1886,32 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::FixedJuplend => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                // Fixed base price with JupLend Lending exchange rate
-                require_eq!(
-                    oracle_ais.len(),
-                    1,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
-
-                require_keys_eq!(
-                    *oracle_ais[0].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
                 Ok(())
             }
 
             OracleSetup::JuplendPythPull => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                require_eq!(
-                    oracle_ais.len(),
-                    2,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
 
-                // First account is the Pyth Push oracle
+                // Primary feed validation
                 require_keys_eq!(
                     oracle_ais[0].key(),
                     bank_config.oracle_keys[0],
                     MarginfiError::WrongOracleAccountKeys
                 );
                 load_price_update_v2_checked(&oracle_ais[0])?;
-
-                // Second account is the JupLend Lending state
-                require_keys_eq!(
-                    oracle_ais[1].key(),
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
                 Ok(())
             }
 
             OracleSetup::JuplendSwitchboardPull => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                require_eq!(
-                    oracle_ais.len(),
-                    2,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
 
-                // First account is the Switchboard Pull oracle
                 require_keys_eq!(
                     oracle_ais[0].key(),
                     bank_config.oracle_keys[0],
                     MarginfiError::WrongOracleAccountKeys
                 );
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
-
-                // Second account is the JupLend Lending state
-                require_keys_eq!(
-                    oracle_ais[1].key(),
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
                 Ok(())
             }
             OracleSetup::PythMSOL => {
@@ -1904,26 +1958,10 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::JuplendMSOL => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                // (0) Pyth (SOL/USD), (1) JupLend Lending, (2) Marinade State
-                require_eq!(
-                    oracle_ais.len(),
-                    3,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
-
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
                 validate_marinade_state_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
@@ -1971,26 +2009,10 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::JuplendLST => {
-                check_eq!(
-                    bank_config.asset_tag,
-                    ASSET_TAG_JUPLEND,
-                    MarginfiError::InvalidOracleSetup
-                );
-                // (0) Pyth (SOL/USD), (1) JupLend Lending, (2) SPL StakePool
-                require_eq!(
-                    oracle_ais.len(),
-                    3,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
+                validate_juplend_accounts(bank_config, oracle_ais)?;
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
-
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
                 validate_stake_pool_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
@@ -2692,7 +2714,10 @@ mod tests {
 
     use crate::constants::SPL_STAKE_POOL_ID;
     use anchor_lang::solana_program::account_info::AccountInfo;
+    use bytemuck::Zeroable;
     use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
+    use marginfi_type_crate::pdas::derive_juplend_liquidity;
+    use marginfi_type_crate::types::OracleSetup;
     use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
     use scope_mocks::state::{ScopeDatedPrice, ScopePrice};
     use solana_stake_interface::{
@@ -2709,23 +2734,17 @@ mod tests {
         };
 
         // A multiplier scales price and confidence by the same factor; source_time is untouched.
-        let scaled = OraclePriceWithMultiplier {
-            oracle_price: base,
-            price_multiplier: I80F48::from_num(1.5),
-        }
-        .cb_observation()
-        .unwrap();
+        let scaled = OraclePriceWithMultiplier::new(base, I80F48::from_num(1.5))
+            .cb_observation()
+            .unwrap();
         assert_eq!(scaled.price, I80F48::from_num(150));
         assert_eq!(scaled.confidence, I80F48::from_num(3));
         assert_eq!(scaled.source_time, 42);
 
         // A unit multiplier (non-integration banks) is the identity.
-        let identity = OraclePriceWithMultiplier {
-            oracle_price: base,
-            price_multiplier: I80F48::ONE,
-        }
-        .cb_observation()
-        .unwrap();
+        let identity = OraclePriceWithMultiplier::new(base, I80F48::ONE)
+            .cb_observation()
+            .unwrap();
         assert_eq!(identity.price, base.price);
         assert_eq!(identity.confidence, base.confidence);
     }
@@ -3414,7 +3433,7 @@ mod tests {
         data
     }
 
-    fn scope_ai<'a>(
+    fn mock_account_info<'a>(
         key: &'a Pubkey,
         owner: &'a Pubkey,
         lamports: &'a mut u64,
@@ -3429,7 +3448,7 @@ mod tests {
         let mut lamports = 0u64;
         // entry 42 = 103.445108 with exp 8 (scope stores value/10^exp), published at t=1000
         let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
 
         let feed = ScopePriceFeed::load_checked(&ai, 1060, 90, 42).unwrap();
         // value/10^exp, within I80F48 rounding of the decimal literal
@@ -3454,7 +3473,7 @@ mod tests {
         let key = Pubkey::new_unique();
         let mut lamports = 0u64;
         let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
 
         // Published at t=1000, read at t=999: a negative age must not count as fresh.
         assert_eq!(
@@ -3466,7 +3485,7 @@ mod tests {
 
         // A timestamp that does not fit i64 would wrap negative under a plain cast.
         let mut data = scope_account_data(42, 10_344_510_800, 8, u64::MAX);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
         assert_eq!(
             ScopePriceFeed::load_checked(&ai, 1000, 60, 42).unwrap_err(),
             MarginfiError::ScopeInvalidEntry.into()
@@ -3478,7 +3497,7 @@ mod tests {
         let key = Pubkey::new_unique();
         let mut lamports = 0u64;
         let mut data = scope_account_data(42, 10_344_510_800, 8, 1000);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
         let mint = Pubkey::new_unique();
 
         let mut config = BankConfig {
@@ -3550,19 +3569,19 @@ mod tests {
         let mut feed_data = scope_account_data(42, 10_344_510_800, 8, 1000);
         let mut venue_data = [0u8; 8];
         let mut impostor_data = [0u8; 8];
-        let feed_ai = scope_ai(
+        let feed_ai = mock_account_info(
             &feed_key,
             &SCOPE_PROGRAM_ID,
             &mut feed_lamports,
             &mut feed_data,
         );
-        let venue_ai = scope_ai(
+        let venue_ai = mock_account_info(
             &venue_key,
             &venue_owner,
             &mut venue_lamports,
             &mut venue_data,
         );
-        let impostor_ai = scope_ai(
+        let impostor_ai = mock_account_info(
             &impostor_key,
             &venue_owner,
             &mut impostor_lamports,
@@ -3575,18 +3594,12 @@ mod tests {
         let venue_then_feed = [venue_ai.clone(), feed_ai.clone()];
         let feed_only = [feed_ai.clone()];
 
-        for (setup, tag, venue_err) in [
-            (
-                OracleSetup::ScopeKamino,
-                ASSET_TAG_KAMINO,
-                MarginfiError::KaminoReserveValidationFailed,
-            ),
-            (
-                OracleSetup::ScopeJuplend,
-                ASSET_TAG_JUPLEND,
-                MarginfiError::JuplendLendingValidationFailed,
-            ),
-        ] {
+        // ScopeKamino: 2-account setup (feed + Kamino reserve).
+        {
+            let setup = OracleSetup::ScopeKamino;
+            let tag = ASSET_TAG_KAMINO;
+            let venue_err = MarginfiError::KaminoReserveValidationFailed;
+
             let mut config = BankConfig {
                 oracle_setup: setup,
                 scope_entry_index: 42,
@@ -3642,6 +3655,78 @@ mod tests {
                 MarginfiError::ScopeInvalidEntry.into()
             );
         }
+
+        {
+            let (liquidity_key, _) = derive_juplend_liquidity();
+            let mut liquidity_lamports = 0u64;
+            let mut liquidity_data = MinimalLiquidity::account_data(0); // active
+            let liquidity_ai = mock_account_info(
+                &liquidity_key,
+                &JUPLEND_LIQUIDITY_PROGRAM_ID,
+                &mut liquidity_lamports,
+                &mut liquidity_data,
+            );
+
+            let setup = OracleSetup::ScopeJuplend;
+            let tag = ASSET_TAG_JUPLEND;
+            let venue_err = MarginfiError::JuplendLendingValidationFailed;
+
+            let mut config = BankConfig {
+                oracle_setup: setup,
+                scope_entry_index: 42,
+                asset_tag: tag,
+                ..BankConfig::default()
+            };
+            config.oracle_keys[0] = feed_key;
+            config.oracle_keys[1] = venue_key;
+
+            let feed_venue_liquidity = [feed_ai.clone(), venue_ai.clone(), liquidity_ai.clone()];
+            let feed_impostor_liquidity =
+                [feed_ai.clone(), impostor_ai.clone(), liquidity_ai.clone()];
+            let feed_venue_only = [feed_ai.clone(), venue_ai.clone()];
+
+            validate(&config, mint, &feed_venue_liquidity).unwrap();
+
+            for other_tag in [
+                ASSET_TAG_DEFAULT,
+                ASSET_TAG_SOL,
+                ASSET_TAG_STAKED,
+                ASSET_TAG_DRIFT,
+                ASSET_TAG_SOLEND,
+                ASSET_TAG_KAMINO,
+                ASSET_TAG_JUPLEND,
+            ]
+            .into_iter()
+            .filter(|t| *t != tag)
+            {
+                config.asset_tag = other_tag;
+                assert_eq!(
+                    validate(&config, mint, &feed_venue_liquidity).unwrap_err(),
+                    MarginfiError::InvalidOracleSetup.into()
+                );
+            }
+            config.asset_tag = tag;
+
+            assert_eq!(
+                validate(&config, mint, &feed_impostor_liquidity).unwrap_err(),
+                venue_err.into()
+            );
+
+            assert_eq!(
+                validate(&config, mint, &feed_only).unwrap_err(),
+                MarginfiError::WrongNumberOfOracleAccounts.into()
+            );
+            assert_eq!(
+                validate(&config, mint, &feed_venue_only).unwrap_err(),
+                MarginfiError::WrongNumberOfOracleAccounts.into()
+            );
+
+            config.scope_entry_index = 300;
+            assert_eq!(
+                validate(&config, mint, &feed_venue_liquidity).unwrap_err(),
+                MarginfiError::ScopeInvalidEntry.into()
+            );
+        }
     }
 
     #[test]
@@ -3651,7 +3736,7 @@ mod tests {
 
         let mut data = scope_account_data(1, 1_000, 2, 500);
         let not_scope = Pubkey::new_unique();
-        let ai = scope_ai(&key, &not_scope, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &not_scope, &mut lamports, &mut data);
         assert_eq!(
             ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
             MarginfiError::ScopeInvalidAccount.into()
@@ -3659,7 +3744,7 @@ mod tests {
 
         let mut bad_disc = scope_account_data(1, 1_000, 2, 500);
         bad_disc[0] ^= 0xff;
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_disc);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_disc);
         assert_eq!(
             ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
             MarginfiError::ScopeInvalidAccount.into()
@@ -3668,7 +3753,7 @@ mod tests {
         let mut short = scope_account_data(1, 1_000, 2, 500);
         let full_len = short.len();
         short.truncate(full_len - 1);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut short);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut short);
         assert_eq!(
             ScopePriceFeed::load_checked(&ai, 500, 90, 1).unwrap_err(),
             MarginfiError::ScopeInvalidAccount.into()
@@ -3680,7 +3765,7 @@ mod tests {
         let key = Pubkey::new_unique();
         let mut lamports = 0u64;
         let mut data = scope_account_data(7, 1_000, 2, 500);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
 
         // Entry 8 was never written: all zeroes must not read as a price of 0.
         assert_eq!(
@@ -3695,10 +3780,199 @@ mod tests {
 
         // Exponent past the power-of-ten table would otherwise panic on indexing.
         let mut bad_exp = scope_account_data(7, 1_000, MAX_EXP_10_I80F48 as u64, 500);
-        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_exp);
+        let ai = mock_account_info(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut bad_exp);
         assert_eq!(
             ScopePriceFeed::load_checked(&ai, 500, 90, 7).unwrap_err(),
             MarginfiError::ScopeInvalidEntry.into()
+        );
+    }
+
+    fn borrow_power(key: &Pubkey, owner: &Pubkey, data: &mut Vec<u8>) -> MarginfiResult<bool> {
+        let mut lamports = 0u64;
+        let ai = mock_account_info(key, owner, &mut lamports, data);
+        juplend_has_borrow_power(&ai)
+    }
+
+    #[test]
+    fn juplend_has_borrow_power_cases() {
+        let owner = JUPLEND_LIQUIDITY_PROGRAM_ID;
+        let mut bad_disc = MinimalLiquidity::account_data(0);
+        bad_disc[0] ^= 0xff;
+        let mut truncated = MinimalLiquidity::account_data(0);
+        truncated.pop();
+        let mut oversized = MinimalLiquidity::account_data(0);
+        oversized.push(0);
+
+        let cases: Vec<(&str, Pubkey, Vec<u8>, bool)> = vec![
+            ("active", owner, MinimalLiquidity::account_data(0), true),
+            ("locked", owner, MinimalLiquidity::account_data(1), false),
+            (
+                "unknown status",
+                owner,
+                MinimalLiquidity::account_data(255),
+                false,
+            ),
+            (
+                "wrong owner",
+                Pubkey::new_unique(),
+                MinimalLiquidity::account_data(0),
+                false,
+            ),
+            ("bad discriminator", owner, bad_disc, false),
+            ("truncated", owner, truncated, false),
+            ("oversized", owner, oversized, true),
+            ("empty", owner, vec![], false),
+        ];
+        for (name, owner, mut data, expected) in cases {
+            assert_eq!(
+                borrow_power(&JUPLEND_LIQUIDITY_PDA, &owner, &mut data),
+                Ok(expected),
+                "{}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn juplend_has_borrow_power_wrong_key_is_hard_error() {
+        let mut data = MinimalLiquidity::account_data(0);
+        assert!(borrow_power(
+            &Pubkey::new_unique(),
+            &JUPLEND_LIQUIDITY_PROGRAM_ID,
+            &mut data
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn scope_juplend_validation_requires_juplend_accounts() {
+        let mut bank = Bank::zeroed();
+        bank.config.oracle_setup = OracleSetup::ScopeJuplend;
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.config.oracle_keys[1] = Pubkey::new_unique();
+        bank.config.scope_entry_index = 0;
+
+        let scope_key = bank.config.oracle_keys[0];
+        let lending_key = bank.config.oracle_keys[1];
+        let mut scope_lamports = 0;
+        let mut scope_data = [0u8; 1];
+        let mut lending_lamports = 0;
+        let mut lending_data = [0u8; 1];
+        let owner = Pubkey::new_unique();
+
+        let ais = vec![
+            AccountInfo::new(
+                &scope_key,
+                false,
+                false,
+                &mut scope_lamports,
+                &mut scope_data,
+                &owner,
+                false,
+            ),
+            AccountInfo::new(
+                &lending_key,
+                false,
+                false,
+                &mut lending_lamports,
+                &mut lending_data,
+                &owner,
+                false,
+            ),
+        ];
+
+        let result =
+            bank.config
+                .validate_oracle_setup(Pubkey::new_unique(), &ais, None, None, None);
+        assert_eq!(
+            result.unwrap_err(),
+            MarginfiError::WrongNumberOfOracleAccounts.into()
+        );
+    }
+
+    #[test]
+    fn scope_juplend_validation_requires_correct_lending_and_liquidity_keys() {
+        let mut bank = Bank::zeroed();
+        bank.config.oracle_setup = OracleSetup::ScopeJuplend;
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.config.oracle_keys[1] = Pubkey::new_unique();
+        bank.config.scope_entry_index = 0;
+
+        let scope_key = bank.config.oracle_keys[0];
+        let lending_key = bank.config.oracle_keys[1];
+        let wrong_liquidity_key = Pubkey::new_unique();
+        let mut scope_lamports = 0;
+        let mut scope_data = [0u8; 1];
+        let mut lending_lamports = 0;
+        let mut lending_data = [0u8; 1];
+        let mut liquidity_lamports = 0;
+        let mut liquidity_data = [0u8; 1];
+        let owner = Pubkey::new_unique();
+
+        let ais = vec![
+            AccountInfo::new(
+                &scope_key,
+                false,
+                false,
+                &mut scope_lamports,
+                &mut scope_data,
+                &owner,
+                false,
+            ),
+            AccountInfo::new(
+                &lending_key,
+                false,
+                false,
+                &mut lending_lamports,
+                &mut lending_data,
+                &owner,
+                false,
+            ),
+            AccountInfo::new(
+                &wrong_liquidity_key,
+                false,
+                false,
+                &mut liquidity_lamports,
+                &mut liquidity_data,
+                &owner,
+                false,
+            ),
+        ];
+
+        let result =
+            bank.config
+                .validate_oracle_setup(Pubkey::new_unique(), &ais, None, None, None);
+        assert_eq!(
+            result.unwrap_err(),
+            MarginfiError::JuplendLiquidityValidationFailed.into()
+        );
+    }
+
+    #[test]
+    fn juplend_has_borrow_power_fails_on_try_borrow_data_error() {
+        let liquidity_key = JUPLEND_LIQUIDITY_PDA;
+        let owner = JUPLEND_LIQUIDITY_PROGRAM_ID;
+        let mut lamports = 0u64;
+        let mut data = [0u8; 1];
+
+        let broken_account = AccountInfo::new(
+            &liquidity_key,
+            false,
+            true,
+            &mut lamports,
+            &mut data,
+            &owner,
+            false,
+        );
+
+        let _guard = broken_account.try_borrow_mut_data().unwrap();
+        let result = juplend_has_borrow_power(&broken_account);
+        assert_eq!(
+            result,
+            Ok(false),
+            "Failed borrow_data should result in disabled borrow power"
         );
     }
 }

@@ -9,7 +9,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Marginfi } from "../../../target/types/marginfi";
 import type { JuplendConfigCompact } from "./types";
 import type { JuplendPoolKeys } from "./types";
-import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import { findJuplendLiquidityPda, JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
 
 export type AddJuplendBankAccounts = {
   group: PublicKey;
@@ -40,9 +40,12 @@ export const addJuplendBankIx = async (
 ): Promise<TransactionInstruction> => {
   const tokenProgram = accounts.tokenProgram ?? TOKEN_PROGRAM_ID;
 
+  const [juplendLiquidity] = findJuplendLiquidityPda();
+
   const remainingAccounts: AccountMeta[] = [
     { pubkey: accounts.oracle, isSigner: false, isWritable: false },
     { pubkey: accounts.jupLendingState, isSigner: false, isWritable: false },
+    { pubkey: juplendLiquidity, isSigner: false, isWritable: false },
   ];
 
   return program.methods

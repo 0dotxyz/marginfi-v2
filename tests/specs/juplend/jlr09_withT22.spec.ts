@@ -60,7 +60,9 @@ import {
 import {
   deriveJuplendMrgnAddresses,
   deriveJuplendPoolKeys,
+  findJuplendLiquidityPda,
 } from "../../utils/juplend/juplend-pdas";
+import { buildJuplendOracleAccounts } from "../../utils/juplend/juplend-layout";
 import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
 import {
   makeJuplendWithdrawSimpleIx,
@@ -76,6 +78,7 @@ import {
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
   MarginfiHealthCacheRaw,
+  ASSET_TAG_JUPLEND,
   blankBankConfigOptRaw,
 } from "../../utils/types";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
@@ -563,11 +566,18 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
     const liquidateeRemaining = await buildHealthRemainingAccounts(
       borrowerMarginfiAccount.publicKey,
     );
-    const liqOracleAccounts: PublicKey[] = [
-      assetBank.config.oracleKeys[0],
-      assetBank.config.oracleKeys[1],
-      liabBank.config.oracleKeys[0],
-    ];
+    const [juplendLiquidity] = findJuplendLiquidityPda();
+    const liqOracleAccounts: PublicKey[] = [];
+    
+    if (assetBank.config.assetTag === ASSET_TAG_JUPLEND) {
+      liqOracleAccounts.push(...buildJuplendOracleAccounts(assetBank, juplendLiquidity));
+    } else {
+      liqOracleAccounts.push(assetBank.config.oracleKeys[0]);
+      if (!assetBank.config.oracleKeys[1].equals(PublicKey.default)) {
+        liqOracleAccounts.push(assetBank.config.oracleKeys[1]);
+      }
+    }
+    liqOracleAccounts.push(liabBank.config.oracleKeys[0]);
 
     const liqIx = await liquidateIx(liquidator.mrgnBankrunProgram!, {
       assetBankKey: t22JuplendBankPk,

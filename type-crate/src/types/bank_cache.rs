@@ -63,7 +63,8 @@ pub struct BankCache {
     ///   ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
     ///   bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    _cb_cache_pad: [u8; 7],
+    pub borrow_power_disabled: u8,
+    _cb_cache_pad: [u8; 6],
     /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
     /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
     /// for consumers who are only interested in reading the oracle price and are applying the
@@ -117,5 +118,28 @@ impl BankCache {
 
     pub fn clear_liquidation_price_cache_locked(&mut self) {
         self.liq_cache_flags &= !Self::LIQ_CACHE_LOCKED_FLAG;
+    }
+
+    pub fn borrow_power_enabled(&self) -> bool {
+        self.borrow_power_disabled == 0
+    }
+
+    pub fn record_borrow_power(&mut self, has_borrow_power: bool) {
+        self.borrow_power_disabled = u8::from(!has_borrow_power);
+    }
+}
+
+#[cfg(test)]
+mod record_borrow_power_tests {
+    use super::*;
+
+    #[test]
+    fn records_active_juplend() {
+        let mut cache = BankCache::default();
+        cache.record_borrow_power(true);
+        assert!(cache.borrow_power_enabled());
+
+        cache.record_borrow_power(false);
+        assert!(!cache.borrow_power_enabled());
     }
 }

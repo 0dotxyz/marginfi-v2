@@ -41,7 +41,8 @@ import {
   deriveLiquidityVaultAuthority,
   deriveLiquidationRecord,
 } from "../../utils/pdas";
-import { deriveJuplendPoolKeys } from "../../utils/juplend/juplend-pdas";
+import { deriveJuplendPoolKeys, findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
+import { buildJuplendOracleAccounts } from "../../utils/juplend/juplend-layout";
 import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
 import {
   makeJuplendWithdrawSimpleIx,
@@ -69,6 +70,7 @@ import {
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
   ORACLE_CONF_INTERVAL,
+  ASSET_TAG_JUPLEND,
   blankBankConfigOptRaw,
   defaultBankConfigOptRaw,
 } from "../../utils/types";
@@ -359,18 +361,25 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       user1MarginfiAccount.publicKey,
     );
 
+    const remainingAccounts = [
+      assetBank.config.oracleKeys[0],
+      assetBank.config.oracleKeys[1],
+      liabBank.config.oracleKeys[0],
+      ...liquidatorRemaining,
+      ...liquidateeRemaining,
+    ];
+    
+    if (assetBank.config.assetTag === ASSET_TAG_JUPLEND) {
+      const [juplendLiquidity] = findJuplendLiquidityPda();
+      remainingAccounts.splice(2, 0, juplendLiquidity); 
+    }
+
     const liqIx = await liquidateIx(users[0].mrgnBankrunProgram!, {
       assetBankKey: jupUsdcBankPk,
       liabilityBankKey: regTokenBBankPk,
       liquidatorMarginfiAccount: user0MarginfiAccountPk,
       liquidateeMarginfiAccount: user1MarginfiAccount.publicKey,
-      remaining: [
-        assetBank.config.oracleKeys[0],
-        assetBank.config.oracleKeys[1],
-        liabBank.config.oracleKeys[0],
-        ...liquidatorRemaining,
-        ...liquidateeRemaining,
-      ],
+      remaining: remainingAccounts,
       amount: JUP_USDC_LIQUIDATION_AMOUNT,
       liquidateeAccounts: liquidateeRemaining.length,
       liquidatorAccounts: liquidatorRemaining.length,
@@ -522,19 +531,24 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       true,
     );
 
-    const assetGroup: PublicKey[] = [
-      jupUsdcBankPk,
-      assetBank.config.oracleKeys[0],
-    ];
-    if (!assetBank.config.oracleKeys[1].equals(PublicKey.default)) {
-      assetGroup.push(assetBank.config.oracleKeys[1]);
+    const [juplendLiquidity] = findJuplendLiquidityPda();
+    const assetGroup: PublicKey[] = [jupUsdcBankPk];
+    if (assetBank.config.assetTag === ASSET_TAG_JUPLEND) {
+      assetGroup.push(...buildJuplendOracleAccounts(assetBank, juplendLiquidity));
+    } else {
+      assetGroup.push(assetBank.config.oracleKeys[0]);
+      if (!assetBank.config.oracleKeys[1].equals(PublicKey.default)) {
+        assetGroup.push(assetBank.config.oracleKeys[1]);
+      }
     }
-    const liabGroup: PublicKey[] = [
-      regTokenBBankPk,
-      liabBank.config.oracleKeys[0],
-    ];
-    if (!liabBank.config.oracleKeys[1].equals(PublicKey.default)) {
-      liabGroup.push(liabBank.config.oracleKeys[1]);
+    const liabGroup: PublicKey[] = [regTokenBBankPk];
+    if (liabBank.config.assetTag === ASSET_TAG_JUPLEND) {
+      liabGroup.push(...buildJuplendOracleAccounts(liabBank, juplendLiquidity));
+    } else {
+      liabGroup.push(liabBank.config.oracleKeys[0]);
+      if (!liabBank.config.oracleKeys[1].equals(PublicKey.default)) {
+        liabGroup.push(liabBank.config.oracleKeys[1]);
+      }
     }
     const remainingGroups: PublicKey[][] = [assetGroup, liabGroup];
     const remaining = composeRemainingAccounts(remainingGroups);

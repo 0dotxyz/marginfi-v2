@@ -11,10 +11,10 @@ use {
             LIQUIDATION_RECORD_SEED, ORDER_SEED,
         },
         pdas::{
-            derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
+            derive_juplend_claim_account, derive_juplend_lending_admin,
             derive_juplend_liquidity_vault, derive_juplend_rate_model,
             derive_juplend_rewards_rate_model, derive_staked_onramp_from_vote,
-            JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
+            JUPLEND_LIQUIDITY_PDA, JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
@@ -319,7 +319,6 @@ pub fn derive_juplend_cpi_accounts_for_lending(
 ) -> JuplendCpiAccounts {
     let (lending_admin, _) = derive_juplend_lending_admin();
     let (rate_model, _) = derive_juplend_rate_model(mint);
-    let (liquidity, _) = derive_juplend_liquidity();
     let vault = derive_juplend_liquidity_vault(mint, token_program);
     let (claim_account, _) = derive_juplend_claim_account(liquidity_vault_authority, mint);
     let (rewards_rate_model, _) = derive_juplend_rewards_rate_model(mint);
@@ -331,7 +330,7 @@ pub fn derive_juplend_cpi_accounts_for_lending(
         lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
         rate_model,
         vault,
-        liquidity,
+        liquidity: JUPLEND_LIQUIDITY_PDA,
         liquidity_program: JUPLEND_LIQUIDITY_PROGRAM_ID,
         rewards_rate_model,
         claim_account,
@@ -423,17 +422,19 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::JuplendPythPull
         | OracleSetup::JuplendSwitchboardPull
         | OracleSetup::ScopeKamino
-        | OracleSetup::ScopeJuplend => vec![keys[0], keys[1]],
-        // Pyth + Marinade State / SPL StakePool / Exponent vault
-        OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
-            vec![keys[0], keys[1]]
-        }
-        // Pyth + reserve/lending + Marinade State / SPL StakePool
+        | OracleSetup::ScopeJuplend
+        | OracleSetup::PythMSOL
+        | OracleSetup::PythLST
+        | OracleSetup::PTPyth => vec![keys[0], keys[1]],
         OracleSetup::KaminoMSOL
-        | OracleSetup::JuplendMSOL
         | OracleSetup::KaminoLST
+        | OracleSetup::JuplendMSOL
         | OracleSetup::JuplendLST => vec![keys[0], keys[1], keys[2]],
     };
+
+    if bank.config.oracle_setup.requires_juplend_liquidity() {
+        out.push(JUPLEND_LIQUIDITY_PDA);
+    }
 
     out.retain(|pk| *pk != Pubkey::default());
     out

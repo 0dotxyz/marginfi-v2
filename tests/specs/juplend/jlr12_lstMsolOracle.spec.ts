@@ -3,6 +3,8 @@ import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
 import {
   bankrunProgram,
+  bankrunContext,
+  banksClient,
   groupAdmin,
   juplendAccounts,
   oracles,
@@ -19,6 +21,7 @@ import {
   ORACLE_SETUP_KAMINO_LST,
 } from "../../utils/types";
 import { JUPLEND_STATE_KEYS } from "../../utils/juplend/test-state";
+import { findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
 import { assert } from "chai";
 
 const MSOL_STATE = new PublicKey(
@@ -30,6 +33,7 @@ let program: Program<Marginfi>;
 let bank: PublicKey;
 let lending: PublicKey;
 let origOracle: PublicKey;
+const [liquidityPda] = findJuplendLiquidityPda();
 
 describe("JupLend LST / mSOL oracle setups", () => {
   before(async () => {
@@ -64,6 +68,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
         await setOracle(ORACLE_SETUP_JUPLEND_LST, oracles.wsolOracle.publicKey, [
           lending,
           BSOL_POOL,
+          liquidityPda,
         ]);
       },
       "StakePoolValidationFailed",
@@ -77,6 +82,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
         await setOracle(ORACLE_SETUP_JUPLEND_MSOL, oracles.wsolOracle.publicKey, [
           lending,
           MSOL_STATE,
+          liquidityPda,
         ]);
       },
       "MarinadeStateValidationFailed",
@@ -103,7 +109,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
         await setOracle(
           ORACLE_SETUP_JUPLEND_LST,
           oracles.wsolOracle.publicKey,
-          [lending],
+          [lending, BSOL_POOL], 
         );
       },
       "WrongNumberOfOracleAccounts",
@@ -117,7 +123,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
         await setOracle(
           ORACLE_SETUP_JUPLEND_LST,
           oracles.wsolOracle.publicKey,
-          [Keypair.generate().publicKey, BSOL_POOL],
+          [Keypair.generate().publicKey, BSOL_POOL, liquidityPda],
         );
       },
       "JuplendLendingValidationFailed",
@@ -131,7 +137,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
         await setOracle(
           ORACLE_SETUP_JUPLEND_LST,
           oracles.wsolOracle.publicKey,
-          [lending, Keypair.generate().publicKey],
+          [lending, Keypair.generate().publicKey, liquidityPda],
         );
       },
       "StakePoolValidationFailed",
@@ -139,8 +145,43 @@ describe("JupLend LST / mSOL oracle setups", () => {
     );
   });
 
+  it("(admin) successfully configures JuplendLST with valid accounts - succeeds", async () => {
+    
+    const usdcBank = await program.account.bank.fetch(bank);
+    const usdcMint = usdcBank.mint;
+
+    const tempStakePool = Keypair.generate();
+    const bsolPoolAcc = await banksClient.getAccount(BSOL_POOL);
+    if (!bsolPoolAcc) {
+      throw new Error("BSOL_POOL account not found");
+    }
+
+    const data = Buffer.from(bsolPoolAcc.data);
+    usdcMint.toBuffer().copy(data, 162); 
+
+    bankrunContext.setAccount(tempStakePool.publicKey, {
+      lamports: bsolPoolAcc.lamports,
+      data,
+      owner: bsolPoolAcc.owner,
+      executable: bsolPoolAcc.executable,
+      rentEpoch: bsolPoolAcc.rentEpoch,
+    });
+
+    await setOracle(ORACLE_SETUP_JUPLEND_LST, oracles.wsolOracle.publicKey, [
+      lending,
+      tempStakePool.publicKey,
+      liquidityPda,
+    ]);
+
+    const { config } = await program.account.bank.fetch(bank);
+    assert.deepEqual(config.oracleSetup, { juplendLst: {} });
+    assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
+    assertKeysEqual(config.oracleKeys[1], lending);
+    assertKeysEqual(config.oracleKeys[2], tempStakePool.publicKey);
+  });
+
   it("(admin) restores the bank oracle", async () => {
-    await setOracle(ORACLE_SETUP_JUPLEND_PYTH_PULL, origOracle, [lending]);
+    await setOracle(ORACLE_SETUP_JUPLEND_PYTH_PULL, origOracle, [lending, liquidityPda]);
     const { config } = await program.account.bank.fetch(bank);
     assert.deepEqual(config.oracleSetup, { juplendPythPull: {} });
     assertKeysEqual(config.oracleKeys[0], origOracle);

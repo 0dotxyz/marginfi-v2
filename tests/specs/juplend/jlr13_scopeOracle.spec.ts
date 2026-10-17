@@ -14,6 +14,7 @@ import {
   ecosystem,
   globalProgramAdmin,
   groupAdmin,
+  juplendAccounts,
   oracles,
   users,
 } from "../../rootHooks";
@@ -55,13 +56,19 @@ import {
 } from "../../utils/types";
 import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
 
-import { deriveJuplendMrgnAddresses } from "../../utils/juplend/juplend-pdas";
+import {
+  deriveJuplendMrgnAddresses,
+  findJuplendLiquidityPda,
+} from "../../utils/juplend/juplend-pdas";
 import {
   defaultJuplendBankConfig,
   type JuplendConfigCompact,
   type JuplendPoolKeys,
 } from "../../utils/juplend/types";
 import { fetchJuplendPool } from "../../utils/juplend/jlr-pool-setup";
+import {
+  JUPLEND_STATE_KEYS,
+} from "../../utils/juplend/test-state";
 import {
   addJuplendBankIx,
   makeJuplendInitPositionIx,
@@ -104,6 +111,7 @@ let borrowBank: PublicKey;
 let adminAccount: PublicKey;
 let userUsdcStart = 0;
 let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
+const [liquidityPda] = findJuplendLiquidityPda();
 
 describe("jlr13: Scope-priced JupLend bank", () => {
   const juplendGroup = Keypair.fromSeed(JUPLEND_SC_GROUP_SEED);
@@ -287,6 +295,8 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       })
     );
     await processBankrunTransaction(ctx, initPosTx, [groupAdmin.wallet]);
+
+    juplendAccounts.set(JUPLEND_STATE_KEYS.jlr13BankUsdcScope, scopeJuplendBank);
   });
 
   it("(admin) configure_bank_oracle rejects ScopeJuplend - use configure_bank_oracle_scope", async () => {
@@ -315,21 +325,21 @@ describe("jlr13: Scope-priced JupLend bank", () => {
 
   it("(admin) configure scope with the wrong lending state - fails, JuplendLendingValidationFailed", async () => {
     const wrongLending = Keypair.generate().publicKey;
-    const result = await scopeConfigure(ENTRY.index, [wrongLending], true);
+    const result = await scopeConfigure(ENTRY.index, [wrongLending, liquidityPda], true);
     assertBankrunTxFailed(result, 6501);
   });
 
   it("(admin) configure scope against an unrefreshed entry - fails, ScopeInvalidEntry", async () => {
     const result = await scopeConfigure(
       UNREFRESHED_ENTRY,
-      [pool.lending],
+      [pool.lending, liquidityPda],
       true
     );
     assertBankrunTxFailed(result, 6801);
   });
 
   it("(admin) configure scope [feed, lending] - happy path", async () => {
-    await scopeConfigure(ENTRY.index, [pool.lending]);
+    await scopeConfigure(ENTRY.index, [pool.lending, liquidityPda]);
 
     const bank = await bankrunProgram.account.bank.fetch(scopeJuplendBank);
     assert.deepEqual(bank.config.oracleSetup, { scopeJuplend: {} });
@@ -343,7 +353,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
 
   it("(attacker) pulse with the wrong lending state - fails, JuplendLendingValidationFailed", async () => {
     await freshenFeed();
-    const result = await pulse([feed, Keypair.generate().publicKey], true);
+    const result = await pulse([feed, Keypair.generate().publicKey, liquidityPda], true);
     assertBankrunTxFailed(result, 6501);
   });
 
@@ -353,9 +363,16 @@ describe("jlr13: Scope-priced JupLend bank", () => {
     assertBankrunTxFailed(result, 6051);
   });
 
+  it("(attacker) pulse with wrong liquidity PDA - fails, JuplendLiquidityValidationFailed", async () => {
+    await freshenFeed();
+    const wrongLiquidityPda = Keypair.generate().publicKey;
+    const result = await pulse([feed, pool.lending, wrongLiquidityPda], true);
+    assertBankrunTxFailed(result, 6514);
+  });
+
   it("pulse caches the scope price and the token exchange price separately", async () => {
     await freshenFeed();
-    await pulse([feed, pool.lending]);
+    await pulse([feed, pool.lending, liquidityPda]);
 
     const bank = await bankrunProgram.account.bank.fetch(scopeJuplendBank);
     const lending = await juplendPrograms.lending.account.lending.fetch(
@@ -377,7 +394,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       ecosystem.usdcDecimals
     ).oracleMaxAge;
     await freshenFeed(maxAge + 60);
-    const result = await pulse([feed, pool.lending], true);
+    const result = await pulse([feed, pool.lending, liquidityPda], true);
     // ScopeStalePrice
     assertBankrunTxFailed(result, 6802);
     await freshenFeed();
@@ -507,7 +524,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
         bank: borrowBank,
         tokenAccount: user.tokenAAccount,
         remaining: composeRemainingAccounts([
-          [scopeJuplendBank, feed, pool.lending],
+          [scopeJuplendBank, feed, pool.lending, liquidityPda],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
         amount: BORROW_AMOUNT,
@@ -532,7 +549,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining: composeRemainingAccounts([
-          [scopeJuplendBank, feed, pool.lending],
+          [scopeJuplendBank, feed, pool.lending, liquidityPda],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
       })
@@ -602,7 +619,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
         pool,
         amount: withdrawAmount,
         remainingAccounts: composeRemainingAccounts([
-          [scopeJuplendBank, feed, pool.lending],
+          [scopeJuplendBank, feed, pool.lending, liquidityPda],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
       })
@@ -634,7 +651,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
         amount: BORROW_AMOUNT,
         repayAll: true,
         remaining: composeRemainingAccounts([
-          [scopeJuplendBank, feed, pool.lending],
+          [scopeJuplendBank, feed, pool.lending, liquidityPda],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
       })

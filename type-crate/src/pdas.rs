@@ -9,6 +9,7 @@ pub const JUPLEND_LENDING_PROGRAM_ID: Pubkey =
     pubkey!("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9");
 pub const JUPLEND_LIQUIDITY_PROGRAM_ID: Pubkey =
     pubkey!("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC");
+pub const JUPLEND_LIQUIDITY_PDA: Pubkey = pubkey!("7s1da8DduuBFqGra5bJBjpnvL5E9mGzCuMk1Qkh4or2Z");
 pub const JUPLEND_REWARDS_PROGRAM_ID: Pubkey =
     pubkey!("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar");
 pub const SPL_SINGLE_POOL_PROGRAM_ID: Pubkey =
@@ -287,4 +288,14 @@ pub fn derive_bank_vault_authority(
     program_id: &Pubkey,
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(crate::bank_authority_seed!(vault_type, bank_pk), program_id)
+}
+
+#[cfg(test)]
+mod juplend_liquidity_pda_tests {
+    use super::*;
+
+    #[test]
+    fn liquidity_pda_const_matches_derivation() {
+        assert_eq!(derive_juplend_liquidity().0, JUPLEND_LIQUIDITY_PDA);
+    }
 }

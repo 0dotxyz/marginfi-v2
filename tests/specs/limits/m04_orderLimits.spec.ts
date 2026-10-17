@@ -59,6 +59,7 @@ import {
 } from "../../utils/juplend/shorthand-instructions";
 import { JuplendPoolKeys } from "../../utils/juplend/types";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
+import { findJuplendLiquidityPda } from "../../utils/juplend/juplend-pdas";
 import { refreshPullOracles } from "../../utils/pyth-pull-mocks";
 import {
   createLookupTableForInstructions,
@@ -185,10 +186,12 @@ SCENARIOS.forEach(
             if (!juplendPool) {
               throw new Error("Juplend banks exist without a Juplend pool");
             }
+            const [juplendLiquidity] = findJuplendLiquidityPda();
             groups.push([
               bank,
               oracles.tokenAOracle.publicKey,
               juplendPool.lending,
+              juplendLiquidity,
             ]);
           }
           return groups;

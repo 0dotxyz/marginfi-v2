@@ -134,17 +134,28 @@ fn check_drift_market_fresh(market: &MinimalSpotMarket, clock: &Clock) -> Margin
     Ok(())
 }
 
-/// The bank's rate-bearing venue account within `oracle_ais`: the LAST one, since the price oracle,
-/// if any, precedes it. Works for fixed and live-oracle variants alike; native banks have none.
 fn venue_ai<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
-) -> Option<&'info AccountInfo<'info>> {
-    if is_integration_asset_tag(bank.config.asset_tag) {
+) -> MarginfiResult<Option<&'info AccountInfo<'info>>> {
+    let tag = bank.config.asset_tag;
+    if tag == ASSET_TAG_JUPLEND {
+        let idx = bank
+            .config
+            .oracle_setup
+            .juplend_layout()
+            .ok_or(MarginfiError::InvalidOracleSetup)?
+            .lending;
+        return oracle_ais
+            .get(idx)
+            .map(Some)
+            .ok_or_else(|| error!(MarginfiError::WrongNumberOfOracleAccounts));
+    }
+    Ok(if is_integration_asset_tag(tag) {
         oracle_ais.last()
     } else {
         None
-    }
+    })
 }
 
 /// Supply APR for `bank` as it would read after `extra_native` NATIVE tokens are supplied to it,
@@ -159,7 +170,7 @@ pub fn rate_at<'info>(
 ) -> MarginfiResult<I80F48> {
     current_supply_apr(
         bank,
-        venue_ai(bank, oracle_ais),
+        venue_ai(bank, oracle_ais)?,
         token_reserve,
         rewards,
         extra_native,
@@ -178,7 +189,7 @@ pub fn rate_of<'info>(
 ) -> MarginfiResult<I80F48> {
     current_supply_apr(
         bank,
-        venue_ai(bank, oracle_ais),
+        venue_ai(bank, oracle_ais)?,
         token_reserve,
         rewards,
         0,
@@ -197,7 +208,7 @@ pub fn venue_remaining_capacity<'info>(
     if !is_integration_asset_tag(tag) {
         return Ok(None);
     }
-    let venue = venue_ai(bank, oracle_ais).ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    let venue = venue_ai(bank, oracle_ais)?.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     match tag {
         ASSET_TAG_KAMINO => {
             let loader = load_kamino_reserve(&bank.config, venue)?;
@@ -607,5 +618,155 @@ mod slot_pacing {
         );
         assert!(slots_per_second_from(3_599, 3_600).is_none());
         assert!(slots_per_second_from(14_401, 3_600).is_none());
+    }
+}
+
+#[cfg(test)]
+mod venue_ai_selection {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::OracleSetup;
+
+    #[test]
+    fn table_driven_juplend_setups_select_correct_venue_index() {
+        let cases = [
+            (OracleSetup::FixedJuplend, 2, 0),
+            (OracleSetup::JuplendPythPull, 3, 1),
+            (OracleSetup::JuplendSwitchboardPull, 3, 1),
+            (OracleSetup::ScopeJuplend, 3, 1),
+            (OracleSetup::JuplendMSOL, 4, 1),
+            (OracleSetup::JuplendLST, 4, 1),
+        ];
+
+        for (setup, num_accounts, expected_lending_idx) in cases {
+            let mut bank = Bank::zeroed();
+            bank.config.asset_tag = ASSET_TAG_JUPLEND;
+            bank.config.oracle_setup = setup;
+
+            let keys: Vec<Pubkey> = (0..num_accounts).map(|_| Pubkey::new_unique()).collect();
+
+            if num_accounts == 2 {
+                let key_0 = keys[0];
+                let key_1 = keys[1];
+                let mut lam_0 = 0;
+                let mut lam_1 = 0;
+                let mut dat_0 = [];
+                let mut dat_1 = [];
+                let ais = vec![
+                    AccountInfo::new(&key_0, false, false, &mut lam_0, &mut dat_0, &key_0, false),
+                    AccountInfo::new(&key_1, false, false, &mut lam_1, &mut dat_1, &key_1, false),
+                ];
+                assert_eq!(
+                    venue_ai(&bank, &ais).unwrap().unwrap().key,
+                    &keys[expected_lending_idx],
+                    "Setup {:?}: expected lending at index {}",
+                    setup,
+                    expected_lending_idx
+                );
+            } else if num_accounts == 3 {
+                let key_0 = keys[0];
+                let key_1 = keys[1];
+                let key_2 = keys[2];
+                let mut lam_0 = 0;
+                let mut lam_1 = 0;
+                let mut lam_2 = 0;
+                let mut dat_0 = [];
+                let mut dat_1 = [];
+                let mut dat_2 = [];
+                let ais = vec![
+                    AccountInfo::new(&key_0, false, false, &mut lam_0, &mut dat_0, &key_0, false),
+                    AccountInfo::new(&key_1, false, false, &mut lam_1, &mut dat_1, &key_1, false),
+                    AccountInfo::new(&key_2, false, false, &mut lam_2, &mut dat_2, &key_2, false),
+                ];
+                assert_eq!(
+                    venue_ai(&bank, &ais).unwrap().unwrap().key,
+                    &keys[expected_lending_idx],
+                    "Setup {:?}: expected lending at index {}",
+                    setup,
+                    expected_lending_idx
+                );
+            } else if num_accounts == 4 {
+                let key_0 = keys[0];
+                let key_1 = keys[1];
+                let key_2 = keys[2];
+                let key_3 = keys[3];
+                let mut lam_0 = 0;
+                let mut lam_1 = 0;
+                let mut lam_2 = 0;
+                let mut lam_3 = 0;
+                let mut dat_0 = [];
+                let mut dat_1 = [];
+                let mut dat_2 = [];
+                let mut dat_3 = [];
+                let ais = vec![
+                    AccountInfo::new(&key_0, false, false, &mut lam_0, &mut dat_0, &key_0, false),
+                    AccountInfo::new(&key_1, false, false, &mut lam_1, &mut dat_1, &key_1, false),
+                    AccountInfo::new(&key_2, false, false, &mut lam_2, &mut dat_2, &key_2, false),
+                    AccountInfo::new(&key_3, false, false, &mut lam_3, &mut dat_3, &key_3, false),
+                ];
+                assert_eq!(
+                    venue_ai(&bank, &ais).unwrap().unwrap().key,
+                    &keys[expected_lending_idx],
+                    "Setup {:?}: expected lending at index {}",
+                    setup,
+                    expected_lending_idx
+                );
+            }
+        }
+    }
+
+    /// Short account slices should error with WrongNumberOfOracleAccounts.
+    #[test]
+    fn juplend_short_slice_errors() {
+        let short_cases = [
+            OracleSetup::FixedJuplend,
+            OracleSetup::JuplendPythPull,
+            OracleSetup::JuplendSwitchboardPull,
+            OracleSetup::ScopeJuplend,
+            OracleSetup::JuplendMSOL,
+            OracleSetup::JuplendLST,
+        ];
+
+        for setup in short_cases {
+            let mut bank = Bank::zeroed();
+            bank.config.asset_tag = ASSET_TAG_JUPLEND;
+            bank.config.oracle_setup = setup;
+
+            // Test with empty slice
+            let err = venue_ai(&bank, &[]).unwrap_err();
+            assert_eq!(
+                err,
+                MarginfiError::WrongNumberOfOracleAccounts.into(),
+                "Setup {:?} with 0 accounts should error with WrongNumberOfOracleAccounts",
+                setup
+            );
+        }
+    }
+
+    /// Invalid setup combinations: JupLend asset tag with non-JupLend setup should error.
+    #[test]
+    fn juplend_tag_non_juplend_setup_errors() {
+        let invalid_setups = [
+            OracleSetup::Fixed,
+            OracleSetup::PythPushOracle,
+            OracleSetup::SwitchboardPull,
+            OracleSetup::Scope,
+            OracleSetup::FixedKamino,
+            OracleSetup::KaminoPythPush,
+        ];
+
+        for setup in invalid_setups {
+            let mut bank = Bank::zeroed();
+            bank.config.asset_tag = ASSET_TAG_JUPLEND;
+            bank.config.oracle_setup = setup;
+
+            let err = venue_ai(&bank, &[]).unwrap_err();
+            assert_eq!(
+                err,
+                MarginfiError::InvalidOracleSetup.into(),
+                "JupLend asset tag with {:?} setup should error with InvalidOracleSetup",
+                setup
+            );
+        }
     }
 }

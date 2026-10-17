@@ -74,6 +74,11 @@ impl FuzzTest {
 
         let bank_config = self.default_juplend_bank_config(oracle);
 
+        let (juplend_liquidity, _) = Pubkey::find_program_address(
+            &[b"liquidity"],
+            &pubkey!("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"),
+        );
+
         let add_ix = types::marginfi::LendingPoolAddBankJuplendInstruction::data(
             types::marginfi::LendingPoolAddBankJuplendInstructionData::new(
                 bank_config,
@@ -102,6 +107,7 @@ impl FuzzTest {
         .remaining_accounts(vec![
             AccountMeta::new_readonly(oracle, false),
             AccountMeta::new_readonly(juplend_lending_state, false),
+            AccountMeta::new_readonly(juplend_liquidity, false),
         ])
         .instruction();
 

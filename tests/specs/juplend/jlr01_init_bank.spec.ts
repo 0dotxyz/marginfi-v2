@@ -105,6 +105,9 @@ const getAdminTokenAccountForMint = (mint: PublicKey): PublicKey => {
   if (mint.equals(ecosystem.wsolMint.publicKey)) {
     return groupAdmin.wsolAccount;
   }
+  if (mint.equals(ecosystem.lstAlphaMint.publicKey)) {
+    return groupAdmin.lstAlphaAccount;
+  }
   throw new Error(`Unsupported mint for init position: ${mint.toBase58()}`);
 };
 
