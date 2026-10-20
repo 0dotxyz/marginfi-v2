@@ -64,6 +64,7 @@ path = "src/main.rs"
 admin_actions = []
 external_cpi_actions = []
 invariant_test = []
+native_orders_test = []
 # Quarantine flag for test modules whose helper methods went missing. Never intended to be
 # enabled -- only exists so cfg-checking recognizes the flag and doesn't warn.
 # NOT for gating standalone action methods; only test modules are ever auto-gated with it.

@@ -13,6 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use std::rc::Rc;
 
+
 // SCOUT:CHECK-CONTRACT:BEGIN sha256=c4b20795d13638b9cbca54acc8669b4394eb8494fe1116eb26b75f0b968aaf9e
 // Semantic invariant checks have two modes:
 //   default / SCOUT_CHECK_MODE=enforce: record a real Crucible fuzz violation;
@@ -191,6 +192,50 @@ macro_rules! scout_check {
     }};
 }
 // SCOUT:CHECK-CONTRACT:END
+
+// --- Action discovery logging (coverage audits) -----------------------------
+// Opt-in via FUZZ_DISCOVERY_LOG=<path>: appends "OK <action_name>" /
+// "FAIL <action_name>" the first time each registered action is attempted or
+// succeeds (deduped process-wide), so coverage audits can diff
+// attempted/succeeded against the full registered-action universe.
+//
+// Timing note: the framework pushes the current action's history record only
+// after `__dispatch_action` returns, so `after_action` observes the *previous*
+// action's finalized outcome. The last action of each chain is therefore
+// missed — statistically negligible for discovery analysis over long runs.
+static SCOUT_ACTION_OUTCOMES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<String>>,
+> = std::sync::OnceLock::new();
+
+pub fn scout_log_action_outcome() {
+    // Cached: an uncached getenv per action costs ~1% CPU plus a shared libc lock.
+    static PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let Some(path) = PATH
+        .get_or_init(|| std::env::var("FUZZ_DISCOVERY_LOG").ok())
+        .as_ref()
+    else {
+        return;
+    };
+    let history = __scout_crucible_test_context::get_action_history();
+    let Some(last) = history.last() else { return };
+    let key = format!(
+        "{} {}",
+        if last.success { "OK" } else { "FAIL" },
+        last.name
+    );
+    let set = SCOUT_ACTION_OUTCOMES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let mut guard = set.lock().unwrap();
+    if guard.insert(key.clone()) {
+        drop(guard);
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "{}", key);
+        }
+    }
+}
+
+mod native_orders;
 
 const SCOUT_TARGET_PROGRAM_ARTIFACT: &str = "programs/marginfi_program.so";
 
@@ -886,8 +931,11 @@ fn scout_kamino_farms_program_id() -> Pubkey {
     "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr".parse().unwrap()
 }
 
-fn scout_kamino_lending_nocpi_artifact() -> &'static str {
-    "programs/kamino_lending_nocpi.so"
+// The real klend mainnet build: kamino_lending_nocpi.so predates the *_v2 instruction family
+// (deposit/withdraw v2) that marginfi CPIs, so venue actions cannot run against it. The TS
+// suite proves this binary compatible (tests/fixtures/kamino_lending.so).
+fn scout_kamino_lending_artifact() -> &'static str {
+    "programs/kamino_lending.so"
 }
 
 fn scout_kamino_farms_artifact() -> &'static str {
@@ -970,12 +1018,21 @@ fn scout_write_u64(data: &mut [u8], offset: usize, value: u64) {
 }
 
 const SCOUT_KAMINO_RESERVE_DISCRIMINATOR: [u8; 8] = [43, 242, 204, 202, 26, 247, 59, 127];
+// klend PROGRAM_VERSION (u8=1, utils/consts.rs) — refresh_reserves_batch rejects reserves whose
+// version != PROGRAM_VERSION with ReserveDeprecated (Custom 6073).
+const SCOUT_KAMINO_RESERVE_VERSION_OFFSET: usize = 8;
 const SCOUT_KAMINO_RESERVE_LENDING_MARKET_OFFSET: usize = 8 + 24;
 const SCOUT_KAMINO_RESERVE_MINT_PUBKEY_OFFSET: usize = 8 + 120;
 const SCOUT_KAMINO_RESERVE_SLOT_OFFSET: usize = 8 + 8;
 const SCOUT_KAMINO_RESERVE_STALE_OFFSET: usize = 8 + 16;
 const SCOUT_KAMINO_RESERVE_PRICE_STATUS_OFFSET: usize = 8 + 17;
 const SCOUT_KAMINO_RESERVE_AVAILABLE_AMOUNT_OFFSET: usize = 8 + 216;
+// liquidity.market_price_sf (Fraction bits @ liquidity+120). Must be nonzero: klend's
+// post_deposit/post_withdraw obligation invariants divide by the deposited market value, and a
+// zero price makes that value zero -> u256 division-by-zero panic inside DepositV2/WithdrawV2.
+// 1<<60 = Fraction::ONE, i.e. a flat $1.00 price (marginfi-side pricing uses the pyth oracle,
+// never this field).
+const SCOUT_KAMINO_RESERVE_MARKET_PRICE_SF_OFFSET: usize = 8 + 240;
 const SCOUT_KAMINO_RESERVE_MINT_DECIMALS_OFFSET: usize = 8 + 264;
 
 fn scout_seeded_bank_pda(program_id: Pubkey, group: Pubkey, bank_mint: Pubkey, bank_seed: u64) -> Pubkey {
@@ -1016,8 +1073,13 @@ fn scout_kamino_obligation_pda(liquidity_vault_authority: Pubkey, lending_market
 fn scout_kamino_reserve_bytes(lending_market: Pubkey, mint: Pubkey) -> Vec<u8> {
     let mut data = vec![0u8; SCOUT_KAMINO_RESERVE_ACCOUNT_LEN];
     data[0..8].copy_from_slice(&SCOUT_KAMINO_RESERVE_DISCRIMINATOR);
+    data[SCOUT_KAMINO_RESERVE_VERSION_OFFSET..SCOUT_KAMINO_RESERVE_VERSION_OFFSET + 8]
+        .copy_from_slice(&1u64.to_le_bytes());
+    // last_update.slot must be <= the SVM clock slot: klend refresh_reserve accrues interest via
+    // slots_elapsed = clock.slot.checked_sub(stored) and reverts MathOverflow when stored is MAX.
+    // 0 is safe (refresh overwrites it with the current slot and clears the stale flag).
     data[SCOUT_KAMINO_RESERVE_SLOT_OFFSET..SCOUT_KAMINO_RESERVE_SLOT_OFFSET + 8]
-        .copy_from_slice(&u64::MAX.to_le_bytes());
+        .copy_from_slice(&0u64.to_le_bytes());
     data[SCOUT_KAMINO_RESERVE_STALE_OFFSET] = 0;
     data[SCOUT_KAMINO_RESERVE_PRICE_STATUS_OFFSET] = 63;
     data[SCOUT_KAMINO_RESERVE_LENDING_MARKET_OFFSET..SCOUT_KAMINO_RESERVE_LENDING_MARKET_OFFSET + 32]
@@ -1026,9 +1088,53 @@ fn scout_kamino_reserve_bytes(lending_market: Pubkey, mint: Pubkey) -> Vec<u8> {
         .copy_from_slice(&mint.to_bytes());
     data[SCOUT_KAMINO_RESERVE_AVAILABLE_AMOUNT_OFFSET..SCOUT_KAMINO_RESERVE_AVAILABLE_AMOUNT_OFFSET + 8]
         .copy_from_slice(&1_000_000u64.to_le_bytes());
+    data[SCOUT_KAMINO_RESERVE_MARKET_PRICE_SF_OFFSET..SCOUT_KAMINO_RESERVE_MARKET_PRICE_SF_OFFSET + 16]
+        .copy_from_slice(&(1u128 << 60).to_le_bytes());
     data[SCOUT_KAMINO_RESERVE_MINT_DECIMALS_OFFSET..SCOUT_KAMINO_RESERVE_MINT_DECIMALS_OFFSET + 8]
         .copy_from_slice(&6u64.to_le_bytes());
     data
+}
+
+use crucible_fuzzer::anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+
+// Raw klend crank instructions, bundled ahead of marginfi kamino venue actions exactly like the
+// production client does (tests/utils/kamino-utils.ts simpleRefresh*). klend rejects deposits and
+// withdrawals unless both the reserve and the obligation were refreshed in the *current slot*
+// (STALE_AFTER_SLOTS_ELAPSED = 1), and marginfi's venue instructions never refresh the obligation
+// themselves, so without these cranks every venue action after the setup slot is rejected.
+// Discriminators: sha256("global:<name>")[..8], matching idls-complete/kamino_lending.json.
+fn scout_klend_anchor_ix(discriminator: [u8; 8], args: &[u8], accounts: Vec<AccountMeta>) -> Instruction {
+    let mut data = discriminator.to_vec();
+    data.extend_from_slice(args);
+    Instruction {
+        program_id: scout_kamino_program_id(),
+        accounts,
+        data,
+    }
+}
+
+fn scout_klend_refresh_reserves_batch_ix(reserve: Pubkey, market: Pubkey) -> Instruction {
+    // skip_price_updates = true: the fabricated reserve's token_info would fail oracle validation.
+    scout_klend_anchor_ix(
+        [144, 110, 26, 103, 162, 204, 252, 147],
+        &[1u8],
+        vec![
+            AccountMeta::new(reserve, false),
+            AccountMeta::new_readonly(market, false),
+        ],
+    )
+}
+
+fn scout_klend_refresh_obligation_ix(market: Pubkey, obligation: Pubkey, reserve: Pubkey) -> Instruction {
+    scout_klend_anchor_ix(
+        [33, 132, 147, 228, 151, 192, 72, 89],
+        &[],
+        vec![
+            AccountMeta::new_readonly(market, false),
+            AccountMeta::new(obligation, false),
+            AccountMeta::new_readonly(reserve, false),
+        ],
+    )
 }
 
 fn scout_valid_kamino_config(oracle: Pubkey) -> marginfi::types::KaminoConfigCompact {
@@ -1124,11 +1230,45 @@ fn scout_valid_drift_config(oracle: Pubkey) -> marginfi::types::DriftConfigCompa
         oracle_max_confidence: 0,
     }
 }
-const SCOUT_KAMINO_LENDING_NOCPI_ARTIFACT: &str = "programs/kamino_lending_nocpi.so";
+const SCOUT_KAMINO_LENDING_ARTIFACT: &str = "programs/kamino_lending.so";
 const SCOUT_KAMINO_FARMS_ARTIFACT: &str = "programs/kamino_farms.so";
 const SCOUT_KAMINO_OBLIGATION_DISCRIMINATOR: [u8; 8] = [168, 206, 141, 106, 88, 76, 172, 167];
 const SCOUT_KAMINO_RESERVE_SIZE: usize = 8 + 8616;
 const SCOUT_KAMINO_OBLIGATION_SIZE: usize = 8 + 3336;
+// MinimalReserve prefix offsets the base fabrication leaves zeroed but the real klend binary
+// validates (kamino-mocks/src/state.rs MinimalReserve/ReserveConfig field order).
+const SCOUT_KAMINO_RESERVE_SUPPLY_VAULT_OFFSET: usize = 8 + 152;
+const SCOUT_KAMINO_RESERVE_FEE_VAULT_OFFSET: usize = 8 + 184;
+const SCOUT_KAMINO_RESERVE_TOKEN_PROGRAM_OFFSET: usize = 8 + 400;
+const SCOUT_KAMINO_RESERVE_COLLATERAL_MINT_OFFSET: usize = 8 + 2552;
+const SCOUT_KAMINO_RESERVE_COLLATERAL_SUPPLY_VAULT_OFFSET: usize = 8 + 2592;
+const SCOUT_KAMINO_RESERVE_CONFIG_OFFSET: usize = 8 + 4848;
+const SCOUT_KAMINO_RESERVE_CONFIG_DEPOSIT_LIMIT_OFFSET: usize =
+    SCOUT_KAMINO_RESERVE_CONFIG_OFFSET + 160;
+const SCOUT_KAMINO_LENDING_MARKET_ACCOUNT_LEN: usize = 8 + 4656;
+const SCOUT_KAMINO_LENDING_MARKET_DISCRIMINATOR: [u8; 8] = [246, 114, 50, 98, 72, 157, 28, 120];
+const SCOUT_KAMINO_OBLIGATION_DEPOSITED_AMOUNT_OFFSET: usize = 8 + 120;
+// Seed liquidity/cToken supply of the kamino-ops reserve (1:1 exchange rate: zero borrows,
+// zero fees, available == mint_total_supply).
+const SCOUT_KAMINO_OPS_LIQUIDITY: u64 = 1_000_000_000;
+const SCOUT_KAMINO_OPS_BANK_SEED: u64 = 4_020_240_003;
+const SCOUT_KAMINO_OPS_INIT_DEPOSIT: u64 = 100;
+
+#[derive(Clone, Copy)]
+struct ScoutKaminoOpsAccounts {
+    bank: Pubkey,
+    user: Pubkey,
+    market: Pubkey,
+    market_authority: Pubkey,
+    reserve: Pubkey,
+    supply: Pubkey,
+    collateral_mint: Pubkey,
+    collateral_vault: Pubkey,
+    obligation: Pubkey,
+    oracle: Pubkey,
+    liquidity_vault_authority: Pubkey,
+    liquidity_vault: Pubkey,
+}
 
 #[derive(Clone, Copy)]
 struct ScoutKaminoWithdrawAccounts {
@@ -1593,7 +1733,12 @@ const SCOUT_BANK_TOTAL_LIABILITY_SHARES_OFFSET: usize = 8 + 248;
 // borrowing_position_count 4->1532, lending_position_count 4->1528 (end of BankCache, both i32).
 const SCOUT_BANK_BORROWING_POSITION_COUNT_OFFSET: usize = 8 + 1532;
 const SCOUT_REPAY_SETUP_LIABILITY_AMOUNT: u64 = 1_000;
-// Offsets = disc(8) + repr(C) payload offset (bank.rs, size 1856, align 8).
+// Offsets = disc(8) + repr(C) payload offset (bank.rs V1 prefix, align 8). The V1 prefix is a
+// byte-identical prefix of the current Bank (marginfi_group.rs asserts offset_of!(Bank,
+// _padding_1) == Bank::V1_LEN), so V1 offsets stay valid; only the account LENGTH grew with
+// the Bank V2 resize (#667). Derive lengths from the IDL type so future resizes cannot
+// silently disarm every bank-reading invariant again (they did between #667 and 0.1.12).
+const SCOUT_BANK_ACCOUNT_LEN: usize = 8 + std::mem::size_of::<marginfi::state::Bank>();
 const SCOUT_CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 const SCOUT_BANK_EMISSIONS_REMAINING_OFFSET: usize = 8 + 848;
 const SCOUT_BANK_LENDING_POSITION_COUNT_OFFSET: usize = 8 + 1528;
@@ -1621,7 +1766,7 @@ type ScoutHandleBankruptcyAccounts = (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey);
 type ScoutHandleBankruptcyVariantAccounts = (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Vec<Pubkey>);
 const SCOUT_HANDLE_BANKRUPTCY_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
 const SCOUT_HANDLE_BANKRUPTCY_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_HANDLE_BANKRUPTCY_BANK_LEN: usize = 8 + 1856;
+const SCOUT_HANDLE_BANKRUPTCY_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_HANDLE_BANKRUPTCY_ACCOUNT_LEN: usize = 8 + 2304;
 const SCOUT_HANDLE_BANKRUPTCY_BANK_MINT_OFFSET: usize = 8;
 const SCOUT_HANDLE_BANKRUPTCY_BANK_MINT_DECIMALS_OFFSET: usize = 8 + 32;
@@ -2004,7 +2149,7 @@ const SCOUT_P11_ANY_OWNED: u64 = 0b0110_1111;
 // repr(C) declaration order (admin, group_flags, fee_state_cache, ..., risk_admin, metadata_admin).
 const SCOUT_P11_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
 const SCOUT_P11_GROUP_DISCRIMINATOR: [u8; 8] = [182, 23, 173, 240, 151, 206, 182, 67];
-const SCOUT_P11_BANK_ACCOUNT_LEN: usize = 8 + 1856;
+const SCOUT_P11_BANK_ACCOUNT_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_P11_GROUP_ACCOUNT_LEN: usize = 8 + 9248;
 const SCOUT_P11_GROUP_FLAGS_OFFSET: usize = 8 + 32;
 const SCOUT_P11_GROUP_AUTH_OFFSETS: [usize; 7] =
@@ -2032,14 +2177,14 @@ const SCOUT_P13_BANK_CAP: usize = 64;
 const SCOUT_P30_BANK_CAP: usize = 64;
 // Bank discriminator/length (bank.rs:16, constants.rs:180-187).
 const SCOUT_P30_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_P30_BANK_LEN: usize = 8 + 1856;
+const SCOUT_P30_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 
 // --- P-0035 (no exposure growth while unhealthy) layout constants -------------------------
 // MarginfiAccount (size 2304) / HealthCache (size 304) field layout, repr(C) declaration order.
 const SCOUT_P35_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
 const SCOUT_P35_ACCOUNT_LEN: usize = 8 + 2304;
 const SCOUT_P35_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_P35_BANK_LEN: usize = 8 + 1856;
+const SCOUT_P35_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_P35_ACCOUNT_FLAGS_OFFSET: usize = 8 + 32 + 32 + 1728;
 // ACCOUNT_IN_FLASHLOAN | ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_DELEVERAGE (user_account.rs:108-113).
 const SCOUT_P35_BRACKET_FLAGS: u64 = (1 << 1) | (1 << 4) | (1 << 5);
@@ -2081,7 +2226,7 @@ const SCOUT_HP_ACCOUNT_LEN: usize = 8 + 2304;
 const SCOUT_HP_ACCOUNT_GROUP_OFFSET: usize = 8;
 const SCOUT_HP_ACCOUNT_FLAGS_OFFSET: usize = 8 + 32 + 32 + 1728;
 const SCOUT_HP_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_HP_BANK_LEN: usize = 8 + 1856;
+const SCOUT_HP_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_HP_BANK_MINT_DECIMALS_OFFSET: usize = 8 + 32;
 const SCOUT_HP_BANK_GROUP_OFFSET: usize = 8 + 33;
 const SCOUT_HP_BANK_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
@@ -2251,7 +2396,7 @@ const SCOUT_RL_ACCOUNT_EXEMPT_FLAGS: u64 = (1 << 1) | (1 << 4) | (1 << 5) | (1 <
 // P-0026 / P-0027 shared machinery: Bank.cache (BankCache) and MarginfiAccount.health_cache
 // (HealthCache) byte layout (bank.rs:16-17, bank_cache.rs:7-8, bank_config.rs:28-97).
 const SCOUT_PC_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_PC_BANK_LEN: usize = 8 + 1856;
+const SCOUT_PC_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_PC_BANK_ORACLE_SETUP_OFFSET: usize = 8 + 288 + 313;
 const SCOUT_PC_BANK_FIXED_PRICE_OFFSET: usize = 8 + 288 + 512;
 const SCOUT_PC_BANK_CACHE_PRICE_OFFSET: usize = 8 + 1368 + 32;
@@ -2320,9 +2465,9 @@ const SCOUT_P28_ACC_INDEX_OFFSET: usize = 8 + 2208;
 const SCOUT_P28_ACC_LIQ_RECORD_OFFSET: usize = 8 + 2216;
 const SCOUT_P28_ACC_TAIL_PAD_OFFSET: usize = 8 + 2248;
 
-// Bank byte layout (size 1856).
+// Bank byte layout (V1 prefix; offsets unchanged by the V2 resize, length = SCOUT_BANK_ACCOUNT_LEN).
 const SCOUT_P28_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_P28_BANK_LEN: usize = 8 + 1856;
+const SCOUT_P28_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_P28_BANK_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
 const SCOUT_P28_BANK_LIABILITY_SHARE_VALUE_OFFSET: usize = 8 + 88;
 const SCOUT_P28_BANK_VAULTS_OFFSET: usize = 8 + 104;
@@ -2394,7 +2539,7 @@ const SCOUT_SV_BANK_CAP: usize = 64;
 const SCOUT_SV_SOCIALIZED_CAP: usize = 8;
 // Bank discriminator/length (bank.rs:16).
 const SCOUT_SV_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-const SCOUT_SV_BANK_LEN: usize = 8 + 1856;
+const SCOUT_SV_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 // asset_share_value @72 / liability_share_value @88.
 const SCOUT_SV_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
 const SCOUT_SV_LIABILITY_SHARE_VALUE_OFFSET: usize = 8 + 88;
@@ -2426,8 +2571,8 @@ const SCOUT_P32_ARMS: u8 = 2;
 // ---------------------------------------------------------------------------------------------
 // P-0010 / P-0019 -- the interest-rate model, reimplemented independently.
 // SCOUT_PIR_* = Property Interest Rate.
-// Bank layout (size 1856; offsets below +8 for the discriminator); cache starts at 1368.
-const SCOUT_PIR_BANK_LEN: usize = 8 + 1856;
+// Bank layout (V1 prefix; offsets below +8 for the discriminator); cache starts at 1368.
+const SCOUT_PIR_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_PIR_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
 const SCOUT_PIR_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
 const SCOUT_PIR_LIABILITY_SHARE_VALUE_OFFSET: usize = 8 + 88;
@@ -2502,7 +2647,7 @@ const SCOUT_PIR_TOKEN_TOLERANCE: fixed::types::I80F48 = fixed::types::I80F48::li
 // elapsed interval, on any bank holding both assets and liabilities."
 //
 // Offsets from Bank's field order (bank.rs).
-const SCOUT_P7_BANK_LEN: usize = 8 + 1856;
+const SCOUT_P7_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 const SCOUT_P7_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
 const SCOUT_P7_BANK_TOTAL_LIABILITY_SHARES_OFFSET: usize = 8 + 248;
 const SCOUT_P7_BANK_TOTAL_ASSET_SHARES_OFFSET: usize = 8 + 264;
@@ -2579,6 +2724,7 @@ use marginfi::{accounts, instruction};
 
 #[derive(Clone)]
 struct MarginfiFixture {
+    native_orders: Option<native_orders::NativeWorld>,
     ctx: crate::__scout_crucible_test_context::TestContext,
     program_id: Pubkey,
     payer: Rc<Keypair>,
@@ -2663,6 +2809,17 @@ struct MarginfiFixture {
     kamino_withdraw_bank: Pubkey,
     kamino_withdraw_marginfi_account: Pubkey,
     kamino_withdraw_reserve: Pubkey,
+
+    // Kamino venue-ops world (real klend CPIs): dedicated market/reserve/bank/user, stood up in
+    // setup() through real instructions so pool snapshots always contain it.
+    kamino_ops_market: Pubkey,
+    kamino_ops_reserve: Pubkey,
+    kamino_ops_oracle: Pubkey,
+    kamino_ops_bank: Pubkey,
+    kamino_ops_user: Pubkey,
+    // cTokens the seed deposit left in the obligation at setup (init_obligation's amount is
+    // irrecoverable and mints no marginfi shares); venue accounting baselines off this.
+    kamino_ops_seed_ctokens: u64,
     pulse_health_healthy_account: Pubkey,
     pulse_health_healthy_bank: Pubkey,
     pulse_health_risk_rejected_account: Pubkey,
@@ -2858,7 +3015,7 @@ struct MarginfiFixture {
 impl MarginfiFixture {
     fn scout_placeholder(&self) -> Pubkey { Pubkey::new_unique() }
 
-    pub fn setup() -> Self {
+    fn setup_base() -> Self {
         let mut ctx = crate::__scout_crucible_test_context::TestContext::new();
         let program_id = Pubkey::new_from_array(marginfi::ID.to_bytes());
         // SCOUT:TARGET-PROGRAM:BEGIN
@@ -2919,6 +3076,7 @@ impl MarginfiFixture {
             .unwrap();
 
         let mut fixture = Self {
+    native_orders: None,
     scout_known_accounts: [Pubkey::default(); SCOUT_KNOWN_CAP],
     scout_known_next: 0,
     scout_p1_prev_ok: false,
@@ -3112,6 +3270,12 @@ impl MarginfiFixture {
     kamino_withdraw_bank: Pubkey::default(),
     kamino_withdraw_marginfi_account: Pubkey::default(),
     kamino_withdraw_reserve: Pubkey::default(),
+    kamino_ops_market: Pubkey::default(),
+    kamino_ops_reserve: Pubkey::default(),
+    kamino_ops_oracle: Pubkey::default(),
+    kamino_ops_bank: Pubkey::default(),
+    kamino_ops_user: Pubkey::default(),
+    kamino_ops_seed_ctokens: 0,
     pulse_health_healthy_account: Pubkey::default(),
     pulse_health_healthy_bank: Pubkey::default(),
     pulse_health_risk_rejected_account: Pubkey::default(),
@@ -3181,6 +3345,12 @@ impl MarginfiFixture {
     scout_p15_value_bits: [0i128; SCOUT_P15_CAP],
     scout_p15_limit: [0u32; SCOUT_P15_CAP],
 };
+        fixture
+    }
+
+    pub fn setup() -> Self {
+        let mut fixture = Self::setup_base();
+        let bank_mint_pubkey = fixture.bank_mint;
         assert!(
             fixture.action_init_global_fee_state(0, 0),
             "setup: init_global_fee_state prerequisite for marginfi_group_initialize failed"
@@ -3797,11 +3967,11 @@ impl MarginfiFixture {
             })
             .unwrap();
 
-        if std::path::Path::new(scout_kamino_lending_nocpi_artifact()).exists() {
+        if std::path::Path::new(scout_kamino_lending_artifact()).exists() {
             TestContext::add_program(
                 &mut fixture.ctx,
                 &scout_kamino_program_id(),
-                scout_kamino_lending_nocpi_artifact(),
+                scout_kamino_lending_artifact(),
             )
             .unwrap();
         }
@@ -4124,6 +4294,195 @@ impl MarginfiFixture {
             })
             .unwrap();
 
+        // Kamino venue-ops world: a dedicated lending market + reserve + kamino bank + user,
+        // stood up entirely through real instructions (add_bank_kamino, kamino_init_obligation)
+        // so venue actions always execute against self-consistent state and crucible's initial
+        // snapshot contains every account (mid-campaign creation via direct ctx calls is lost on
+        // pool restores). Skipped when the klend binary is not staged; actions no-op then.
+        if std::path::Path::new(scout_kamino_lending_artifact()).exists() {
+            let kamino_program = scout_kamino_program_id();
+            let ops_market = Pubkey::new_unique();
+            let (ops_market_authority, ops_market_authority_bump) =
+                Pubkey::find_program_address(&[b"lma", ops_market.as_ref()], &kamino_program);
+            let ops_reserve = Pubkey::new_unique();
+            let ops_supply =
+                Pubkey::find_program_address(&[b"reserve_liq_supply", ops_reserve.as_ref()], &kamino_program).0;
+            let ops_fee_vault =
+                Pubkey::find_program_address(&[b"fee_receiver", ops_reserve.as_ref()], &kamino_program).0;
+            let ops_coll_mint =
+                Pubkey::find_program_address(&[b"reserve_coll_mint", ops_reserve.as_ref()], &kamino_program).0;
+            let ops_coll_vault =
+                Pubkey::find_program_address(&[b"reserve_coll_supply", ops_reserve.as_ref()], &kamino_program).0;
+
+            let mut ops_market_bytes = vec![0u8; SCOUT_KAMINO_LENDING_MARKET_ACCOUNT_LEN];
+            ops_market_bytes[..8].copy_from_slice(&SCOUT_KAMINO_LENDING_MARKET_DISCRIMINATOR);
+            // klend validates the lma PDA with `bump = lending_market.bump_seed` (u64 @ 8+8).
+            ops_market_bytes[16..24]
+                .copy_from_slice(&(ops_market_authority_bump as u64).to_le_bytes());
+            fixture.ctx.create_account()
+                .pubkey(ops_market)
+                .owner(kamino_program)
+                .data(&ops_market_bytes)
+                .create()
+                .unwrap();
+
+            fixture.ctx.create_token_account()
+                .pubkey(ops_supply)
+                .mint(fixture.bank_mint)
+                .token_owner(ops_market_authority)
+                .amount(SCOUT_KAMINO_OPS_LIQUIDITY)
+                .create()
+                .unwrap();
+            fixture.ctx.create_token_account()
+                .pubkey(ops_fee_vault)
+                .mint(fixture.bank_mint)
+                .token_owner(ops_market_authority)
+                .amount(0)
+                .create()
+                .unwrap();
+            fixture.ctx.create_account()
+                .pubkey(ops_coll_mint)
+                .owner(spl_token::id())
+                .data(&scout_token_mint_bytes_append(6, ops_market_authority, SCOUT_KAMINO_OPS_LIQUIDITY))
+                .create()
+                .unwrap();
+            fixture.ctx.create_token_account()
+                .pubkey(ops_coll_vault)
+                .mint(ops_coll_mint)
+                .token_owner(ops_market_authority)
+                .amount(SCOUT_KAMINO_OPS_LIQUIDITY)
+                .create()
+                .unwrap();
+
+            let mut ops_reserve_bytes =
+                scout_kamino_reserve_bytes(ops_market, fixture.bank_mint);
+            ops_reserve_bytes[SCOUT_KAMINO_RESERVE_SUPPLY_VAULT_OFFSET..SCOUT_KAMINO_RESERVE_SUPPLY_VAULT_OFFSET + 32]
+                .copy_from_slice(ops_supply.as_ref());
+            ops_reserve_bytes[SCOUT_KAMINO_RESERVE_FEE_VAULT_OFFSET..SCOUT_KAMINO_RESERVE_FEE_VAULT_OFFSET + 32]
+                .copy_from_slice(ops_fee_vault.as_ref());
+            ops_reserve_bytes[SCOUT_KAMINO_RESERVE_TOKEN_PROGRAM_OFFSET..SCOUT_KAMINO_RESERVE_TOKEN_PROGRAM_OFFSET + 32]
+                .copy_from_slice(spl_token::id().as_ref());
+            ops_reserve_bytes[SCOUT_KAMINO_RESERVE_COLLATERAL_MINT_OFFSET..SCOUT_KAMINO_RESERVE_COLLATERAL_MINT_OFFSET + 32]
+                .copy_from_slice(ops_coll_mint.as_ref());
+            ops_reserve_bytes[SCOUT_KAMINO_RESERVE_COLLATERAL_SUPPLY_VAULT_OFFSET..SCOUT_KAMINO_RESERVE_COLLATERAL_SUPPLY_VAULT_OFFSET + 32]
+                .copy_from_slice(ops_coll_vault.as_ref());
+            scout_write_u64(&mut ops_reserve_bytes, SCOUT_KAMINO_RESERVE_AVAILABLE_AMOUNT_OFFSET, SCOUT_KAMINO_OPS_LIQUIDITY);
+            scout_write_u64(&mut ops_reserve_bytes, SCOUT_KAMINO_RESERVE_MINT_TOTAL_SUPPLY_OFFSET, SCOUT_KAMINO_OPS_LIQUIDITY);
+            scout_write_u64(&mut ops_reserve_bytes, SCOUT_KAMINO_RESERVE_CONFIG_DEPOSIT_LIMIT_OFFSET, u64::MAX);
+            fixture.ctx.create_account()
+                .pubkey(ops_reserve)
+                .owner(kamino_program)
+                .data(&ops_reserve_bytes)
+                .create()
+                .unwrap();
+
+            let ops_oracle = Pubkey::new_unique();
+            let ops_oracle_bytes = {
+                use ::anchor_lang::prelude::Clock;
+                let now = fixture.ctx.svm.get_sysvar::<Clock>().unix_timestamp;
+                scout_price_update_v2_bytes([19u8; 32], 100_000_000, now)
+            };
+            fixture.ctx.create_account()
+                .pubkey(ops_oracle)
+                .owner(pyth_receiver_program_id())
+                .data(&ops_oracle_bytes)
+                .create()
+                .unwrap();
+
+            let ops_bank = scout_seeded_bank_pda(
+                fixture.program_id,
+                fixture.marginfi_group,
+                fixture.bank_mint,
+                SCOUT_KAMINO_OPS_BANK_SEED,
+            );
+            let (
+                ops_lva,
+                ops_liquidity_vault,
+                ops_insurance_vault_authority,
+                ops_insurance_vault,
+                ops_fee_vault_authority_bank,
+                ops_fee_vault_bank,
+            ) = scout_bank_vault_pdas(fixture.program_id, ops_bank);
+            let ops_obligation = scout_kamino_obligation_pda(ops_lva, ops_market);
+            let mut ops_bank_config = scout_valid_kamino_config(ops_oracle);
+            ops_bank_config.deposit_limit = u64::MAX;
+            assert!(
+                fixture.ctx
+                    .program(fixture.program_id)
+                    .call(instruction::LendingPoolAddBankKamino {
+                        bank_config: ops_bank_config,
+                        bank_seed: SCOUT_KAMINO_OPS_BANK_SEED,
+                    })
+                    .accounts(accounts::LendingPoolAddBankKamino {
+                        group: fixture.marginfi_group,
+                        governance_admin: fixture.payer.pubkey(),
+                        fee_payer: fixture.payer.pubkey(),
+                        bank_mint: fixture.bank_mint,
+                        bank: ops_bank,
+                        integration_acc_1: ops_reserve,
+                        integration_acc_2: ops_obligation,
+                        liquidity_vault_authority: ops_lva,
+                        liquidity_vault: ops_liquidity_vault,
+                        insurance_vault_authority: ops_insurance_vault_authority,
+                        insurance_vault: ops_insurance_vault,
+                        fee_vault_authority: ops_fee_vault_authority_bank,
+                        fee_vault: ops_fee_vault_bank,
+                        token_program: spl_token::id(),
+                    })
+                    .remaining_accounts(vec![ops_oracle, ops_reserve])
+                    .signers(&[&*fixture.payer])
+                    .send()
+                    .map(|o| o.is_success())
+                    .unwrap_or(false),
+                "setup: lending_pool_add_bank_kamino (kamino-ops world) failed"
+            );
+
+            // Real init_obligation: klend creates the obligation + user metadata with correct
+            // rent and CPIs the seed deposit, leaving kamino_ops_seed_ctokens in the position.
+            let ops_user_metadata =
+                Pubkey::find_program_address(&[b"user_meta", ops_lva.as_ref()], &kamino_program).0;
+            assert!(
+                fixture.ctx
+                    .program(fixture.program_id)
+                    .call(instruction::KaminoInitObligation {
+                        amount: SCOUT_KAMINO_OPS_INIT_DEPOSIT,
+                    })
+                    .accounts(accounts::KaminoInitObligation {
+                        fee_payer: fixture.payer.pubkey(),
+                        bank: ops_bank,
+                        signer_token_account: fixture.signer_token_account,
+                        liquidity_vault_authority: ops_lva,
+                        liquidity_vault: ops_liquidity_vault,
+                        integration_acc_2: ops_obligation,
+                        user_metadata: ops_user_metadata,
+                        lending_market: ops_market,
+                        lending_market_authority: ops_market_authority,
+                        integration_acc_1: ops_reserve,
+                        mint: fixture.bank_mint,
+                        reserve_liquidity_supply: ops_supply,
+                        reserve_collateral_mint: ops_coll_mint,
+                        reserve_destination_deposit_collateral: ops_coll_vault,
+                        obligation_farm_user_state: None,
+                        reserve_farm_state: None,
+                        liquidity_token_program: spl_token::id(),
+                    })
+                    .signers(&[&*fixture.payer])
+                    .send()
+                    .map(|o| o.is_success())
+                    .unwrap_or(false),
+                "setup: kamino_init_obligation (kamino-ops world) failed"
+            );
+
+            fixture.kamino_ops_market = ops_market;
+            fixture.kamino_ops_reserve = ops_reserve;
+            fixture.kamino_ops_oracle = ops_oracle;
+            fixture.kamino_ops_bank = ops_bank;
+            fixture.kamino_ops_user = fixture
+                .scout_create_initialized_marginfi_account()
+                .expect("setup: kamino-ops user marginfi_account_initialize failed");
+            fixture.kamino_ops_seed_ctokens = fixture.scout_kamino_obligation_deposited(ops_obligation);
+        }
+
         {
             let fee_state_pda =
                 Pubkey::find_program_address(&[FEE_STATE_SEED], &fixture.program_id).0;
@@ -4150,6 +4509,12 @@ impl MarginfiFixture {
         let _ = fixture.scout_p30_record_fee_baselines();
         // SCOUT:PROPERTY-HOOK:P-0014
         let _ = fixture.scout_sv_record_share_baselines();
+
+        // Build the native order/rebalance world eagerly: crucible's stateful pool snapshots
+        // the SVM right after setup, and pool restores lose accounts created mid-campaign
+        // through direct ctx.create_* calls, which made a lazily-built world's keeper token
+        // account vanish under native_execute_rebalance_multi (harness panic, general fixture).
+        fixture.native_ensure_for_campaign();
 
         fixture
         // SCOUT:SETUP-GLUE:END
@@ -5956,6 +6321,62 @@ impl MarginfiFixture {
 
     // SCOUT:EXTRA-ACTIONS:BEGIN
 
+    pub fn action_native_place_order(&mut self, trigger: u8, slippage_bps: u16) -> bool {
+        self.native_place_order(trigger, slippage_bps)
+    }
+
+    pub fn action_native_execute_order(&mut self, variant: u8, amount: u16) -> bool {
+        self.native_execute_order(variant, amount)
+    }
+
+    pub fn action_native_cancel_order(&mut self, unauthorized: bool) -> bool {
+        self.native_cancel_order(unauthorized)
+    }
+
+    pub fn action_native_place_rebalance(&mut self, amount: u32, tip: u32) -> bool {
+        self.native_place_rebalance(amount, tip)
+    }
+
+    pub fn action_native_update_rebalance(&mut self, amount: u32, tip: u32) -> bool {
+        self.native_update_rebalance(amount, tip)
+    }
+
+    pub fn action_native_execute_rebalance(&mut self, variant: u8, amount: u32) -> bool {
+        self.native_execute_rebalance(variant, amount)
+    }
+
+    pub fn action_native_settle_rebalance(&mut self, advance: bool, refund: bool) -> bool {
+        self.native_settle_rebalance(advance, refund)
+    }
+
+    pub fn action_native_cancel_rebalance(&mut self, unauthorized: bool) -> bool {
+        self.native_cancel_rebalance(unauthorized)
+    }
+
+    pub fn action_native_rebalance_fee_pool(&mut self, withdraw: bool, amount: u32) -> bool {
+        self.native_rebalance_fee_pool(withdraw, amount)
+    }
+
+    pub fn action_native_move_price(&mut self, bank_index: u8, pct: u8, down: bool) -> bool {
+        self.native_move_price(bank_index, pct, down)
+    }
+
+    pub fn action_native_keeper_close_order(&mut self) -> bool {
+        self.native_keeper_close_order()
+    }
+
+    pub fn action_native_set_keeper_close_flags(&mut self, unauthorized: bool, all: bool) -> bool {
+        self.native_set_keeper_close_flags(unauthorized, all)
+    }
+
+    pub fn action_native_execute_rebalance_multi(&mut self, variant: u8, amount: u32) -> bool {
+        self.native_execute_rebalance_multi(variant, amount)
+    }
+
+    pub fn action_native_liquidate_order_user(&mut self, variant: u8, seize_pct: u8) -> bool {
+        self.native_liquidate_order_user(variant, seize_pct)
+    }
+
     fn scout_register_subject_account(&mut self, account: Pubkey) {
         self.scout_p1_accounts[self.scout_p1_accounts_next % SCOUT_SUBJECT_CAP] = account;
         self.scout_p1_accounts_next = self.scout_p1_accounts_next.saturating_add(1);
@@ -6570,6 +6991,363 @@ impl MarginfiFixture {
             return None;
         }
         Some(bank)
+    }
+
+    // ---- Kamino venue-ops helpers ------------------------------------------------------
+    // All pubkeys of the venue world, re-derived from the two fixture roots (bank, reserve).
+    fn scout_kamino_ops_accounts(&self) -> Option<ScoutKaminoOpsAccounts> {
+        if self.kamino_ops_bank == Pubkey::default() {
+            return None;
+        }
+        let kamino = scout_kamino_program_id();
+        let (lva, liquidity_vault, _, _, _, _) =
+            scout_bank_vault_pdas(self.program_id, self.kamino_ops_bank);
+        let reserve = self.kamino_ops_reserve;
+        Some(ScoutKaminoOpsAccounts {
+            bank: self.kamino_ops_bank,
+            user: self.kamino_ops_user,
+            market: self.kamino_ops_market,
+            market_authority: Pubkey::find_program_address(
+                &[b"lma", self.kamino_ops_market.as_ref()],
+                &kamino,
+            )
+            .0,
+            reserve,
+            supply: Pubkey::find_program_address(
+                &[b"reserve_liq_supply", reserve.as_ref()],
+                &kamino,
+            )
+            .0,
+            collateral_mint: Pubkey::find_program_address(
+                &[b"reserve_coll_mint", reserve.as_ref()],
+                &kamino,
+            )
+            .0,
+            collateral_vault: Pubkey::find_program_address(
+                &[b"reserve_coll_supply", reserve.as_ref()],
+                &kamino,
+            )
+            .0,
+            obligation: scout_kamino_obligation_pda(lva, self.kamino_ops_market),
+            oracle: self.kamino_ops_oracle,
+            liquidity_vault_authority: lva,
+            liquidity_vault,
+        })
+    }
+
+    fn scout_kamino_obligation_deposited(&self, obligation: Pubkey) -> u64 {
+        self.ctx
+            .read_account(&obligation)
+            .ok()
+            .and_then(|a| {
+                a.data
+                    .get(SCOUT_KAMINO_OBLIGATION_DEPOSITED_AMOUNT_OFFSET..SCOUT_KAMINO_OBLIGATION_DEPOSITED_AMOUNT_OFFSET + 8)
+                    .map(|b| u64::from_le_bytes(b.try_into().unwrap_or_default()))
+            })
+            .unwrap_or(0)
+    }
+
+    fn scout_bank_total_asset_shares(&self, bank: Pubkey) -> fixed::types::I80F48 {
+        self.ctx
+            .read_account(&bank)
+            .ok()
+            .and_then(|a| {
+                a.data
+                    .get(SCOUT_BANK_TOTAL_ASSET_SHARES_OFFSET..SCOUT_BANK_TOTAL_ASSET_SHARES_OFFSET + 16)
+                    .map(|b| fixed::types::I80F48::from_le_bytes(b.try_into().unwrap_or_default()))
+            })
+            .unwrap_or(fixed::types::I80F48::ZERO)
+    }
+
+    /// The user's active balance in the kamino-ops bank, as (asset_shares I80F48).
+    fn scout_kamino_ops_user_shares(&self, user: Pubkey, bank: Pubkey) -> fixed::types::I80F48 {
+        let data = match self.ctx.read_account(&user) {
+            Ok(a) => a.data,
+            Err(_) => return fixed::types::I80F48::ZERO,
+        };
+        for i in 0..16usize {
+            let base = SCOUT_PULSE_FIRST_BALANCE_BASE_OFFSET + i * SCOUT_BALANCE_STRIDE;
+            if data.len() < base + SCOUT_BALANCE_STRIDE || data[base] != 1 {
+                continue;
+            }
+            if &data[base + 1..base + 33] != bank.as_ref() {
+                continue;
+            }
+            return fixed::types::I80F48::from_le_bytes(
+                data[base + 40..base + 56].try_into().unwrap_or_default(),
+            );
+        }
+        fixed::types::I80F48::ZERO
+    }
+
+    /// State of every account a venue action may touch, for rollback checks on rejection.
+    fn scout_kamino_ops_snapshot(&self) -> Vec<(Pubkey, Option<(Pubkey, u64, Vec<u8>)>)> {
+        let keys = match self.scout_kamino_ops_accounts() {
+            Some(a) => vec![
+                a.bank, a.liquidity_vault, a.obligation, a.reserve, a.supply,
+                a.collateral_mint, a.collateral_vault, a.user, self.signer_token_account,
+                self.kamino_ops_oracle,
+            ],
+            None => return vec![],
+        };
+        keys.into_iter()
+            .map(|key| {
+                let state = self
+                    .ctx
+                    .read_account(&key)
+                    .ok()
+                    .filter(|a| a.lamports != 0 || !a.data.is_empty())
+                    .map(|a| (a.owner, a.lamports, a.data));
+                (key, state)
+            })
+            .collect()
+    }
+
+    fn scout_kamino_check_rollback(
+        &self,
+        before: &[(Pubkey, Option<(Pubkey, u64, Vec<u8>)>)],
+        what: &str,
+    ) {
+        scout_check!(
+            "KAMINO-OPS",
+            "rejected-venue-tx-restores-all-tracked-accounts",
+            before == self.scout_kamino_ops_snapshot().as_slice(),
+            "kamino {what} changed tracked state despite rejection"
+        );
+    }
+
+    /// Re-stamp the ops oracle with the current clock so withdraw's health-check price load
+    /// is always fresh regardless of campaign clock warps.
+    fn scout_kamino_ops_refresh_oracle(&mut self) {
+        use ::anchor_lang::prelude::Clock;
+        let now = self.ctx.svm.get_sysvar::<Clock>().unix_timestamp;
+        let _ = self.ctx.update_account(&self.kamino_ops_oracle, |data| {
+            let publish_offset = 8 + 32 + 1 + 32 + 8 + 8 + 4;
+            data[publish_offset..publish_offset + 8].copy_from_slice(&now.to_le_bytes());
+            data[publish_offset + 8..publish_offset + 16].copy_from_slice(&now.to_le_bytes());
+        });
+    }
+
+    pub fn action_kamino_init_obligation(&mut self, amount: u16) -> bool {
+        let Some(accts) = self.scout_kamino_ops_accounts() else {
+            return false;
+        };
+        let kamino = scout_kamino_program_id();
+        let user_metadata = Pubkey::find_program_address(
+            &[b"user_meta", accts.liquidity_vault_authority.as_ref()],
+            &kamino,
+        )
+        .0;
+        let before = self.scout_kamino_ops_snapshot();
+        let ok = self
+            .ctx
+            .program(self.program_id)
+            .call(instruction::KaminoInitObligation {
+                amount: amount as u64,
+            })
+            .accounts(accounts::KaminoInitObligation {
+                fee_payer: self.payer.pubkey(),
+                bank: accts.bank,
+                signer_token_account: self.signer_token_account,
+                liquidity_vault_authority: accts.liquidity_vault_authority,
+                liquidity_vault: accts.liquidity_vault,
+                integration_acc_2: accts.obligation,
+                user_metadata,
+                lending_market: accts.market,
+                lending_market_authority: accts.market_authority,
+                integration_acc_1: accts.reserve,
+                mint: self.bank_mint,
+                reserve_liquidity_supply: accts.supply,
+                reserve_collateral_mint: accts.collateral_mint,
+                reserve_destination_deposit_collateral: accts.collateral_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                liquidity_token_program: spl_token::id(),
+            })
+            .signers(&[&*self.payer])
+            .send()
+            .map(|o| o.is_success())
+            .unwrap_or(false);
+        scout_check!(
+            "KAMINO-OPS",
+            "cannot-reinitialize-obligation",
+            !ok,
+            "kamino_init_obligation succeeded on an already-initialized obligation (amount={amount})"
+        );
+        if !ok {
+            self.scout_kamino_check_rollback(&before, "init_obligation");
+        }
+        true
+    }
+
+    pub fn action_kamino_deposit(&mut self, amount: u16, refresh: bool) -> bool {
+        let Some(accts) = self.scout_kamino_ops_accounts() else {
+            return false;
+        };
+        let amount = (amount % 10_000) as u64 + 1;
+        let deposited_before = self.scout_kamino_obligation_deposited(accts.obligation);
+        let shares_before = self.scout_bank_total_asset_shares(accts.bank);
+        let signer_before = self.scout_token_amount(self.signer_token_account);
+        let before = self.scout_kamino_ops_snapshot();
+        self.ctx
+            .raw_call(scout_klend_refresh_reserves_batch_ix(accts.reserve, accts.market))
+            .add_transaction()
+            .expect("queue klend reserve crank");
+        self.ctx
+            .raw_call(scout_klend_refresh_obligation_ix(accts.market, accts.obligation, accts.reserve))
+            .add_transaction()
+            .expect("queue klend obligation crank");
+        self.ctx
+            .program(self.program_id)
+            .call(instruction::KaminoDeposit {
+                amount,
+                refresh_reserve: Some(refresh),
+            })
+            .accounts(accounts::KaminoDeposit {
+                group: self.marginfi_group,
+                marginfi_account: accts.user,
+                authority: self.payer.pubkey(),
+                bank: accts.bank,
+                signer_token_account: self.signer_token_account,
+                liquidity_vault_authority: accts.liquidity_vault_authority,
+                liquidity_vault: accts.liquidity_vault,
+                integration_acc_2: accts.obligation,
+                lending_market: accts.market,
+                lending_market_authority: accts.market_authority,
+                integration_acc_1: accts.reserve,
+                mint: self.bank_mint,
+                reserve_liquidity_supply: accts.supply,
+                reserve_collateral_mint: accts.collateral_mint,
+                reserve_destination_deposit_collateral: accts.collateral_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                liquidity_token_program: spl_token::id(),
+            })
+            .signers(&[&*self.payer])
+            .add_transaction()
+            .expect("queue kamino deposit");
+        let ok = self
+            .ctx
+            .send_batch()
+            .ok()
+            .flatten()
+            .map(|o| o.is_success())
+            .unwrap_or(false);
+        if !ok {
+            self.scout_kamino_check_rollback(&before, "deposit");
+            return true;
+        }
+        // 1:1 reserve: amount liquidity in == amount cTokens minted (the program's own assert
+        // tolerates ±1); shares track cTokens exactly (asset_share_value stays 1).
+        let signer_delta = signer_before - self.scout_token_amount(self.signer_token_account);
+        let deposited_delta = self
+            .scout_kamino_obligation_deposited(accts.obligation)
+            .saturating_sub(deposited_before);
+        let shares_delta = self
+            .scout_bank_total_asset_shares(accts.bank)
+            .saturating_sub(shares_before);
+        scout_check!(
+            "KAMINO-OPS",
+            "deposit-conserves-value-into-venue",
+            signer_delta == amount
+                && deposited_delta.abs_diff(amount) <= 1
+                && (shares_delta - fixed::types::I80F48::from_num(amount)).abs()
+                    <= fixed::types::I80F48::ONE,
+            "kamino deposit accounting: paid={signer_delta} (sent {amount}), obligation +{deposited_delta}, total_shares +{shares_delta}"
+        );
+        true
+    }
+
+    pub fn action_kamino_withdraw(&mut self, amount: u16, all: bool, refresh: bool) -> bool {
+        let Some(accts) = self.scout_kamino_ops_accounts() else {
+            return false;
+        };
+        let user_shares = self.scout_kamino_ops_user_shares(accts.user, accts.bank);
+        let shares_floor: u64 = user_shares.floor().to_num::<u64>();
+        if shares_floor == 0 {
+            return false;
+        }
+        let amount_ctokens = if all {
+            shares_floor
+        } else {
+            (amount as u64 % shares_floor) + 1
+        };
+        self.scout_kamino_ops_refresh_oracle();
+        let deposited_before = self.scout_kamino_obligation_deposited(accts.obligation);
+        let shares_before = self.scout_bank_total_asset_shares(accts.bank);
+        let dest_before = self.scout_token_amount(self.signer_token_account);
+        let before = self.scout_kamino_ops_snapshot();
+        let flags = (all as u8) | ((refresh as u8) << 1);
+        self.ctx
+            .raw_call(scout_klend_refresh_reserves_batch_ix(accts.reserve, accts.market))
+            .add_transaction()
+            .expect("queue klend reserve crank");
+        self.ctx
+            .raw_call(scout_klend_refresh_obligation_ix(accts.market, accts.obligation, accts.reserve))
+            .add_transaction()
+            .expect("queue klend obligation crank");
+        self.ctx
+            .program(self.program_id)
+            .call(instruction::KaminoWithdraw {
+                amount: amount_ctokens,
+                flags: Some(flags),
+            })
+            .accounts(accounts::KaminoWithdraw {
+                group: self.marginfi_group,
+                marginfi_account: accts.user,
+                authority: self.payer.pubkey(),
+                bank: accts.bank,
+                destination_token_account: self.signer_token_account,
+                liquidity_vault_authority: accts.liquidity_vault_authority,
+                liquidity_vault: accts.liquidity_vault,
+                integration_acc_2: accts.obligation,
+                lending_market: accts.market,
+                lending_market_authority: accts.market_authority,
+                integration_acc_1: accts.reserve,
+                mint: self.bank_mint,
+                reserve_liquidity_supply: accts.supply,
+                reserve_collateral_mint: accts.collateral_mint,
+                reserve_source_collateral: accts.collateral_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                liquidity_token_program: spl_token::id(),
+            })
+            .remaining_accounts(vec![accts.bank, accts.oracle, accts.reserve])
+            .signers(&[&*self.payer])
+            .add_transaction()
+            .expect("queue kamino withdraw");
+        let ok = self
+            .ctx
+            .send_batch()
+            .ok()
+            .flatten()
+            .map(|o| o.is_success())
+            .unwrap_or(false);
+        if !ok {
+            self.scout_kamino_check_rollback(&before, "withdraw");
+            return true;
+        }
+        let deposited_delta =
+            deposited_before.saturating_sub(self.scout_kamino_obligation_deposited(accts.obligation));
+        let shares_burned = shares_before
+            .saturating_sub(self.scout_bank_total_asset_shares(accts.bank));
+        let dest_delta = self
+            .scout_token_amount(self.signer_token_account)
+            .saturating_sub(dest_before);
+        let burned_expect = if all {
+            user_shares
+        } else {
+            fixed::types::I80F48::from_num(amount_ctokens)
+        };
+        scout_check!(
+            "KAMINO-OPS",
+            "withdraw-conserves-value-from-venue",
+            deposited_delta == amount_ctokens
+                && (shares_burned - burned_expect).abs() <= fixed::types::I80F48::ONE
+                && dest_delta.abs_diff(amount_ctokens) <= 1,
+            "kamino withdraw accounting: obligation -{deposited_delta} (expected {amount_ctokens}), total_shares -{shares_burned} (expected ~{burned_expect}), destination +{dest_delta}"
+        );
+        true
     }
 
     fn scout_prepare_lending_account_close_balance_marginfi_account(&mut self) -> Option<Pubkey> {
@@ -12887,7 +13665,7 @@ impl MarginfiFixture {
     // ---------------------------------------------------------------------------------------
     // P-0029 (fee conservation) instrumentation.
     fn scout_p29_read_bank(&self, bank: &Pubkey) -> Option<(i128, i128, i128, i64, [u8; 16])> {
-        const P29_BANK_LEN: usize = 8 + 1856;
+        const P29_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P29_INSURANCE: usize = 8 + 176;
         const P29_GROUP: usize = 8 + 232;
         const P29_PROGRAM: usize = 8 + 896;
@@ -13089,7 +13867,7 @@ impl MarginfiFixture {
     /// P-0013's registry seeder, called from setup(). Records banks whose CLOSE_ENABLED_FLAG is set at that moment.
     fn scout_p13_seed_close_enabled_banks(&mut self) {
         const P13_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const P13_BANK_LEN: usize = 8 + 1856;
+        const P13_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
 
         let forged_banks = scout_forged_bank_pdas(self.program_id);
 
@@ -14179,7 +14957,7 @@ impl MarginfiFixture {
     )> {
         const P1_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
         const P1_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
-        const P1_BANK_LEN: usize = 8 + 1856;
+        const P1_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P1_ACCOUNT_LEN: usize = 8 + 2304;
         const P1_BANK_MINT_OFFSET: usize = 8;
         const P1_BANK_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
@@ -14512,6 +15290,8 @@ impl MarginfiFixture {
 
     /// `#[fuzz_fixture]`'s per-action callback.
     fn after_action(&mut self) {
+        scout_log_action_outcome();
+
         // P-0001
         if let Some((value, tokens, claim, actor_accounts, marks)) = self.scout_p1_measure() {
             self.scout_p1_prev_ok = self.scout_p1_cur_ok;
@@ -16859,9 +17639,13 @@ impl MarginfiFixture {
     // SCOUT:EXTRA-ACTIONS:END
 }
 
+include!("native_campaign.rs");
+
+#[cfg(not(feature = "native_orders_test"))]
 #[invariant_test]
 fn invariant_test(_f: &mut MarginfiFixture) {
     scout_check_session!();
+    fixture.native_check_invariants();
     // SCOUT:INVARIANTS:BEGIN
     // SCOUT:INVARIANT:P-0002:BEGIN
     // P-0002 -- share conservation: bank.total_asset_shares equals the sum of asset_shares across live balances referencing it.
@@ -16928,7 +17712,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
     // P-0003 -- per-bank solvency: liquidity_vault + total_liability_amount >= total_asset_amount + collected fees.
     fn invariant_p_0003(f: &mut MarginfiFixture) {
         const SCOUT_P3_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const SCOUT_P3_BANK_ACCOUNT_LEN: usize = 8 + 1856;
+        const SCOUT_P3_BANK_ACCOUNT_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const SCOUT_P3_ASSET_SHARE_VALUE_OFFSET: usize = 8 + 72;
         const SCOUT_P3_LIABILITY_SHARE_VALUE_OFFSET: usize = 8 + 88;
         const SCOUT_P3_LIQUIDITY_VAULT_OFFSET: usize = 8 + 104;
@@ -17573,7 +18357,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
         const P20_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
         const P20_ACCOUNT_LEN: usize = 8 + 2304;
         const P20_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const P20_BANK_LEN: usize = 8 + 1856;
+        const P20_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P20_GROUP_DISCRIMINATOR: [u8; 8] = [182, 23, 173, 240, 151, 206, 182, 67];
         const P20_GROUP_LEN: usize = 8 + 9248;
         const P20_ACCOUNT_GROUP_OFFSET: usize = 8;
@@ -18016,7 +18800,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
         const P5_ACCOUNT_DISCRIMINATOR: [u8; 8] = [67, 178, 130, 109, 126, 114, 28, 42];
         const P5_ACCOUNT_LEN: usize = 8 + 2304;
         const P5_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const P5_BANK_LEN: usize = 8 + 1856;
+        const P5_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P5_BANK_LENDING_COUNT_OFFSET: usize = 8 + 1528;
         const P5_BANK_BORROWING_COUNT_OFFSET: usize = 8 + 1532;
         const P5_ASSET_TAG_DEFAULT: u8 = 0;
@@ -18156,7 +18940,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
     // P-0006 -- group.banks must be >= the number of live banks under that group this check can prove exist.
     fn invariant_p_0006(f: &mut MarginfiFixture) {
         const P6_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const P6_BANK_LEN: usize = 8 + 1856;
+        const P6_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P6_GROUP_DISCRIMINATOR: [u8; 8] = [182, 23, 173, 240, 151, 206, 182, 67];
         const P6_GROUP_LEN: usize = 8 + 9248;
         const P6_BANK_GROUP_OFFSET: usize = 8 + 33;
@@ -20744,7 +21528,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
     // SCOUT:INVARIANT:P-0042:BEGIN
     fn invariant_p_0042(f: &mut MarginfiFixture) {
         const P42_BANK_DISCRIMINATOR: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];
-        const P42_BANK_LEN: usize = 8 + 1856;
+        const P42_BANK_LEN: usize = SCOUT_BANK_ACCOUNT_LEN;
         const P42_EMODE_CONFIG_OFFSET: usize = 944;
         const P42_ENTRY_STRIDE: usize = 40;
         const P42_ENTRY_TAG_OFFSET: usize = 0;

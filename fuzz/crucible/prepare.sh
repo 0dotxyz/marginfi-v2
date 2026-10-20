@@ -43,7 +43,7 @@ cp "${symbols[0]}" "$OUT/marginfi_symbols.so"
 cp "$CARGO_TARGET_DIR/deploy/solend_mocks.so" "$OUT/solend_mocks.so"
 cp tests/fixtures/drift.so "$OUT/drift_v2.so"
 cp tests/fixtures/kamino_farms.so "$OUT/"
-cp tests/fixtures/kamino_lending_nocpi.so "$OUT/"
+cp tests/fixtures/kamino_lending.so "$OUT/"
 cp tests/fixtures/solend.so "$OUT/"
 
 # anchor leaves `address` empty because declare_id! lives in id-crate, so take the
