@@ -1,3 +1,5 @@
+use anchor_lang::{AnchorDeserialize, Discriminator};
+use base64::Engine;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
@@ -6,11 +8,14 @@ use fixtures::{
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
 use marginfi::constants::PROGRAM_VERSION;
+use marginfi::events::MarginfiAccountExecuteOrderEvent;
 use marginfi::prelude::MarginfiError;
+use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
-    centi_to_u32, u32_to_centi, BalanceSide, OrderTrigger, WrappedI80F48,
+    centi_to_u32, u32_to_centi, BalanceSide, ExecuteOrderRecord, OrderTrigger, OrderTriggerType,
+    WrappedI80F48,
 };
-use solana_program_test::tokio;
+use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
     account::Account,
     pubkey::Pubkey,
@@ -19,6 +24,24 @@ use solana_sdk::{
 };
 use solana_system_interface::error::SystemError;
 use test_case::test_case;
+
+fn execution_events(logs: &[String]) -> Vec<MarginfiAccountExecuteOrderEvent> {
+    logs.iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .map(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap()
+        })
+        .filter(|data| data.starts_with(MarginfiAccountExecuteOrderEvent::DISCRIMINATOR))
+        .map(|data| {
+            MarginfiAccountExecuteOrderEvent::deserialize(
+                &mut &data[MarginfiAccountExecuteOrderEvent::DISCRIMINATOR.len()..],
+            )
+            .unwrap()
+        })
+        .collect()
+}
 
 /// Helper to create an OrderTrigger with a stop-loss threshold.
 fn stop_loss_trigger(threshold: I80F48, max_slippage: u32) -> OrderTrigger {
@@ -482,11 +505,15 @@ async fn execute_order_fails_post_trigger_not_met(
         blockhash,
     );
 
-    let result = ctx.banks_client.process_transaction(tx).await;
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
     assert_custom_error!(
-        result.unwrap_err(),
+        BanksClientError::from(result.result.unwrap_err()),
         MarginfiError::OrderExecutionOverWithdrawal
     );
+    assert!(execution_events(&result.metadata.unwrap().log_messages).is_empty());
     drop(ctx);
 
     assert_active_orders(&borrower_mfi_account_f, 1).await;
@@ -762,14 +789,16 @@ async fn execute_order_fails_health_check(
 }
 
 // See the comment over the first test
-#[test_case(BankMint::Fixed, 500.0, BankMint::Usdc, 985.0, BankMint::Sol, take_profit_trigger(fp!(15), slippage_bps(500)), 1.00075)]
-#[test_case(BankMint::Sol, 5.0, BankMint::Usdc, 10.0, BankMint::Fixed, take_profit_trigger(fp!(35), 0), 1.1975)] // Greedy user
-#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, take_profit_trigger(fp!(0.5), slippage_bps(250)), 1.0055)]
-#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 72.5, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(350)), 1.01895)]
-#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, both_trigger(fp!(1495), fp!(1500), slippage_bps(5)), 1.07425)]
-#[test_case(BankMint::Fixed, 1000.0, BankMint::Usdc, 985.0, BankMint::Sol, stop_loss_trigger(fp!(1100), slippage_bps(25)), 1.002575)]
-#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, stop_loss_trigger(fp!(1490), 0), 1.0)] // Greedy user
-#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, stop_loss_trigger(fp!(2), slippage_bps(35)), 1.00035)]
+#[test_case(BankMint::Fixed, 500.0, BankMint::Usdc, 985.0, BankMint::Sol, take_profit_trigger(fp!(15), slippage_bps(500)), 1.00075, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Sol, 5.0, BankMint::Usdc, 10.0, BankMint::Fixed, take_profit_trigger(fp!(35), 0), 1.1975, OrderTriggerType::TakeProfit)] // Greedy user
+#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, take_profit_trigger(fp!(0.5), slippage_bps(250)), 1.0055, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 72.5, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(350)), 1.01895, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, both_trigger(fp!(1495), fp!(1500), slippage_bps(5)), 1.07425, OrderTriggerType::StopLoss)]
+#[test_case(BankMint::Fixed, 1000.0, BankMint::Usdc, 985.0, BankMint::Sol, stop_loss_trigger(fp!(1100), slippage_bps(25)), 1.002575, OrderTriggerType::StopLoss)]
+#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, stop_loss_trigger(fp!(1490), 0), 1.0, OrderTriggerType::StopLoss)] // Greedy user
+#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, stop_loss_trigger(fp!(2), slippage_bps(35)), 1.00035, OrderTriggerType::StopLoss)]
+// Exactly at the take-profit threshold, Both must select TakeProfit.
+#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 75.0, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(100)), 1.0, OrderTriggerType::TakeProfit)]
 #[tokio::test]
 async fn execute_order_success(
     asset_mint: BankMint,
@@ -779,6 +808,7 @@ async fn execute_order_success(
     uninvolved_mint: BankMint,
     trigger: OrderTrigger,
     withdraw_scale: f64,
+    expected_trigger: OrderTriggerType,
 ) -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Setup
@@ -818,6 +848,27 @@ async fn execute_order_success(
 
     let order_before = borrower_mfi_account_f.load_order(order_pda).await;
     let mfi_before = borrower_mfi_account_f.load().await;
+    let asset_bank_before = asset_bank_f.load().await;
+    let liability_bank_before = liability_bank_f.load().await;
+
+    let closure_recipient = Keypair::new();
+    fund_keeper_for_fees(&test_f, &closure_recipient).await?;
+    let closure_balance_before = test_f
+        .try_load(&closure_recipient.pubkey())
+        .await?
+        .unwrap()
+        .lamports;
+    // Account closures return the actual balance, including any donations above rent.
+    let mut order_account = test_f.try_load(&order_pda).await?.unwrap();
+    order_account.lamports += 123;
+    let order_lamports = order_account.lamports;
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&order_pda, &order_account.into());
+    let record_lamports = test_f
+        .get_minimum_rent_for_size(8 + ExecuteOrderRecord::LEN)
+        .await;
 
     let (start_ix, execute_record) = borrower_mfi_account_f
         .make_start_execute_ix(order_pda, keeper.pubkey())
@@ -853,7 +904,7 @@ async fn execute_order_success(
             order_pda,
             execute_record,
             keeper.pubkey(),
-            keeper.pubkey(),
+            closure_recipient.pubkey(),
             vec![liability_bank_f.key],
         )
         .await;
@@ -867,8 +918,38 @@ async fn execute_order_success(
         blockhash,
     );
 
-    ctx.banks_client.process_transaction(tx).await?;
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
+    result.result?;
+    let events = execution_events(&result.metadata.unwrap().log_messages);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.header.signer, Some(keeper.pubkey()));
+    assert_eq!(event.header.marginfi_account, borrower_mfi_account_f.key);
+    assert_eq!(
+        event.header.marginfi_account_authority,
+        mfi_before.authority
+    );
+    assert_eq!(event.header.marginfi_group, mfi_before.group);
+    assert_eq!(event.order, order_pda);
+    assert_eq!(event.triggered, expected_trigger);
+    assert_eq!(event.closure_recipient, closure_recipient.pubkey());
+    assert_eq!(event.order_lamports_returned, order_lamports);
+    assert_eq!(event.execution_record_lamports_returned, record_lamports);
     drop(ctx);
+
+    assert!(test_f.try_load(&execute_record).await?.is_none());
+    let closure_balance_after = test_f
+        .try_load(&closure_recipient.pubkey())
+        .await?
+        .unwrap()
+        .lamports;
+    assert_eq!(
+        closure_balance_after - closure_balance_before,
+        order_lamports + record_lamports
+    );
 
     // order closed
     let order_after = test_f.try_load(&order_pda).await?;
@@ -913,6 +994,35 @@ async fn execute_order_success(
         .iter()
         .find(|b| b.bank_pk == pre_liab.bank_pk);
     assert!(post_liab.is_none(), "liability balance should be removed");
+
+    // These fixtures have zero oracle confidence and no elapsed interest/premium accrual.
+    // Check exact order equity, excluding the uninvolved balance and without f64 rounding.
+    let pre_assets = calc_value(
+        asset_bank_before.get_asset_amount(pre_asset.asset_shares.into())?,
+        I80F48::from_num(price),
+        asset_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    let pre_liabilities = calc_value(
+        liability_bank_before.get_liability_amount(pre_liab.liability_shares.into())?,
+        I80F48::from_num(default_price_for_mint(&liability_mint)),
+        liability_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    let post_assets = calc_value(
+        asset_bank_f
+            .load()
+            .await
+            .get_asset_amount(post_asset.unwrap().asset_shares.into())?,
+        I80F48::from_num(price),
+        asset_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    assert_eq!(
+        I80F48::from(event.equity_before_usd),
+        pre_assets - pre_liabilities
+    );
+    assert_eq!(I80F48::from(event.equity_after_usd), post_assets);
 
     // uninvolved SOL balance unchanged
     let pre_sol = mfi_before

@@ -1,6 +1,6 @@
 use crate::events::{
     AccountEventHeader, KeeperCloseOrderEvent, MarginfiAccountCloseOrderEvent,
-    MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
+    MarginfiAccountExecuteOrderEvent, MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
 };
 use crate::instructions::marginfi_account::liquidate_start::validate_instructions;
 use crate::ix_utils::{
@@ -453,7 +453,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     let start_health = || -> I80F48 { execute_record.order_start_health.into() };
 
-    match order.trigger {
+    let triggered = match order.trigger {
         OrderTriggerType::StopLoss => {
             let sl: I80F48 = order.stop_loss.into();
             let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
@@ -462,6 +462,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                 net >= allowed_sl,
                 MarginfiError::OrderExecutionOverWithdrawal
             );
+            OrderTriggerType::StopLoss
         }
         OrderTriggerType::TakeProfit => {
             let tp: I80F48 = order.take_profit.into();
@@ -475,6 +476,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                 net >= allowed_diff && net >= allowed_tp,
                 MarginfiError::OrderExecutionOverWithdrawal
             );
+            OrderTriggerType::TakeProfit
         }
         OrderTriggerType::Both => {
             let sl: I80F48 = order.stop_loss.into();
@@ -493,6 +495,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                     net >= allowed_diff && net >= allowed_tp,
                     MarginfiError::OrderExecutionOverWithdrawal
                 );
+                OrderTriggerType::TakeProfit
             } else {
                 let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
@@ -500,9 +503,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                     net >= allowed_sl,
                     MarginfiError::OrderExecutionOverWithdrawal
                 );
+                OrderTriggerType::StopLoss
             }
         }
-    }
+    };
 
     // Only one asset and liab are currently involved in a balance, with the single liability being
     // closed.
@@ -549,6 +553,22 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
     marginfi_account.decrement_active_orders()?;
+
+    emit!(MarginfiAccountExecuteOrderEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.executor.key()),
+            marginfi_account: marginfi_account_loader.key(),
+            marginfi_account_authority: marginfi_account.authority,
+            marginfi_group: marginfi_account.group,
+        },
+        order: order_loader.key(),
+        triggered,
+        equity_before_usd: execute_record.order_start_health,
+        equity_after_usd: net.into(),
+        closure_recipient: ctx.accounts.fee_recipient.key(),
+        order_lamports_returned: order_loader.to_account_info().lamports(),
+        execution_record_lamports_returned: execute_record_loader.to_account_info().lamports(),
+    });
 
     Ok(())
 }
