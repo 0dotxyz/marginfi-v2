@@ -31,11 +31,12 @@ use anchor_spl::token_interface::{
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::{
-    refresh_reserves_batch, withdraw_obligation_collateral_and_redeem_reserve_collateral_v2,
+    refresh_obligation, refresh_reserves_batch,
+    withdraw_obligation_collateral_and_redeem_reserve_collateral_v2,
 };
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositFarmsAccounts, RefreshReservesBatch,
+        DepositFarmsAccounts, RefreshObligation, RefreshReservesBatch,
         WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
@@ -130,6 +131,7 @@ pub fn kamino_withdraw<'info>(
 
     if refresh_reserve {
         ctx.accounts.cpi_refresh_reserve()?;
+        ctx.accounts.cpi_refresh_obligation()?;
     }
 
     let expected_liquidity_amount = ctx
@@ -467,6 +469,18 @@ impl<'info> KaminoWithdraw<'info> {
             self.lending_market.to_account_info(),
         ]);
         refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
+    pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
+        let accounts = RefreshObligation {
+            lending_market: self.lending_market.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
+        };
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program.key(), accounts)
+            .with_remaining_accounts(vec![self.integration_acc_1.to_account_info()]);
+        refresh_obligation(cpi_ctx)?;
         Ok(())
     }
 
