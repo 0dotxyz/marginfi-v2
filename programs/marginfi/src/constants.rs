@@ -97,8 +97,8 @@ pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour
 /// Time after tagging at which the premium reaches `LIQUIDATION_TAG_MAX_PREMIUM`, growing
 /// linearly from `LIQUIDATION_TAG_DELAY_SECS`.
 pub const LIQUIDATION_TAG_FULL_PREMIUM_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
-/// Maximum liquidation premium reachable via tag growth (1 = 100%).
-pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(1);
+/// Maximum liquidation premium reachable via tag growth (0.25 = 25%).
+pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(0.25);
 /// Share of the account's health deficit a liquidation must erase to restart the premium-growth
 /// clock (see `tag_after_liquidation`).
 pub const LIQUIDATION_TAG_RESET_DEFICIT_FRACTION: I80F48 = I80F48!(0.25);
