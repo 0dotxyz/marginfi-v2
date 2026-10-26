@@ -1114,6 +1114,8 @@ pub mod marginfi {
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
+    /// * refresh_reserve - when true, internally refresh the reserve and then the obligation
+    ///   before depositing.
     pub fn kamino_deposit<'info>(
         ctx: Context<'info, KaminoDeposit<'info>>,
         amount: u64,
@@ -1129,7 +1131,7 @@ pub mod marginfi {
     ///   `remaining_accounts`
     /// * flags - optional bitflags:
     ///   - bit 0 (`0x01`): withdraw all
-    ///   - bit 1 (`0x02`): refresh reserve via batch refresh
+    ///   - bit 1 (`0x02`): internally refresh the reserve and obligation before withdrawing
     pub fn kamino_withdraw<'info>(
         ctx: Context<'info, KaminoWithdraw<'info>>,
         amount: u64,

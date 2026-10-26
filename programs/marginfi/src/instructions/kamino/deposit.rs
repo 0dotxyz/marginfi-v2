@@ -23,12 +23,13 @@ use anchor_spl::token_interface::{
 };
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::{
-    deposit_reserve_liquidity_and_obligation_collateral_v2, refresh_reserves_batch,
+    deposit_reserve_liquidity_and_obligation_collateral_v2, refresh_obligation,
+    refresh_reserves_batch,
 };
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, RefreshReservesBatch,
+        DepositReserveLiquidityAndObligationCollateralV2, RefreshObligation, RefreshReservesBatch,
     },
     state::{MinimalObligation, MinimalReserve},
 };
@@ -68,15 +69,17 @@ pub fn kamino_deposit<'info>(
     // Get initial obligation data to verify deposit amount later
     let initial_obligation_deposited_amount =
         ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+        ctx.accounts.cpi_refresh_obligation()?;
+    }
+
     let expected_collateral_amount = ctx
         .accounts
         .integration_acc_1
         .load()?
         .liquidity_to_collateral(amount)?;
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-    }
 
     ctx.accounts.cpi_transfer_user_to_obligation_owner(amount)?;
     ctx.accounts.cpi_kamino_deposit(amount, authority_bump)?;
@@ -284,6 +287,18 @@ impl<'info> KaminoDeposit<'info> {
             self.lending_market.to_account_info(),
         ]);
         refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
+    pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
+        let accounts = RefreshObligation {
+            lending_market: self.lending_market.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
+        };
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program.key(), accounts)
+            .with_remaining_accounts(vec![self.integration_acc_1.to_account_info()]);
+        refresh_obligation(cpi_ctx)?;
         Ok(())
     }
 
