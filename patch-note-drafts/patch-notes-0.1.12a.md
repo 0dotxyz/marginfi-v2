@@ -24,13 +24,21 @@ so indexers and clients can track order executions. The event includes:
 
 - The order address and an account header identifying the executor, marginfi account, account
   authority, and group.
+- `created_at`: the configured Order's creation timestamp in Unix seconds (0 for legacy orders),
+  and `max_slippage`: its configured limit, encoded as a u32 fraction where `u32::MAX` is 100%.
+- `asset_bank` and `asset_shares_after`: the bank and remaining position shares of the tagged
+  asset balance after execution. Shares are not token amounts or swap proceeds. Starting amounts
+  and the closed liability bank are not retained by the execution record and are not emitted.
 - `triggered`: the validated `StopLoss` or `TakeProfit` branch, including for orders configured
   with both triggers. This field never reports `Both`.
 - `equity_before_usd` and `equity_after_usd`: the protocol-valued USD equity of the tagged order
   balances immediately before and after execution, encoded as `WrappedI80F48`.
-- `closure_recipient`, `order_lamports_returned`, and `execution_record_lamports_returned`: the
-  recipient and lamports returned when the order and execution-record accounts are closed.
+- `closure_recipient` and `order_lamports_returned`: the closure recipient and the lamports
+  returned from closing the order account. The execution record's returned lamports are not emitted.
 
 Consumers must verify that the transaction succeeded before treating the event as a completed
 execution. The equity difference is not realized trading P/L, and the returned lamports are account
 closure proceeds, not trading fees.
+
+Event consumers must use the updated IDL for the new event layout. The execution-record layout,
+instruction arguments, and required accounts are unchanged.
