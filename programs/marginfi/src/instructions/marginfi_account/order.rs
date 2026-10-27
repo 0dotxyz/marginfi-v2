@@ -413,7 +413,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         )
     };
 
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_health_cache(health_cache);
 
     // Inline CB gate: order execution moves funds at oracle prices, so revert if any involved
     // bank's live price has jumped past the breach threshold relative to its reference.

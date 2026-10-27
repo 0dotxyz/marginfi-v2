@@ -1266,7 +1266,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     }
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
-        account.health_cache = health_cache;
+        account.set_health_cache(health_cache);
         account.liquidation_tagged_at = 0;
         account.unset_flag(ACCOUNT_IN_REBALANCE, false);
         account.lending_account.sort_balances();

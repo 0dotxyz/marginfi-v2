@@ -273,7 +273,7 @@ pub fn lending_account_borrow<'info>(
     bank.update_cache_price(price_for_cache)?;
 
     health_cache.set_engine_ok(true);
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_health_cache(health_cache);
 
     Ok(())
 }

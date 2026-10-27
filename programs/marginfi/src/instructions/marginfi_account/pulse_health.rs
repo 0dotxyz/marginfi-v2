@@ -180,7 +180,7 @@ pub fn lending_account_pulse_health<'info>(
         account.indexer_flags.has_trivial_balance =
             has_trivial_balance(equity_assets, equity_liabs) as u8;
     }
-    account.health_cache = health_cache;
+    account.set_health_cache(health_cache);
 
     emit!(HealthPulseEvent {
         account: ctx.accounts.marginfi_account.key(),
