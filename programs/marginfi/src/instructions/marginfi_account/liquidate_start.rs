@@ -124,6 +124,7 @@ pub fn start_receivership<'info>(
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
         },
+        // Risk-admin deleverage can unwind healthy accounts; permissionless liquidation cannot.
         matches!(origin, ReceivershipCacheOrigin::Deleverage),
     )?;
 
