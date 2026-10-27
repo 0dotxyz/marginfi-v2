@@ -305,6 +305,14 @@ pub struct MarginfiAccountExecuteOrderEvent {
     /// The signer is the executor.
     pub header: AccountEventHeader,
     pub order: Pubkey,
+    /// Unix timestamp (seconds) when the order was created; 0 for legacy orders.
+    pub created_at: i64,
+    /// Configured slippage limit, encoded as a u32 fraction (u32::MAX = 100%).
+    pub max_slippage: u32,
+    /// Bank of the surviving tagged asset balance.
+    pub asset_bank: Pubkey,
+    /// Position shares, not token amounts or swap proceeds.
+    pub asset_shares_after: WrappedI80F48,
     /// The validated execution branch: StopLoss or TakeProfit, never Both.
     pub triggered: OrderTriggerType,
     /// Protocol-valued equity of the tagged order balances immediately before execution.
@@ -314,7 +322,6 @@ pub struct MarginfiAccountExecuteOrderEvent {
     /// Recipient of the closed accounts' lamports; these proceeds are not trading fees.
     pub closure_recipient: Pubkey,
     pub order_lamports_returned: u64,
-    pub execution_record_lamports_returned: u64,
 }
 
 #[event]

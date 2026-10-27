@@ -934,10 +934,12 @@ async fn execute_order_success(
     );
     assert_eq!(event.header.marginfi_group, mfi_before.group);
     assert_eq!(event.order, order_pda);
+    assert_eq!(event.created_at, order_before.created_at);
+    assert_eq!(event.max_slippage, order_before.max_slippage);
+    assert_eq!(event.asset_bank, asset_bank_f.key);
     assert_eq!(event.triggered, expected_trigger);
     assert_eq!(event.closure_recipient, closure_recipient.pubkey());
     assert_eq!(event.order_lamports_returned, order_lamports);
-    assert_eq!(event.execution_record_lamports_returned, record_lamports);
     drop(ctx);
 
     assert!(test_f.try_load(&execute_record).await?.is_none());
@@ -994,6 +996,7 @@ async fn execute_order_success(
         .iter()
         .find(|b| b.bank_pk == pre_liab.bank_pk);
     assert!(post_liab.is_none(), "liability balance should be removed");
+    assert_eq!(event.asset_shares_after, post_asset.unwrap().asset_shares);
 
     // These fixtures have zero oracle confidence and no elapsed interest/premium accrual.
     // Check exact order equity, excluding the uninvolved balance and without f64 rounding.

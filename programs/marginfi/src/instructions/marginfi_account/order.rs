@@ -554,6 +554,15 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
     marginfi_account.decrement_active_orders()?;
 
+    // Execution closes the tagged liability balance and preserves all non-order balances,
+    // leaving the tagged asset balance available for event metadata (even if only dust remains).
+    let (asset_bank, asset_shares_after) = marginfi_account
+        .lending_account
+        .get_active_balances_iter()
+        .find(|balance| balance.tag != 0 && order.tags.contains(&balance.tag))
+        .map(|balance| (balance.bank_pk, balance.asset_shares))
+        .unwrap_or_default();
+
     emit!(MarginfiAccountExecuteOrderEvent {
         header: AccountEventHeader {
             signer: Some(ctx.accounts.executor.key()),
@@ -562,12 +571,15 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
             marginfi_group: marginfi_account.group,
         },
         order: order_loader.key(),
+        created_at: order.created_at,
+        max_slippage: order.max_slippage,
+        asset_bank,
+        asset_shares_after,
         triggered,
         equity_before_usd: execute_record.order_start_health,
         equity_after_usd: net.into(),
         closure_recipient: ctx.accounts.fee_recipient.key(),
         order_lamports_returned: order_loader.to_account_info().lamports(),
-        execution_record_lamports_returned: execute_record_loader.to_account_info().lamports(),
     });
 
     Ok(())
