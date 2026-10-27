@@ -1,5 +1,5 @@
-//! The Kamino / JupLend part of `lending_pool_close_bank`: withdraws the bank's seed position to
-//! the admin and closes the venue accounts.
+//! The Kamino / JupLend part of `lending_pool_close_bank`: withdraws the bank's seed position into
+//! the liquidity vault and closes the venue accounts.
 use crate::bank_signer;
 use crate::check;
 use crate::state::bank::BankImpl;
@@ -87,7 +87,7 @@ pub(super) fn close_venue_position<'info>(
             reserve.key() == bank.integration_acc_1,
             MarginfiError::InvalidKaminoReserve
         );
-        // Already closed.
+        // Never initialized (bank still `Uninitialized`) or already closed.
         if *obligation.owner != KAMINO_PROGRAM_ID {
             return Ok(());
         }
