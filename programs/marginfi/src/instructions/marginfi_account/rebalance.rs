@@ -105,7 +105,6 @@ fn venue_multiplier<'info>(
         oracle_ais,
         clock,
         OraclePriceType::RealTime,
-        false,
     )?;
     Ok(priced.price_multiplier)
 }
