@@ -656,6 +656,12 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
     assert_eq!(liquidator_usdc_tokens, native!(98, "USDC"));
 
     let liquidatee_ma = liquidatee.load().await;
+    let health_cache = &liquidatee_ma.health_cache;
+    assert!(health_cache.is_engine_ok());
+    assert_eq!(
+        health_cache.program_version,
+        marginfi::constants::PROGRAM_VERSION
+    );
     let sol_bank_state = sol_bank.load().await;
     let usdc_bank_state = usdc_bank.load().await;
     let sol_index = liquidatee_ma

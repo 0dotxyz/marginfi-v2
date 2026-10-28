@@ -36,7 +36,6 @@
 
 use crate::{
     check, check_eq,
-    constants::PROGRAM_VERSION,
     events::{
         AccountEventHeader, KeeperCloseRebalanceOrderEvent,
         MarginfiAccountCloseRebalanceOrderEvent, MarginfiAccountPlaceRebalanceOrderEvent,
@@ -52,8 +51,9 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            calc_value, check_account_maint_health, get_remaining_accounts_per_bank,
-            run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+            calc_value, check_account_maint_health, finalize_health_cache,
+            get_remaining_accounts_per_bank, run_cb_price_gate, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -1114,7 +1114,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     }
 
     let mut health_cache = HealthCache::zeroed();
-    health_cache.timestamp = clock.unix_timestamp;
     let (value_moved, tip_pending, move_yield_indices) = {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
 
@@ -1186,8 +1185,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             &mut health_cache,
             clock.unix_timestamp as u64,
         )?;
-        health_cache.program_version = PROGRAM_VERSION;
-        health_cache.set_engine_ok(true);
+        finalize_health_cache(&mut health_cache, clock.unix_timestamp);
 
         // Re-arm the circuit-breaker price gate the per-leg withdraws skipped while deferring: a
         // risk-carrying rebalance reverts if any post-move bank's live price has jumped past the

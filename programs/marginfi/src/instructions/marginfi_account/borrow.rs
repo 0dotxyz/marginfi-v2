@@ -1,6 +1,5 @@
 use crate::{
     bank_signer, check,
-    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, LendingAccountBorrowEvent},
     math_error,
     prelude::{MarginfiError, MarginfiResult},
@@ -8,8 +7,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health_and_clear_tag,
-            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            finalize_health_cache, is_signer_authorized, run_cb_price_gate, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -204,7 +203,6 @@ pub fn lending_account_borrow<'info>(
     }
 
     let mut health_cache = HealthCache::zeroed();
-    health_cache.timestamp = clock.unix_timestamp;
     marginfi_account.lending_account.sort_balances();
     marginfi_account.sync_indexer_flags();
 
@@ -222,7 +220,6 @@ pub fn lending_account_borrow<'info>(
         &mut Some(&mut health_cache),
         &mut Some(&mut premium_scratch),
     )?;
-    health_cache.program_version = PROGRAM_VERSION;
 
     // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
     // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
@@ -272,7 +269,7 @@ pub fn lending_account_borrow<'info>(
     bank.update_bank_cache(&group)?;
     bank.update_cache_price(price_for_cache)?;
 
-    health_cache.set_engine_ok(true);
+    finalize_health_cache(&mut health_cache, clock.unix_timestamp);
     marginfi_account.health_cache = health_cache;
 
     Ok(())
