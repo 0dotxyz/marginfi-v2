@@ -22,10 +22,23 @@ use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
         FeeState, HealthCache, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
-        RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        ReceivershipCacheOrigin, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
+
+fn validate_receivership_cache(
+    account: &MarginfiAccount,
+    origin: ReceivershipCacheOrigin,
+) -> MarginfiResult {
+    check!(
+        account.health_cache.has_receivership_origin(origin),
+        MarginfiError::UnexpectedLiquidationState,
+        "Health cache was replaced after receivership started"
+    );
+    Ok(())
+}
 
 /// (Permissionless) Ends a liquidation. Records the liquidation event in the user's record. Debits a
 /// small flat sol fee to the global fee wallet.
@@ -42,6 +55,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     validate_not_cpi_by_stack_height()?;
 
+    validate_receivership_cache(&marginfi_account, ReceivershipCacheOrigin::Liquidation)?;
+
     let pre_assets_equity: I80F48 = liq_record.cache.asset_value_equity.into();
 
     // Below the threshold the account may end healthy or fully cleared; the premium cap still
@@ -50,8 +65,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
-    // Read before `end_receivership` updates them. The receivership legs leave both alone: the
-    // cache write and the lending-only tag clear are both suspended while in receivership.
+    // Read before `end_receivership` updates them. The cache provenance check above guarantees
+    // the e-mode bit still comes from the start; receivership legs suspend the tag clear.
     let tagged_at = marginfi_account.liquidation_tagged_at;
     let emode_boosted = marginfi_account.health_cache.is_emode_boosted();
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
@@ -108,6 +123,8 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
     let group = ctx.accounts.group.load()?;
 
     validate_not_cpi_by_stack_height()?;
+
+    validate_receivership_cache(&marginfi_account, ReceivershipCacheOrigin::Deleverage)?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_DELEVERAGE, false);
     let (_, seized_f64, _, repaid_f64) = end_receivership(
@@ -170,7 +187,7 @@ pub fn end_receivership<'info>(
     )?;
 
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
-    marginfi_account.health_cache = post_hc;
+    marginfi_account.set_health_cache(post_hc);
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-liquidation collateral mix (cached prices).
@@ -372,5 +389,51 @@ pub struct EndDeleverage<'info> {
 impl Hashable for EndDeleverage<'_> {
     fn get_hash() -> [u8; 8] {
         get_discrim_hash("global", "end_deleverage")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use marginfi_type_crate::types::{DELEVERAGE_START, LIQUIDATION_START};
+
+    #[test]
+    fn receivership_start_cache_requires_matching_origin() {
+        let mut account = MarginfiAccount::zeroed();
+        let mut cache = HealthCache::zeroed();
+        cache.set_emode_boosted(true);
+
+        for origin in [
+            ReceivershipCacheOrigin::Liquidation,
+            ReceivershipCacheOrigin::Deleverage,
+        ] {
+            let other = match origin {
+                ReceivershipCacheOrigin::Liquidation => ReceivershipCacheOrigin::Deleverage,
+                ReceivershipCacheOrigin::Deleverage => ReceivershipCacheOrigin::Liquidation,
+            };
+            account.set_receivership_start_health_cache(cache, origin);
+            assert!(account.health_cache.is_emode_boosted());
+            assert!(validate_receivership_cache(&account, origin).is_ok());
+            assert!(validate_receivership_cache(&account, other).is_err());
+
+            // Even a copy of the stamped cache loses provenance on an ordinary write.
+            account.set_health_cache(account.health_cache);
+            assert!(account.health_cache.is_emode_boosted());
+            assert!(validate_receivership_cache(&account, origin).is_err());
+
+            // A failed pulse can replace an e-mode cache with a fresh zeroed one.
+            account.set_receivership_start_health_cache(cache, origin);
+            account.set_health_cache(HealthCache::zeroed());
+            assert!(!account.health_cache.is_emode_boosted());
+            assert!(validate_receivership_cache(&account, origin).is_err());
+        }
+
+        account.health_cache.flags |= LIQUIDATION_START | DELEVERAGE_START;
+        assert!(
+            validate_receivership_cache(&account, ReceivershipCacheOrigin::Liquidation).is_err()
+        );
+        assert!(
+            validate_receivership_cache(&account, ReceivershipCacheOrigin::Deleverage).is_err()
+        );
     }
 }
