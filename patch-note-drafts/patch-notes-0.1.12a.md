@@ -27,7 +27,8 @@ e-mode status used by liquidation comes from the initial health calculation.
 Additional account-state checks protect against instructions invoked through CPI during a
 liquidation or flashloan:
 
-- `lending_account_pulse_health` rejects accounts in receivership or risk-admin liquidation.
+- `lending_account_pulse_health` rejects accounts in receivership, risk-admin liquidation, order
+  execution, or rebalance.
 - `kamino_deposit`, `drift_deposit`, and `juplend_deposit` reject accounts in receivership,
   matching the existing standard deposit check.
 - Authority and keeper order-close instructions, including rebalance-order closure, reject

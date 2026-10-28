@@ -3,7 +3,8 @@ use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP,
+    HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 
@@ -198,8 +199,13 @@ pub struct PulseHealth<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        // Defense in depth: no valid reason for accounts in transient states to pulse.
         constraint = !marginfi_account.load()?.get_flag(
-            ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION
+            ACCOUNT_IN_RECEIVERSHIP
+                | ACCOUNT_IN_DELEVERAGE
+                | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION
+                | ACCOUNT_IN_ORDER_EXECUTION
+                | ACCOUNT_IN_REBALANCE
         ) @ MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
