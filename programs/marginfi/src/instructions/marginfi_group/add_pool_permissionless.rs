@@ -21,7 +21,7 @@ use marginfi_type_crate::{
     },
     types::{
         make_points, Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
-        MarginfiGroup, OracleSetup, RatePoint, StakedSettings, INTEREST_CURVE_SEVEN_POINT,
+        MarginfiGroup, RatePoint, StakedSettings, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 
@@ -107,8 +107,11 @@ fn write_staked_bank(
     if is_t22 {
         bank.flags |= IS_T22;
     }
-    bank.config.oracle_setup = OracleSetup::StakedWithPythPush;
+    bank.config.oracle_setup = settings.staked_oracle_setup();
     bank.config.oracle_keys[0] = settings.oracle;
+    bank.config.scope_entry_index = settings.scope_base_feed().unwrap_or(0);
+    bank.config
+        .set_scope_smoothed_entry(settings.scope_smoothed_entry());
 
     Ok(())
 }

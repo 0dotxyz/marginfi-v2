@@ -24,8 +24,8 @@ use marginfi_type_crate::{
         u32_to_basis, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache,
         HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup,
         OracleFeedFamily, OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
-        ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ReconciledEmodeConfig, RequirementType, RiskTier, ScopePriceSelection, ACCOUNT_DISABLED,
+        ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
         ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
@@ -53,16 +53,23 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedDrift => Ok(2),
         // Fixed + JupLend: bank + lending state (no oracle)
         OracleSetup::FixedJuplend => Ok(2),
-        // PythMSOL: bank + Pyth + Marinade State
-        OracleSetup::PythMSOL => Ok(3),
-        // KaminoMSOL / JuplendMSOL: bank + Pyth + reserve/lending + Marinade State
-        OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => Ok(4),
-        // PythLST: bank + Pyth + SPL StakePool
-        OracleSetup::PythLST => Ok(3),
-        // KaminoLST / JuplendLST: bank + Pyth + reserve/lending + SPL StakePool
-        OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
-        // PTPyth: bank + Pyth + Exponent vault
-        OracleSetup::PTPyth => Ok(3),
+        // PythMSOL / ScopeMSOL: bank + Pyth or Scope feed + Marinade State
+        OracleSetup::PythMSOL | OracleSetup::ScopeMSOL => Ok(3),
+        // KaminoMSOL / JuplendMSOL and their Scope twins: bank + feed + reserve/lending +
+        // Marinade State
+        OracleSetup::KaminoMSOL
+        | OracleSetup::JuplendMSOL
+        | OracleSetup::ScopeKaminoMSOL
+        | OracleSetup::ScopeJuplendMSOL => Ok(4),
+        // PythLST / ScopeLST: bank + Pyth or Scope feed + SPL StakePool
+        OracleSetup::PythLST | OracleSetup::ScopeLST => Ok(3),
+        // KaminoLST / JuplendLST and their Scope twins: bank + feed + reserve/lending + SPL StakePool
+        OracleSetup::KaminoLST
+        | OracleSetup::JuplendLST
+        | OracleSetup::ScopeKaminoLST
+        | OracleSetup::ScopeJuplendLST => Ok(4),
+        // PTPyth / ScopePT: bank + Pyth or Scope feed + Exponent vault
+        OracleSetup::PTPyth | OracleSetup::ScopePT => Ok(3),
         // PTFixed: bank + Exponent vault (no base feed, i.e. the token is assumed to be ~= $1)
         OracleSetup::PTFixed => Ok(2),
         // ScopeKamino / ScopeJuplend: bank + Scope feed + reserve/lending
@@ -793,6 +800,7 @@ struct EmodeConfigIterator<'a, 'info> {
     shared_oracle_key: Option<Pubkey>,
     shared_feed_family: Option<OracleFeedFamily>,
     shared_fixed_price: Option<I80F48>,
+    shared_scope_selection: Option<ScopePriceSelection>,
     lowest_liab_weight: Option<I80F48>,
     same_asset_invalid: bool,
 }
@@ -817,6 +825,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             shared_oracle_key: None,
             shared_feed_family: None,
             shared_fixed_price: None,
+            shared_scope_selection: None,
             lowest_liab_weight: None,
             same_asset_invalid: false,
         }
@@ -835,6 +844,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             Some(oracle_key),
             Some(feed_family),
             Some(fixed_price),
+            Some(scope_selection),
             Some(liab_weight),
         ) = (
             self.same_asset_leverage,
@@ -843,12 +853,14 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             self.shared_oracle_key,
             self.shared_feed_family,
             self.shared_fixed_price,
+            self.shared_scope_selection,
             self.lowest_liab_weight,
         ) {
             reconciled.same_asset.mint = mint;
             reconciled.same_asset.oracle_key = oracle_key;
             reconciled.same_asset.feed_family = Some(feed_family);
             reconciled.same_asset.fixed_price = fixed_price;
+            reconciled.same_asset.scope_selection = scope_selection;
             reconciled.same_asset.asset_weight =
                 compute_same_asset_emode_weight(leverage, liab_weight);
         }
@@ -895,6 +907,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                         &mut self.shared_oracle_key,
                         &mut self.shared_feed_family,
                         &mut self.shared_fixed_price,
+                        &mut self.shared_scope_selection,
                         &mut self.lowest_liab_weight,
                         &bank,
                         bank.mint,
@@ -926,14 +939,15 @@ fn same_asset_leverage_for_requirement(
 /// Folds one liability mint/weight into the running same-asset accumulators.
 /// Returns `false` when any liability bank is ineligible, uses an integration pricing setup,
 /// lacks a feed family (fixed-price, deprecated, or unset oracle setup), is missing an oracle
-/// key, or diverges from a previously seen mint/oracle-key/feed-family triple. Callers must stop
-/// folding on `false`.
+/// key, or diverges from a previously seen mint/oracle-key/feed-family/fixed-price/scope-selection
+/// identity. Callers must stop folding on `false`.
 #[allow(clippy::too_many_arguments)]
 fn update_reconciled_same_asset_config(
     shared_mint: &mut Option<Pubkey>,
     shared_oracle_key: &mut Option<Pubkey>,
     shared_feed_family: &mut Option<OracleFeedFamily>,
     shared_fixed_price: &mut Option<I80F48>,
+    shared_scope_selection: &mut Option<ScopePriceSelection>,
     lowest_liab_weight: &mut Option<I80F48>,
     bank: &Bank,
     mint: Pubkey,
@@ -947,15 +961,24 @@ fn update_reconciled_same_asset_config(
     // The native multiplier setups (mSOL / LST / PT) are admissible on the same footing as
     // `StakedWithPythPush`: each has its own feed family, so a liability of that family can only
     // pair with collateral of the same family, mint, and `oracle_keys[0]`, pinning both sides to
-    // one multiplier source. Their `Kamino*` / `Juplend*` wrappers stay excluded.
+    // one multiplier source. Their `Kamino*` / `Juplend*` wrappers (Pyth- or Scope-fed) stay
+    // excluded. The Scope-fed
+    // twins (`StakedWithScope` / `ScopeMSOL` / `ScopeLST` / `ScopePT`) have families of their own
+    // and carry the Scope entry in their identity, so they never pair with a Pyth-fed bank. Plain
+    // `Scope` is the Scope counterpart of `PythPushOracle`.
     if !matches!(
         bank.config.oracle_setup,
         OracleSetup::PythPushOracle
+            | OracleSetup::Scope
             | OracleSetup::SwitchboardPull
             | OracleSetup::StakedWithPythPush
+            | OracleSetup::StakedWithScope
             | OracleSetup::PythMSOL
+            | OracleSetup::ScopeMSOL
             | OracleSetup::PythLST
+            | OracleSetup::ScopeLST
             | OracleSetup::PTPyth
+            | OracleSetup::ScopePT
     ) {
         *lowest_liab_weight = None;
         return false;
@@ -975,12 +998,14 @@ fn update_reconciled_same_asset_config(
 
     let oracle_key = bank.config.oracle_keys[0];
     let fixed_price: I80F48 = bank.config.fixed_price.into();
+    let scope_selection = bank.config.effective_scope_selection();
     match shared_mint {
         Some(existing_mint)
             if *existing_mint != mint
                 || shared_oracle_key.as_ref() != Some(&oracle_key)
                 || shared_feed_family.as_ref() != Some(&feed_family)
-                || shared_fixed_price.as_ref() != Some(&fixed_price) =>
+                || shared_fixed_price.as_ref() != Some(&fixed_price)
+                || shared_scope_selection.as_ref() != Some(&scope_selection) =>
         {
             *lowest_liab_weight = None;
             false
@@ -996,6 +1021,7 @@ fn update_reconciled_same_asset_config(
             *shared_oracle_key = Some(oracle_key);
             *shared_feed_family = Some(feed_family);
             *shared_fixed_price = Some(fixed_price);
+            *shared_scope_selection = Some(scope_selection);
             *lowest_liab_weight = Some(liab_weight);
             true
         }
@@ -1900,7 +1926,7 @@ fn calc_weighted_asset_value_standalone(
                 // interval, capped at 5% of price.
                 let premium_price = match (need_premium_price, price_adapter_result) {
                     (true, Ok(feed)) => feed.get_price_of_type_ignore_conf(
-                        requirement_type.get_oracle_price_type(),
+                        feed.price_type_for(requirement_type),
                         Some(PriceBias::Low),
                     )?,
                     // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
@@ -1947,7 +1973,7 @@ fn calc_weighted_asset_value_standalone(
                 // Same as the Paused/ReduceOnly exit: premium-only read, confidence ignored.
                 let premium_price = if need_premium_price {
                     price_feed.get_price_of_type_ignore_conf(
-                        requirement_type.get_oracle_price_type(),
+                        price_feed.price_type_for(requirement_type),
                         Some(PriceBias::Low),
                     )?
                 } else {
@@ -1959,7 +1985,7 @@ fn calc_weighted_asset_value_standalone(
             // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
             let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
-            let oracle_price_type = requirement_type.get_oracle_price_type();
+            let oracle_price_type = price_feed.price_type_for(requirement_type);
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
                     oracle_price_type,
@@ -2036,16 +2062,17 @@ fn calc_weighted_liab_value_standalone(
         .config
         .get_weight(requirement_type, BalanceSide::Liabilities);
 
+    let oracle_price_type = price_feed.price_type_for(requirement_type);
     let higher_price = if let Some(cache) = liq_cache.as_mut() {
         let price_with_confidence = price_feed.get_price_and_confidence_of_type(
-            requirement_type.get_oracle_price_type(),
+            oracle_price_type,
             bank.config.oracle_max_confidence,
         )?;
         cache.record(requirement_type, position_index, price_with_confidence);
         apply_price_bias(price_with_confidence, PriceBias::High)?
     } else {
         price_feed.get_price_of_type(
-            requirement_type.get_oracle_price_type(),
+            oracle_price_type,
             Some(PriceBias::High),
             bank.config.oracle_max_confidence,
         )?
@@ -2982,6 +3009,291 @@ mod test {
         );
     }
 
+    /// Older Scope -> Pyth / Switchboard transitions left the Scope entry behind. That unused
+    /// state must not change the collateral weight, including on native multiplier setups.
+    #[test]
+    fn get_asset_weight_ignores_legacy_scope_entries_for_non_scope_pricing() {
+        for setup in [
+            OracleSetup::PythPushOracle,
+            OracleSetup::KaminoPythPush,
+            OracleSetup::SwitchboardPull,
+            OracleSetup::KaminoSwitchboardPull,
+            OracleSetup::StakedWithPythPush,
+            OracleSetup::PythMSOL,
+            OracleSetup::KaminoMSOL,
+            OracleSetup::JuplendMSOL,
+            OracleSetup::PythLST,
+            OracleSetup::KaminoLST,
+            OracleSetup::JuplendLST,
+            OracleSetup::PTPyth,
+        ] {
+            let mut bank =
+                same_asset_eligible_bank(Pubkey::new_unique(), Pubkey::new_unique(), I80F48::ONE);
+            bank.config.oracle_setup = setup;
+            bank.config.operational_state = BankOperationalState::Operational;
+            bank.config.risk_tier = RiskTier::Collateral;
+            bank.config.asset_weight_init = I80F48!(0.8).into();
+            bank.config.asset_weight_maint = I80F48!(0.9).into();
+            if setup == OracleSetup::PTPyth {
+                bank.config.fixed_price = I80F48!(0.9).into();
+            }
+
+            let mut reconciled = ReconciledEmodeConfig::default();
+            reconciled.same_asset.mint = bank.mint;
+            reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+            reconciled.same_asset.feed_family = setup.feed_family();
+            reconciled.same_asset.fixed_price = bank.config.fixed_price.into();
+            reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+            for entry in [0, 42, u16::MAX] {
+                // Assign directly to reproduce pre-upgrade state; the current setter clears it.
+                bank.config.scope_entry_index = entry;
+                for (label, requirement) in [
+                    ("initial", RequirementType::Initial),
+                    ("maintenance", RequirementType::Maintenance),
+                ] {
+                    assert_eq!(
+                        bank.get_asset_weight(requirement, &reconciled),
+                        I80F48!(0.99),
+                        "{setup:?}, {label}, legacy entry {entry}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn same_asset_liabilities_ignore_legacy_scope_entries_for_non_scope_pricing() {
+        for setup in [
+            OracleSetup::PythPushOracle,
+            OracleSetup::SwitchboardPull,
+            OracleSetup::StakedWithPythPush,
+            OracleSetup::PythMSOL,
+            OracleSetup::PythLST,
+            OracleSetup::PTPyth,
+        ] {
+            let mint = Pubkey::new_unique();
+            let feed = Pubkey::new_unique();
+            let mut shared_mint = None;
+            let mut shared_oracle_key = None;
+            let mut shared_feed_family = None;
+            let mut shared_fixed_price = None;
+            let mut shared_scope_entry = None;
+            let mut lowest_liab_weight = None;
+
+            // Seed with the stale entry too: the first liability must normalize its identity.
+            for (entry, weight) in [
+                (42, I80F48!(1.05)),
+                (0, I80F48!(1.0)),
+                (u16::MAX, I80F48!(1.03)),
+            ] {
+                let mut bank = same_asset_eligible_bank(mint, feed, weight);
+                bank.config.oracle_setup = setup;
+                bank.config.scope_entry_index = entry;
+                if setup == OracleSetup::PTPyth {
+                    bank.config.fixed_price = I80F48!(0.9).into();
+                }
+
+                assert!(
+                    update_reconciled_same_asset_config(
+                        &mut shared_mint,
+                        &mut shared_oracle_key,
+                        &mut shared_feed_family,
+                        &mut shared_fixed_price,
+                        &mut shared_scope_entry,
+                        &mut lowest_liab_weight,
+                        &bank,
+                        bank.mint,
+                        weight,
+                    ),
+                    "{setup:?}, legacy entry {entry}"
+                );
+            }
+            assert_eq!(
+                shared_scope_entry,
+                Some(ScopePriceSelection::default()),
+                "{setup:?}"
+            );
+            assert_eq!(lowest_liab_weight, Some(I80F48::ONE), "{setup:?}");
+        }
+    }
+
+    /// Scope banks on one `OraclePrices` account price different assets per entry, so the entry
+    /// is part of the same-asset identity: Kamino SOL collateral on Scope pairs with Scope SOL debt
+    /// only on the same entry.
+    #[test]
+    fn get_asset_weight_requires_matching_scope_entry() {
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
+            OracleSetup::StakedWithScope,
+            OracleSetup::ScopeMSOL,
+            OracleSetup::ScopeLST,
+            OracleSetup::ScopeKaminoLST,
+            OracleSetup::ScopeKaminoMSOL,
+            OracleSetup::ScopeJuplendMSOL,
+            OracleSetup::ScopeJuplendLST,
+            OracleSetup::ScopePT,
+        ] {
+            let mut bank =
+                same_asset_eligible_bank(Pubkey::new_unique(), Pubkey::new_unique(), I80F48::ONE);
+            bank.config.risk_tier = RiskTier::Collateral;
+            bank.config.operational_state = BankOperationalState::Operational;
+            bank.config.oracle_setup = setup;
+
+            let mut reconciled = ReconciledEmodeConfig::default();
+            reconciled.same_asset.mint = bank.mint;
+            reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+            reconciled.same_asset.feed_family = setup.feed_family();
+            reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+            for entry in [0, 13] {
+                bank.config.scope_entry_index = entry;
+                reconciled.same_asset.scope_selection.entry_index = entry;
+                for requirement in [RequirementType::Initial, RequirementType::Maintenance] {
+                    assert_eq!(
+                        bank.get_asset_weight(requirement, &reconciled),
+                        I80F48!(0.99),
+                        "{setup:?}, matching entry {entry}"
+                    );
+                }
+
+                bank.config.scope_entry_index = entry + 1;
+                for requirement in [RequirementType::Initial, RequirementType::Maintenance] {
+                    assert_eq!(
+                        bank.get_asset_weight(requirement, &reconciled),
+                        I80F48::ZERO,
+                        "{setup:?}, different entries"
+                    );
+                }
+
+                // Same spot entry, but only one side reads a smoothed entry.
+                bank.config.scope_entry_index = entry;
+                bank.config.set_scope_smoothed_entry(Some(entry + 100));
+                for requirement in [RequirementType::Initial, RequirementType::Maintenance] {
+                    assert_eq!(
+                        bank.get_asset_weight(requirement, &reconciled),
+                        I80F48::ZERO,
+                        "{setup:?}, different smoothed entries"
+                    );
+                }
+                reconciled.same_asset.scope_selection.smoothed_entry = Some(entry + 100);
+                assert_eq!(
+                    bank.get_asset_weight(RequirementType::Initial, &reconciled),
+                    I80F48!(0.99),
+                    "{setup:?}, matching smoothed entry {entry}"
+                );
+                bank.config.set_scope_smoothed_entry(None);
+                reconciled.same_asset.scope_selection.smoothed_entry = None;
+            }
+
+            // Same feed key and entry, but read as a Pyth feed: a different family.
+            bank.config.oracle_setup = OracleSetup::KaminoPythPush;
+            assert_eq!(
+                bank.get_asset_weight(RequirementType::Initial, &reconciled),
+                I80F48::ZERO
+            );
+        }
+    }
+
+    /// Scope and Scope-based native multipliers can establish the liability side; liabilities on
+    /// different spot or smoothed entries of one feed never fold into a single identity.
+    /// Venue wrappers price through an exchange rate that moves on its own, so they may be
+    /// collateral but never establish the liability side - including the Scope wrappers, which
+    /// used to fall out of `feed_family() == None` and now rest on the allow-list alone.
+    #[test]
+    fn same_asset_liabilities_reject_venue_wrappers() {
+        for setup in [
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
+            OracleSetup::ScopeKaminoLST,
+            OracleSetup::ScopeKaminoMSOL,
+            OracleSetup::ScopeJuplendMSOL,
+            OracleSetup::ScopeJuplendLST,
+            OracleSetup::KaminoPythPush,
+            OracleSetup::KaminoMSOL,
+            OracleSetup::KaminoLST,
+            OracleSetup::JuplendLST,
+        ] {
+            let mut bank =
+                same_asset_eligible_bank(Pubkey::new_unique(), Pubkey::new_unique(), I80F48::ONE);
+            bank.config.oracle_setup = setup;
+            let mut shared_mint = None;
+            let mut shared_oracle_key = None;
+            let mut shared_feed_family = None;
+            let mut shared_fixed_price = None;
+            let mut shared_scope_selection = None;
+            let mut lowest_liab_weight = None;
+            assert!(
+                !update_reconciled_same_asset_config(
+                    &mut shared_mint,
+                    &mut shared_oracle_key,
+                    &mut shared_feed_family,
+                    &mut shared_fixed_price,
+                    &mut shared_scope_selection,
+                    &mut lowest_liab_weight,
+                    &bank,
+                    bank.mint,
+                    I80F48::ONE,
+                ),
+                "{setup:?}"
+            );
+            assert_eq!(lowest_liab_weight, None, "{setup:?}");
+        }
+    }
+
+    #[test]
+    fn same_asset_liabilities_must_share_the_scope_entry() {
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::StakedWithScope,
+            OracleSetup::ScopeMSOL,
+            OracleSetup::ScopeLST,
+            OracleSetup::ScopePT,
+        ] {
+            let mint = Pubkey::new_unique();
+            let feed = Pubkey::new_unique();
+            let scope_bank = |entry: u16| {
+                let mut bank = same_asset_eligible_bank(mint, feed, I80F48::ONE);
+                bank.config.oracle_setup = setup;
+                bank.config.scope_entry_index = entry;
+                bank
+            };
+
+            for entry in [0, 13] {
+                let mut averaged = scope_bank(entry);
+                averaged.config.set_scope_smoothed_entry(Some(entry + 100));
+                // Another spot entry, or the same spot entry with a smoothed entry.
+                for odd_one in [scope_bank(entry + 1), averaged] {
+                    let (bank_a, bank_b) = (scope_bank(entry), scope_bank(entry));
+                    let mut shared_mint = None;
+                    let mut shared_oracle_key = None;
+                    let mut shared_feed_family = None;
+                    let mut shared_fixed_price = None;
+                    let mut shared_scope_entry = None;
+                    let mut lowest_liab_weight = None;
+                    let mut fold = |bank: &Bank| {
+                        update_reconciled_same_asset_config(
+                            &mut shared_mint,
+                            &mut shared_oracle_key,
+                            &mut shared_feed_family,
+                            &mut shared_fixed_price,
+                            &mut shared_scope_entry,
+                            &mut lowest_liab_weight,
+                            bank,
+                            bank.mint,
+                            I80F48::ONE,
+                        )
+                    };
+                    assert!(fold(&bank_a), "{setup:?}");
+                    assert!(fold(&bank_b), "{setup:?}");
+                    assert!(!fold(&odd_one), "{setup:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn get_asset_weight_disabled_when_reconciled_family_missing() {
         let mint = Pubkey::new_unique();
@@ -3137,6 +3449,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
@@ -3146,6 +3459,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3156,6 +3470,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3179,6 +3494,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let mut bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank_a.config.fixed_price = I80F48!(0.90).into();
@@ -3190,6 +3506,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3200,6 +3517,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3217,6 +3535,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
@@ -3226,6 +3545,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3236,6 +3556,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3253,6 +3574,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
@@ -3262,6 +3584,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3272,6 +3595,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3290,6 +3614,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         let mut bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
@@ -3300,6 +3625,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3310,6 +3636,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -3328,6 +3655,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.config.oracle_setup = OracleSetup::Fixed;
@@ -3337,6 +3665,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3355,6 +3684,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.config.oracle_setup = OracleSetup::KaminoPythPush;
@@ -3364,6 +3694,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3382,6 +3713,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
@@ -3391,6 +3723,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -3408,6 +3741,7 @@ mod test {
         let mut shared_oracle_key = None;
         let mut shared_feed_family = None;
         let mut shared_fixed_price = None;
+        let mut shared_scope_entry = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
@@ -3417,6 +3751,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -3427,6 +3762,7 @@ mod test {
             &mut shared_oracle_key,
             &mut shared_feed_family,
             &mut shared_fixed_price,
+            &mut shared_scope_entry,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
