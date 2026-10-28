@@ -9,7 +9,8 @@ use crate::{
         liquidation_record::{tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
-            clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+            clear_liquidation_price_cache_locks, finalize_health_cache, get_health_components,
+            MarginfiAccountImpl,
         },
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
@@ -147,8 +148,8 @@ pub fn end_receivership<'info>(
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let pre_health: I80F48 = pre_assets - pre_liabs;
 
+    let clock = Clock::get()?;
     let mut post_hc = HealthCache::zeroed();
-    post_hc.timestamp = Clock::get()?.unix_timestamp;
     let (post_health, _post_assets, _post_liabs) =
         check_pre_liquidation_condition_and_get_account_health(
             marginfi_account,
@@ -171,6 +172,7 @@ pub fn end_receivership<'info>(
     )?;
 
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
+    finalize_health_cache(&mut post_hc, clock.unix_timestamp);
     marginfi_account.health_cache = post_hc;
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
@@ -178,7 +180,7 @@ pub fn end_receivership<'info>(
     marginfi_account.update_premium_snapshots(
         group,
         &premium_scratch,
-        Clock::get()?.unix_timestamp as u64,
+        clock.unix_timestamp as u64,
         false,
     )?;
 
@@ -216,7 +218,7 @@ pub fn end_receivership<'info>(
         return err!(MarginfiError::WorseHealthPostLiquidation);
     }
 
-    let now = Clock::get()?.unix_timestamp;
+    let now = clock.unix_timestamp;
 
     // clear receivership
     marginfi_account.unset_flag(
