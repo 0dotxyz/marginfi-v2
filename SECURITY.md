@@ -331,9 +331,7 @@ maximum loss is $5, which can trivially be avoided by simply depositing more tha
 ### Receivership Liquidation uses Equity Weight and TWAP Price
 
 The premium liquidators can collect is TWAP based, since Equity pricing uses the TWAP. This is
-intentional: we already cap the receiver's Spot profit by requiring them to improve health. (One
-exception: a Scope-priced bank whose configured smoothed entry is stale or unreadable values
-Equity at its spot price, so a stale average never blocks a liquidation.) As a
+intentional: we already cap the receiver's Spot profit by requiring them to improve health. As a
 result, there is a profit and incentive implication for liquidators when the TWAP differs from the
 Spot price. 
 

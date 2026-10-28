@@ -287,7 +287,7 @@ describe("Scope smoothed entry", () => {
     );
   });
 
-  it("a stale EMA blocks new borrows but not receivership", async () => {
+  it("a stale smoothed slot blocks pricing entirely until it is refreshed", async () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await setFeed();
     const borrow = async (amount: BN) =>
@@ -321,18 +321,41 @@ describe("Scope smoothed entry", () => {
       ),
       [groupAdmin.wallet]
     );
-    // ...then let the EMA go stale while spot stays fresh.
+    // ...then let the smoothed slot go stale while spot stays fresh: like a stale Pyth update,
+    // nothing prices off this bank until it is refreshed - not a borrow, not a liquidation.
     await setFeed(10_000);
+    const groups = [scopeGroup, debtGroup];
 
+    // The collateral bank cannot be priced, so the risk engine rejects the borrow (6009), the
+    // same way it does for a stale Pyth feed.
     await expectFailedTxWithError(
       async () => {
         await borrow(usdc(1));
+      },
+      "RiskEngineInitRejected",
+      6009
+    );
+    await expectFailedTxWithError(
+      async () => {
+        await processBankrunTransaction(
+          bankrunContext,
+          new Transaction().add(
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
+            await startLiquidationIx(liquidator.mrgnBankrunProgram, {
+              marginfiAccount: borrowerAcc.publicKey,
+              liquidationReceiver: liquidator.wallet.publicKey,
+              remaining: composeRemainingAccountsWriteableMeta(groups),
+            })
+          ),
+          [liquidator.wallet]
+        );
       },
       "ScopeStalePrice",
       6802
     );
 
-    const groups = [scopeGroup, debtGroup];
+    // Refreshed: the receivership goes through.
+    await setFeed();
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(

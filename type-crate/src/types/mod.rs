@@ -72,8 +72,6 @@ impl RequirementType {
     ///
     /// Initial and equity requirements use the time weighted price feed.
     /// Maintenance requirement uses the real time price feed, as its more accurate for triggering liquidations.
-    /// Scope-priced banks whose smoothed entry is unavailable fall back to the spot price for
-    /// Equity (see `OraclePriceFeedAdapter::price_type_for`); Initial keeps failing on it.
     pub fn get_oracle_price_type(&self) -> OraclePriceType {
         match self {
             RequirementType::Initial | RequirementType::Equity => OraclePriceType::TimeWeighted,

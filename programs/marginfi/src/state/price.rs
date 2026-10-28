@@ -32,7 +32,7 @@ use marginfi_type_crate::{
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
         mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
-        OracleSetup, PriceBias, RequirementType,
+        OracleSetup, PriceBias,
     },
 };
 use pyth_solana_receiver_sdk::{
@@ -368,22 +368,6 @@ struct OracleLoadContext {
 }
 
 impl OraclePriceFeedAdapter {
-    /// The price type the risk engine reads for `requirement_type`. Equity (liquidation and
-    /// order bookkeeping) falls back to the spot price when a configured Scope smoothed entry
-    /// is unavailable, so a stale average never blocks a liquidation; the liquidation price cache
-    /// then holds that spot price in its time-weighted slot, so `end_liquidation` values equity
-    /// the same way. Initial margin keeps the time-weighted price and fails on it.
-    pub fn price_type_for(&self, requirement_type: RequirementType) -> OraclePriceType {
-        match (requirement_type, self) {
-            (RequirementType::Equity, Self::Scope(feed))
-                if feed.smoothed == ScopeSmoothed::Unavailable =>
-            {
-                OraclePriceType::RealTime
-            }
-            _ => requirement_type.get_oracle_price_type(),
-        }
-    }
-
     pub fn try_from_bank<'info>(
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
@@ -2151,13 +2135,9 @@ impl OraclePriceFeedAdapter {
 pub enum ScopeSmoothed {
     /// No smoothed entry configured: the spot price serves both price types.
     None,
-    Price {
-        price: I80F48,
-        timestamp: u64,
-    },
-    /// Configured but stale or unreadable. Only the time-weighted price fails, so liquidation
-    /// (real-time price) is never blocked by it.
-    Unavailable,
+    /// The configured smoothed entry; a stale or unreadable one fails the whole load, exactly
+    /// like a stale Pyth update (which carries spot and EMA together).
+    Price { price: I80F48, timestamp: u64 },
 }
 
 /// Reads one entry out of a Scope feed's `OraclePrices` account.
@@ -2190,13 +2170,10 @@ impl ScopePriceFeed {
             bank_config.scope_entry_index,
         )?;
         if let Some(smoothed_entry) = bank_config.scope_smoothed_entry() {
-            feed.smoothed = match Self::load_checked(ai, current_timestamp, max_age, smoothed_entry)
-            {
-                Ok(smoothed) => ScopeSmoothed::Price {
-                    price: smoothed.price,
-                    timestamp: smoothed.last_updated_timestamp,
-                },
-                Err(_) => ScopeSmoothed::Unavailable,
+            let smoothed = Self::load_checked(ai, current_timestamp, max_age, smoothed_entry)?;
+            feed.smoothed = ScopeSmoothed::Price {
+                price: smoothed.price,
+                timestamp: smoothed.last_updated_timestamp,
             };
         }
         Ok(feed)
@@ -2305,9 +2282,6 @@ impl PriceAdapter for ScopePriceFeed {
     ) -> MarginfiResult<I80F48> {
         match (oracle_price_type, self.smoothed) {
             (OraclePriceType::TimeWeighted, ScopeSmoothed::Price { price, .. }) => Ok(price),
-            (OraclePriceType::TimeWeighted, ScopeSmoothed::Unavailable) => {
-                err!(MarginfiError::ScopeStalePrice)
-            }
             _ => Ok(self.price),
         }
     }
@@ -4264,10 +4238,6 @@ mod tests {
             price(OraclePriceType::TimeWeighted),
             I80F48::from_num(140) * rate
         ));
-        assert!(matches!(
-            feed.price_type_for(RequirementType::Equity),
-            OraclePriceType::TimeWeighted
-        ));
     }
 
     #[test]
@@ -4375,11 +4345,6 @@ mod tests {
             .get_price_and_confidence_of_type(OraclePriceType::TimeWeighted, u32::MAX)
             .unwrap();
         assert_eq!(weighted.source_time, 995);
-        // A fresh average also prices liquidation equity.
-        assert!(matches!(
-            OraclePriceFeedAdapter::Scope(feed).price_type_for(RequirementType::Equity),
-            OraclePriceType::TimeWeighted
-        ));
         assert_eq!(weighted.confidence, I80F48::ZERO);
 
         // Without a smoothed entry the spot price serves both types, as before.
@@ -4396,7 +4361,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_smoothed_stale_or_missing_blocks_only_the_time_weighted_price() {
+    fn scope_smoothed_stale_or_missing_fails_the_whole_load() {
         let key = Pubkey::new_unique();
         let mut lamports = 0u64;
         // entry 142 last updated at t=900: 100s old against a 60s max age
@@ -4406,43 +4371,26 @@ mod tests {
         ]);
         let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
 
-        // Stale (142) and never refreshed (143) both leave liquidation pricing intact.
-        for smoothed_entry in [142, 143] {
+        // A configured smoothed entry is load-bearing like Pyth's EMA: stale (142) or never
+        // refreshed (143) fails the load, so no price type is served off it.
+        for (smoothed_entry, err) in [
+            (142, MarginfiError::ScopeStalePrice),
+            (143, MarginfiError::ScopeInvalidEntry),
+        ] {
             let config = scope_smoothed_config(key, Some(smoothed_entry));
-            let feed = ScopePriceFeed::load_for_bank(&ai, 1_000, 60, &config).unwrap();
-            assert_eq!(feed.smoothed, ScopeSmoothed::Unavailable);
             assert_eq!(
-                feed.get_price_of_type(OraclePriceType::RealTime, None, u32::MAX)
-                    .unwrap(),
-                I80F48::from_num(120)
-            );
-            assert_eq!(
-                feed.get_price_of_type(OraclePriceType::TimeWeighted, None, u32::MAX)
-                    .unwrap_err(),
-                MarginfiError::ScopeStalePrice.into()
+                ScopePriceFeed::load_for_bank(&ai, 1_000, 60, &config).unwrap_err(),
+                err.into(),
+                "entry {smoothed_entry}"
             );
         }
 
-        // Liquidation equity falls back to spot; initial margin keeps reading (and failing on)
-        // the average.
-        let config = scope_smoothed_config(key, Some(142));
-        let adapter = OraclePriceFeedAdapter::Scope(
-            ScopePriceFeed::load_for_bank(&ai, 1_000, 60, &config).unwrap(),
-        );
-        assert!(matches!(
-            adapter.price_type_for(RequirementType::Equity),
-            OraclePriceType::RealTime
-        ));
-        assert!(matches!(
-            adapter.price_type_for(RequirementType::Initial),
-            OraclePriceType::TimeWeighted
-        ));
-        assert!(matches!(
-            adapter.price_type_for(RequirementType::Maintenance),
-            OraclePriceType::RealTime
-        ));
+        // Without a smoothed entry the stale 142 is simply never read.
+        let config = scope_smoothed_config(key, None);
+        let feed = ScopePriceFeed::load_for_bank(&ai, 1_000, 60, &config).unwrap();
+        assert_eq!(feed.smoothed, ScopeSmoothed::None);
 
-        // A stale spot entry still fails the whole load, smoothed entry or not.
+        // A stale spot entry fails the load, smoothed entry or not.
         let config = scope_smoothed_config(key, Some(142));
         assert_eq!(
             ScopePriceFeed::load_for_bank(&ai, 1_061, 60, &config).unwrap_err(),

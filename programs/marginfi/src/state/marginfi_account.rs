@@ -1926,7 +1926,7 @@ fn calc_weighted_asset_value_standalone(
                 // interval, capped at 5% of price.
                 let premium_price = match (need_premium_price, price_adapter_result) {
                     (true, Ok(feed)) => feed.get_price_of_type_ignore_conf(
-                        feed.price_type_for(requirement_type),
+                        requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
                     )?,
                     // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
@@ -1973,7 +1973,7 @@ fn calc_weighted_asset_value_standalone(
                 // Same as the Paused/ReduceOnly exit: premium-only read, confidence ignored.
                 let premium_price = if need_premium_price {
                     price_feed.get_price_of_type_ignore_conf(
-                        price_feed.price_type_for(requirement_type),
+                        requirement_type.get_oracle_price_type(),
                         Some(PriceBias::Low),
                     )?
                 } else {
@@ -1985,7 +1985,7 @@ fn calc_weighted_asset_value_standalone(
             // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
             let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
-            let oracle_price_type = price_feed.price_type_for(requirement_type);
+            let oracle_price_type = requirement_type.get_oracle_price_type();
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
                     oracle_price_type,
@@ -2062,7 +2062,7 @@ fn calc_weighted_liab_value_standalone(
         .config
         .get_weight(requirement_type, BalanceSide::Liabilities);
 
-    let oracle_price_type = price_feed.price_type_for(requirement_type);
+    let oracle_price_type = requirement_type.get_oracle_price_type();
     let higher_price = if let Some(cache) = liq_cache.as_mut() {
         let price_with_confidence = price_feed.get_price_and_confidence_of_type(
             oracle_price_type,
