@@ -16,6 +16,10 @@ use bytemuck::{Pod, Zeroable};
     derive(BorshDeserialize, BorshSerialize)
 )]
 #[cfg_attr(not(feature = "anchor"), derive(Clone, Copy, Pod, Zeroable))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default)]
 pub struct WrappedI80F48 {
     pub value: [u8; 16],

@@ -95,6 +95,10 @@ assert_struct_size!(RebalanceMove, 24);
 assert_struct_align!(RebalanceMove, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
 pub struct RebalanceMove {
     pub src_index: u8,

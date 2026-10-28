@@ -191,6 +191,10 @@ impl BankConfig {
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigOpt {
     pub asset_weight_init: Option<WrappedI80F48>,
@@ -242,6 +246,10 @@ pub struct BankConfigOpt {
 /// any administratively configurable state. Restoring a bank to `Operational` is governed by
 /// [`BankConfigGov`].
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigFast {
     pub deposit_limit: Option<u64>,
@@ -266,6 +274,10 @@ pub struct BankConfigFast {
 ///
 /// `operational_state`, when present, may only restore a bank to `Operational`.
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigGov {
     pub asset_weight_init: Option<WrappedI80F48>,
@@ -410,6 +422,10 @@ impl BankConfigOpt {
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct BankConfigCompact {
     pub asset_weight_init: WrappedI80F48,
