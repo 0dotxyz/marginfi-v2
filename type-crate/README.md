@@ -14,9 +14,12 @@ marginfi-type-crate = { version = "0.2.0", default-features = false, features = 
 
 The network options are `mainnet-beta`, `devnet`, `staging`, `stagingalt`, and `localnet`. Exactly
 one is required with `ix_builders`. `pdas` is independent of `ix_builders`; `anchor` enables
-Anchor derives and `pdas`. `types::Pubkey` is a lightweight stub when none of these three
-features is enabled and is the Solana pubkey otherwise. The stub is also available at
-`types::pubkey::Pubkey`.
+Anchor derives and `pdas`. With all three features disabled, the crate's normal dependency graph
+contains no Solana or Anchor crates, and `types::Pubkey` is a lightweight stub. In this types-only
+configuration, the program `ID` is not exported, including when a network feature is selected.
+With any of the three features enabled, `types::Pubkey` is the Solana pubkey and `ID` is available.
+The stub remains available at `types::pubkey::Pubkey` in every configuration. Cargo unifies features
+across dependents, so another dependency can enable a Solana-facing feature for the shared crate.
 
 ## Building an instruction
 

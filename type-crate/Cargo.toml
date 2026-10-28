@@ -16,8 +16,8 @@ name = "marginfi_type_crate"
 default = ["client", "anchor"]
 client = []
 anchor = ["dep:anchor-lang", "pdas"]
-ix_builders = ["dep:borsh", "dep:solana-instruction", "solana-pubkey/borsh"]
-pdas = ["dep:solana-instruction", "solana-pubkey/curve25519", "solana-pubkey/sha2"]
+ix_builders = ["dep:borsh", "dep:solana-instruction", "dep:solana-pubkey", "solana-pubkey/borsh"]
+pdas = ["dep:solana-instruction", "dep:solana-pubkey", "solana-pubkey/curve25519", "solana-pubkey/sha2"]
 localnet = []
 mainnet-beta = []
 staging = []
@@ -33,7 +33,7 @@ fixed = { workspace = true }
 fixed-macro = { workspace = true }
 bs58 = { workspace = true }
 static_assertions = { workspace = true }
-solana-pubkey = { workspace = true, features = ["bytemuck"] }
+solana-pubkey = { workspace = true, features = ["bytemuck"], optional = true }
 
 anchor-lang = { workspace = true, optional = true }
 solana-instruction = { workspace = true, optional = true }
