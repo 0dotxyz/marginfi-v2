@@ -1,3 +1,4 @@
+use super::rebalance::load_marginfi_account_unless_closed;
 use crate::events::{
     AccountEventHeader, KeeperCloseOrderEvent, MarginfiAccountCloseOrderEvent,
     MarginfiAccountExecuteOrderEvent, MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
@@ -33,7 +34,7 @@ use marginfi_type_crate::{
         BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode, MarginfiAccount,
         MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_DISABLED,
         ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -663,6 +664,11 @@ pub struct CloseOrder<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = !marginfi_account.load()?.get_flag(
+            ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION
+        ) @ MarginfiError::UnexpectedLiquidationState,
+        constraint = !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
+            @ MarginfiError::AccountInFlashloan,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
@@ -695,8 +701,16 @@ pub struct CloseOrder<'info> {
 pub struct KeeperCloseOrder<'info> {
     /// CHECK: This uses an unchecked account here so the instruction can be called even when the
     /// marginfi account was closed.
-    /// The ownership check is checked in the handler or/and type checks are made in the handler.
-    #[account(mut)]
+    /// The constraints validate ownership and layout unless the account is already closed.
+    #[account(
+        mut,
+        constraint = load_marginfi_account_unless_closed(&marginfi_account.to_account_info())?
+            .map_or(true, |a| !a.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION))
+            @ MarginfiError::UnexpectedLiquidationState,
+        constraint = load_marginfi_account_unless_closed(&marginfi_account.to_account_info())?
+            .map_or(true, |a| !a.get_flag(ACCOUNT_IN_FLASHLOAN))
+            @ MarginfiError::AccountInFlashloan
+    )]
     pub marginfi_account: UncheckedAccount<'info>,
 
     /// CHECK: no checks whatsoever, keeper decides this without restriction

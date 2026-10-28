@@ -85,8 +85,9 @@ use marginfi_type_crate::{
     types::{
         BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
-        ORDER_BLOCKING_FLAGS,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, MAX_REBALANCE_BANKS,
+        MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
 use std::cell::RefMut;
@@ -292,7 +293,7 @@ pub struct PlaceRebalanceOrder<'info> {
 
 /// Loads the marginfi account at `info` mutably, or returns `None` if the account has been closed
 /// (system-owned and empty). Any other owner or layout is an error.
-fn load_marginfi_account_unless_closed<'a>(
+pub(super) fn load_marginfi_account_unless_closed<'a>(
     info: &'a AccountInfo<'_>,
 ) -> MarginfiResult<Option<RefMut<'a, MarginfiAccount>>> {
     if info.owner.eq(&system_program::ID) && info.data_is_empty() {
@@ -380,8 +381,16 @@ pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResul
 #[derive(Accounts)]
 pub struct CloseRebalanceOrder<'info> {
     /// CHECK: unchecked so the ix works even when the marginfi account was closed; ownership and type
-    /// are validated in the handler.
-    #[account(mut)]
+    /// are validated by the constraints and handler.
+    #[account(
+        mut,
+        constraint = load_marginfi_account_unless_closed(&marginfi_account.to_account_info())?
+            .map_or(true, |a| !a.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION))
+            @ MarginfiError::UnexpectedLiquidationState,
+        constraint = load_marginfi_account_unless_closed(&marginfi_account.to_account_info())?
+            .map_or(true, |a| !a.get_flag(ACCOUNT_IN_FLASHLOAN))
+            @ MarginfiError::AccountInFlashloan
+    )]
     pub marginfi_account: UncheckedAccount<'info>,
     /// Signs to close an order that still holds a position; omitted for the permissionless close of a
     /// dead order.
