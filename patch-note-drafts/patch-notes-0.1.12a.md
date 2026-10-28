@@ -32,8 +32,8 @@ liquidation or flashloan:
 - `kamino_deposit`, `drift_deposit`, and `juplend_deposit` reject accounts in receivership,
   matching the existing standard deposit check.
 - Authority and keeper order-close instructions, including rebalance-order closure, reject
-  accounts in receivership, risk-admin liquidation, or a flashloan. Keepers can still close
-  eligible orders after the marginfi account itself has been closed.
+  accounts in receivership, risk-admin liquidation, a flashloan, order execution, or rebalance.
+  Keepers can still close eligible orders after the marginfi account itself has been closed.
 
 The health cache uses flag bits 16 and 32 for liquidation-start and deleverage-start provenance,
 respectively. Account layouts, instruction arguments, and required accounts are unchanged.

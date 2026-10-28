@@ -290,7 +290,7 @@ pub struct PlaceRebalanceOrder<'info> {
 }
 
 /// Close a rebalance order. The account authority may close their own order at any time (except
-/// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act: the
+/// mid-operation, see `check_order_close_state`). Permissionlessly, anyone may close a stale order once it can no longer act: the
 /// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
 pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResult {
     let order = ctx.accounts.rebalance_order.load()?;
@@ -316,12 +316,6 @@ pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResul
                     by_authority || !has_allowed_position,
                     MarginfiError::LiquidatorOrderCloseNotAllowed
                 );
-                if by_authority {
-                    check!(
-                        !marginfi_account.get_flag(ACCOUNT_IN_REBALANCE),
-                        MarginfiError::IllegalAction
-                    );
-                }
                 marginfi_account.decrement_active_orders()?;
                 (
                     marginfi_account.authority,

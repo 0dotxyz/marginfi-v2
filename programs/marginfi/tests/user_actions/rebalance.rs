@@ -13,8 +13,9 @@ use marginfi_type_crate::{
     constants::REBALANCE_ORDER_SEED,
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
     types::{
-        BankConfig, BankConfigOpt, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+        BankConfig, BankConfigOpt, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
     },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -600,7 +601,7 @@ async fn rebalance_keeper_close_when_no_position() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn rebalance_order_close_rejects_liquidation_and_flashloan() -> anyhow::Result<()> {
+async fn rebalance_order_close_rejects_transient_state() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let dest = f.test_f.usdc_mint.create_empty_token_account().await;
     f.user
@@ -627,6 +628,11 @@ async fn rebalance_order_close_rejects_liquidation_and_flashloan() -> anyhow::Re
             MarginfiError::UnexpectedLiquidationState,
         ),
         (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),
+        (
+            ACCOUNT_IN_ORDER_EXECUTION,
+            MarginfiError::UnexpectedOrderExecutionState,
+        ),
+        (ACCOUNT_IN_REBALANCE, MarginfiError::IllegalAction),
     ] {
         account.account_flags = flag;
         f.user.set_account(&account).await?;

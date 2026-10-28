@@ -13,8 +13,8 @@ use marginfi::prelude::MarginfiError;
 use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
     centi_to_u32, u32_to_centi, BalanceSide, ExecuteOrderRecord, OrderTrigger, OrderTriggerType,
-    WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+    WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
@@ -1440,7 +1440,7 @@ async fn close_order_success_authority(
 }
 
 #[tokio::test]
-async fn order_close_rejects_liquidation_and_flashloan() -> anyhow::Result<()> {
+async fn order_close_rejects_transient_state() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let asset = test_f.get_bank(&BankMint::Usdc);
     let liability = test_f.get_bank(&BankMint::Fixed);
@@ -1468,6 +1468,11 @@ async fn order_close_rejects_liquidation_and_flashloan() -> anyhow::Result<()> {
             MarginfiError::UnexpectedLiquidationState,
         ),
         (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),
+        (
+            ACCOUNT_IN_ORDER_EXECUTION,
+            MarginfiError::UnexpectedOrderExecutionState,
+        ),
+        (ACCOUNT_IN_REBALANCE, MarginfiError::IllegalAction),
     ] {
         account.account_flags = flag;
         user.set_account(&account).await?;

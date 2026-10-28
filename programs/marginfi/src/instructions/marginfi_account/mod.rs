@@ -24,14 +24,15 @@ mod withdraw;
 
 use anchor_lang::{prelude::*, system_program};
 use marginfi_type_crate::types::{
-    MarginfiAccount, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+    MarginfiAccount, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 use std::cell::RefMut;
 
 use crate::{check, check_eq, prelude::*};
 
-/// Intermediate liquidation or flashloan balances must not determine order closure eligibility.
+/// Intermediate liquidation, flashloan, order execution, or rebalance balances must not determine
+/// order closure eligibility.
 fn check_order_close_state(account: &MarginfiAccount) -> MarginfiResult {
     check!(
         !account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION),
@@ -40,6 +41,14 @@ fn check_order_close_state(account: &MarginfiAccount) -> MarginfiResult {
     check!(
         !account.get_flag(ACCOUNT_IN_FLASHLOAN),
         MarginfiError::AccountInFlashloan
+    );
+    check!(
+        !account.get_flag(ACCOUNT_IN_ORDER_EXECUTION),
+        MarginfiError::UnexpectedOrderExecutionState
+    );
+    check!(
+        !account.get_flag(ACCOUNT_IN_REBALANCE),
+        MarginfiError::IllegalAction
     );
     Ok(())
 }
