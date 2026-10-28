@@ -147,6 +147,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
   ) => {
     const tx = new Transaction().add(
       await configureBankOracleScope(groupAdmin.mrgnBankrunProgram, {
+        type: ORACLE_SETUP_SCOPE_JUPLEND,
         bank: scopeJuplendBank,
         oracle: feed,
         entryIndex,

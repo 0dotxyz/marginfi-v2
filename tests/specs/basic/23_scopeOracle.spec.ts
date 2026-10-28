@@ -29,6 +29,7 @@ import {
   defaultBankConfig,
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
+  ORACLE_SETUP_SCOPE,
 } from "../../utils/types";
 import { bytesToF64, getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -109,6 +110,7 @@ describe("Scope oracle", () => {
     await admin.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBankOracleScope(admin, {
+          type: ORACLE_SETUP_SCOPE,
           bank: scopeBank.publicKey,
           oracle: feed,
           entryIndex: ENTRY_A.index,
@@ -130,6 +132,7 @@ describe("Scope oracle", () => {
     await admin.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBankOracleScope(admin, {
+          type: ORACLE_SETUP_SCOPE,
           bank: scopeBank.publicKey,
           oracle: feed,
           entryIndex: ENTRY_B.index,
@@ -147,6 +150,7 @@ describe("Scope oracle", () => {
     await admin.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBankOracleScope(admin, {
+          type: ORACLE_SETUP_SCOPE,
           bank: scopeBank.publicKey,
           oracle: feed,
           entryIndex: ENTRY_A.index,
@@ -199,6 +203,7 @@ describe("Scope oracle", () => {
     await admin.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBankOracleScope(admin, {
+          type: ORACLE_SETUP_SCOPE,
           bank: scopeBank.publicKey,
           oracle: feed,
           entryIndex: 300,
@@ -354,6 +359,7 @@ describe("Scope oracle", () => {
         await admin.provider.sendAndConfirm!(
           new Transaction().add(
             await configureBankOracleScope(admin, {
+              type: ORACLE_SETUP_SCOPE,
               bank: scopeBank.publicKey,
               oracle: feed,
               entryIndex: 512,

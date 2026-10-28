@@ -588,15 +588,29 @@ export type ConfigureBankOracleScopeArgs = {
   bank: PublicKey;
   group?: PublicKey;
   governanceAdmin?: PublicKey;
+  /**
+   * The resulting setup: Scope / ScopeKamino / ScopeJuplend, or a Scope-fed multiplier setup
+   * (ScopeMSOL / ScopeLST / ScopePT, or the ScopeKamino* / ScopeJuplend* mSOL / LST wrappers)
+   * that reads the Scope entry as its base price.
+   */
+  type: number;
   /** The scope feed's OraclePrices account */
   oracle: PublicKey;
   /** Which of the 512 entries in that account prices this bank */
   entryIndex: number;
   /**
-   * Venue account after the feed: the Kamino reserve for a Kamino bank, the JupLend `Lending`
-   * state for a JupLend bank. Omit for a regular bank.
+   * Accounts after the feed required by `type`: the Kamino reserve / JupLend `Lending`
+   * state for a venue bank, then the Marinade State or SPL stake pool for an mSOL / LST bank, or
+   * the Exponent vault for a PT bank. Omit for a plain Scope bank.
    */
   remaining?: PublicKey[];
+  /** PT linear-pricing start price, in (0, 1]. Set (with the vault) to configure ScopePT. */
+  ptStartPrice?: number;
+  /**
+   * Entry for the time-weighted (initial margin) price, the PythLazerEMA of `entryIndex` in the
+   * same feed. Omit to use the spot price for both price types.
+   */
+  smoothedEntryIndex?: number;
 };
 
 export const configureBankOracleScope = (
@@ -620,7 +634,15 @@ export const configureBankOracleScope = (
   }
 
   const ix = program.methods
-    .lendingPoolConfigureBankOracleScope(args.oracle, args.entryIndex)
+    .lendingPoolConfigureBankOracleScope(
+      args.type,
+      args.oracle,
+      args.entryIndex,
+      args.ptStartPrice === undefined
+        ? null
+        : bigNumberToWrappedI80F48(args.ptStartPrice),
+      args.smoothedEntryIndex ?? null,
+    )
     .accounts(accounts)
     .remainingAccounts(metas)
     .instruction();

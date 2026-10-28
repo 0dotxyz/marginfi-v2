@@ -133,6 +133,8 @@ describe("Init group", () => {
       riskTier: {
         isolated: undefined,
       },
+      baseFeed: null,
+      smoothedEntry: null,
     };
     let failed = false;
     try {
@@ -170,6 +172,8 @@ describe("Init group", () => {
       riskTier: {
         collateral: undefined,
       },
+      baseFeed: null,
+      smoothedEntry: null,
     };
     const [settingsKey] = deriveStakedSettings(
       program.programId,
@@ -209,6 +213,8 @@ describe("Init group", () => {
       totalAssetValueInitLimit: null,
       oracleMaxAge: 60,
       riskTier: null,
+      baseFeed: null,
+      smoothedEntry: null,
     };
     const [settingsKey] = deriveStakedSettings(
       program.programId,
@@ -249,6 +255,8 @@ describe("Init group", () => {
       riskTier: {
         isolated: undefined,
       },
+      baseFeed: null,
+      smoothedEntry: null,
     };
     const [settingsKey] = deriveStakedSettings(
       program.programId,
