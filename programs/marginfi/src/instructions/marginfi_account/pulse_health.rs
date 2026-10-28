@@ -2,7 +2,10 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::types::{
+    HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP,
+    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+};
 
 use crate::{
     constants::PROGRAM_VERSION,
@@ -180,7 +183,7 @@ pub fn lending_account_pulse_health<'info>(
         account.indexer_flags.has_trivial_balance =
             has_trivial_balance(equity_assets, equity_liabs) as u8;
     }
-    account.health_cache = health_cache;
+    account.set_health_cache(health_cache);
 
     emit!(HealthPulseEvent {
         account: ctx.accounts.marginfi_account.key(),
@@ -194,7 +197,10 @@ pub fn lending_account_pulse_health<'info>(
 pub struct PulseHealth<'info> {
     #[account(
         mut,
-        has_one = group @ MarginfiError::InvalidGroup
+        has_one = group @ MarginfiError::InvalidGroup,
+        constraint = !marginfi_account.load()?.get_flag(
+            ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION
+        ) @ MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

@@ -11,7 +11,7 @@ use fixed::types::I80F48;
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
 
-use super::{HealthCache, WrappedI80F48};
+use super::{HealthCache, ReceivershipCacheOrigin, WrappedI80F48};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -48,6 +48,8 @@ pub struct MarginfiAccount {
     pub account_flags: u64, // 8
     /// Wallet whose canonical ATA receives off-chain emissions distributions.
     pub emissions_destination_account: Pubkey, // 32
+    /// Replace through `set_health_cache` or `set_receivership_start_health_cache` so that
+    /// ordinary updates cannot retain receivership-start provenance.
     pub health_cache: HealthCache,
     /// If this account was migrated from another one, store the original account key
     pub migrated_from: Pubkey, // 32
@@ -96,6 +98,23 @@ pub struct MarginfiAccount {
 impl MarginfiAccount {
     pub const LEN: usize = std::mem::size_of::<MarginfiAccount>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::ACCOUNT;
+
+    /// All ordinary cache writes invalidate any receivership-start provenance, even if the
+    /// caller copied an existing cache instead of constructing a fresh one.
+    pub fn set_health_cache(&mut self, mut cache: HealthCache) {
+        cache.clear_receivership_origin();
+        self.health_cache = cache;
+    }
+
+    /// Only the start of receivership may write a cache with this provenance.
+    pub fn set_receivership_start_health_cache(
+        &mut self,
+        mut cache: HealthCache,
+        origin: ReceivershipCacheOrigin,
+    ) {
+        cache.set_receivership_origin(origin);
+        self.health_cache = cache;
+    }
 
     pub fn get_flag(&self, flag: u64) -> bool {
         self.account_flags & flag != 0

@@ -13,7 +13,8 @@ use marginfi::prelude::MarginfiError;
 use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
     centi_to_u32, u32_to_centi, BalanceSide, ExecuteOrderRecord, OrderTrigger, OrderTriggerType,
-    WrappedI80F48,
+    WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
@@ -1435,6 +1436,87 @@ async fn close_order_success_authority(
     );
     assert_active_orders(&borrower_mfi_account_f, 0).await;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn order_close_rejects_liquidation_and_flashloan() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let asset = test_f.get_bank(&BankMint::Usdc);
+    let liability = test_f.get_bank(&BankMint::Fixed);
+    let user = create_borrower_with_positions(&test_f, asset, 300.0, liability, 50.0).await?;
+    let order = user
+        .try_place_order(
+            vec![asset.key, liability.key],
+            stop_loss_trigger(fp!(100), 0),
+        )
+        .await?;
+    let repay_token = liability.mint.create_token_account_and_mint_to(100.0).await;
+    user.try_bank_repay(repay_token.key, liability, 0.0, Some(true))
+        .await?;
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let mut account = user.load().await;
+
+    for (flag, error) in [
+        (
+            ACCOUNT_IN_RECEIVERSHIP,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (
+            ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),
+    ] {
+        account.account_flags = flag;
+        user.set_account(&account).await?;
+        let result = user.try_close_order(order, test_f.payer()).await;
+        assert_custom_error!(result.unwrap_err(), error);
+        let result = user
+            .try_keeper_close_order(order, &keeper, keeper.pubkey())
+            .await;
+        assert_custom_error!(result.unwrap_err(), error);
+        assert!(test_f.try_load(&order).await?.is_some());
+        assert_active_orders(&user, 1).await;
+    }
+
+    account.account_flags = 0;
+    user.set_account(&account).await?;
+    user.try_keeper_close_order(order, &keeper, keeper.pubkey())
+        .await?;
+    assert_active_orders(&user, 0).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn keeper_close_order_after_account_closed() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let asset = test_f.get_bank(&BankMint::Usdc);
+    let liability = test_f.get_bank(&BankMint::Fixed);
+    let user = create_borrower_with_positions(&test_f, asset, 300.0, liability, 50.0).await?;
+    let order = user
+        .try_place_order(
+            vec![asset.key, liability.key],
+            stop_loss_trigger(fp!(100), 0),
+        )
+        .await?;
+    let closed = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: solana_system_interface::program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&user.key, &closed.into());
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    user.try_keeper_close_order(order, &keeper, keeper.pubkey())
+        .await?;
+    assert!(test_f.try_load(&order).await?.is_none());
     Ok(())
 }
 

@@ -34,6 +34,7 @@
 //! unpaid griefing bounded by the per-order cooldown and the conservation dust, while any realized
 //! edge pays the full tip for a move that did leave the position in the better venue.
 
+use super::{check_order_close_state, load_marginfi_account_unless_closed};
 use crate::{
     check, check_eq,
     constants::PROGRAM_VERSION,
@@ -69,7 +70,6 @@ use anchor_lang::{
         program::{invoke, invoke_signed},
         system_instruction,
     },
-    system_program,
 };
 use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
@@ -89,7 +89,6 @@ use marginfi_type_crate::{
         ORDER_BLOCKING_FLAGS,
     },
 };
-use std::cell::RefMut;
 
 /// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
 /// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
@@ -290,31 +289,6 @@ pub struct PlaceRebalanceOrder<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Loads the marginfi account at `info` mutably, or returns `None` if the account has been closed
-/// (system-owned and empty). Any other owner or layout is an error.
-fn load_marginfi_account_unless_closed<'a>(
-    info: &'a AccountInfo<'_>,
-) -> MarginfiResult<Option<RefMut<'a, MarginfiAccount>>> {
-    if info.owner.eq(&system_program::ID) && info.data_is_empty() {
-        return Ok(None);
-    }
-    require_keys_eq!(*info.owner, crate::ID, MarginfiError::InternalLogicError);
-    let data = info.try_borrow_mut_data()?;
-    require!(
-        data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
-        MarginfiError::InternalLogicError
-    );
-    let disc = &data[..8];
-    check_eq!(
-        disc,
-        MarginfiAccount::DISCRIMINATOR,
-        MarginfiError::InternalLogicError
-    );
-    Ok(Some(RefMut::map(data, |data| {
-        bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()])
-    })))
-}
-
 /// Close a rebalance order. The account authority may close their own order at any time (except
 /// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act: the
 /// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
@@ -328,6 +302,7 @@ pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResul
             // The account is gone: the order is dead and anyone may reclaim it.
             None => (Pubkey::default(), Pubkey::default(), false),
             Some(mut marginfi_account) => {
+                check_order_close_state(&marginfi_account)?;
                 // The authority may close their own order anytime; anyone else may close it only
                 // once it holds no position in any allowed venue.
                 let by_authority = signer == Some(marginfi_account.authority);
@@ -1266,7 +1241,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     }
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
-        account.health_cache = health_cache;
+        account.set_health_cache(health_cache);
         account.liquidation_tagged_at = 0;
         account.unset_flag(ACCOUNT_IN_REBALANCE, false);
         account.lending_account.sort_balances();
