@@ -137,6 +137,9 @@ fn configure_bank(
             )?;
         }
 
+        let previous_liability_weight_init: I80F48 = bank.config.liability_weight_init.into();
+        let previous_liability_weight_maint: I80F48 = bank.config.liability_weight_maint.into();
+
         // Settings are not frozen, everything updates
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
@@ -156,7 +159,13 @@ fn configure_bank(
                 group.emode_max_maint_leverage,
             )?;
         }
-        check_same_asset_weight_ordering(bank, group)?;
+        // Lower initial or higher maintenance liability weights cannot worsen an already inverted
+        // same-asset-emode ordering, even if they do not fix the inversion.
+        if I80F48::from(bank.config.liability_weight_init) > previous_liability_weight_init
+            || I80F48::from(bank.config.liability_weight_maint) < previous_liability_weight_maint
+        {
+            check_same_asset_weight_ordering(bank, group)?;
+        }
         if fees_changed {
             check_same_asset_fee(bank, group)?;
         }

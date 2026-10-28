@@ -1,7 +1,7 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetSameAssetEmodeEligibilityEvent};
 use crate::ix_utils;
 use crate::state::bank::BankImpl;
-use crate::state::emode::check_same_asset_fee;
+use crate::state::emode::{check_same_asset_fee, check_same_asset_weight_ordering};
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
@@ -26,6 +26,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     check!(!bank.get_flag(FREEZE_SETTINGS), MarginfiError::Unauthorized);
+    let was_eligible = bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
     if enabled {
         check!(
@@ -56,6 +57,10 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     bank.update_flag(enabled, BANK_SAME_ASSET_EMODE_ELIGIBLE);
     let group = ctx.accounts.group.load()?;
     check_same_asset_fee(&bank, &group)?;
+    // If the bank was already enabled, we allow an inverted config to pass regardless.
+    if enabled && !was_eligible {
+        check_same_asset_weight_ordering(&bank, &group)?;
+    }
 
     emit!(LendingPoolBankSetSameAssetEmodeEligibilityEvent {
         header: GroupEventHeader {
