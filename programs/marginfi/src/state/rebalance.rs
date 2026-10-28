@@ -105,10 +105,10 @@ pub trait RebalanceRecordImpl {
     /// Reconcile the declared moves against the observed per-bank underlying-token deltas.
     /// `post_underlying[i]` is the end token amount of `ref_banks[i]`. For every referenced bank the net
     /// declared flow (incoming amounts minus outgoing) must equal `post - pre` within the conservation
-    /// dust. Returns `(total_moved, total_ref_pre, dust)`: the tokens that landed (sum of positive net
-    /// deltas), the start token amount summed across ALL referenced banks (the tip denominator, stable
-    /// against how the keeper splits the move across banks), and the tolerance applied (reused by the
-    /// caller's budget-cap cushion).
+    /// dust. Returns `(total_moved, total_ref_pre, dust)`: the tokens moved (the smaller of the tokens
+    /// that left banks and the tokens that landed in banks), the start token amount summed across ALL
+    /// referenced banks (the tip denominator, stable against how the keeper splits the move across
+    /// banks), and the tolerance applied (reused by the caller's budget-cap cushion).
     fn reconcile(
         &self,
         post_underlying: &[I80F48],
@@ -232,7 +232,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
             MarginfiError::IllegalBalanceState
         );
         let dust = self.conservation_dust(mint_decimals, venue_multiplier)?;
-        let mut total_moved = I80F48::ZERO;
+        let mut total_in = I80F48::ZERO;
         let mut total_ref_pre = I80F48::ZERO;
         let mut total_actual = I80F48::ZERO;
         for (i, post) in post_underlying.iter().enumerate().take(n) {
@@ -255,12 +255,16 @@ impl RebalanceRecordImpl for RebalanceRecord {
             total_actual = total_actual.checked_add(actual).ok_or_else(math_error!())?;
             total_ref_pre = total_ref_pre.checked_add(pre).ok_or_else(math_error!())?;
             if actual > I80F48::ZERO {
-                total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
+                total_in = total_in.checked_add(actual).ok_or_else(math_error!())?;
             }
         }
 
         check!(total_actual >= -dust, MarginfiError::RebalanceValueLeak);
-        Ok((total_moved, total_ref_pre, dust))
+        // `total_actual` is what landed minus what left, so this is what left.
+        let total_out = total_in
+            .checked_sub(total_actual)
+            .ok_or_else(math_error!())?;
+        Ok((total_in.min(total_out), total_ref_pre, dust))
     }
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {
