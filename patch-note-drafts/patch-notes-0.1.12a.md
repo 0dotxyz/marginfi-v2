@@ -17,6 +17,26 @@ debt and accounts boosted by e-mode are unchanged.
 Existing tags use the new curve after the program upgrade. No account migration or instruction
 changes are required.
 
+## Liquidation and Order Closure Safeguards
+
+Receivership liquidation and deleverage now mark the health cache at the start of the operation.
+The corresponding end instruction verifies that the cache still has the matching start marker;
+ordinary health-cache updates clear the marker. This adds a defense-in-depth check that the
+e-mode status used by liquidation comes from the initial health calculation.
+
+Additional account-state checks protect against instructions invoked through CPI during a
+liquidation or flashloan:
+
+- `lending_account_pulse_health` rejects accounts in receivership or risk-admin liquidation.
+- `kamino_deposit`, `drift_deposit`, and `juplend_deposit` reject accounts in receivership,
+  matching the existing standard deposit check.
+- Authority and keeper order-close instructions, including rebalance-order closure, reject
+  accounts in receivership, risk-admin liquidation, or a flashloan. Keepers can still close
+  eligible orders after the marginfi account itself has been closed.
+
+The health cache uses flag bits 16 and 32 for liquidation-start and deleverage-start provenance,
+respectively. Account layouts, instruction arguments, and required accounts are unchanged.
+
 ## Order Execution Event
 
 `end_execute_order` now emits `MarginfiAccountExecuteOrderEvent` after its execution checks pass,
