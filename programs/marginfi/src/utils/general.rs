@@ -405,7 +405,7 @@ pub fn fetch_unbiased_price_for_bank_cache<'info>(
 }
 
 /// Locate a bank's oracle information from a properly formatted slice of remaining accounts.
-fn oracle_accounts_for_bank<'info>(
+pub fn oracle_accounts_for_bank<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
     remaining_accounts: &'info [AccountInfo<'info>],

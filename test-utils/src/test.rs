@@ -532,6 +532,10 @@ pub const PYTH_PUSH_SOL_REAL_FEED: Pubkey = pubkey!("PythPushSo1Rea1Price1111111
 pub const SWITCH_PULL_SOL_REAL_FEED: Pubkey =
     pubkey!("BSzfJs4d1tAkSDqkepnfzEVcx2WtDVnwwXa2giy9PLeP");
 
+/// `program-test` boots at timestamp 0, which a rate reading treats as never written, so tests that
+/// read rate history pin a real time.
+pub const BASE_TS: i64 = 1_700_000_000;
+
 pub fn get_oracle_id_from_feed_id(feed_id: Pubkey) -> Option<Pubkey> {
     match feed_id.to_bytes() {
         PYTH_PUSH_FULLV_FEED_ID => Some(PYTH_PUSH_SOL_FULLV_FEED),
@@ -1250,6 +1254,22 @@ impl TestFixture {
         clock.slot = slot;
         clock.unix_timestamp = unix_timestamp;
         self.context.borrow_mut().set_sysvar(&clock);
+    }
+
+    /// Pin the Clock sysvar's `unix_timestamp` and republish `feeds` at it, so their prices stay
+    /// fresh across the step.
+    pub async fn pin_clock(&self, unix_timestamp: i64, feeds: &[Pubkey]) {
+        let mut clock: Clock = self.banks_client().get_sysvar().await.unwrap();
+        clock.unix_timestamp = unix_timestamp;
+        self.context.borrow_mut().set_sysvar(&clock);
+        for feed in feeds {
+            self.set_pyth_oracle_timestamp(*feed, unix_timestamp).await;
+        }
+    }
+
+    /// A handle on the banks client that holds no borrow of the context across an await.
+    pub fn banks_client(&self) -> BanksClient {
+        self.context.borrow().banks_client.clone()
     }
 
     pub async fn advance_time(&self, seconds: i64) {

@@ -10,10 +10,14 @@ use anchor_lang::{
 };
 use fixed::types::I80F48;
 use marginfi::state::price::{OraclePriceFeedAdapter, PriceAdapter};
+use marginfi::state::rate::NativeRateModel;
 use marginfi_type_crate::bank_authority_seed;
+use marginfi_type_crate::constants::{
+    BANK_RATE_READINGS, INTEREST_MAX_WINDOW_SECONDS, SECONDS_PER_YEAR,
+};
 use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
 use marginfi_type_crate::types::{
-    Bank, BankConfigOpt, BankVaultType, OraclePriceType, OracleSetup,
+    Bank, BankConfigOpt, BankVaultType, OraclePriceType, OracleSetup, RateReading,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
@@ -516,6 +520,41 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Replace the bank's rate readings with one `age` seconds old, at the asset index that makes
+    /// its realized supply APR since then equal `apr`, given its current yield index `index_now`.
+    pub async fn seed_rate_history(&self, index_now: I80F48, apr: I80F48, age: i64) {
+        let mut ctx = self.ctx.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+        let growth = apr * I80F48::from_num(age) / SECONDS_PER_YEAR;
+        let reading = RateReading::new(
+            index_now / (I80F48::ONE + growth),
+            I80F48::ONE,
+            clock.unix_timestamp - age,
+        )
+        .unwrap();
+
+        let mut bank_ai = ctx
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+        bank.rate_readings = [RateReading::default(); BANK_RATE_READINGS];
+        bank.rate_readings[0] = reading;
+        ctx.set_account(&self.key, &bank_ai.into());
+    }
+
+    /// [`Self::seed_rate_history`] for a native bank: a full max window at the supply rate it pays
+    /// right now.
+    pub async fn seed_native_rate_history(&self) {
+        let bank = self.load().await;
+        let apr = NativeRateModel::new(&bank).unwrap().rate_at(0).unwrap();
+        let age = i64::from(INTEREST_MAX_WINDOW_SECONDS);
+        self.seed_rate_history(bank.asset_share_value.into(), apr, age)
+            .await;
     }
 }
 

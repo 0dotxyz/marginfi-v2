@@ -24,6 +24,86 @@ A user is lending $100 in SOL and borrowing $50 in BONK. They set a take-profit 
  * Any combination of SOL going up or BONK going down that leads to a net-value of $70 can make the Order eligible to execute!
 ```
 
+## Interest Triggers
+
+An Order can also carry an **interest trigger**: exit when the position's carry has been negative on
+average over a window you choose. This is aimed at strategies, where the point of the position is
+the spread between what the lending position earns and what the borrowing position costs.
+
+```
+A user lends $1,000 USDC earning 5% and borrows $900 PYUSD costing 3%, keeping the 2% spread.
+ * If the USDC lend rate falls or the PYUSD borrow rate climbs, the spread can flip negative
+   and the position bleeds every day it stays open.
+ * An interest trigger closes it for them.
+```
+
+Two things make this more than "exit when the spread goes negative".
+
+**A blip is not a signal.** Rates are measured as the growth of each bank's share value across a
+window you choose (`window_seconds`, 6 to 48 hours, 24 hours by default). That growth is the average
+rate actually realized over the window. A brief move counts only for the interest it actually
+charged. The longer the window, the more it takes to move the average. A longer window is steadier;
+a shorter one reacts sooner.
+
+**Leaving costs money.** Losing 1% a year does not justify paying 1% slippage today to escape. You
+set `exit_budget_seconds` (14 days by default). A Keeper may only execute when the unwind costs less
+than what the position would lose to interest over that span. It is a spending limit priced in days
+of loss, not a delay: nothing waits for it. A Keeper who finds a route with no slippage can exit the
+moment carry turns. On an expensive route they must wait for the rate to worsen or find a better
+route. Your `max_slippage` still caps the exit regardless.
+
+`min_negative_apr` optionally requires the loss to reach a given annual rate, measured against your
+lending position, before the trigger fires at all. Left unset, any negative carry qualifies.
+
+The lend side counts only what the bank pays its lenders. Yield a token earns through its own
+price, such as a liquid staking token's staking yield or a PT accruing to par, is not measured.
+Set `min_negative_apr` to that yield. With a 5% staking yield, a setting of 5% fires the trigger
+once the loss measured here is deeper than what the token earns. Native staked collateral is the
+exception: its pool value is part of the measurement.
+
+These settings are yours to choose. Together they decide how much it takes to trigger an exit and
+what one can cost. A longer `window_seconds` and a higher `min_negative_apr` ask for more before the
+Order fires. `exit_budget_seconds` and `max_slippage` cap what a Keeper may spend.
+
+The variable-borrow premium you pay counts toward the cost side, since it is a real charge that
+pushes the spread negative.
+
+### How the Measurement Stays Honest
+
+Every bank keeps its own rolling history of where its share value stood. The protocol's ordinary
+pricing activity writes it: borrows, withdrawals, liquidations, and a permissionless pulse anyone
+can run. Readings are at least three hours apart and reach back at least 48 hours once the bank has
+been live that long. Your Order records nothing of its own. When a Keeper tries to execute it, each
+position's rate is read from its bank's history. The reading used is the one closest to your window
+that is at least a window old.
+
+Three things follow.
+
+- **It works from the moment you place it.** If the banks already hold a window of history, the
+  Order can execute right away. There is no priming step, and nothing for you or a Keeper to keep
+  alive.
+- **The history is the bank's, not the Order's.** It is shared by every Order on the bank. A Keeper
+  cannot shorten your window, reset it, or pick a flattering starting point.
+- **The measurement is exact.** It reads accrued share value, not a rate at an instant. Whatever the
+  bank actually charged or paid over the window is what the Order sees.
+
+If a bank has been quiet for longer than your window, the nearest older reading is used, so the
+measured span can be longer than you asked for, never shorter.
+
+An auto-rebalance does not move a balance an interest trigger was placed on. The bank your lending
+position is measured in stays the one you chose. The balance is held this way until its Order tag is
+cleared with `SetKeeperCloseFlags`, including after the Order has executed or been closed.
+
+### Interest and Price Triggers Together
+
+The interest trigger is independent of the Stop Loss / Take Profit threshold on the same Order, so
+one Order can carry both. That matters for a leveraged staking loop: lend an LST and borrow SOL. A
+depeg is a price problem, which a Stop Loss handles. A borrow rate climbing above the staking yield
+is a carry problem, which this trigger handles with `min_negative_apr` set to that yield. Either
+condition can execute the Order, and each is bound by its own cost rule.
+
+Before the banks hold a full window of history, your Stop Loss still works normally.
+
 ### Fees, and Who Keeps the Keepers
 
 Project Zero will run Keepers initially upon feature public launch (ETA Q2/Q3 2026), but any
@@ -40,6 +120,162 @@ spam Orders or otherwise misuse the Order system may be excluded by Keepers with
 Keeper assumes liability for failing to execute an Order in time. Users should be aware of the tax
 implications of using this feature in their respective jurisdiction, Keepers are not obligated (nor
 expected to) provide any tax information, receipts of transactions, etc.
+
+## Borrow Orders
+
+A **Borrow Order** borrows on your behalf while a bank's rate has been cheap. It can also repay that
+borrow once the rate turns expensive. You name the bank, how much you want in total, and the rate
+you are willing to pay. A Keeper fills the order whenever the rate the bank has actually charged
+over your window sits under that level. The order is persistent. It fills a piece at a time, keeps
+count of what is left, and stays open until it has borrowed everything you asked for or you cancel
+it. Give it a second, higher level and the same order closes the position once the rate has risen
+over it. The repayment comes from the bank the borrow was parked in.
+
+```
+A user wants to short SOL, but only if the borrow costs under 4% a year.
+ * They place a Borrow Order on the SOL bank for 100 SOL, open-below 4%.
+ * The SOL bank's rate has sat at 6% for days. Nothing happens.
+ * Utilization drops and the rate holds at 3% for the user's window. A Keeper fills what fits.
+ * If only 40 SOL fits under 4% before the rate would climb back over it, the Keeper fills 40 and
+   the order stays open for the other 60.
+
+A looper wants USDC leverage only while it is cheap.
+ * They place an order on the USDC bank for 50,000 USDC, open-below 5%, close-above 12%, redeploying
+   into a second USDC bank.
+ * The rate holds at 4% for a day: a Keeper borrows, and the USDC lands in the second bank earning.
+ * Weeks later the rate spikes and holds at 15%: a Keeper pulls the USDC back out of the second bank
+   and repays the borrow. The order stays, ready to open again when the rate falls.
+```
+
+This is aimed at strict shorts and basis trades that are sensitive to the borrow rate, and at
+loopers who want to hold leverage only while it is cheap enough to be worth it.
+
+### Partial Fills
+
+Borrowing pushes a bank's rate up. A fill is only allowed if the rate it leaves behind is still
+under your level. It must also take all that fits. A fill that leaves more than a granule (1% of the
+order) of room under the level is refused. So is one smaller than a granule, unless that is all the
+order had left. A Keeper therefore takes what fits, no more and no less. That is the whole
+partial-fill mechanism; there is no separate "partial" mode. If the bank has plenty of room, one
+fill takes everything. If it has a little, the order fills in pieces as room appears. A bank's
+borrow limit, its liquidity, and the destination's deposit limit each count as "nothing more to
+give". A fill they cap is still the full one.
+
+One thing the fill rule does not see is your collateral. A fill your account cannot carry is refused
+by the health check. A smaller fill is not accepted in its place. Size `amount` to what your
+collateral can support, or add collateral before the rate comes down.
+
+Consecutive fills are spaced by a `cooldown_seconds` you choose (1 hour by default). That keeps an
+order from chasing the rate up in a burst of small fills. Opens and closes share the one cooldown,
+which also keeps an order from flipping back and forth when the rate hovers around a level. Because
+every fill has to be the full one and at least a granule, nobody can start your cooldown with a
+token-sized fill.
+
+### Where the Money Goes
+
+You choose one of two destinations when you place the order:
+
+- **A bank of your choosing** holding the same asset. The borrowed funds are deposited there in the
+  same transaction, so they earn from the moment they arrive. Borrow USDC from one bank and lend it
+  to another whose rate is higher, or use it as collateral for the next leg of a loop. The
+  destination cannot be the bank you borrowed from, since one balance cannot hold both sides of the
+  same bank. Both banks must be native marginfi banks.
+- **Your wallet.** The funds land in your own token account for the asset (your associated token
+  account, created for you if it does not exist yet). The order has nothing further to do with them.
+  A Keeper cannot direct them anywhere else: a fill that tries is refused before it borrows.
+
+### Closing Again
+
+Give the order a `close_above_apr` higher than its open level and it gains a close side. A Keeper
+may close once the rate the bank has realized over your window has risen over that level, and the
+rate right now is still over it. The close withdraws from the destination bank and repays the borrow
+with it, in one transaction. A close must repay all the destination can cover. That is the whole
+debt when the deposit covers it. Otherwise it is everything the deposit holds or the destination
+bank can pay out at the time, to within a granule (all of it once less than a granule is left). A
+close can only repay what the order itself borrowed, interest included, never debt you took on the
+same bank yourself. A Keeper can never take more out of the destination bank than it pays. Whatever
+is repaid comes off the order's count in proportion. A fully closed order is back to its original
+amount and opens again when the rate falls. If you repay some of the borrow yourself, a close still
+clears the rest and leaves the order empty.
+
+The close side needs somewhere to repay from, so it requires a destination bank. A wallet order has
+handed its funds over and cannot be closed by a Keeper. Setting the close level to zero removes the
+close side. The order counts what its own fills borrowed. Repaying some of that yourself does not
+shrink the count. Update or cancel the order if you no longer want a Keeper closing the rest.
+
+An auto-rebalance does not move a balance a borrow order uses. A close therefore finds the deposit
+in the destination bank you chose. An order tags the balances it finds when it is placed, and again
+at every fill that opens. They stay held until their Order tag is cleared with
+`SetKeeperCloseFlags`, including after the order is cancelled.
+
+### What a Keeper Can and Cannot Do
+
+While a fill is running, the Keeper holds borrow authority on your account (withdraw and repay
+authority for a close). That authority is fenced in on every side:
+
+- The only instructions allowed in the transaction are the fill's start and end and its two legs. An
+  open's legs are a borrow from the order's bank and, for a redeploying order, a deposit into the
+  destination bank. A close's legs are a withdraw from the destination bank and a repay on the
+  order's bank.
+- Every other balance on your account is proven untouched before the fill is accepted.
+- An open is proven to have left the rate under your level with no more than a granule to spare. A
+  redeploying fill is proven to have deposited all it borrowed.
+- A close's repayment is proven to cover what the destination could pay and to stay within what the
+  order owes. Its withdrawal is proven to stay within what it paid.
+
+On a bank charging a variable borrow premium, the premium a repayment settles counts as paid.
+
+Your account's health is checked once, over the finished position. For a redeploying order, the
+deposit counts as collateral for the borrow that funded it. That is what lets a loop lever up in a
+single fill. A close only shrinks the position, so it is held to the maintenance requirement rather
+than the initial one.
+
+A fill that moves funds from one marginfi bank to another (a redeploying open, any close) does not
+count against either bank's outflow limits. Nothing leaves the protocol, the same as with an
+auto-rebalance. A wallet open is a real outflow and counts like any borrow.
+
+### Paying the Keeper
+
+Placing an order charges the same flat SOL fee as any other order. Each successful open and close
+also pays the Keeper the order's `keeper_tip`, in lamports, from your account's fee pool. That is
+the pool auto-rebalance orders use; top it up with `TopUpRebalanceFeePool`. The tip scales with how
+much of the order's amount the fill moved: a fill of half the order earns half the tip. A pool that
+runs short pays what it has. A tip of zero is allowed, but an order that pays nothing depends on
+someone running a Keeper for free.
+
+One residual risk is accepted, the same one auto-rebalance accepts. A Keeper who is also a lender in
+the bank can lower its rate with a deposit just before the fill and withdraw it just after. The
+window check confines that to banks which were genuinely cheap over your window. The damage is
+bounded by your order's amount.
+
+### The Rate Is the Bank's Own History
+
+The rate the order watches is the same bank history that powers Interest Triggers. It reads how much
+the bank's borrow index actually grew across your window (`window_seconds`, 6 hours to 48 hours, 24
+hours by default), not a rate at an instant. A brief spike contributes only its own duration. An
+hour at a punishing rate inside a day's window barely registers, while the same rate held all day is
+exactly what the order sees. Nobody can reset or shorten that measurement, and there is nothing to
+keep alive. Placing the order takes a reading of its own. The order can therefore fire one window
+after placement at the latest, sooner on a bank that already has the history.
+
+### Modifying and Cancelling
+
+Because the order persists, it can be changed in place. `UpdateBorrowOrder` adjusts the amount,
+either level, the window, the cooldown, or the tip. Two rules apply: the new amount cannot be below
+what has already been borrowed, and every value has to stay inside the ranges above.
+`CancelBorrowOrder` removes it and returns your rent. Neither touches anything already borrowed.
+
+### Knowing When a Keeper Acted
+
+Every open emits an event carrying how much was borrowed, how much remains, the rate that justified
+the fill, and the rate it left behind. Every close emits how much was repaid, what the order still
+holds, and the rate that justified it. Front ends read these to tell you a Keeper opened or closed
+part of your position, the same way a Trigger notifies you of an exit.
+
+### What Is Not Here Yet
+
+Redeploying into Kamino, Drift or JupLend banks, and turning a filled borrow into a Stop Loss or
+Take Profit, are to come.
 
 ## Using Orders With Multiple Positions
 
@@ -95,11 +331,19 @@ sure they do not close out positions involved with their Orders without updating
   used to pass information between the start and end of order execution. None of these should exist
   in production. Note that the Keeper must have enough SOL to pay rent to open this account, even
   though it's returned at the end of the tx.
+- `BorrowOrder` - a persistent borrow order for one (account, bank) pair: the amount, what
+  has filled so far and the debt shares it holds, the open and close levels, the window, the
+  cooldown, the keeper tip and the destination.
+- `BorrowOrderRecord` - the borrow-order fill's ephemeral counterpart to `ExecuteOrderRecord`: opened
+  at `StartBorrowOrderOpen` / `StartBorrowOrderClose`, closed at the matching end, never present
+  between transactions.
 
 ## Instructions
 
 - `PlaceOrder` (user) - Place a new Stop Loss, Take Profit, or Both type Order on a pair of balances
   the user currently holds.
+- `PlaceInterestOrder` (user) - The same, carrying an `InterestTriggerConfig`. Takes the same
+  accounts; the rates are read from the banks' own history, so the order is live from placement.
 - `StartExecuteOrder` (Keeper) - Keepers run this to begin the execution of an Order. Must be at the
   start of the tx. Withdraw/Repay of the involved balances typically follows this ix.
   Requires a risk check of just the balances involved in the Order.
@@ -109,3 +353,24 @@ sure they do not close out positions involved with their Orders without updating
 - `SetKeeperCloseFlags` (user) - Enables the Keeper to close Orders via `KeeperCloserOrder`,
   typically use `CloseOrder` instead.
 - `KeeperCloserOrder` (Keeper) - Close an Order on an account where neither of the original positions exists or all the tags have been cleared by the user
+- `PlaceBorrowOrder` (user) - Place a borrow order on a bank, with an optional same-mint
+  destination bank, an optional close level (which requires the destination) and a keeper tip.
+  Charges the flat order-init fee and takes a rate reading of the bank.
+- `UpdateBorrowOrder` (user) - Change a live order's amount, levels, window, cooldown or tip.
+- `CancelBorrowOrder` (user) - Cancel a borrow order and reclaim rent.
+- `StartBorrowOrderOpen` (Keeper) - Begin an open. Checks the bank's realized rate against the open
+  level, then grants the Keeper borrow authority for the transaction. Must be followed by the
+  ordinary `LendingAccountBorrow` (and `LendingAccountDeposit` when redeploying).
+- `EndBorrowOrderOpen` (Keeper) - Must be last. Proves the borrow was at least a granule and left
+  the rate under the level with no more than a granule to spare, or exhausted the order, the bank's
+  liquidity or a bank limit. Also proves that a redeploying order deposited what was borrowed, that
+  no other balance changed, and that the account is healthy over the finished position. Records the
+  fill and pays the tip.
+- `StartBorrowOrderClose` (Keeper) - Begin a close. Checks the bank's realized and current rates
+  against the close level and that the order holds debt, then grants the Keeper withdraw and repay
+  authority for the transaction. Must be followed by `LendingAccountWithdraw` from the destination bank and
+  `LendingAccountRepay` on the order's bank.
+- `EndBorrowOrderClose` (Keeper) - Must be last. Proves the repayment covered what the destination
+  held and could pay out (less a granule) and stayed within what the order owes. Also proves that
+  the withdrawal stayed within what was paid (premium settled included), that no other balance
+  changed, and that the account meets maintenance health. Records the repayment and pays the tip.

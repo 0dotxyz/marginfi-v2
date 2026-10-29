@@ -288,7 +288,7 @@ When an account enters receivership liquidation:
 - The designated `liquidation_receiver` gets temporary authority over the account.
 - The original authority is temporarily locked out.
 - Operations like withdraw become permissionless during receivership (anyone with
-  `allow_receivership=true` authorization can act).
+  `ALLOW_RECEIVERSHIP` authorization can act).
 
 For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATORS/RECEIVERSHIP_LIQUIDATION.md).
 

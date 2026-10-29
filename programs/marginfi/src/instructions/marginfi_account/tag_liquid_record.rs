@@ -11,8 +11,8 @@ use crate::{
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_BORROW_ORDER,
+    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
@@ -74,6 +74,7 @@ pub struct TagLiquidationRecord<'info> {
                 | ACCOUNT_IN_DELEVERAGE
                 | ACCOUNT_IN_ORDER_EXECUTION
                 | ACCOUNT_IN_REBALANCE
+                | ACCOUNT_IN_BORROW_ORDER
         ) @ MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

@@ -7,7 +7,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            LendingAccountImpl, MarginfiAccountImpl, ALLOW_BORROW_ORDER, ALLOW_ORDER_EXECUTION,
+            ALLOW_RECEIVERSHIP,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -118,7 +119,7 @@ pub fn lending_account_repay<'info>(
         // Unlike repay_all, a full non-repay_all repayment keeps the balance slot active. Its
         // order tag must not be reused if a later deposit or borrow gives that slot a new side.
         if bank_account.balance.get_side().is_none() {
-            bank_account.balance.tag = 0;
+            bank_account.balance.clear_tag();
         }
 
         (amount, share_amount)
@@ -248,7 +249,7 @@ pub struct LendingAccountRepay<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.governance_admin, authority.key(), true, true, false)
+            is_signer_authorized(&a, g.governance_admin, authority.key(), ALLOW_RECEIVERSHIP | ALLOW_ORDER_EXECUTION | ALLOW_BORROW_ORDER)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

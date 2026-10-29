@@ -1,4 +1,7 @@
-use super::{bank::BankFixture, marginfi_account::MarginfiAccountFixture};
+use super::{
+    bank::BankFixture,
+    marginfi_account::{should_include_integration_observation_meta, MarginfiAccountFixture},
+};
 use crate::kamino::KaminoFixture;
 use crate::prelude::{get_oracle_id_from_feed_id, MintFixture};
 use crate::ui_to_native;
@@ -1157,6 +1160,12 @@ impl MarginfiGroupFixture {
         if bank_state.config.oracle_setup != OracleSetup::Fixed {
             let oracle_key = bank_state.config.oracle_keys[0];
             accounts.push(AccountMeta::new_readonly(oracle_key, false));
+        }
+        if should_include_integration_observation_meta(&bank_state) {
+            accounts.push(AccountMeta::new_readonly(
+                bank_state.integration_acc_1,
+                false,
+            ));
         }
 
         let mut ctx = self.ctx.borrow_mut();
