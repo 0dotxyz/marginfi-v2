@@ -543,7 +543,16 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+
+    // ************** BEGIN UNWIND ERRORS (starting at 7000)
+    #[msg("below minimum unwind size")]
+    BelowMinimum = 1000, // 7000
+    #[msg("epoch has not rolled over since the unwind")]
+    EpochNotOver, // 7001
+    #[msg("SOL balance has an unsettled premium receivable")]
+    UnsettledPremium, // 7002
+                      // **************END UNWIND ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -834,6 +843,11 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Unwind-specific errors (starting at 7000)
+            7000 => MarginfiError::BelowMinimum,
+            7001 => MarginfiError::EpochNotOver,
+            7002 => MarginfiError::UnsettledPremium,
 
             _ => MarginfiError::InternalLogicError,
         }

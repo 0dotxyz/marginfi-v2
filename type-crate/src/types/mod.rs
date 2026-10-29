@@ -19,6 +19,7 @@ pub mod rate_limiter;
 pub mod rebalance;
 pub mod same_asset_emode_registry;
 pub mod staked_settings;
+pub mod unwind;
 pub mod user_account;
 pub mod wrapped_i80f48;
 
@@ -43,6 +44,7 @@ pub use rate_limiter::*;
 pub use rebalance::*;
 pub use same_asset_emode_registry::*;
 pub use staked_settings::*;
+pub use unwind::*;
 pub use user_account::*;
 pub use wrapped_i80f48::*;
 

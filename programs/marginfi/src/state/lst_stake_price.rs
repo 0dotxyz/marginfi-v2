@@ -21,7 +21,7 @@ use crate::constants::{
 /// Sanity ceiling for an LST/mSOL SOL-denominated exchange rate. Guards against a bad byte-slice
 /// yielding an absurd multiplier: real rates sit near 1.0-1.4 and appreciate only with staking
 /// yield, so 3 leaves over a decade of headroom while tightly bounding a garbage read.
-const MAX_LST_SOL_RATE: i128 = 3;
+pub(crate) const MAX_LST_SOL_RATE: i128 = 3;
 /// Upper bound (~5 years) on how far in the future a PT vault may mature, a sanity check on the
 /// timestamps decoded from the Exponent vault.
 const PT_MAX_MATURITY_HORIZON: i64 = 5 * 365 * 24 * 60 * 60;

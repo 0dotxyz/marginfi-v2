@@ -10,8 +10,8 @@ use crate::{
         bank_cache::update_interest_rates,
         bank_config::BankConfigImpl,
         interest_rate::{
-            calc_interest_rate_accrual_state_changes, InterestRateConfigImpl,
-            InterestRateStateChanges,
+            calc_interest_rate_accrual_state_changes, calculate_utilization_split,
+            InterestRateConfigImpl, InterestRateStateChanges,
         },
         price::OraclePriceWithMultiplier,
     },
@@ -47,6 +47,29 @@ pub const CB_MIN_REF_PRICE: I80F48 = I80F48::from_bits(1 << 20);
 /// Consecutive tier-3 trips before the bank is forced to `CircuitBroken`.
 pub const CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK: u8 = 3;
 
+pub(crate) const BPS_DENOMINATOR: u32 = 10_000;
+pub(crate) const MAX_PENDING_UNWIND_CAP_BPS: u32 = 5_000;
+
+fn check_utilization_ratio_with_pending(
+    bank: &Bank,
+    pending_unwind_lamports: u64,
+) -> MarginfiResult {
+    let total_assets = bank.get_asset_amount(bank.total_asset_shares.into())?;
+    let effective_liabilities = bank
+        .get_actual_liability_amount()?
+        .checked_add(I80F48::from_num(pending_unwind_lamports))
+        .ok_or_else(math_error!())?;
+
+    if total_assets < effective_liabilities {
+        let assets_num: f64 = total_assets.to_num();
+        let liabs_num: f64 = effective_liabilities.to_num();
+        msg!("assets: {:?} effective_liabs: {:?}", assets_num, liabs_num);
+        return err!(MarginfiError::IllegalUtilizationRatio);
+    }
+
+    Ok(())
+}
+
 /// Maximum age (seconds) of `cache.last_oracle_price_timestamp` accepted when enabling CB.
 /// Forces admin to bundle a fresh pulse with `configure_bank` so the EMA can't be seeded
 /// from an attacker-controlled stale price.
@@ -62,6 +85,12 @@ pub const CB_MAX_EMA_SHIFT_BPS_PER_PULSE: u64 = 500;
 pub const CB_WINDOW_SECONDS: i64 = 4 * 60 * 60;
 pub const CB_WINDOW_MAX_UP_BPS: u64 = 2_000;
 pub const CB_WINDOW_MAX_DOWN_BPS: u64 = 4_000;
+
+fn apply_bps(amount: I80F48, bps: u32) -> Option<I80F48> {
+    amount
+        .checked_mul(I80F48::from_num(bps))
+        .and_then(|v| v.checked_div(I80F48::from_num(BPS_DENOMINATOR)))
+}
 
 fn cb_confidence_adjusted_deviation_bps(
     current: I80F48,
@@ -190,6 +219,9 @@ pub trait BankImpl {
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
+    fn get_pending_unwind_amount(&self) -> I80F48;
+    fn get_actual_liability_amount(&self) -> MarginfiResult<I80F48>;
+    fn get_effective_liability_amount(&self) -> MarginfiResult<I80F48>;
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
@@ -201,6 +233,11 @@ pub trait BankImpl {
         bypass_borrow_limit: bool,
     ) -> MarginfiResult;
     fn check_utilization_ratio(&self) -> MarginfiResult;
+    fn get_pending_unwind_cap(&self) -> MarginfiResult<u64>;
+    fn add_pending_unwind(&mut self, amount: u64) -> MarginfiResult;
+    fn release_pending_unwind(&mut self, amount: u64) -> MarginfiResult;
+    fn set_max_pending_unwind_bps(&mut self, bps: u32) -> MarginfiResult;
+    fn apply_pnl_to_asset_share_value(&mut self, pnl: I80F48) -> MarginfiResult;
     fn configure(&mut self, config: &BankConfigOpt) -> MarginfiResult;
     fn configure_unfrozen_fields_only(&mut self, config: &BankConfigOpt) -> MarginfiResult;
     fn accrue_interest(
@@ -343,6 +380,21 @@ impl BankImpl for Bank {
             .ok_or_else(math_error!())?)
     }
 
+    fn get_pending_unwind_amount(&self) -> I80F48 {
+        I80F48::from_num(self.pending_unwind_lamports)
+    }
+
+    fn get_actual_liability_amount(&self) -> MarginfiResult<I80F48> {
+        self.get_liability_amount(self.total_liability_shares.into())
+    }
+
+    fn get_effective_liability_amount(&self) -> MarginfiResult<I80F48> {
+        Ok(self
+            .get_actual_liability_amount()?
+            .checked_add(self.get_pending_unwind_amount())
+            .ok_or_else(math_error!())?)
+    }
+
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64> {
         if !self.config.is_deposit_limit_active() {
             return Ok(u64::MAX);
@@ -423,38 +475,88 @@ impl BankImpl for Bank {
         bypass_borrow_limit: bool,
     ) -> MarginfiResult {
         let total_liability_shares: I80F48 = self.total_liability_shares.into();
-        self.total_liability_shares = total_liability_shares
+
+        let new_total_liability_shares = total_liability_shares
             .checked_add(shares)
-            .ok_or_else(math_error!())?
-            .into();
+            .ok_or_else(math_error!())?;
 
         if !bypass_borrow_limit && shares.is_positive() && self.config.is_borrow_limit_active() {
-            let total_liability_amount =
-                self.get_liability_amount(self.total_liability_shares.into())?;
+            let effective_liability_amount = self
+                .get_liability_amount(new_total_liability_shares)?
+                .checked_add(self.get_pending_unwind_amount())
+                .ok_or_else(math_error!())?;
+
             let borrow_limit = I80F48::from_num(self.config.borrow_limit);
 
-            if total_liability_amount >= borrow_limit {
-                let liab_num: f64 = total_liability_amount.to_num();
+            if effective_liability_amount >= borrow_limit {
+                let liab_num: f64 = effective_liability_amount.to_num();
                 let borrow_num: f64 = borrow_limit.to_num();
+
                 msg!("amt: {:?} borrow lim: {:?}", liab_num, borrow_num);
+
                 return err!(MarginfiError::BankLiabilityCapacityExceeded);
             }
         }
+
+        self.total_liability_shares = new_total_liability_shares.into();
 
         Ok(())
     }
 
     fn check_utilization_ratio(&self) -> MarginfiResult {
+        check_utilization_ratio_with_pending(self, self.pending_unwind_lamports)
+    }
+
+    fn get_pending_unwind_cap(&self) -> MarginfiResult<u64> {
         let total_assets = self.get_asset_amount(self.total_asset_shares.into())?;
-        let total_liabilities = self.get_liability_amount(self.total_liability_shares.into())?;
 
-        if total_assets < total_liabilities {
-            let assets_num: f64 = total_assets.to_num();
-            let liabs_num: f64 = total_liabilities.to_num();
-            msg!("assets: {:?} liabs: {:?}", assets_num, liabs_num);
-            return err!(MarginfiError::IllegalUtilizationRatio);
+        apply_bps(total_assets, self.max_pending_unwind_bps)
+            .and_then(|v| v.checked_to_num::<u64>())
+            .ok_or_else(|| MarginfiError::MathError.into())
+    }
+
+    fn add_pending_unwind(&mut self, amount: u64) -> MarginfiResult {
+        let cap = self.get_pending_unwind_cap()?;
+        let new_pending = self
+            .pending_unwind_lamports
+            .checked_add(amount)
+            .ok_or(MarginfiError::MathError)?;
+        require!(
+            new_pending <= cap,
+            MarginfiError::BankLiabilityCapacityExceeded
+        );
+        check_utilization_ratio_with_pending(self, new_pending)?;
+        self.pending_unwind_lamports = new_pending;
+        Ok(())
+    }
+
+    fn release_pending_unwind(&mut self, amount: u64) -> MarginfiResult {
+        self.pending_unwind_lamports = self
+            .pending_unwind_lamports
+            .checked_sub(amount)
+            .ok_or(MarginfiError::InternalLogicError)?;
+        Ok(())
+    }
+
+    fn set_max_pending_unwind_bps(&mut self, bps: u32) -> MarginfiResult {
+        require!(
+            bps <= MAX_PENDING_UNWIND_CAP_BPS,
+            MarginfiError::InvalidConfig
+        );
+        self.max_pending_unwind_bps = bps;
+        Ok(())
+    }
+
+    fn apply_pnl_to_asset_share_value(&mut self, pnl: I80F48) -> MarginfiResult {
+        let total_shares: I80F48 = self.total_asset_shares.into();
+        if pnl.is_zero() || total_shares.is_zero() {
+            return Ok(());
         }
-
+        let per_share = pnl.checked_div(total_shares).ok_or_else(math_error!())?;
+        let new_value = I80F48::from(self.asset_share_value)
+            .checked_add(per_share)
+            .ok_or_else(math_error!())?;
+        self.asset_share_value = new_value.max(I80F48::ZERO).into();
         Ok(())
     }
 
@@ -686,9 +788,10 @@ impl BankImpl for Bank {
         }
 
         let total_assets = self.get_asset_amount(self.total_asset_shares.into())?;
-        let total_liabilities = self.get_liability_amount(self.total_liability_shares.into())?;
+        let total_liabilities = self.get_actual_liability_amount()?;
+        let effective_liabilities = self.get_effective_liability_amount()?;
 
-        if (total_assets == I80F48::ZERO) || (total_liabilities == I80F48::ZERO) {
+        if (total_assets == I80F48::ZERO) || (effective_liabilities == I80F48::ZERO) {
             #[cfg(not(feature = "client"))]
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
@@ -719,6 +822,7 @@ impl BankImpl for Bank {
             time_delta,
             total_assets,
             total_liabilities,
+            effective_liabilities,
             &ir_calc,
             self.asset_share_value.into(),
             self.liability_share_value.into(),
@@ -794,10 +898,10 @@ impl BankImpl for Bank {
             return Ok(());
         }
         let total_assets_amount: I80F48 = self.get_asset_amount(self.total_asset_shares.into())?;
-        let total_liabilities_amount: I80F48 =
-            self.get_liability_amount(self.total_liability_shares.into())?;
+        let total_liabilities_amount = self.get_actual_liability_amount()?;
+        let effective_liabilities = self.get_effective_liability_amount()?;
 
-        if (total_assets_amount == I80F48::ZERO) || (total_liabilities_amount == I80F48::ZERO) {
+        if (total_assets_amount == I80F48::ZERO) || (effective_liabilities == I80F48::ZERO) {
             self.cache.reset_preserving_oracle_state();
             return Ok(());
         }
@@ -807,14 +911,17 @@ impl BankImpl for Bank {
             .interest_rate_config
             .create_interest_rate_calculator(group);
 
-        let utilization_rate: I80F48 = total_liabilities_amount
-            .checked_div(total_assets_amount)
-            .ok_or_else(math_error!())?;
-        let interest_rates = ir_calc.calc_interest_rate(utilization_rate)?;
+        let utilization = calculate_utilization_split(
+            total_assets_amount,
+            total_liabilities_amount,
+            effective_liabilities,
+        )?;
+
+        let interest_rates = ir_calc
+            .calc_interest_rates_split_utilization(utilization.effective, utilization.actual)?;
 
         update_interest_rates(&mut self.cache, &interest_rates);
 
-        // Update banks last update timestamp
         self.last_update = Clock::get()?.unix_timestamp;
         Ok(())
     }
@@ -2555,5 +2662,221 @@ mod cb_tests {
         let frozen = b.cb_frozen_seconds_pending + b.cb_frozen_seconds(b.last_update, now);
         assert_eq!(frozen, 3_600);
         assert_eq!((now - b.last_update) as u64 - frozen, 900);
+    }
+
+    #[cfg(test)]
+    mod pending_unwind_tests {
+        use super::*;
+        use anchor_lang::{
+            error::Error as AnchorError, solana_program::program_error::ProgramError,
+        };
+
+        fn anchor_error_code(err: AnchorError) -> u32 {
+            match err {
+                AnchorError::AnchorError(e) => e.error_code_number,
+                AnchorError::ProgramError(e) => match &e.program_error {
+                    ProgramError::Custom(c) => *c,
+                    other => panic!("unexpected program error: {other:?}"),
+                },
+            }
+        }
+
+        fn assert_err<T: std::fmt::Debug>(res: MarginfiResult<T>, expected: MarginfiError) {
+            assert_eq!(anchor_error_code(res.unwrap_err()), u32::from(expected));
+        }
+
+        fn bank_with_pending_unwind(assets: u64, liabilities: u64, pending: u64, bps: u32) -> Bank {
+            Bank {
+                total_asset_shares: I80F48::from_num(assets).into(),
+                asset_share_value: I80F48::ONE.into(),
+                total_liability_shares: I80F48::from_num(liabilities).into(),
+                liability_share_value: I80F48::ONE.into(),
+                pending_unwind_lamports: pending,
+                max_pending_unwind_bps: bps,
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn effective_liabilities_are_actual_plus_pending() {
+            let b = bank_with_pending_unwind(1_000, 400, 100, 5_000);
+            assert_eq!(
+                b.get_actual_liability_amount().unwrap(),
+                I80F48::from_num(400)
+            );
+            assert_eq!(b.get_pending_unwind_amount(), I80F48::from_num(100));
+            assert_eq!(
+                b.get_effective_liability_amount().unwrap(),
+                I80F48::from_num(500)
+            );
+        }
+
+        #[test]
+        fn effective_liabilities_equal_actual_when_nothing_pending() {
+            let b = bank_with_pending_unwind(1_000, 400, 0, 5_000);
+            assert_eq!(
+                b.get_effective_liability_amount().unwrap(),
+                b.get_actual_liability_amount().unwrap()
+            );
+        }
+
+        #[test]
+        fn utilization_check_counts_pending_as_liability() {
+            assert!(bank_with_pending_unwind(1_000, 900, 100, 5_000)
+                .check_utilization_ratio()
+                .is_ok());
+            assert_err(
+                bank_with_pending_unwind(1_000, 900, 101, 5_000).check_utilization_ratio(),
+                MarginfiError::IllegalUtilizationRatio,
+            );
+        }
+
+        #[test]
+        fn utilization_check_does_not_enforce_the_unwind_cap() {
+            let b = bank_with_pending_unwind(1_000, 0, 900, 1_000);
+            assert!(b.check_utilization_ratio().is_ok());
+        }
+
+        #[test]
+        fn pending_cap_is_bps_of_total_assets() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 0, 2_500);
+            b.asset_share_value = I80F48::from_num(2).into();
+            assert_eq!(b.get_pending_unwind_cap().unwrap(), 500);
+        }
+
+        #[test]
+        fn add_pending_unwind_accepts_up_to_the_cap_then_rejects() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 0, 5_000);
+            b.add_pending_unwind(300).unwrap();
+            b.add_pending_unwind(200).unwrap();
+            assert_eq!(b.pending_unwind_lamports, 500);
+
+            assert_err(
+                b.add_pending_unwind(1),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+            assert_eq!(b.pending_unwind_lamports, 500, "failed add must not mutate");
+        }
+
+        #[test]
+        fn zero_bps_disables_new_unwinds() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 0, 0);
+            assert_err(
+                b.add_pending_unwind(1),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+        }
+
+        #[test]
+        fn add_pending_unwind_fails_when_liquidity_is_insufficient() {
+            let mut b = bank_with_pending_unwind(1_000, 800, 0, 5_000);
+            assert_err(
+                b.add_pending_unwind(300),
+                MarginfiError::IllegalUtilizationRatio,
+            );
+            assert_eq!(b.pending_unwind_lamports, 0);
+        }
+
+        #[test]
+        fn add_pending_unwind_overflow_is_a_math_error() {
+            let mut b = bank_with_pending_unwind(1_000, 0, u64::MAX, 5_000);
+            assert_err(b.add_pending_unwind(1), MarginfiError::MathError);
+        }
+
+        #[test]
+        fn release_pending_unwind_cannot_go_below_zero() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 300, 5_000);
+            b.release_pending_unwind(100).unwrap();
+            assert_eq!(b.pending_unwind_lamports, 200);
+
+            assert_err(
+                b.release_pending_unwind(201),
+                MarginfiError::InternalLogicError,
+            );
+            assert_eq!(
+                b.pending_unwind_lamports, 200,
+                "failed release must not mutate"
+            );
+
+            b.release_pending_unwind(200).unwrap();
+            assert_eq!(b.pending_unwind_lamports, 0);
+        }
+
+        #[test]
+        fn lowering_cap_below_outstanding_pending_is_allowed() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 400, 5_000);
+            b.set_max_pending_unwind_bps(0).unwrap();
+            assert_eq!(b.max_pending_unwind_bps, 0);
+            assert_eq!(
+                b.pending_unwind_lamports, 400,
+                "outstanding tickets untouched"
+            );
+
+            assert_err(
+                b.add_pending_unwind(1),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+            b.release_pending_unwind(400).unwrap();
+            assert_eq!(b.pending_unwind_lamports, 0);
+        }
+
+        #[test]
+        fn raising_cap_allows_more_unwinds() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 400, 4_000);
+            assert_err(
+                b.add_pending_unwind(1),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+            b.set_max_pending_unwind_bps(5_000).unwrap();
+            b.add_pending_unwind(100).unwrap();
+            assert_eq!(b.pending_unwind_lamports, 500);
+        }
+
+        #[test]
+        fn max_pending_unwind_cap_rejects_values_above_the_limit() {
+            let mut b = bank_with_pending_unwind(1_000, 0, 0, 5_000);
+            assert_err(
+                b.set_max_pending_unwind_bps(MAX_PENDING_UNWIND_CAP_BPS + 1),
+                MarginfiError::InvalidConfig,
+            );
+            assert_eq!(b.max_pending_unwind_bps, MAX_PENDING_UNWIND_CAP_BPS);
+        }
+
+        fn with_borrow_limit(mut b: Bank, limit: u64) -> Bank {
+            b.config.borrow_limit = limit;
+            b
+        }
+
+        #[test]
+        fn borrow_limit_counts_pending_unwinds() {
+            let shares = I80F48::from_num(400);
+
+            let mut no_pending =
+                with_borrow_limit(bank_with_pending_unwind(10_000, 500, 0, 5_000), 1_000);
+            no_pending.change_liability_shares(shares, false).unwrap();
+
+            let mut with_pending =
+                with_borrow_limit(bank_with_pending_unwind(10_000, 500, 300, 5_000), 1_000);
+            assert_err(
+                with_pending.change_liability_shares(shares, false),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+
+            let mut bypass =
+                with_borrow_limit(bank_with_pending_unwind(10_000, 500, 300, 5_000), 1_000);
+            bypass.change_liability_shares(shares, true).unwrap();
+        }
+
+        #[test]
+        fn borrow_limit_frees_up_once_pending_is_released() {
+            let shares = I80F48::from_num(400);
+            let mut b = with_borrow_limit(bank_with_pending_unwind(10_000, 500, 300, 5_000), 1_000);
+            assert_err(
+                b.change_liability_shares(shares, false),
+                MarginfiError::BankLiabilityCapacityExceeded,
+            );
+            b.release_pending_unwind(300).unwrap();
+            b.change_liability_shares(shares, false).unwrap();
+        }
     }
 }

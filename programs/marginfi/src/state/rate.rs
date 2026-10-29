@@ -20,7 +20,7 @@
 //! `update_exchange_price`, which refreshes the `TokenReserve` the supply rate reads).
 
 use crate::state::bank::BankImpl;
-use crate::state::interest_rate::LendingCurve;
+use crate::state::interest_rate::{calculate_utilization_split, LendingCurve};
 use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,
 };
@@ -95,6 +95,7 @@ pub struct NativeRateModel {
     curve: LendingCurve,
     assets: I80F48,
     liabilities: I80F48,
+    effective_liabilities: I80F48,
 }
 
 impl NativeRateModel {
@@ -102,7 +103,8 @@ impl NativeRateModel {
         Ok(Self {
             curve: LendingCurve::new(&bank.config.interest_rate_config)?,
             assets: bank.get_asset_amount(bank.total_asset_shares.into())?,
-            liabilities: bank.get_liability_amount(bank.total_liability_shares.into())?,
+            liabilities: bank.get_actual_liability_amount()?,
+            effective_liabilities: bank.get_effective_liability_amount()?,
         })
     }
 
@@ -113,14 +115,13 @@ impl NativeRateModel {
             .assets
             .checked_add(I80F48::from_num(extra_native))
             .ok_or_else(math_error!())?;
-        if assets == I80F48::ZERO || self.liabilities == I80F48::ZERO {
+        if assets == I80F48::ZERO || self.effective_liabilities == I80F48::ZERO {
             return Ok(I80F48::ZERO);
         }
-        let utilization = self
-            .liabilities
-            .checked_div(assets)
-            .ok_or_else(math_error!())?;
-        self.curve.lending_rate(utilization)
+        let utilization =
+            calculate_utilization_split(assets, self.liabilities, self.effective_liabilities)?;
+        self.curve
+            .lending_rate_with_pending(utilization.effective, utilization.actual)
     }
 }
 
@@ -245,7 +246,7 @@ fn slots_per_second_from(slots: u64, seconds: i64) -> Option<I80F48> {
 
 /// Real slots per second over the elapsed part of the current epoch, for venues that denominate
 /// their rate in slots. Falls back to klend's own convention when the sample is unusable.
-fn measured_slots_per_second(clock: &Clock) -> I80F48 {
+pub(crate) fn measured_slots_per_second(clock: &Clock) -> I80F48 {
     let nominal = I80F48::from_num(KLEND_SLOTS_PER_SECOND);
     let Ok(schedule) = EpochSchedule::get() else {
         return nominal;

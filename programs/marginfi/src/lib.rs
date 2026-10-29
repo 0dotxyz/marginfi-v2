@@ -828,6 +828,45 @@ pub mod marginfi {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
+    pub fn init_unwind_config(
+        ctx: Context<InitUnwindConfig>,
+        fee_multiplier_bps: u32,
+        max_pending_unwind_bps: u32,
+        min_unwind_lamports: u64,
+    ) -> MarginfiResult {
+        marginfi_account::init_unwind_config(
+            ctx,
+            fee_multiplier_bps,
+            max_pending_unwind_bps,
+            min_unwind_lamports,
+        )
+    }
+
+    pub fn update_unwind_config(
+        ctx: Context<UpdateUnwindConfig>,
+        fee_multiplier_bps: u32,
+        max_pending_unwind_bps: u32,
+        min_unwind_lamports: u64,
+    ) -> MarginfiResult {
+        marginfi_account::update_unwind_config(
+            ctx,
+            fee_multiplier_bps,
+            max_pending_unwind_bps,
+            min_unwind_lamports,
+        )
+    }
+
+    pub fn unwind_lst<'info>(
+        ctx: Context<'info, UnwindLst<'info>>,
+        max_lst_in: u64,
+    ) -> MarginfiResult {
+        marginfi_account::unwind_lst(ctx, max_lst_in)
+    }
+
+    pub fn settle_unwind_ticket(ctx: Context<SettleUnwindTicket>) -> MarginfiResult {
+        marginfi_account::settle_unwind_ticket(ctx)
+    }
+
     /// (Permissionless) Refresh the cached oracle price for a bank.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
         ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,

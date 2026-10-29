@@ -4,6 +4,8 @@ use fixed_macro::types::I80F48;
 pub const LIQUIDITY_VAULT_AUTHORITY_SEED: &str = "liquidity_vault_auth";
 pub const INSURANCE_VAULT_AUTHORITY_SEED: &str = "insurance_vault_auth";
 pub const FEE_VAULT_AUTHORITY_SEED: &str = "fee_vault_auth";
+pub const UNWIND_CONFIG_SEED: &[u8] = b"unwind_config";
+pub const UNWIND_TICKET_SEED: &[u8] = b"unwind_ticket";
 
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";
 pub const INSURANCE_VAULT_SEED: &str = "insurance_vault";

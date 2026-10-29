@@ -179,6 +179,14 @@ impl InterestRateCalc {
         &self,
         utilization_ratio: I80F48,
     ) -> MarginfiResult<ComputedInterestRates> {
+        self.calc_interest_rates_split_utilization(utilization_ratio, utilization_ratio)
+    }
+
+    pub(crate) fn calc_interest_rates_split_utilization(
+        &self,
+        effective_utilization: I80F48,
+        actual_utilization: I80F48,
+    ) -> MarginfiResult<ComputedInterestRates> {
         let Fees {
             insurance_fee_rate,
             insurance_fee_fixed,
@@ -197,14 +205,14 @@ impl InterestRateCalc {
                 return err!(MarginfiError::InvalidConfig);
             }
             INTEREST_CURVE_SEVEN_POINT => self
-                .interest_rate_multipoint_curve(utilization_ratio)
+                .interest_rate_multipoint_curve(effective_utilization)
                 .ok_or_else(math_error!())?,
             _ => panic!("unsupported curve type"),
         };
 
-        // Lending rate is adjusted for utilization ratio to symmetrize payments between borrowers and depositors.
+        // Lenders earn on actual liabilities; pending unwind only affects borrower rates.
         let lending_rate_apr: I80F48 = base_rate_apr
-            .checked_mul(utilization_ratio)
+            .checked_mul(actual_utilization)
             .ok_or_else(math_error!())?;
 
         // Borrowing rate is adjusted for fees.
@@ -369,13 +377,21 @@ impl LendingCurve {
     /// The lending rate at `utilization`: the curve's base rate times the utilization. Fees do not
     /// enter it.
     pub fn lending_rate(&self, utilization: I80F48) -> MarginfiResult<I80F48> {
+        self.lending_rate_with_pending(utilization, utilization)
+    }
+
+    pub(crate) fn lending_rate_with_pending(
+        &self,
+        effective_util: I80F48,
+        actual_util: I80F48,
+    ) -> MarginfiResult<I80F48> {
         multipoint_curve(
             self.zero_rate,
             self.hundred_rate,
             self.points[..self.used].iter().copied(),
-            utilization,
+            effective_util,
         )
-        .and_then(|base_rate| base_rate.checked_mul(utilization))
+        .and_then(|base| base.checked_mul(actual_util))
         .ok_or_else(math_error!())
         .map_err(Into::into)
     }
@@ -419,16 +435,18 @@ fn calc_accrued_interest_payment_per_period(
     Some(new_value)
 }
 
-/// Calculates the interest payment for a given period `time_delta` in a principal value `value` for interest rate (in APR) `arp`.
-/// Result is the interest payment.
-fn calc_interest_payment_for_period(apr: I80F48, time_delta: u64, value: I80F48) -> Option<I80F48> {
+pub(crate) fn calc_interest_payment_for_period(
+    apr: I80F48,
+    period_secs: u64,
+    principal: I80F48,
+) -> Option<I80F48> {
     if apr.is_zero() {
         return Some(I80F48::ZERO);
     }
 
-    let interest_payment: I80F48 = value
+    let interest_payment: I80F48 = principal
         .checked_mul(apr)?
-        .checked_mul(time_delta.into())?
+        .checked_mul(period_secs.into())?
         .checked_div(SECONDS_PER_YEAR)?;
 
     Some(interest_payment)
@@ -465,19 +483,23 @@ pub fn calc_interest_rate_accrual_state_changes(
     time_delta: u64,
     total_assets_amount: I80F48,
     total_liabilities_amount: I80F48,
+    effective_liabilities_amount: I80F48,
     interest_rate_calc: &InterestRateCalc,
     asset_share_value: I80F48,
     liability_share_value: I80F48,
 ) -> MarginfiResult<InterestRateStateChanges> {
-    // If the cache is empty, we need to calculate the interest rates
-    let utilization_rate: I80F48 = total_liabilities_amount
-        .checked_div(total_assets_amount)
-        .ok_or_else(math_error!())?;
+    let utilization = calculate_utilization_split(
+        total_assets_amount,
+        total_liabilities_amount,
+        effective_liabilities_amount,
+    )?;
+
     debug!(
-        "Utilization rate: {}, time delta {}s",
-        utilization_rate, time_delta
+        "Actual utilization: {}, Effective utilization: {}, time delta {}s",
+        utilization.actual, utilization.effective, time_delta
     );
-    let interest_rates = interest_rate_calc.calc_interest_rate(utilization_rate)?;
+    let interest_rates = interest_rate_calc
+        .calc_interest_rates_split_utilization(utilization.effective, utilization.actual)?;
 
     debug!("{:#?}", interest_rates);
 
@@ -530,6 +552,27 @@ pub struct InterestRateStateChanges {
     pub insurance_fees_collected: I80F48,
     pub group_fees_collected: I80F48,
     pub protocol_fees_collected: I80F48,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct UtilizationSplit {
+    pub(crate) actual: I80F48,
+    pub(crate) effective: I80F48,
+}
+
+pub(crate) fn calculate_utilization_split(
+    total_assets: I80F48,
+    actual_liabilities: I80F48,
+    effective_liabilities: I80F48,
+) -> MarginfiResult<UtilizationSplit> {
+    Ok(UtilizationSplit {
+        actual: actual_liabilities
+            .checked_div(total_assets)
+            .ok_or_else(math_error!())?,
+        effective: effective_liabilities
+            .checked_div(total_assets)
+            .ok_or_else(math_error!())?,
+    })
 }
 
 #[cfg(test)]
@@ -1126,6 +1169,9 @@ mod tests {
         let old_total_liability_amount = liab_share_value * total_liability_shares;
         let old_total_asset_amount = asset_share_value * total_asset_shares;
 
+        let total_assets_amount = asset_share_value * total_asset_shares;
+        let total_liabilities_amount = liab_share_value * total_liability_shares;
+
         let InterestRateStateChanges {
             new_asset_share_value,
             new_liability_share_value: new_liab_share_value,
@@ -1134,8 +1180,9 @@ mod tests {
             protocol_fees_collected,
         } = calc_interest_rate_accrual_state_changes(
             3600,
-            total_asset_shares,
-            total_liability_shares,
+            total_assets_amount,
+            total_liabilities_amount,
+            total_liabilities_amount,
             &ir_config.create_interest_rate_calculator(&group),
             asset_share_value,
             liab_share_value,
@@ -1612,5 +1659,62 @@ mod tests {
             ],
         );
         assert!(c.validate_seven_point().is_ok());
+    }
+
+    #[test]
+    fn calc_interest_rates_with_pending_unwind() {
+        let cfg = sample_multipoint_calc();
+        let actual_utilization = I80F48::from_num(0.3);
+        let effective_utilization = I80F48::from_num(0.5);
+
+        let rates = cfg
+            .calc_interest_rates_split_utilization(effective_utilization, actual_utilization)
+            .unwrap();
+
+        assert!(rates.borrowing_rate_apr >= I80F48::ZERO);
+        assert!(rates.lending_rate_apr >= I80F48::ZERO);
+
+        let rates_no_pending = cfg.calc_interest_rate(actual_utilization).unwrap();
+
+        assert!(rates.borrowing_rate_apr > rates_no_pending.borrowing_rate_apr);
+    }
+
+    #[test]
+    fn native_rate_with_pending_unwind() {
+        use crate::state::rate::NativeRateModel;
+
+        let mut bank = Bank {
+            total_asset_shares: I80F48::from_num(1_000_000).into(),
+            total_liability_shares: I80F48::from_num(500_000).into(),
+            asset_share_value: I80F48::ONE.into(),
+            liability_share_value: I80F48::ONE.into(),
+            config: BankConfig {
+                interest_rate_config: InterestRateConfig {
+                    zero_util_rate: apr_to_u32(0.05),
+                    hundred_util_rate: apr_to_u32(0.40),
+                    points: make_points(&[
+                        RatePoint::new(util_to_u32(0.20), apr_to_u32(0.10)),
+                        RatePoint::new(util_to_u32(0.60), apr_to_u32(0.15)),
+                    ]),
+                    curve_type: INTEREST_CURVE_SEVEN_POINT,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        bank.pending_unwind_lamports = 100_000;
+
+        let model = NativeRateModel::new(&bank).expect("model creation");
+        let rate = model.rate_at(0).expect("rate calculation");
+
+        let borrow_util = I80F48::from_num(600_000) / I80F48::from_num(1_000_000);
+        let lend_util = I80F48::from_num(500_000) / I80F48::from_num(1_000_000);
+        let curve = LendingCurve::new(&bank.config.interest_rate_config).expect("curve");
+        let expected = curve
+            .lending_rate_with_pending(borrow_util, lend_util)
+            .expect("expected rate");
+
+        assert_eq!(rate, expected);
     }
 }

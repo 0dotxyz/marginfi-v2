@@ -243,15 +243,20 @@ pub struct Bank {
     /// this bank's borrowers pay (as `liability_tag`).
     /// * 0 = untagged: never matches any premium entry.
     pub premium_tag: u16,
-    // Pad to next 8-byte multiple
-    pub _pad3: [u8; 6],
+    pub _pad3: [u8; 2],
+
+    pub max_pending_unwind_bps: u32,
     /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
     /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
     /// can never charge for (or health-project) the deactivated window.
     /// * 0 on banks that never activated premium.
     pub premium_activated_at: i64,
 
-    pub _padding_1: [[u64; 8]; 32],
+    /// Pending SOL principal, in lamports.
+    pub pending_unwind_lamports: u64,
+
+    pub _padding_1: [[u64; 8]; 31],
+    pub _padding_1_tail: [u64; 7],
 }
 
 impl Bank {

@@ -392,8 +392,15 @@ mod tests {
         assert_eq!(offset_of!(Bank, cb_frozen_seconds_pending), 1832);
         assert_eq!(offset_of!(Bank, premium_tag), 1840);
         assert_eq!(offset_of!(Bank, _pad3), 1842);
+        assert_eq!(offset_of!(Bank, max_pending_unwind_bps), 1844);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
-        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN);
+        assert_eq!(offset_of!(Bank, pending_unwind_lamports), Bank::V1_LEN);
+
+        assert_eq!(
+            offset_of!(Bank, _padding_1),
+            offset_of!(Bank, pending_unwind_lamports) + std::mem::size_of::<u64>()
+        );
+        assert_eq!(offset_of!(Bank, _padding_1_tail), 3848);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

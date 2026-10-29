@@ -280,13 +280,14 @@ impl MintFixture {
     }
 
     pub async fn mint_to<T: Into<f64>>(&mut self, dest: &Pubkey, ui_amount: T) {
+        let amount = ui_to_native!(ui_amount.into(), self.mint.decimals);
         let tx = {
             let ctx = self.ctx.borrow();
-            let mint_to_ix =
-                self.make_mint_to_ix(dest, ui_to_native!(ui_amount.into(), self.mint.decimals));
+            let instructions = self.make_fund_ixs(dest, amount);
             let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
+
             Transaction::new_signed_with_payer(
-                &[mint_to_ix],
+                &instructions,
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
                 blockhash,
@@ -314,6 +315,18 @@ impl MintFixture {
             amount,
         )
         .unwrap()
+    }
+
+    pub fn make_fund_ixs(&self, dest: &Pubkey, amount: u64) -> Vec<Instruction> {
+        if self.key == spl_token::native_mint::ID {
+            let payer = self.ctx.borrow().payer.pubkey();
+            vec![
+                anchor_lang::solana_program::system_instruction::transfer(&payer, dest, amount),
+                spl_token::instruction::sync_native(&spl_token::ID, dest).unwrap(),
+            ]
+        } else {
+            vec![self.make_mint_to_ix(dest, amount)]
+        }
     }
 
     pub async fn create_empty_token_account(&self) -> TokenAccountFixture {
@@ -351,18 +364,17 @@ impl MintFixture {
         )
         .await;
 
-        let mint_to_ix = self.make_mint_to_ix(
-            &token_account_f.key,
-            ui_to_native!(ui_amount.into(), self.mint.decimals),
-        );
+        let amount = ui_to_native!(ui_amount.into(), self.mint.decimals);
+        let instructions = self.make_fund_ixs(&token_account_f.key, amount);
 
         let blockhash = {
             let banks_client = self.ctx.borrow().banks_client.clone();
             banks_client.get_latest_blockhash().await.unwrap()
         };
+
         let ctx = self.ctx.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
-            &[mint_to_ix],
+            &instructions,
             Some(&payer),
             &[&ctx.payer],
             blockhash,

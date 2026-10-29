@@ -599,6 +599,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.fee_vault_bump, 255);
     assert_eq!(bank.fee_vault_authority_bump, 253);
     assert_eq!(bank._pad2, [0; 6]);
+    assert_eq!(bank._pad3, [0; 2]);
+    assert_eq!(bank.max_pending_unwind_bps, 0);
+    assert_eq!(bank.pending_unwind_lamports, 0);
     assert_eq!(
         I80F48::from(bank.collected_group_fees_outstanding),
         I80F48::from_str("1015697146.551430542063226").unwrap()
@@ -724,7 +727,10 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.liquidation_liquidator_fee, 0);
     assert_eq!(bank.liquidation_insurance_fee, 0);
     assert_eq!(bank._padding_0, [0; 8]);
-    assert_eq!(bank._pad3, [0u8; 6]);
+    assert_eq!(bank._pad2, [0u8; 6]);
+    assert_eq!(bank._pad3, [0; 2]);
+    assert_eq!(bank.max_pending_unwind_bps, 0);
+    assert_eq!(bank.pending_unwind_lamports, 0);
     assert_eq!(bank.integration_acc_1, Pubkey::default());
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());

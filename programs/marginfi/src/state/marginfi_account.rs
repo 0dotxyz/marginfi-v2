@@ -2426,6 +2426,32 @@ impl<'a> BankAccountWrapper<'a> {
         // Materialize pending premium before computing the total owed.
         self.claim_premium()?;
 
+        self.repay_all_after_claim(in_receivership, settle_premium)
+    }
+
+    /// Repays in full only when no premium is outstanding.
+    pub fn repay_all_without_premium(
+        &mut self,
+        in_receivership: bool,
+    ) -> MarginfiResult<(u64, I80F48)> {
+        check!(
+            I80F48::from(self.balance.premium_outstanding) <= I80F48::ZERO,
+            MarginfiError::UnsettledPremium
+        );
+        self.claim_premium()?;
+        check!(
+            I80F48::from(self.balance.premium_outstanding) <= I80F48::ZERO,
+            MarginfiError::UnsettledPremium
+        );
+
+        self.repay_all_after_claim(in_receivership, false)
+    }
+
+    fn repay_all_after_claim(
+        &mut self,
+        in_receivership: bool,
+        settle_premium: bool,
+    ) -> MarginfiResult<(u64, I80F48)> {
         let total_liability_shares: I80F48;
         let current_liability_amount: I80F48;
         let current_asset_amount: I80F48;

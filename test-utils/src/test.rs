@@ -772,6 +772,11 @@ impl TestFixture {
         program.add_program("mocks", mocks::ID, None);
 
         program.prefer_bpf(false);
+        program.add_program(
+            "spl_stake_pool",
+            spl_stake_pool::id(),
+            processor!(spl_stake_pool::processor::Processor::process),
+        );
         let requires_real_kamino_program = add_integration_programs;
         let mut original_sbf_out_dir = None;
 

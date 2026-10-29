@@ -34,7 +34,8 @@ marginfi-type-crate = { workspace = true, features = ["anchor"] }
 spl-transfer-hook-interface = { workspace = true }
 spl-token-2022 = { workspace = true }
 solana-program = { workspace = true, optional = true }
-solana-stake-interface = { workspace = true, features = ["borsh"] }
+solana-stake-interface = { workspace = true, features = ["borsh", "bincode", "sysvar"] }
+spl-stake-pool = { workspace = true }
 solana-vote-interface = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-borsh = { workspace = true }
@@ -70,6 +71,7 @@ solana-account-decoder = { workspace = true }
 solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
 solana-sdk = { workspace = true }
+solana-stake-interface-v2 = { package = "solana-stake-interface", version = "2.0.2", features = ["bincode"] }
 solana-compute-budget-interface = { workspace = true }
 solana-system-interface = { workspace = true }
 solana-system-transaction = { workspace = true }

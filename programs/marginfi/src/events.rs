@@ -489,3 +489,18 @@ pub struct CircuitBreakerAutoBrokenEvent {
     pub consecutive_tier3_trips: u8,
     pub current_timestamp: i64,
 }
+
+#[event]
+pub struct UnwindLstEvent {
+    pub header: AccountEventHeader,
+    pub lst_bank: Pubkey,
+    pub sol_bank: Pubkey,
+    pub stake_account: Pubkey,
+    pub debt_repaid_lamports: u64,
+    pub unwind_fee_lamports: u64,
+    pub unwind_fee_lst: u64,
+    pub lst_debited_total: u64,
+    pub lst_burned: u64,
+    pub pool_withdrawal_fee_lst: u64,
+    pub epoch_seconds_remaining: u64,
+}
