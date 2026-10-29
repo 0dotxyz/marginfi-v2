@@ -321,6 +321,7 @@ impl MintSnapshotRecords {
     }
 }
 
+#[cfg(feature = "anchor")]
 pub type MintSnapshotsArchive<'a, 'info> = super::Archive<'a, 'info, 300, MintSnapshotRecords>;
 
 #[cfg(test)]

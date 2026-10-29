@@ -2084,7 +2084,8 @@ impl LendingAccountImpl for LendingAccount {
 
     fn sort_balances(&mut self) {
         // Sort all balances in descending order by bank_pk
-        self.balances.sort_by(|a, b| b.bank_pk.cmp(&a.bank_pk));
+        self.balances
+            .sort_by_key(|balance| core::cmp::Reverse(balance.bank_pk));
     }
 
     /// Finds n free tags for new orders, starting with newer ones first

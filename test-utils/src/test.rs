@@ -46,7 +46,6 @@ use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 use fixed_macro::types::I80F48;
 use lazy_static::lazy_static;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_program::{hash::Hash, sysvar};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
@@ -55,9 +54,10 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_sdk::{hash::Hash, sysvar};
 
+use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::system_program;
-use solana_program::clock::Clock;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 #[derive(Default, Debug, Clone)]
@@ -201,9 +201,10 @@ pub struct TestBankSetting {
     pub config: Option<BankConfig>,
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum BankMint {
     /// $1
+    #[default]
     Usdc,
     /// $2
     Fixed,
@@ -245,12 +246,6 @@ pub enum BankMint {
     SolEqIsolated,
     /// $1
     KaminoUsdc,
-}
-
-impl Default for BankMint {
-    fn default() -> Self {
-        Self::Usdc
-    }
 }
 
 impl BankMint {
@@ -775,6 +770,7 @@ impl TestFixture {
         let requires_real_kamino_program = add_integration_programs;
         let mut original_sbf_out_dir = None;
 
+        // ProgramTest's processor! macro uses the unqualified standard Result type.
         if requires_real_kamino_program {
             original_sbf_out_dir = Some(std::env::var_os("SBF_OUT_DIR"));
             let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -797,22 +793,19 @@ impl TestFixture {
             program.add_program("token_metadata", TOKEN_METADATA_PROGRAM_ID, None);
             program.prefer_bpf(false);
         } else {
-            program.add_program(
-                "kamino_lending",
-                kamino_mocks::kamino_lending::ID,
-                processor!(mock_kamino_lending_processor),
-            );
-            program.add_program(
-                "kamino_farms",
-                kamino_mocks::kamino_farms::ID,
-                processor!(mock_kamino_lending_processor),
-            );
+            program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, {
+                use std::result::Result;
+                processor!(mock_kamino_lending_processor)
+            });
+            program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, {
+                use std::result::Result;
+                processor!(mock_kamino_lending_processor)
+            });
         }
-        program.add_program(
-            "fake_kamino_lending",
-            FAKE_KAMINO_PROGRAM_ID,
-            processor!(mock_kamino_lending_processor),
-        );
+        program.add_program("fake_kamino_lending", FAKE_KAMINO_PROGRAM_ID, {
+            use std::result::Result;
+            processor!(mock_kamino_lending_processor)
+        });
 
         let usdc_keypair = Keypair::new();
         let fixed_keypair = Keypair::new();

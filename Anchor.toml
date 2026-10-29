@@ -1,6 +1,6 @@
 [toolchain]
-anchor_version = "1.0.2"
-solana_version = "3.1.13"
+anchor_version = "1.2.2"
+solana_version = "4.1.2"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
@@ -32,9 +32,6 @@ token_metadata = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 [programs.mainnet]
 # liquidity_incentive_program = "LipsxuAkFkwa4RKNzn51wAsW7Dedzt1RNHMkTkDEZUW"
 marginfi = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
-
-[registry]
-url = "https://api.apr.dev"
 
 [provider]
 cluster = "Localnet"

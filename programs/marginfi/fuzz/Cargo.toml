@@ -15,15 +15,13 @@ doc = false
 
 [dependencies]
 marginfi-type-crate = { path = "../../../type-crate", features = ["anchor"] }
-solana-sdk = "=3.0.0"
-solana-program = "=3.0.0"
-solana-program-test = { version = "=3.1.12", features = ["agave-unstable-api"] }
+solana-sdk = "3.0.0"
 spl-token = "9.0.0"
 spl-token-2022 = "11.0.0"
 solana-instructions-sysvar = "4.0.0"
 
-anchor-lang = { version = "1.0.2" }
-anchor-spl = { version = "1.0.2", default-features = false, features = ["associated_token", "token", "token_2022"] }
+anchor-lang = { version = "1.2.2" }
+anchor-spl = { version = "1.2.2", default-features = false, features = ["solana-v3", "associated_token", "token", "token_2022"] }
 
 pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", rev = "913ce2196a104635582d745c8fbd9a69e240070c" }
 

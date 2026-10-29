@@ -1,6 +1,7 @@
 #![no_main]
 
 use anchor_lang::prelude::{AccountLoader, Clock};
+use anchor_lang::solana_program::program_pack::Pack;
 use anyhow::Result;
 use arbitrary::Arbitrary;
 use fixed::types::I80F48;
@@ -11,7 +12,6 @@ use marginfi_fuzz::{
     account_state::AccountsState, arbitrary_helpers::*, metrics::Metrics, MarginfiFuzzContext,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
-use solana_program::program_pack::Pack;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Arbitrary)]
