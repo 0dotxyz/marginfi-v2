@@ -293,8 +293,6 @@ impl<'info> KaminoDeposit<'info> {
     }
 
     pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
-        // The bank-owned obligation holds only the linked reserve and has no Kamino borrows.
-        // Kamino validates the remaining accounts against the actual obligation state.
         let accounts = RefreshObligation {
             lending_market: self.lending_market.to_account_info(),
             obligation: self.integration_acc_2.to_account_info(),
