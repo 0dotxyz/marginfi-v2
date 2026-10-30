@@ -428,7 +428,7 @@ async fn send_kamino_ixs(
     setup: &KaminoBankSetup,
     ixs: &[Instruction],
 ) -> anyhow::Result<(Result<(), TransactionError>, Vec<String>)> {
-    let (mut banks, payer) = {
+    let (banks, payer) = {
         let ctx = setup.test_f.context.borrow();
         (ctx.banks_client.clone(), ctx.payer.insecure_clone())
     };
