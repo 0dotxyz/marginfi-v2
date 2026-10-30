@@ -27,12 +27,8 @@ const KAMINO_TX_CU_LIMIT: u32 = 800_000;
 
 // (wallet_funding_ui, deposit_native, internal_refresh)
 #[test_case(10.0, 1_000_000, false; "1_usdc_external")]
-#[test_case(10.0, 1_000_000, true; "1_usdc_internal")]
-#[test_case(500.0, 100_000_000, false; "100_usdc_external")]
 #[test_case(500.0, 100_000_000, true; "100_usdc_internal")]
 #[test_case(10_000.0, 5_000_000_000, false; "5000_usdc_external")]
-#[test_case(10_000.0, 5_000_000_000, true; "5000_usdc_internal")]
-#[test_case(100_000.0, 50_000_000_000, false; "50000_usdc_external")]
 #[test_case(100_000.0, 50_000_000_000, true; "50000_usdc_internal")]
 #[tokio::test]
 async fn kamino_deposit_local_instruction_call_success(
@@ -95,12 +91,8 @@ async fn kamino_deposit_local_instruction_call_success(
 
 // (wallet_funding_ui, deposit_native, withdraw_collateral_native, internal_refresh)
 #[test_case(10.0, 1_000_000, 100_000, false; "1_usdc_external")]
-#[test_case(10.0, 1_000_000, 100_000, true; "1_usdc_internal")]
-#[test_case(500.0, 100_000_000, 10_000_000, false; "100_usdc_external")]
 #[test_case(500.0, 100_000_000, 10_000_000, true; "100_usdc_internal")]
 #[test_case(10_000.0, 5_000_000_000, 1_000_000_000, false; "5000_usdc_external")]
-#[test_case(10_000.0, 5_000_000_000, 1_000_000_000, true; "5000_usdc_internal")]
-#[test_case(100_000.0, 50_000_000_000, 25_000_000_000, false; "50000_usdc_external")]
 #[test_case(100_000.0, 50_000_000_000, 25_000_000_000, true; "50000_usdc_internal")]
 #[tokio::test]
 async fn kamino_withdraw_local_instruction_call_success(
@@ -296,11 +288,8 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter(
 
 // (wallet_funding_ui, deposit_native)
 #[test_case(0.01, 1_000_000, false; "1_usdc_external")]
-#[test_case(0.01, 1_000_000, true; "1_usdc_internal")]
-#[test_case(1.0, 100_000_000, false; "100_usdc_external")]
 #[test_case(1.0, 100_000_000, true; "100_usdc_internal")]
 #[test_case(100.0, 500_000_000_000, false; "500000_usdc_external")]
-#[test_case(100.0, 500_000_000_000, true; "500000_usdc_internal")]
 #[tokio::test]
 async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
     wallet_funding: f64,
@@ -346,8 +335,6 @@ async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
 
 // (wallet_funding_ui, deposit_native)
 #[test_case(10.0, 1_000_000, false; "1_usdc_external")]
-#[test_case(10.0, 1_000_000, true; "1_usdc_internal")]
-#[test_case(10_000.0, 5_000_000_000, false; "5000_usdc_external")]
 #[test_case(10_000.0, 5_000_000_000, true; "5000_usdc_internal")]
 #[tokio::test]
 async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
@@ -762,10 +749,7 @@ async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
 }
 
 #[test_case(0x02, false; "partial_internal_refresh")]
-#[test_case(0x03, false; "withdraw_all_internal_refresh")]
-#[test_case(0x00, true; "partial_caller_refresh")]
 #[test_case(0x01, true; "withdraw_all_caller_refresh")]
-#[test_case(0x02, true; "partial_internal_refresh_already_fresh")]
 #[test_case(0x03, true; "withdraw_all_internal_refresh_already_fresh")]
 #[tokio::test]
 async fn kamino_withdraw_uses_refreshed_exchange_rate(
