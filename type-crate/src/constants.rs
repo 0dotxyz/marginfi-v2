@@ -142,6 +142,10 @@ pub const PREMIUM_ACTIVE: u64 = 1 << 13;
 /// emergency mode.
 pub const KAMINO_MARKET_EMERGENCY: u64 = 1 << 14;
 
+/// JupLend's global liquidity, token reserve, or Earn supply position is halted. Refreshed by
+/// `propagate_juplend_emergency`; Initial collateral value is zero until the next refresh clears it.
+pub const JUPLEND_EMERGENCY: u64 = 1 << 15;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
