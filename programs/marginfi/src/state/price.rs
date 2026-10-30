@@ -39,6 +39,8 @@ use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
+#[cfg(not(target_os = "solana"))]
+use scope_mocks::state::ScopeDatedPrice;
 use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
@@ -2045,6 +2047,35 @@ pub struct ScopePriceFeed {
 }
 
 impl ScopePriceFeed {
+    /// Constructs a feed from a decoded Scope entry for off-chain clients.
+    ///
+    /// The caller must authenticate the account, select the configured entry, and check its
+    /// timestamp against the current time and maximum age. Unlike `load_checked`, this does not
+    /// reject stale, future, or out-of-range timestamps. The caller must also apply any integration
+    /// exchange-rate multiplier and determine borrow power from integration state. For Kamino,
+    /// borrow power depends on both reserve and market emergency flags.
+    #[cfg(not(target_os = "solana"))]
+    pub fn from_entry(entry: &ScopeDatedPrice, has_borrow_power: bool) -> MarginfiResult<Self> {
+        check!(
+            entry.price.value > 0 && entry.unix_timestamp > 0,
+            MarginfiError::ScopeInvalidEntry
+        );
+        check!(
+            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let price = I80F48::from_num(entry.price.value)
+            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
+            .ok_or_else(math_error!())?;
+
+        Ok(Self {
+            price,
+            last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power,
+        })
+    }
+
     /// Validates the account and reads `entry_index`, without a staleness check (used by config
     /// validation, where the feed may legitimately not have been cranked yet).
     fn read_entry(ai: &AccountInfo, entry_index: u16) -> MarginfiResult<Self> {
@@ -3421,6 +3452,49 @@ mod tests {
         data: &'a mut [u8],
     ) -> AccountInfo<'a> {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    #[test]
+    fn scope_from_entry_matches_account_entry_validation() {
+        let key = Pubkey::new_unique();
+        for (value, exp, timestamp) in [
+            (10_344_510_800, 8, 1_000),
+            (123, 0, 1),
+            (1, (MAX_EXP_10_I80F48 - 1) as u64, 1),
+            (0, 8, 1_000),
+            (1, 8, 0),
+            (1, MAX_EXP_10_I80F48 as u64, 1),
+        ] {
+            let entry = ScopeDatedPrice {
+                price: ScopePrice { value, exp },
+                unix_timestamp: timestamp,
+                ..ScopeDatedPrice::default()
+            };
+            let mut data = scope_account_data(42, value, exp, timestamp);
+            let mut lamports = 0;
+            let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+            let account_feed = ScopePriceFeed::read_entry(&ai, 42);
+            let client_feed = ScopePriceFeed::from_entry(&entry, false);
+            match (account_feed, client_feed) {
+                (Ok(account), Ok(client)) => {
+                    assert_eq!(client.price, account.price);
+                    assert_eq!(
+                        client.last_updated_timestamp,
+                        account.last_updated_timestamp
+                    );
+                    assert!(account.has_borrow_power());
+                    assert!(!client.has_borrow_power());
+                    assert!(ScopePriceFeed::from_entry(&entry, true)
+                        .unwrap()
+                        .has_borrow_power());
+                }
+                (Err(account_error), Err(client_error)) => {
+                    assert_eq!(account_error, client_error);
+                }
+                _ => panic!("account and decoded-entry validation disagree"),
+            }
+        }
     }
 
     #[test]
