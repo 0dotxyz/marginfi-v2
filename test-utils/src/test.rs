@@ -2382,9 +2382,6 @@ impl TestFixture {
         refresh: KaminoRefreshOptions,
     ) -> Vec<Instruction> {
         let mut ixs = Vec::new();
-        if refresh.internal || refresh.skip_external_price_updates {
-            ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(800_000));
-        }
         if refresh.external {
             let reserve_ix = if refresh.skip_external_price_updates {
                 user.make_kamino_refresh_reserves_batch_ix(bank_f).await

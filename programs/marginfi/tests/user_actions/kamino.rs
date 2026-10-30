@@ -8,7 +8,6 @@ use marginfi::{
 };
 use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
 use marginfi_type_crate::types::{Bank, BankOperationalState};
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
     account::AccountSharedData,
@@ -23,7 +22,6 @@ use test_case::test_case;
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
 const SOLANA_SLOTS_PER_DAY: u64 = 216_000;
 const WARP_DAYS: u64 = 30;
-const KAMINO_TX_CU_LIMIT: u32 = 800_000;
 
 // (wallet_funding_ui, deposit_native, internal_refresh)
 #[test_case(10.0, 1_000_000, false; "1_usdc_external")]
@@ -410,12 +408,7 @@ async fn send_kamino_ixs(
     };
     let blockhash = banks.get_latest_blockhash().await?;
 
-    let mut all = vec![ComputeBudgetInstruction::set_compute_unit_limit(
-        KAMINO_TX_CU_LIMIT,
-    )];
-    all.extend_from_slice(ixs);
-
-    let tx = Transaction::new_signed_with_payer(&all, Some(&payer.pubkey()), &[&payer], blockhash);
+    let tx = Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &[&payer], blockhash);
     let res = banks.process_transaction_with_metadata(tx).await?;
     let logs = res.metadata.map(|m| m.log_messages).unwrap_or_default();
     Ok((res.result, logs))
@@ -585,11 +578,9 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
     warp_clock_forward(&setup).await?;
     TestFixture::process_ixs(
         setup.test_f.context.clone(),
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(KAMINO_TX_CU_LIMIT),
-            user.make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
-                .await,
-        ],
+        &[user
+            .make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
+            .await],
     )
     .await?;
 
@@ -869,11 +860,9 @@ async fn kamino_withdraw_without_refresh_flag_fails_on_stale_state(
     if refresh_reserve_first {
         TestFixture::process_ixs(
             setup.test_f.context.clone(),
-            &[
-                ComputeBudgetInstruction::set_compute_unit_limit(KAMINO_TX_CU_LIMIT),
-                user.make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
-                    .await,
-            ],
+            &[user
+                .make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
+                .await],
         )
         .await?;
     }
