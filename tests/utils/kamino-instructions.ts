@@ -1,6 +1,7 @@
 import {
   AccountMeta,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
 import BN from "bn.js";
@@ -8,7 +9,7 @@ import { Marginfi } from "../../target/types/marginfi";
 import { Program } from "@coral-xyz/anchor";
 import { KaminoConfigCompact } from "./kamino-utils";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { KLEND_PROGRAM_ID } from "./types";
+import { FARMS_PROGRAM_ID, KLEND_PROGRAM_ID } from "./types";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
@@ -363,4 +364,45 @@ export const makeKaminoWithdrawIx = async (
     .instruction();
 
   return ix;
+};
+
+export type KaminoCloseBankAccountsArgs = {
+  /** marginfi program id, also the "none" placeholder for the farm accounts */
+  marginfiProgramId: PublicKey;
+  bank: PublicKey;
+  lendingMarket: PublicKey;
+  reserve: PublicKey;
+  obligationFarmUserState?: PublicKey | null;
+  reserveFarmState?: PublicKey | null;
+};
+
+/** The Kamino tail of `closeBank`'s remaining accounts, in the order `close_bank.rs` expects. */
+export const kaminoCloseBankAccounts = (
+  args: KaminoCloseBankAccountsArgs,
+): AccountMeta[] => {
+  const meta = (pubkey: PublicKey, isWritable: boolean): AccountMeta => ({
+    pubkey,
+    isSigner: false,
+    isWritable,
+  });
+  const [authority] = deriveLiquidityVaultAuthority(
+    args.marginfiProgramId,
+    args.bank,
+  );
+  const none = args.marginfiProgramId;
+  return [
+    meta(deriveBaseObligation(authority, args.lendingMarket)[0], true),
+    meta(args.reserve, true),
+    meta(args.lendingMarket, false),
+    meta(deriveLendingMarketAuthority(KLEND_PROGRAM_ID, args.lendingMarket)[0], false),
+    meta(deriveReserveLiquiditySupply(KLEND_PROGRAM_ID, args.reserve)[0], true),
+    meta(deriveReserveCollateralMint(KLEND_PROGRAM_ID, args.reserve)[0], true),
+    meta(deriveReserveCollateralSupply(KLEND_PROGRAM_ID, args.reserve)[0], true),
+    meta(args.obligationFarmUserState ?? none, !!args.obligationFarmUserState),
+    meta(args.reserveFarmState ?? none, !!args.reserveFarmState),
+    meta(KLEND_PROGRAM_ID, false),
+    meta(FARMS_PROGRAM_ID, false),
+    meta(TOKEN_PROGRAM_ID, false),
+    meta(SystemProgram.programId, false),
+  ];
 };

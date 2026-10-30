@@ -33,8 +33,9 @@ pub fn get_discrim_hash(namespace: &str, name: &str) -> [u8; 8] {
     sighash
 }
 
-/// Validate the given ix hash is the first in the list of ixes, other than compute budget ixes
-/// and explicitly allowed ixes (e.g. Kamino refreshes), and appears only once.
+/// Validate the given ix hash is the first in the list of ixes, other than compute budget ixes,
+/// associated token account ixes (a swap route may create its intermediate token accounts), and
+/// explicitly allowed ixes (e.g. Kamino refreshes), and appears only once.
 ///
 /// If the ix implements `Hashable`, use `get_hash()` to get the expected hash.
 pub fn validate_ix_first(
@@ -47,13 +48,15 @@ pub fn validate_ix_first(
     let mut expected_ix_encountered = false;
 
     for instruction in ixes.iter() {
-        if instruction.program_id == compute_budget_key {
+        if instruction.program_id == compute_budget_key
+            || instruction.program_id == ASSOCIATED_TOKEN_KEY
+        {
             continue;
         }
 
         // Sanity check the instruction is valid
         if instruction.data.len() < 8 {
-            // Note: non-anchor programs (e.g. ComputeBudget) can end up in this path.
+            // Note: other non-anchor programs can end up in this path.
             return err!(MarginfiError::StartNotFirst);
         }
         let discrim = &instruction.data[0..8];
@@ -523,6 +526,44 @@ mod tests {
         assert_eq!(
             get_discrim_hash("global", "update_exchange_price"),
             ix_discriminators::JUPLEND_UPDATE_EXCHANGE_PRICE
+        );
+    }
+
+    #[test]
+    fn start_first_skips_associated_token_account_ixes() {
+        let program_id = Pubkey::new_unique();
+        let start = [1u8; 8];
+        let other = [2u8; 8];
+        let ix = |program_id: Pubkey, data: Vec<u8>| Instruction {
+            program_id,
+            accounts: vec![],
+            data,
+        };
+        // `create_idempotent` carries one byte, `create` none: both shorter than a discriminator.
+        let create_ata = ix(ASSOCIATED_TOKEN_KEY, vec![1]);
+        let create_ata_legacy = ix(ASSOCIATED_TOKEN_KEY, vec![]);
+        let compute = ix(COMPUTE_PROGRAM_KEY, vec![2, 0, 0, 0, 0]);
+
+        // ATA creations before the start (like compute budget ixes) and inside the route are
+        // skipped, not mistaken for a misplaced start.
+        let ixes = [
+            compute.clone(),
+            create_ata.clone(),
+            ix(program_id, start.to_vec()),
+            ix(program_id, other.to_vec()),
+            create_ata_legacy,
+            ix(Pubkey::new_unique(), [9u8; 8].to_vec()),
+        ];
+        assert!(validate_ix_first(&ixes, &program_id, &start, &[]).is_ok());
+
+        // Any other sub-8-byte instruction is still rejected.
+        let ixes = [
+            ix(Pubkey::new_unique(), vec![1]),
+            ix(program_id, start.to_vec()),
+        ];
+        assert_eq!(
+            validate_ix_first(&ixes, &program_id, &start, &[]).unwrap_err(),
+            MarginfiError::StartNotFirst.into()
         );
     }
 
