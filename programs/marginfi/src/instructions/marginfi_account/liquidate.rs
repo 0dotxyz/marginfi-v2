@@ -37,7 +37,6 @@ use marginfi_type_crate::{
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
         MarginfiGroup, OraclePriceType, PriceBias, RequirementType, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -164,13 +163,6 @@ pub fn lending_account_liquidate<'info>(
     let cb_admin_liquidation =
         any_balance_bank_is_cb_halted(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
 
-    // Like deleverage, only the risk admin may liquidate through an Exponent PT emergency.
-    let risk_admin_liquidation = ctx.accounts.authority.key() == group.risk_admin;
-    if risk_admin_liquidation {
-        liquidatee_marginfi_account.set_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
-        liquidator_marginfi_account.set_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
-    }
-
     {
         let group = marginfi_group_loader.load()?;
 
@@ -261,7 +253,6 @@ pub fn lending_account_liquidate<'info>(
             &asset_bank,
             &clock,
             ctx.remaining_accounts,
-            risk_admin_liquidation,
         )?;
         check!(asset_price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
 
@@ -270,12 +261,7 @@ pub fn lending_account_liquidate<'info>(
         let liab_price: I80F48 = {
             let oracle_ais = &ctx.remaining_accounts[asset_bank_remaining_accounts_len
                 ..(asset_bank_remaining_accounts_len + liab_bank_remaining_accounts_len)];
-            let liab_pf = OraclePriceFeedAdapter::try_from_bank(
-                &liab_bank,
-                oracle_ais,
-                &clock,
-                risk_admin_liquidation,
-            )?;
+            let liab_pf = OraclePriceFeedAdapter::try_from_bank(&liab_bank, oracle_ais, &clock)?;
             liab_pf.get_price_of_type(
                 OraclePriceType::RealTime,
                 Some(PriceBias::High),
@@ -607,8 +593,6 @@ pub fn lending_account_liquidate<'info>(
     if !cb_admin_liquidation {
         run_cb_price_gate(&liquidator_marginfi_account, liquidator_remaining_accounts)?;
     }
-    liquidatee_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
-    liquidator_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
 
     let asset_mint = ctx.accounts.asset_bank.load_mut()?.mint;
     let liability_mint = ctx.accounts.liab_bank.load_mut()?.mint;

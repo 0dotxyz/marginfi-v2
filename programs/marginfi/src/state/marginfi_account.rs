@@ -25,8 +25,8 @@ use marginfi_type_crate::{
         HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup,
         OracleFeedFamily, OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
         ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -88,7 +88,6 @@ pub trait MarginfiAccountImpl {
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
     fn defers_health_to_end_instruction(&self) -> bool;
-    fn prices_through_pt_emergency(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -265,7 +264,6 @@ pub fn run_cb_price_gate<'info>(
                     oracle_ais,
                     &clock,
                     OraclePriceType::RealTime,
-                    marginfi_account.prices_through_pt_emergency(),
                 )?;
             bank.cb_price_gate(cache_price.cb_observation()?)?;
         }
@@ -316,11 +314,6 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
     }
 
-    /// Risk-admin unwinds (deleverage, risk-admin liquidation) price PT banks through an Exponent
-    /// emergency.
-    fn prices_through_pt_emergency(&self) -> bool {
-        self.get_flag(ACCOUNT_IN_DELEVERAGE | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION)
-    }
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
         // orders one account can open.
@@ -1053,8 +1046,6 @@ pub fn get_health_components<'info>(
         HealthPriceMode::Client(clock) => (false, None, clock),
     };
 
-    let ignore_pt_emergency = marginfi_account.prices_through_pt_emergency();
-
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================
@@ -1147,12 +1138,8 @@ pub fn get_health_components<'info>(
             let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
             // Create oracle adapter (heap allocation happens here)
-            let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(
-                &bank,
-                oracle_ais,
-                &clock,
-                ignore_pt_emergency,
-            );
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
             // Premium weights reuse the biased health price computed inside the calc — no
             // extra adapter work (see the premium module docs for the accepted rate wobble).
@@ -1377,7 +1364,7 @@ pub fn get_tagged_account_health_components<'info>(
 
         let (asset_val, liab_val) = {
             let price_adapter_result =
-                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock, false);
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
             let (asset_val, liab_val, price, _err_code, _premium_price) =
                 calc_weighted_value_for_balance(
