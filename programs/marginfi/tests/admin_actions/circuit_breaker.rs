@@ -2,7 +2,9 @@ use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{assert_custom_error, prelude::*};
+use marginfi::instructions::marginfi_group::StakedSettingsEditConfigFast;
 use marginfi::prelude::*;
+use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
 use marginfi_type_crate::types::{BankConfigOpt, BankOperationalState};
 use solana_program_test::{BanksClientError, *};
 use solana_sdk::pubkey::Pubkey;
@@ -1095,5 +1097,43 @@ async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()>
     assert_eq!(accrued.cb_frozen_seconds_pending, 0);
     assert_eq!(accrued.last_update, resume_time);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn staked_cb_settings_require_fast_admin() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let slow_admin = Keypair::new();
+    test_f
+        .marginfi_group
+        .try_set_governance_admin(&slow_admin)
+        .await?;
+
+    let settings = || StakedSettingsEditConfigFast {
+        circuit_breaker_enabled: Some(true),
+        cb_deviation_bps_tiers: Some([600, 1050, 1800]),
+        cb_tier_durations_seconds: Some([600, 1800, 7200]),
+        cb_escalation_window_mult: Some(2),
+        cb_ema_alpha_bps: Some(2000),
+        ..Default::default()
+    };
+
+    let slow_result = test_f
+        .marginfi_group
+        .try_edit_staked_settings_fast_with_signer(&slow_admin, settings())
+        .await;
+    assert_custom_error!(slow_result.unwrap_err(), MarginfiError::Unauthorized);
+
+    test_f
+        .marginfi_group
+        .try_edit_staked_settings_fast(settings())
+        .await?;
+
+    let staked = test_f.marginfi_group.load_staked_settings().await;
+    assert_eq!(staked.flags, CIRCUIT_BREAKER_ENABLED);
+    assert_eq!(staked.cb_deviation_bps_tiers, [600, 1050, 1800]);
+    assert_eq!(staked.cb_tier_durations_seconds, [600, 1800, 7200]);
+    assert_eq!(staked.cb_escalation_window_mult, 2);
+    assert_eq!(staked.cb_ema_alpha_bps, 2000);
     Ok(())
 }

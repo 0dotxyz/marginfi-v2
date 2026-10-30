@@ -502,6 +502,28 @@ export interface StakedSettingsEdit {
   riskTier: { collateral: {} } | { isolated: {} } | null;
 }
 
+export interface StakedSettingsEditFast {
+  circuitBreakerEnabled: boolean | null;
+  cbDeviationBpsTiers: [number, number, number] | null;
+  cbTierDurationsSeconds: [number, number, number] | null;
+  cbEscalationWindowMult: number | null;
+  cbEmaAlphaBps: number | null;
+  cbWindowSeconds: number | null;
+  cbWindowMaxUpBps: number | null;
+  cbWindowMaxDownBps: number | null;
+}
+
+export const blankStakedSettingsEditFast = (): StakedSettingsEditFast => ({
+  circuitBreakerEnabled: null,
+  cbDeviationBpsTiers: null,
+  cbTierDurationsSeconds: null,
+  cbEscalationWindowMult: null,
+  cbEmaAlphaBps: null,
+  cbWindowSeconds: null,
+  cbWindowMaxUpBps: null,
+  cbWindowMaxDownBps: null,
+});
+
 export const MAX_EMODE_ENTRIES = 10;
 export const EMODE_APPLIES_TO_ISOLATED = 1;
 

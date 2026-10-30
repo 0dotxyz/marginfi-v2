@@ -928,7 +928,8 @@ pub mod marginfi {
         marginfi_group::initialize_staked_settings(ctx, settings)
     }
 
-    /// (slow governance_admin only) Edit the staked collateral settings for the group.
+    /// (slow governance_admin only) Edit the staked collateral settings for the group, other than
+    /// the circuit breaker (see `edit_staked_settings_fast`).
     pub fn edit_staked_settings(
         ctx: Context<EditStakedSettings>,
         settings: StakedSettingsEditConfig,
@@ -936,7 +937,16 @@ pub mod marginfi {
         marginfi_group::edit_staked_settings(ctx, settings)
     }
 
-    /// (permissionless) Propagate updated staked settings to a staked collateral bank.
+    /// (admin only) Edit the circuit breaker settings that staked collateral banks inherit.
+    pub fn edit_staked_settings_fast(
+        ctx: Context<EditStakedSettingsFast>,
+        settings: StakedSettingsEditConfigFast,
+    ) -> MarginfiResult {
+        marginfi_group::edit_staked_settings_fast(ctx, settings)
+    }
+
+    /// (permissionless) Propagate updated staked settings to a staked collateral bank. Turning the
+    /// bank's circuit breaker on needs a price pulsed within `CB_ENABLE_MAX_PRICE_AGE_SECONDS`.
     pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> MarginfiResult {
         marginfi_group::propagate_staked_settings(ctx)
     }

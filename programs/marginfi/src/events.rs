@@ -1,4 +1,4 @@
-use crate::StakedSettingsEditConfig;
+use crate::{StakedSettingsEditConfig, StakedSettingsEditConfigFast};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::ORDER_ACTIVE_TAGS,
@@ -93,6 +93,12 @@ pub struct LendingPoolBankConfigureFrozenEvent {
 pub struct EditStakedSettingsEvent {
     pub group: Pubkey,
     pub settings: StakedSettingsEditConfig,
+}
+
+#[event]
+pub struct EditStakedSettingsFastEvent {
+    pub group: Pubkey,
+    pub settings: StakedSettingsEditConfigFast,
 }
 
 #[event]
