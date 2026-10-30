@@ -40,7 +40,9 @@ pub struct BankConfig {
     /// Used for liquidation eligibility. Generally <= liability_weight_init.
     pub liability_weight_maint: WrappedI80F48,
 
-    /// Maximum total deposits allowed in this bank, in native token units (0 = no limit)
+    /// Deposit ceiling for most normal deposits. `u64::MAX` disables the limit; 0 blocks deposits.
+    /// NOT a hard limit, some instructions (e.g., liquidation) can bypass this limit.
+    /// * native token units, e.g., 10 USDC = 10 * 10 ^6
     pub deposit_limit: u64,
 
     /// Interest rate model configuration
@@ -60,7 +62,10 @@ pub struct BankConfig {
     pub cb_window_max_down_bps: u16,
     pub _pad0: [u8; 2], // Bank state (1) + Oracle Setup (1) + 2x u16 (4) + 2 = 8
 
-    /// Maximum total borrows allowed in this bank, in native token units (0 = no limit)
+    /// Maximum total borrows allowed in this bank. `u64::MAX` disables the limit; 0 blocks
+    /// borrowing. All integration banks (Kamino, Juplend, etc) do not support borrowing and have
+    /// this set to 0.
+    /// * native token units, e.g., 10 USDC = 10 * 10 ^6
     pub borrow_limit: u64,
 
     /// Risk tier for this bank (Collateral or Isolated)
