@@ -2170,6 +2170,13 @@ impl BalanceImpl for Balance {
     }
 }
 
+fn clear_stale_order_tag(balance: &mut Balance, side_before: Option<BalanceSide>) {
+    let side_after = balance.get_side();
+    if side_after.is_none() || side_after != side_before {
+        balance.tag = 0;
+    }
+}
+
 pub struct BankAccountWrapper<'a> {
     pub balance: &'a mut Balance,
     pub bank: &'a mut Bank,
@@ -2592,6 +2599,7 @@ impl<'a> BankAccountWrapper<'a> {
 
         let balance = &mut self.balance;
         let bank = &mut self.bank;
+        let side_before = balance.get_side();
         // Record if the balance was an asset/liability beforehand
         let had_assets =
             I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
@@ -2702,6 +2710,8 @@ impl<'a> BankAccountWrapper<'a> {
             balance.write_off_premium();
         }
 
+        clear_stale_order_tag(balance, side_before);
+
         let share_amount = match operation_type {
             BalanceIncreaseType::RepayOnly => liability_shares_decrease,
             BalanceIncreaseType::Any
@@ -2727,6 +2737,7 @@ impl<'a> BankAccountWrapper<'a> {
 
         let balance = &mut self.balance;
         let bank = &mut self.bank;
+        let side_before = balance.get_side();
         let had_assets =
             I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
         let had_liabs = I80F48::from(balance.liability_shares)
@@ -2834,6 +2845,8 @@ impl<'a> BankAccountWrapper<'a> {
         if had_liabs && !has_liabs {
             bank.decrement_borrowing_position_count();
         }
+
+        clear_stale_order_tag(balance, side_before);
 
         let share_amount = match operation_type {
             BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::BypassBorrowLimit => {
@@ -3495,6 +3508,100 @@ mod test {
             balance.asset_shares = asset_shares.into();
             balance.liability_shares = liability_shares.into();
             (bank, balance)
+        }
+
+        #[test]
+        fn liquidation_credit_clears_order_tag_on_full_repay_and_flip() {
+            for credit in [I80F48!(10), I80F48!(15)] {
+                let (mut bank, mut balance) =
+                    make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48::ZERO, I80F48!(10));
+                balance.tag = 17;
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                // This is the liquidator's seized-collateral credit, which can repay or flip debt.
+                wrapper.deposit_ignore_deposit_cap(I80F48!(4)).unwrap();
+                assert_eq!(wrapper.balance.tag, 17);
+                wrapper
+                    .deposit_ignore_deposit_cap(credit - I80F48!(4))
+                    .unwrap();
+                assert_eq!(wrapper.balance.tag, 0);
+                assert_eq!(
+                    wrapper.balance.get_side(),
+                    if credit == I80F48!(10) {
+                        None
+                    } else {
+                        Some(BalanceSide::Assets)
+                    }
+                );
+                assert!(wrapper.balance.is_active());
+            }
+        }
+
+        #[test]
+        fn withdrawal_clears_order_tag_on_empty_and_liquidation_flip() {
+            for amount in [I80F48!(10), I80F48!(15)] {
+                let (mut bank, mut balance) =
+                    make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48!(10), I80F48::ZERO);
+                balance.tag = 23;
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                wrapper.withdraw(I80F48!(4)).unwrap();
+                assert_eq!(wrapper.balance.tag, 23);
+                // Ordinary withdrawal can empty a slot; liquidation can also flip its side.
+                if amount == I80F48!(10) {
+                    wrapper.withdraw(I80F48!(6)).unwrap();
+                } else {
+                    wrapper.withdraw_ignore_borrow_cap(I80F48!(11)).unwrap();
+                }
+                assert_eq!(wrapper.balance.tag, 0);
+                assert_eq!(
+                    wrapper.balance.get_side(),
+                    if amount == I80F48!(10) {
+                        None
+                    } else {
+                        Some(BalanceSide::Liabilities)
+                    }
+                );
+                assert!(wrapper.balance.is_active());
+            }
+        }
+
+        #[test]
+        fn shared_repay_clears_tag_before_balance_is_borrowed_again() {
+            let (mut bank, mut balance) =
+                make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48::ZERO, I80F48!(10));
+            balance.tag = 42;
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.repay(I80F48!(4)).unwrap();
+            assert_eq!(wrapper.balance.tag, 42);
+            wrapper.repay(I80F48!(6)).unwrap();
+            assert_eq!(wrapper.balance.get_side(), None);
+            assert_eq!(wrapper.balance.tag, 0);
+            wrapper.borrow(I80F48!(10)).unwrap();
+            assert_eq!(wrapper.balance.get_side(), Some(BalanceSide::Liabilities));
+            assert_eq!(wrapper.balance.tag, 0);
+        }
+
+        #[test]
+        fn withdrawal_clears_tag_when_remaining_shares_are_below_empty_threshold() {
+            let (mut bank, mut balance) =
+                make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48!(10), I80F48::ZERO);
+            balance.tag = 9;
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.withdraw(I80F48!(9.5)).unwrap();
+            assert_eq!(I80F48::from(wrapper.balance.asset_shares), I80F48!(0.5));
+            assert_eq!(wrapper.balance.get_side(), None);
+            assert_eq!(wrapper.balance.tag, 0);
         }
 
         /// `withdraw` on a bank with fractional `asset_share_value`. Choose an

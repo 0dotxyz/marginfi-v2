@@ -469,6 +469,36 @@ mod tests {
         assert_eq!(account.lending_account.balances[0].tag, 7);
     }
 
+    #[test]
+    fn carry_tags_after_balance_mutations_clear_the_drained_source() {
+        use crate::state::marginfi_account::BankAccountWrapper;
+        use marginfi_type_crate::types::Bank;
+
+        let src = Pubkey::new_unique();
+        let dst = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 7);
+        let record = record_for(&account, &[ref_bank(src, 7), ref_bank(dst, 0)]);
+
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = I80F48::from_num(100).into();
+        bank.config.deposit_limit = u64::MAX;
+        {
+            let mut source = BankAccountWrapper {
+                bank: &mut bank,
+                balance: &mut account.lending_account.balances[0],
+            };
+            source.withdraw(I80F48::ONE).unwrap();
+            assert_eq!(source.balance.tag, 0);
+            source.close_balance(false).unwrap();
+        }
+        account.lending_account.balances[1] = balance(dst, 0);
+        record.carry_tags(&mut account).unwrap();
+        assert_eq!(account.lending_account.balances[1].tag, 7);
+    }
+
     /// An active slot below `EMPTY_BALANCE_THRESHOLD` is left out of the snapshot on both sides.
     #[test]
     fn record_ignores_an_empty_slot() {
