@@ -400,20 +400,6 @@ async fn refresh_reserve_ix(setup: &KaminoBankSetup) -> Instruction {
     }
 }
 
-async fn refresh_obligation_ix(setup: &KaminoBankSetup) -> Instruction {
-    let bank = setup.bank_f.load().await;
-    let reserve = setup.load_reserve().await;
-    Instruction {
-        program_id: kamino_mocks::kamino_lending::ID,
-        accounts: vec![
-            AccountMeta::new_readonly(reserve.lending_market, false),
-            AccountMeta::new(bank.integration_acc_2, false),
-            AccountMeta::new_readonly(bank.integration_acc_1, false),
-        ],
-        data: kamino_mocks::kamino_lending::client::args::RefreshObligation {}.data(),
-    }
-}
-
 async fn refresh_reserve_only(setup: &KaminoBankSetup) -> anyhow::Result<()> {
     process_kamino_ix(setup, refresh_reserve_ix(setup).await).await
 }
@@ -697,7 +683,7 @@ async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
 
     let ixs = [
         refresh_reserve_ix(&setup).await,
-        refresh_obligation_ix(&setup).await,
+        user.make_kamino_refresh_obligation_ix(&setup.bank_f).await,
         deposit_ix,
     ];
     process_kamino_ixs(&setup, &ixs).await?;
@@ -777,7 +763,7 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
     let mut ixs = Vec::new();
     if caller_refresh {
         ixs.push(refresh_reserve_ix(&setup).await);
-        ixs.push(refresh_obligation_ix(&setup).await);
+        ixs.push(user.make_kamino_refresh_obligation_ix(&setup.bank_f).await);
     }
     ixs.push(withdraw_ix);
     process_kamino_ixs(&setup, &ixs).await?;
