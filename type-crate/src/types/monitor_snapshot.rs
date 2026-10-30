@@ -75,9 +75,9 @@ impl ArchiveRecord for MintSnapshotRecords {
         }
 
         let mint_bytes: [u8; 32] = bytes[0..32].try_into().ok()?;
-        #[cfg(feature = "anchor")]
+        #[cfg(any(feature = "anchor", feature = "ix_builders", feature = "pdas"))]
         let mint = Pubkey::new_from_array(mint_bytes);
-        #[cfg(not(feature = "anchor"))]
+        #[cfg(not(any(feature = "anchor", feature = "ix_builders", feature = "pdas")))]
         let mint = Pubkey::new(mint_bytes);
 
         let head = u16::from_le_bytes(bytes[33..35].try_into().ok()?);
@@ -321,6 +321,7 @@ impl MintSnapshotRecords {
     }
 }
 
+#[cfg(feature = "anchor")]
 pub type MintSnapshotsArchive<'a, 'info> = super::Archive<'a, 'info, 300, MintSnapshotRecords>;
 
 #[cfg(test)]
@@ -337,12 +338,12 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "anchor")]
+    #[cfg(any(feature = "anchor", feature = "ix_builders", feature = "pdas"))]
     fn pk(seed: u8) -> Pubkey {
         Pubkey::new_from_array([seed; 32])
     }
 
-    #[cfg(not(feature = "anchor"))]
+    #[cfg(not(any(feature = "anchor", feature = "ix_builders", feature = "pdas")))]
     fn pk(seed: u8) -> Pubkey {
         Pubkey::new([seed; 32])
     }
@@ -448,4 +449,17 @@ mod tests {
         let loaded = MintSnapshotRecords::from_archive_account::<300>(&account, rec.mint).unwrap();
         assert_eq!(loaded, rec);
     }
+}
+
+/// One monitor snapshot update, paired positionally with a mint remaining account.
+#[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SnapshotUpdateInput {
+    pub snapshot_hour: u64,
+    pub price: u64,
+    pub native_apy: u64,
 }

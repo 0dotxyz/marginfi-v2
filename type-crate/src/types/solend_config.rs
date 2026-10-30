@@ -1,0 +1,151 @@
+#[cfg(feature = "anchor")]
+use anchor_lang::prelude::*;
+use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
+
+#[cfg(not(feature = "anchor"))]
+use super::Pubkey;
+use super::{
+    make_points, BankConfig, BankOperationalState, InterestRateConfig, OracleSetup, RatePoint,
+    RiskTier, WrappedI80F48, INTEREST_CURVE_SEVEN_POINT,
+};
+use crate::constants::{ASSET_TAG_SOLEND, PYTH_PUSH_MIGRATED_DEPRECATED};
+
+/// Used to configure Solend banks. A simplified version of `BankConfigCompact` which omits most
+/// values related to interest since Solend banks cannot earn interest or be borrowed against.
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct SolendConfigCompact {
+    pub oracle: Pubkey,
+    pub asset_weight_init: WrappedI80F48,
+    pub asset_weight_maint: WrappedI80F48,
+    /// Cap in **Solend collateral units**, not underlying. As the reserve collateral
+    /// exchange rate grows, the same cap admits more underlying — re-tune against the
+    /// current rate.
+    pub deposit_limit: u64,
+    /// Either `SolendPythPull` or `SolendSwitchboardPull`
+    pub oracle_setup: OracleSetup,
+    /// Bank operational state - allows starting banks in paused state
+    pub operational_state: BankOperationalState,
+    /// Risk tier - determines if assets can be borrowed in isolation
+    pub risk_tier: RiskTier,
+    /// Config flags for future-proofing
+    pub config_flags: u8,
+    pub total_asset_value_init_limit: u64,
+    pub oracle_max_age: u16,
+    /// Oracle confidence threshold (0 = use default 10%)
+    pub oracle_max_confidence: u32,
+}
+
+impl SolendConfigCompact {
+    pub const LEN: usize = std::mem::size_of::<SolendConfigCompact>();
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        oracle: Pubkey,
+        asset_weight_init: WrappedI80F48,
+        asset_weight_maint: WrappedI80F48,
+        deposit_limit: u64,
+        oracle_setup: OracleSetup,
+        operational_state: BankOperationalState,
+        risk_tier: RiskTier,
+        config_flags: u8,
+        total_asset_value_init_limit: u64,
+        oracle_max_age: u16,
+        oracle_max_confidence: u32,
+    ) -> Self {
+        SolendConfigCompact {
+            oracle,
+            asset_weight_init,
+            asset_weight_maint,
+            deposit_limit,
+            oracle_setup,
+            operational_state,
+            risk_tier,
+            config_flags,
+            total_asset_value_init_limit,
+            oracle_max_age,
+            oracle_max_confidence,
+        }
+    }
+
+    /// Convert to BankConfig with the reserve key for Solend banks
+    pub fn to_bank_config(&self, reserve_key: Pubkey) -> BankConfig {
+        // These are placeholder values: Solend positions do not support borrowing and likely
+        // never will, thus they will earn no interest.
+        // Note: Some placeholder values are non-zero to handle downstream validation checks.
+        let default_ir_config = InterestRateConfig {
+            placeholder0: I80F48::ZERO.into(),
+            placeholder1: I80F48::ZERO.into(),
+            placeholder2: I80F48::ZERO.into(),
+            protocol_fixed_fee_apr: I80F48::ZERO.into(),
+            insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: 0,
+            hundred_util_rate: 1234567,
+            points: make_points(&[RatePoint::new(12345, 123456)]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        };
+
+        let keys = [
+            self.oracle,
+            reserve_key,
+            Pubkey::default(),
+            Pubkey::default(),
+            Pubkey::default(),
+        ];
+
+        BankConfig {
+            asset_weight_init: self.asset_weight_init,
+            asset_weight_maint: self.asset_weight_maint,
+            liability_weight_init: I80F48!(1.5).into(), // placeholder
+            liability_weight_maint: I80F48!(1.25).into(), // placeholder
+            deposit_limit: self.deposit_limit,
+            interest_rate_config: default_ir_config,
+            operational_state: self.operational_state,
+            oracle_setup: self.oracle_setup,
+            oracle_keys: keys,
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
+            borrow_limit: 0, // Can't ever borrow solend assets
+            risk_tier: self.risk_tier,
+            asset_tag: ASSET_TAG_SOLEND,
+            config_flags: self.config_flags,
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
+            total_asset_value_init_limit: self.total_asset_value_init_limit,
+            oracle_max_age: self.oracle_max_age,
+            scope_entry_index: 0,
+            oracle_max_confidence: self.oracle_max_confidence,
+            fixed_price: I80F48::ZERO.into(),
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
+        }
+    }
+}
+
+impl Default for SolendConfigCompact {
+    fn default() -> Self {
+        SolendConfigCompact {
+            oracle: Pubkey::default(),
+            asset_weight_init: I80F48!(0.8).into(),
+            asset_weight_maint: I80F48!(0.9).into(),
+            deposit_limit: 1_000_000,
+            oracle_setup: OracleSetup::SolendPythPull,
+            operational_state: BankOperationalState::Operational,
+            risk_tier: RiskTier::Collateral,
+            config_flags: PYTH_PUSH_MIGRATED_DEPRECATED,
+            total_asset_value_init_limit: 1_000_000,
+            oracle_max_age: 60,
+            oracle_max_confidence: 0,
+        }
+    }
+}
