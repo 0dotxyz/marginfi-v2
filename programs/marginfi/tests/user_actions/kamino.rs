@@ -217,7 +217,7 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter(
             flags: Some(0x02),
         }
         .data();
-        process_kamino_ix(&setup, ix).await?;
+        process_kamino_ixs(&setup, &[ix]).await?;
     } else {
         setup
             .test_f
@@ -338,13 +338,10 @@ async fn warp_clock_forward(setup: &KaminoBankSetup) -> anyhow::Result<()> {
     let clock = setup.test_f.get_clock().await;
     let next_slot = clock.slot + WARP_DAYS * SOLANA_SLOTS_PER_DAY;
     let next_timestamp = clock.unix_timestamp + (WARP_DAYS * 24 * 60 * 60) as i64;
+    // Kamino accrues interest using slots or timestamps depending on the reserve configuration.
     setup.test_f.context.borrow_mut().warp_to_slot(next_slot)?;
     setup.test_f.set_clock(next_slot, next_timestamp).await;
     Ok(())
-}
-
-fn delta(post: u64, pre: u64) -> i128 {
-    post as i128 - pre as i128
 }
 
 async fn send_kamino_ixs(
@@ -373,17 +370,6 @@ async fn process_kamino_ixs(setup: &KaminoBankSetup, ixs: &[Instruction]) -> any
     result.map_err(|e| anyhow::anyhow!("{e:?}\n{logs:#?}"))
 }
 
-async fn send_kamino_ix(
-    setup: &KaminoBankSetup,
-    ix: Instruction,
-) -> anyhow::Result<(Result<(), TransactionError>, Vec<String>)> {
-    send_kamino_ixs(setup, &[ix]).await
-}
-
-async fn process_kamino_ix(setup: &KaminoBankSetup, ix: Instruction) -> anyhow::Result<()> {
-    process_kamino_ixs(setup, &[ix]).await
-}
-
 async fn refresh_reserve_ix(setup: &KaminoBankSetup) -> Instruction {
     let bank = setup.bank_f.load().await;
     let reserve = setup.load_reserve().await;
@@ -398,10 +384,6 @@ async fn refresh_reserve_ix(setup: &KaminoBankSetup) -> Instruction {
         }
         .data(),
     }
-}
-
-async fn refresh_reserve_only(setup: &KaminoBankSetup) -> anyhow::Result<()> {
-    process_kamino_ix(setup, refresh_reserve_ix(setup).await).await
 }
 
 /// The circuit breaker tracks the multiplier-adjusted effective price on integration banks: for a
@@ -566,7 +548,7 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
         .expect("initial deposit must create an active balance");
 
     warp_clock_forward(&setup).await?;
-    refresh_reserve_only(&setup).await?;
+    process_kamino_ixs(&setup, &[refresh_reserve_ix(&setup).await]).await?;
 
     let clock = setup.test_f.get_clock().await;
     let refreshed_reserve = setup.load_reserve().await;
@@ -591,7 +573,7 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
     }
     .data();
 
-    let (result, logs) = send_kamino_ix(&setup, stale_ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[stale_ix]).await?;
     assert!(result.is_err(), "deposit with stale obligation must fail");
     assert!(
         logs.iter().any(|l| l.contains("ObligationStale")),
@@ -609,7 +591,7 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
         refresh_reserve: Some(true),
     }
     .data();
-    process_kamino_ix(&setup, fresh_ix).await?;
+    process_kamino_ixs(&setup, &[fresh_ix]).await?;
 
     let post_obligation: kamino_mocks::state::MinimalObligation =
         setup.test_f.load_and_deserialize(&setup.obligation).await;
@@ -628,7 +610,8 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
     );
 
     let post = setup.load_state(&user_token).await;
-    let actual_collateral = delta(post.obligation_collateral, pre.obligation_collateral);
+    let actual_collateral =
+        i128::from(post.obligation_collateral) - i128::from(pre.obligation_collateral);
     assert_eq_with_tolerance!(
         actual_collateral,
         expected_collateral as i128,
@@ -640,7 +623,7 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
         .await
         .expect("Kamino collateral balance must remain active");
     assert_eq_with_tolerance!(
-        delta(post_accounted, pre_accounted),
+        i128::from(post_accounted) - i128::from(pre_accounted),
         actual_collateral,
         KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
     );
@@ -697,7 +680,8 @@ async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
     );
 
     let post = setup.load_state(&user_token).await;
-    let actual_collateral = delta(post.obligation_collateral, pre.obligation_collateral);
+    let actual_collateral =
+        i128::from(post.obligation_collateral) - i128::from(pre.obligation_collateral);
     assert_eq_with_tolerance!(
         actual_collateral,
         expected_collateral as i128,
@@ -709,7 +693,7 @@ async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
         .await
         .expect("Kamino collateral balance must remain active");
     assert_eq_with_tolerance!(
-        delta(post_accounted, pre_accounted),
+        i128::from(post_accounted) - i128::from(pre_accounted),
         actual_collateral,
         KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
     );
@@ -771,7 +755,7 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
     let post = setup.load_state(&user_token).await;
     let post_reserve = setup.load_reserve().await;
 
-    let redeemed = delta(pre.obligation_collateral, post.obligation_collateral);
+    let redeemed = i128::from(pre.obligation_collateral) - i128::from(post.obligation_collateral);
     assert!(redeemed > 0, "withdraw must redeem collateral");
     let actual_collateral = redeemed as u64;
     if !withdraw_all {
@@ -786,9 +770,9 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
         "{WARP_DAYS}-day interest must change withdrawn liquidity beyond tolerance (gap={liquidity_gap})"
     );
 
-    let actual_liquidity = delta(post.user_balance, pre.user_balance);
+    let actual_liquidity = i128::from(post.user_balance) - i128::from(pre.user_balance);
     assert_eq!(
-        delta(pre.reserve_supply_balance, post.reserve_supply_balance),
+        i128::from(pre.reserve_supply_balance) - i128::from(post.reserve_supply_balance),
         actual_liquidity
     );
     assert_eq_with_tolerance!(
@@ -813,7 +797,7 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
             .await
             .expect("partial withdraw should keep a balance open");
         assert_eq_with_tolerance!(
-            delta(pre_accounted, post_accounted),
+            i128::from(pre_accounted) - i128::from(post_accounted),
             actual_collateral as i128,
             KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
         );
@@ -840,7 +824,7 @@ async fn kamino_withdraw_without_refresh_flag_fails_on_stale_state(
     warp_clock_forward(&setup).await?;
 
     if refresh_reserve_first {
-        refresh_reserve_only(&setup).await?;
+        process_kamino_ixs(&setup, &[refresh_reserve_ix(&setup).await]).await?;
     }
 
     let mut ix = user
@@ -857,7 +841,7 @@ async fn kamino_withdraw_without_refresh_flag_fails_on_stale_state(
     }
     .data();
 
-    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "stale withdraw without refresh must fail");
     assert!(
         logs.iter().any(|l| l.contains(expected_error)),
@@ -914,7 +898,7 @@ async fn kamino_deposit_refreshes_before_bank_validation() -> anyhow::Result<()>
         refresh_reserve: Some(true),
     }
     .data();
-    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "deposit into a paused bank must fail");
     let reserve_refresh = logs
         .iter()
@@ -954,7 +938,7 @@ async fn kamino_withdraw_refreshes_before_checking_balance(
         flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
     }
     .data();
-    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "withdraw without a position must fail");
     let reserve_refresh = logs
         .iter()
@@ -1013,7 +997,7 @@ async fn kamino_withdraw_rolls_back_when_obligation_refresh_fails(
         flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
     }
     .data();
-    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(
         result.is_err(),
         "mismatched obligation market must fail: {logs:#?}"
@@ -1045,7 +1029,7 @@ async fn kamino_deposit_rolls_back_refresh_when_transfer_fails() -> anyhow::Resu
         refresh_reserve: Some(true),
     }
     .data();
-    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(
         result.is_err(),
         "deposit exceeding the token balance must fail"
