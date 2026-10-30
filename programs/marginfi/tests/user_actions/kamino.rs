@@ -8,6 +8,7 @@ use marginfi::{
 };
 use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
 use marginfi_type_crate::types::{Bank, BankOperationalState};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
     account::AccountSharedData,
@@ -22,6 +23,7 @@ use test_case::test_case;
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
 const SOLANA_SLOTS_PER_DAY: u64 = 216_000;
 const WARP_DAYS: u64 = 30;
+const KAMINO_TX_CU_LIMIT: u32 = 800_000;
 
 // (wallet_funding_ui, deposit_native, internal_refresh)
 #[test_case(10.0, 1_000_000, false; "1_usdc_external")]
@@ -42,6 +44,14 @@ async fn kamino_deposit_local_instruction_call_success(
 
     let pre = setup.load_state(&user_token).await;
 
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if internal_refresh {
+        &compute_budget
+    } else {
+        &[]
+    };
     setup
         .test_f
         .run_kamino_deposit_with_options(
@@ -54,6 +64,7 @@ async fn kamino_deposit_local_instruction_call_success(
                 internal: internal_refresh,
                 ..Default::default()
             },
+            pre_instructions,
         )
         .await?;
 
@@ -101,6 +112,14 @@ async fn kamino_withdraw_local_instruction_call_success(
 ) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(wallet_funding).await;
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if internal_refresh {
+        &compute_budget
+    } else {
+        &[]
+    };
 
     setup
         .test_f
@@ -114,6 +133,7 @@ async fn kamino_withdraw_local_instruction_call_success(
                 internal: internal_refresh,
                 ..Default::default()
             },
+            pre_instructions,
         )
         .await?;
 
@@ -137,6 +157,7 @@ async fn kamino_withdraw_local_instruction_call_success(
                 internal: internal_refresh,
                 ..Default::default()
             },
+            pre_instructions,
         )
         .await?;
 
@@ -247,6 +268,9 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter(
                     internal: true,
                     ..Default::default()
                 },
+                &[ComputeBudgetInstruction::set_compute_unit_limit(
+                    KAMINO_TX_CU_LIMIT,
+                )],
             )
             .await?;
     } else {
@@ -311,6 +335,7 @@ async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
                 internal: internal_refresh,
                 ..Default::default()
             },
+            &[],
         )
         .await;
     let err = res.expect_err("deposit should fail with insufficient user funds");
@@ -366,6 +391,7 @@ async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
                 internal: internal_refresh,
                 ..Default::default()
             },
+            &[],
         )
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::OperationWithdrawOnly);
@@ -629,6 +655,9 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
                 internal: true,
                 ..Default::default()
             },
+            &[ComputeBudgetInstruction::set_compute_unit_limit(
+                KAMINO_TX_CU_LIMIT,
+            )],
         )
         .await?;
 
@@ -706,6 +735,7 @@ async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
                 internal: internal_refresh,
                 skip_external_price_updates: true,
             },
+            &[],
         )
         .await?;
 
@@ -770,6 +800,14 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
     } else {
         REQUESTED_COLLATERAL
     };
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if !caller_refresh && flags & 0x02 != 0 {
+        &compute_budget
+    } else {
+        &[]
+    };
     setup
         .test_f
         .run_kamino_withdraw_with_options(
@@ -783,6 +821,7 @@ async fn kamino_withdraw_uses_refreshed_exchange_rate(
                 internal: flags & 0x02 != 0,
                 skip_external_price_updates: caller_refresh,
             },
+            pre_instructions,
         )
         .await?;
 

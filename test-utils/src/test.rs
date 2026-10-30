@@ -2308,6 +2308,7 @@ impl TestFixture {
             signer_token_account,
             amount,
             KaminoRefreshOptions::default(),
+            &[],
         )
         .await
     }
@@ -2319,8 +2320,10 @@ impl TestFixture {
         signer_token_account: Pubkey,
         amount: u64,
         refresh: KaminoRefreshOptions,
+        pre_instructions: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
-        let mut ixs = self.kamino_refresh_ixs(bank_f, user, refresh).await;
+        let mut ixs = pre_instructions.to_vec();
+        ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
         let mut deposit_ix = user
             .make_kamino_deposit_ix(signer_token_account, bank_f, amount)
             .await;
@@ -2348,6 +2351,7 @@ impl TestFixture {
             amount,
             withdraw_all,
             KaminoRefreshOptions::default(),
+            &[],
         )
         .await
     }
@@ -2360,12 +2364,23 @@ impl TestFixture {
         amount: u64,
         withdraw_all: Option<bool>,
         refresh: KaminoRefreshOptions,
+        pre_instructions: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
-        let mut ixs = self.kamino_refresh_ixs(bank_f, user, refresh).await;
+        const WITHDRAW_ALL_FLAG: u8 = 1 << 0;
+        const REFRESH_RESERVE_FLAG: u8 = 1 << 1;
+
+        let mut ixs = pre_instructions.to_vec();
+        ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
         let mut withdraw_ix = user
             .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
-        let flags = u8::from(withdraw_all.unwrap_or(false)) | (u8::from(refresh.internal) << 1);
+        let mut flags = 0;
+        if withdraw_all.unwrap_or(false) {
+            flags |= WITHDRAW_ALL_FLAG;
+        }
+        if refresh.internal {
+            flags |= REFRESH_RESERVE_FLAG;
+        }
         withdraw_ix.data = marginfi::instruction::KaminoWithdraw {
             amount,
             flags: (flags != 0).then_some(flags),
