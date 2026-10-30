@@ -7,23 +7,34 @@ use marginfi::{
     assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
 };
 use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
+use marginfi_type_crate::types::{Bank, BankOperationalState};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
-    clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
+    account::AccountSharedData,
+    clock::Clock,
+    instruction::Instruction,
+    pubkey::Pubkey,
+    signer::Signer,
+    transaction::{Transaction, TransactionError},
 };
 use test_case::test_case;
 
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
+const SOLANA_SLOTS_PER_DAY: u64 = 216_000;
+const WARP_DAYS: u64 = 30;
+const KAMINO_TX_CU_LIMIT: u32 = 800_000;
 
-// (wallet_funding_ui, deposit_native)
-#[test_case(10.0, 1_000_000)] // 1 USDC
-#[test_case(500.0, 100_000_000)] // 100 USDC
-#[test_case(10_000.0, 5_000_000_000)] // 5,000 USDC
-#[test_case(100_000.0, 50_000_000_000)] // 50,000 USDC
+// (wallet_funding_ui, deposit_native, internal_refresh)
+#[test_case(10.0, 1_000_000, false; "1_usdc_external")]
+#[test_case(500.0, 100_000_000, true; "100_usdc_internal")]
+#[test_case(10_000.0, 5_000_000_000, false; "5000_usdc_external")]
+#[test_case(100_000.0, 50_000_000_000, true; "50000_usdc_internal")]
 #[tokio::test]
 async fn kamino_deposit_local_instruction_call_success(
     wallet_funding: f64,
     deposit_amount: u64,
+    internal_refresh: bool,
 ) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(wallet_funding).await;
@@ -33,9 +44,28 @@ async fn kamino_deposit_local_instruction_call_success(
 
     let pre = setup.load_state(&user_token).await;
 
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if internal_refresh {
+        &compute_budget
+    } else {
+        &[]
+    };
     setup
         .test_f
-        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, deposit_amount)
+        .run_kamino_deposit_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            deposit_amount,
+            KaminoRefreshOptions {
+                external: !internal_refresh,
+                internal: internal_refresh,
+                ..Default::default()
+            },
+            pre_instructions,
+        )
         .await?;
 
     let post = setup.load_state(&user_token).await;
@@ -68,23 +98,43 @@ async fn kamino_deposit_local_instruction_call_success(
     Ok(())
 }
 
-// (wallet_funding_ui, deposit_native, withdraw_collateral_native)
-#[test_case(10.0, 1_000_000, 100_000)] // deposit 1 USDC, withdraw 0.1 collateral
-#[test_case(500.0, 100_000_000, 10_000_000)] // deposit 100 USDC, withdraw 10 collateral
-#[test_case(10_000.0, 5_000_000_000, 1_000_000_000)] // deposit 5,000 USDC, withdraw 1,000 collateral
-#[test_case(100_000.0, 50_000_000_000, 25_000_000_000)] // deposit 50,000 USDC, withdraw 25,000 collateral
+// (wallet_funding_ui, deposit_native, withdraw_collateral_native, internal_refresh)
+#[test_case(10.0, 1_000_000, 100_000, false; "1_usdc_external")]
+#[test_case(500.0, 100_000_000, 10_000_000, true; "100_usdc_internal")]
+#[test_case(10_000.0, 5_000_000_000, 1_000_000_000, false; "5000_usdc_external")]
+#[test_case(100_000.0, 50_000_000_000, 25_000_000_000, true; "50000_usdc_internal")]
 #[tokio::test]
 async fn kamino_withdraw_local_instruction_call_success(
     wallet_funding: f64,
     deposit_amount: u64,
     withdraw_amount: u64,
+    internal_refresh: bool,
 ) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(wallet_funding).await;
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if internal_refresh {
+        &compute_budget
+    } else {
+        &[]
+    };
 
     setup
         .test_f
-        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, deposit_amount)
+        .run_kamino_deposit_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            deposit_amount,
+            KaminoRefreshOptions {
+                external: !internal_refresh,
+                internal: internal_refresh,
+                ..Default::default()
+            },
+            pre_instructions,
+        )
         .await?;
 
     let pre_reserve = setup.load_reserve().await;
@@ -96,12 +146,18 @@ async fn kamino_withdraw_local_instruction_call_success(
 
     setup
         .test_f
-        .run_kamino_withdraw(
+        .run_kamino_withdraw_with_options(
             &setup.bank_f,
             &user,
             user_token.key,
             withdraw_amount,
             Some(false),
+            KaminoRefreshOptions {
+                external: !internal_refresh,
+                internal: internal_refresh,
+                ..Default::default()
+            },
+            pre_instructions,
         )
         .await?;
 
@@ -144,8 +200,12 @@ async fn kamino_withdraw_local_instruction_call_success(
 
 /// e2e: the bank rate limiter must debit a Kamino withdraw in underlying liquidity, not collateral
 /// shares — so it nets against the deposit inflow (which is recorded in underlying).
+#[test_case(false; "caller_refresh")]
+#[test_case(true; "internal_refresh_after_interest")]
 #[tokio::test]
-async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Result<()> {
+async fn kamino_withdraw_records_underlying_on_bank_rate_limiter(
+    internal_refresh: bool,
+) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
     setup
@@ -184,25 +244,55 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Re
     }
 
     let withdraw_amount = 1_000_000_000u64; // collateral shares
-    let expected_underlying = setup
+    let stale_underlying = setup
         .load_reserve()
         .await
         .collateral_to_liquidity(withdraw_amount)?;
     assert_ne!(
-        expected_underlying, withdraw_amount,
+        stale_underlying, withdraw_amount,
         "fixture exchange rate must differ from 1 for this test to be meaningful"
     );
 
-    setup
-        .test_f
-        .run_kamino_withdraw(
-            &setup.bank_f,
-            &user,
-            user_token.key,
-            withdraw_amount,
-            Some(false),
-        )
-        .await?;
+    if internal_refresh {
+        warp_clock_forward(&setup).await?;
+        setup
+            .test_f
+            .run_kamino_withdraw_with_options(
+                &setup.bank_f,
+                &user,
+                user_token.key,
+                withdraw_amount,
+                Some(false),
+                KaminoRefreshOptions {
+                    external: false,
+                    internal: true,
+                    ..Default::default()
+                },
+                &[ComputeBudgetInstruction::set_compute_unit_limit(
+                    KAMINO_TX_CU_LIMIT,
+                )],
+            )
+            .await?;
+    } else {
+        setup
+            .test_f
+            .run_kamino_withdraw(
+                &setup.bank_f,
+                &user,
+                user_token.key,
+                withdraw_amount,
+                Some(false),
+            )
+            .await?;
+    }
+
+    let expected_underlying = setup
+        .load_reserve()
+        .await
+        .collateral_to_liquidity(withdraw_amount)?;
+    if internal_refresh {
+        assert!(expected_underlying.abs_diff(stale_underlying) > KAMINO_ROUNDING_TOLERANCE_NATIVE);
+    }
 
     let bank = setup.bank_f.load().await;
     let now = {
@@ -219,13 +309,14 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Re
 }
 
 // (wallet_funding_ui, deposit_native)
-#[test_case(0.01, 1_000_000)] // try deposit 1 USDC with 0.01 wallet
-#[test_case(1.0, 100_000_000)] // try deposit 100 USDC with 1 wallet
-#[test_case(100.0, 500_000_000_000)] // try deposit 500,000 USDC with 100 wallet
+#[test_case(0.01, 1_000_000, false; "1_usdc_external")]
+#[test_case(1.0, 100_000_000, true; "100_usdc_internal")]
+#[test_case(100.0, 500_000_000_000, false; "500000_usdc_external")]
 #[tokio::test]
 async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
     wallet_funding: f64,
     deposit_amount: u64,
+    internal_refresh: bool,
 ) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(wallet_funding).await;
@@ -234,7 +325,18 @@ async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
 
     let res = setup
         .test_f
-        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, deposit_amount)
+        .run_kamino_deposit_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            deposit_amount,
+            KaminoRefreshOptions {
+                external: !internal_refresh,
+                internal: internal_refresh,
+                ..Default::default()
+            },
+            &[],
+        )
         .await;
     let err = res.expect_err("deposit should fail with insufficient user funds");
     assert_anchor_error!(err, TokenError::InsufficientFunds);
@@ -255,12 +357,13 @@ async fn kamino_deposit_local_instruction_call_failure_insufficient_funds(
 }
 
 // (wallet_funding_ui, deposit_native)
-#[test_case(10.0, 1_000_000)] // deposit 1 USDC then withdraw u64::MAX
-#[test_case(10_000.0, 5_000_000_000)] // deposit 5,000 USDC then withdraw u64::MAX
+#[test_case(10.0, 1_000_000, false; "1_usdc_external")]
+#[test_case(10_000.0, 5_000_000_000, true; "5000_usdc_internal")]
 #[tokio::test]
 async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
     wallet_funding: f64,
     deposit_amount: u64,
+    internal_refresh: bool,
 ) -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(wallet_funding).await;
@@ -277,7 +380,19 @@ async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
 
     let res = setup
         .test_f
-        .run_kamino_withdraw(&setup.bank_f, &user, user_token.key, u64::MAX, Some(false))
+        .run_kamino_withdraw_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            u64::MAX,
+            Some(false),
+            KaminoRefreshOptions {
+                external: !internal_refresh,
+                internal: internal_refresh,
+                ..Default::default()
+            },
+            &[],
+        )
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::OperationWithdrawOnly);
 
@@ -297,6 +412,32 @@ async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
     );
 
     Ok(())
+}
+
+async fn warp_clock_forward(setup: &KaminoBankSetup) -> anyhow::Result<()> {
+    let clock = setup.test_f.get_clock().await;
+    let next_slot = clock.slot + WARP_DAYS * SOLANA_SLOTS_PER_DAY;
+    let next_timestamp = clock.unix_timestamp + (WARP_DAYS * 24 * 60 * 60) as i64;
+    // Kamino accrues interest using slots or timestamps depending on the reserve configuration.
+    setup.test_f.context.borrow_mut().warp_to_slot(next_slot)?;
+    setup.test_f.set_clock(next_slot, next_timestamp).await;
+    Ok(())
+}
+
+async fn send_kamino_ixs(
+    setup: &KaminoBankSetup,
+    ixs: &[Instruction],
+) -> anyhow::Result<(Result<(), TransactionError>, Vec<String>)> {
+    let (banks, payer) = {
+        let ctx = setup.test_f.context.borrow();
+        (ctx.banks_client.clone(), ctx.payer.insecure_clone())
+    };
+    let blockhash = banks.get_latest_blockhash().await?;
+
+    let tx = Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &[&payer], blockhash);
+    let res = banks.process_transaction_with_metadata(tx).await?;
+    let logs = res.metadata.map(|m| m.log_messages).unwrap_or_default();
+    Ok((res.result, logs))
 }
 
 /// The circuit breaker tracks the multiplier-adjusted effective price on integration banks: for a
@@ -439,5 +580,551 @@ async fn kamino_market_emergency_mode_zeroes_init_value_only() -> anyhow::Result
     let resumed = user.load().await.health_cache;
     assert!(I80F48::from(resumed.asset_value) > I80F48::ZERO);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::Result<()> {
+    const DEPOSIT_AMOUNT: u64 = 100_000_000;
+
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, DEPOSIT_AMOUNT)
+        .await?;
+
+    let pre = setup.load_state(&user_token).await;
+    let pre_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("initial deposit must create an active balance");
+
+    warp_clock_forward(&setup).await?;
+    TestFixture::process_ixs(
+        setup.test_f.context.clone(),
+        &[user
+            .make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
+            .await],
+    )
+    .await?;
+
+    let clock = setup.test_f.get_clock().await;
+    let refreshed_reserve = setup.load_reserve().await;
+    let obligation: kamino_mocks::state::MinimalObligation =
+        setup.test_f.load_and_deserialize(&setup.obligation).await;
+
+    assert_eq!(
+        refreshed_reserve.slot, clock.slot,
+        "reserve must be refreshed"
+    );
+    assert!(
+        obligation.last_update_slot < clock.slot,
+        "obligation must remain stale after reserve-only refresh"
+    );
+
+    let mut stale_ix = user
+        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, DEPOSIT_AMOUNT)
+        .await;
+    stale_ix.data = marginfi::instruction::KaminoDeposit {
+        amount: DEPOSIT_AMOUNT,
+        refresh_reserve: Some(false),
+    }
+    .data();
+
+    let (result, logs) = send_kamino_ixs(&setup, &[stale_ix]).await?;
+    assert!(result.is_err(), "deposit with stale obligation must fail");
+    assert!(
+        logs.iter().any(|l| l.contains("ObligationStale")),
+        "expected klend ObligationStale, got:\n{logs:#?}"
+    );
+
+    let pre_internal_reserve = setup.load_reserve().await;
+    warp_clock_forward(&setup).await?;
+
+    setup
+        .test_f
+        .run_kamino_deposit_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            DEPOSIT_AMOUNT,
+            KaminoRefreshOptions {
+                external: false,
+                internal: true,
+                ..Default::default()
+            },
+            &[ComputeBudgetInstruction::set_compute_unit_limit(
+                KAMINO_TX_CU_LIMIT,
+            )],
+        )
+        .await?;
+
+    let post_obligation: kamino_mocks::state::MinimalObligation =
+        setup.test_f.load_and_deserialize(&setup.obligation).await;
+    let post_clock = setup.test_f.get_clock().await;
+    assert_eq!(
+        post_obligation.last_update_slot, post_clock.slot,
+        "obligation must have been refreshed in the current slot"
+    );
+
+    let post_reserve = setup.load_reserve().await;
+    let expected_collateral = post_reserve.liquidity_to_collateral(DEPOSIT_AMOUNT)?;
+    let stale_rate_collateral = pre_internal_reserve.liquidity_to_collateral(DEPOSIT_AMOUNT)?;
+    assert!(
+        expected_collateral.abs_diff(stale_rate_collateral) > KAMINO_ROUNDING_TOLERANCE_NATIVE,
+        "{WARP_DAYS}-day interest must change the exchange rate"
+    );
+
+    let post = setup.load_state(&user_token).await;
+    let actual_collateral =
+        i128::from(post.obligation_collateral) - i128::from(pre.obligation_collateral);
+    assert_eq_with_tolerance!(
+        actual_collateral,
+        expected_collateral as i128,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    let post_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("Kamino collateral balance must remain active");
+    assert_eq_with_tolerance!(
+        i128::from(post_accounted) - i128::from(pre_accounted),
+        actual_collateral,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    Ok(())
+}
+
+#[test_case(false; "flag_off")]
+#[test_case(true; "flag_on_already_fresh")]
+#[tokio::test]
+async fn kamino_deposit_with_caller_supplied_refresh_succeeds(
+    internal_refresh: bool,
+) -> anyhow::Result<()> {
+    const DEPOSIT_AMOUNT: u64 = 100_000_000;
+
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, DEPOSIT_AMOUNT)
+        .await?;
+
+    let pre = setup.load_state(&user_token).await;
+    let pre_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("initial deposit must create an active balance");
+    let pre_reserve = setup.load_reserve().await;
+
+    warp_clock_forward(&setup).await?;
+
+    setup
+        .test_f
+        .run_kamino_deposit_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            DEPOSIT_AMOUNT,
+            KaminoRefreshOptions {
+                external: true,
+                internal: internal_refresh,
+                skip_external_price_updates: true,
+            },
+            &[],
+        )
+        .await?;
+
+    let post_reserve = setup.load_reserve().await;
+    let expected_collateral = post_reserve.liquidity_to_collateral(DEPOSIT_AMOUNT)?;
+    let stale_rate_collateral = pre_reserve.liquidity_to_collateral(DEPOSIT_AMOUNT)?;
+    assert!(
+        expected_collateral.abs_diff(stale_rate_collateral) > KAMINO_ROUNDING_TOLERANCE_NATIVE,
+        "{WARP_DAYS}-day interest must change the exchange rate"
+    );
+
+    let post = setup.load_state(&user_token).await;
+    let actual_collateral =
+        i128::from(post.obligation_collateral) - i128::from(pre.obligation_collateral);
+    assert_eq_with_tolerance!(
+        actual_collateral,
+        expected_collateral as i128,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    let post_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("Kamino collateral balance must remain active");
+    assert_eq_with_tolerance!(
+        i128::from(post_accounted) - i128::from(pre_accounted),
+        actual_collateral,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    Ok(())
+}
+
+#[test_case(0x02, false; "partial_internal_refresh")]
+#[test_case(0x01, true; "withdraw_all_caller_refresh")]
+#[test_case(0x03, true; "withdraw_all_internal_refresh_already_fresh")]
+#[tokio::test]
+async fn kamino_withdraw_uses_refreshed_exchange_rate(
+    flags: u8,
+    caller_refresh: bool,
+) -> anyhow::Result<()> {
+    const REQUESTED_COLLATERAL: u64 = 1_000_000_000;
+
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    let withdraw_all = flags & 0x01 != 0;
+    let pre = setup.load_state(&user_token).await;
+    let pre_accounted = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("Kamino balance must be active before withdrawing");
+    let pre_reserve = setup.load_reserve().await;
+    warp_clock_forward(&setup).await?;
+
+    let amount = if withdraw_all {
+        0
+    } else {
+        REQUESTED_COLLATERAL
+    };
+    let compute_budget = [ComputeBudgetInstruction::set_compute_unit_limit(
+        KAMINO_TX_CU_LIMIT,
+    )];
+    let pre_instructions: &[Instruction] = if !caller_refresh && flags & 0x02 != 0 {
+        &compute_budget
+    } else {
+        &[]
+    };
+    setup
+        .test_f
+        .run_kamino_withdraw_with_options(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            amount,
+            Some(withdraw_all),
+            KaminoRefreshOptions {
+                external: caller_refresh,
+                internal: flags & 0x02 != 0,
+                skip_external_price_updates: caller_refresh,
+            },
+            pre_instructions,
+        )
+        .await?;
+
+    let post = setup.load_state(&user_token).await;
+    let post_reserve = setup.load_reserve().await;
+
+    let redeemed = i128::from(pre.obligation_collateral) - i128::from(post.obligation_collateral);
+    assert!(redeemed > 0, "withdraw must redeem collateral");
+    let actual_collateral = redeemed as u64;
+    if !withdraw_all {
+        assert_eq!(actual_collateral, REQUESTED_COLLATERAL);
+    }
+
+    let expected_liquidity = post_reserve.collateral_to_liquidity(actual_collateral)?;
+    let stale_rate_liquidity = pre_reserve.collateral_to_liquidity(actual_collateral)?;
+    let liquidity_gap = expected_liquidity.abs_diff(stale_rate_liquidity);
+    assert!(
+        liquidity_gap > KAMINO_ROUNDING_TOLERANCE_NATIVE,
+        "{WARP_DAYS}-day interest must change withdrawn liquidity beyond tolerance (gap={liquidity_gap})"
+    );
+
+    let actual_liquidity = i128::from(post.user_balance) - i128::from(pre.user_balance);
+    assert_eq!(
+        i128::from(pre.reserve_supply_balance) - i128::from(post.reserve_supply_balance),
+        actual_liquidity
+    );
+    assert_eq_with_tolerance!(
+        actual_liquidity,
+        expected_liquidity as i128,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    if withdraw_all {
+        assert_eq_with_tolerance!(
+            redeemed,
+            pre_accounted as i128,
+            KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+        );
+        assert!(
+            setup.load_user_accounted_collateral(&user).await.is_none(),
+            "withdraw-all should close the user marginfi balance"
+        );
+    } else {
+        let post_accounted = setup
+            .load_user_accounted_collateral(&user)
+            .await
+            .expect("partial withdraw should keep a balance open");
+        assert_eq_with_tolerance!(
+            i128::from(pre_accounted) - i128::from(post_accounted),
+            actual_collateral as i128,
+            KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+        );
+    }
+    Ok(())
+}
+
+#[test_case(false, "ReserveStale"; "nothing_refreshed")]
+#[test_case(true, "ObligationStale"; "reserve_only_refreshed")]
+#[tokio::test]
+async fn kamino_withdraw_without_refresh_flag_fails_on_stale_state(
+    refresh_reserve_first: bool,
+    expected_error: &str,
+) -> anyhow::Result<()> {
+    const REQUESTED_COLLATERAL: u64 = 1_000_000_000;
+
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    warp_clock_forward(&setup).await?;
+
+    if refresh_reserve_first {
+        TestFixture::process_ixs(
+            setup.test_f.context.clone(),
+            &[user
+                .make_kamino_refresh_reserves_batch_ix(&setup.bank_f)
+                .await],
+        )
+        .await?;
+    }
+
+    let mut ix = user
+        .make_kamino_withdraw_ix(
+            user_token.key,
+            &setup.bank_f,
+            REQUESTED_COLLATERAL,
+            Some(false),
+        )
+        .await;
+    ix.data = marginfi::instruction::KaminoWithdraw {
+        amount: REQUESTED_COLLATERAL,
+        flags: Some(0x00),
+    }
+    .data();
+
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
+    assert!(result.is_err(), "stale withdraw without refresh must fail");
+    assert!(
+        logs.iter().any(|l| l.contains(expected_error)),
+        "expected {expected_error}, got:\n{logs:#?}"
+    );
+    Ok(())
+}
+
+// Snapshot all accounts whose data can change in a deposit or withdrawal. The payer's fee is
+// intentionally excluded: transaction fees are charged even when an instruction fails.
+async fn kamino_account_data(
+    setup: &KaminoBankSetup,
+    user: Pubkey,
+    user_token: Pubkey,
+) -> anyhow::Result<Vec<Vec<u8>>> {
+    let bank = setup.bank_f.load().await;
+    let addresses = [
+        setup.bank_f.key,
+        user,
+        user_token,
+        bank.liquidity_vault,
+        bank.integration_acc_1,
+        setup.obligation,
+        setup.reserve_liquidity_supply,
+    ];
+    let mut data = Vec::with_capacity(addresses.len());
+    for address in addresses {
+        data.push(setup.test_f.try_load(&address).await?.unwrap().data);
+    }
+    Ok(data)
+}
+
+#[tokio::test]
+async fn kamino_deposit_refreshes_before_bank_validation() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+
+    let mut bank = setup.test_f.try_load(&setup.bank_f.key).await?.unwrap();
+    bytemuck::from_bytes_mut::<Bank>(&mut bank.data[8..])
+        .config
+        .operational_state = BankOperationalState::Paused;
+    setup
+        .test_f
+        .context
+        .borrow_mut()
+        .set_account(&setup.bank_f.key, &AccountSharedData::from(bank));
+    let before = kamino_account_data(&setup, user.key, user_token.key).await?;
+
+    let mut ix = user
+        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, 1_000_000)
+        .await;
+    ix.data = marginfi::instruction::KaminoDeposit {
+        amount: 1_000_000,
+        refresh_reserve: Some(true),
+    }
+    .data();
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
+    assert!(result.is_err(), "deposit into a paused bank must fail");
+    let reserve_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshReservesBatch"));
+    let obligation_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshObligation"));
+    let validation_error = logs.iter().position(|l| l.contains("BankPaused"));
+    assert!(
+        matches!((reserve_refresh, obligation_refresh, validation_error),
+            (Some(r), Some(o), Some(e)) if r < o && o < e),
+        "expected reserve refresh, obligation refresh, then bank validation: {logs:#?}"
+    );
+    assert_eq!(
+        before,
+        kamino_account_data(&setup, user.key, user_token.key).await?
+    );
+    Ok(())
+}
+
+#[test_case(false; "partial")]
+#[test_case(true; "withdraw_all")]
+#[tokio::test]
+async fn kamino_withdraw_refreshes_before_checking_balance(
+    withdraw_all: bool,
+) -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+    let before = kamino_account_data(&setup, user.key, user_token.key).await?;
+
+    // The account has no position, so withdrawal must fail after both refreshes.
+    let mut ix = user
+        .make_kamino_withdraw_ix(user_token.key, &setup.bank_f, 1, Some(withdraw_all))
+        .await;
+    ix.data = marginfi::instruction::KaminoWithdraw {
+        amount: 1,
+        flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
+    }
+    .data();
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
+    assert!(result.is_err(), "withdraw without a position must fail");
+    let reserve_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshReservesBatch"));
+    let obligation_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshObligation"));
+    let balance_error = logs.iter().position(|l| l.contains("BankAccountNotFound"));
+    assert!(
+        matches!((reserve_refresh, obligation_refresh, balance_error),
+            (Some(r), Some(o), Some(e)) if r < o && o < e),
+        "expected reserve refresh, obligation refresh, then balance error: {logs:#?}"
+    );
+
+    // The failed transaction must also roll back the otherwise successful refreshes.
+    assert_eq!(
+        before,
+        kamino_account_data(&setup, user.key, user_token.key).await?
+    );
+    Ok(())
+}
+
+#[test_case(false; "partial")]
+#[test_case(true; "withdraw_all")]
+#[tokio::test]
+async fn kamino_withdraw_rolls_back_when_obligation_refresh_fails(
+    withdraw_all: bool,
+) -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 100_000_000)
+        .await?;
+    warp_clock_forward(&setup).await?;
+
+    // Keep the reserve valid, but make Kamino reject the obligation's market after the reserve
+    // refresh. Marginfi's own deposit-reserve constraints still pass.
+    let mut obligation = setup.test_f.try_load(&setup.obligation).await?.unwrap();
+    let data = bytemuck::from_bytes_mut::<kamino_mocks::state::MinimalObligation>(
+        &mut obligation.data[8..],
+    );
+    data.lending_market = Pubkey::default();
+    setup
+        .test_f
+        .context
+        .borrow_mut()
+        .set_account(&setup.obligation, &AccountSharedData::from(obligation));
+    let before = kamino_account_data(&setup, user.key, user_token.key).await?;
+
+    let mut ix = user
+        .make_kamino_withdraw_ix(user_token.key, &setup.bank_f, 1_000_000, Some(withdraw_all))
+        .await;
+    ix.data = marginfi::instruction::KaminoWithdraw {
+        amount: 1_000_000,
+        flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
+    }
+    .data();
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
+    assert!(
+        result.is_err(),
+        "mismatched obligation market must fail: {logs:#?}"
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("Instruction: RefreshObligation")),
+        "expected obligation refresh failure: {logs:#?}"
+    );
+    assert_eq!(
+        before,
+        kamino_account_data(&setup, user.key, user_token.key).await?
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn kamino_deposit_rolls_back_refresh_when_transfer_fails() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+    warp_clock_forward(&setup).await?;
+    let before = kamino_account_data(&setup, user.key, user_token.key).await?;
+
+    let mut ix = user
+        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, 100_000_000)
+        .await;
+    ix.data = marginfi::instruction::KaminoDeposit {
+        amount: 100_000_000,
+        refresh_reserve: Some(true),
+    }
+    .data();
+    let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
+    assert!(
+        result.is_err(),
+        "deposit exceeding the token balance must fail"
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("Instruction: RefreshObligation")),
+        "expected refresh before transfer failure: {logs:#?}"
+    );
+    assert!(
+        logs.iter().any(|l| l.contains("insufficient funds")),
+        "expected token transfer failure: {logs:#?}"
+    );
+    assert_eq!(
+        before,
+        kamino_account_data(&setup, user.key, user_token.key).await?
+    );
     Ok(())
 }
