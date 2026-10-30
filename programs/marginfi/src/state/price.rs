@@ -2081,6 +2081,17 @@ pub struct ScopePriceFeed {
     has_borrow_power: bool,
 }
 
+#[cfg(test)]
+impl ScopePriceFeed {
+    pub fn new_for_tests(price: I80F48, has_borrow_power: bool) -> Self {
+        Self {
+            price,
+            last_updated_timestamp: 0,
+            has_borrow_power,
+        }
+    }
+}
+
 impl ScopePriceFeed {
     /// Validates the account and reads `entry_index`, without a staleness check (used by config
     /// validation, where the feed may legitimately not have been cranked yet).

@@ -29,12 +29,13 @@
 //!    premium wallet. Bankruptcy / tokenless repayment / liability→asset flips write the
 //!    receivable off without crediting the bank.
 //!
-//! ## Scratch valuation reuses health prices (accepted approximation)
+//! ## Scratch valuation uses unbiased health-pass prices
 //!
-//! Collateral weights reuse the health pass's biased, requirement-typed prices — zero extra
-//! oracle work. The rate therefore wobbles with confidence bands (clamped at 5% of price;
-//! uniform haircuts cancel in the average, so at most ~5% RELATIVE, symmetric, correctable
-//! by any crank) and varies slightly by triggering instruction (Initial uses EMA for Pyth).
+//! Collateral weights use the unbiased price from the health pass's own oracle read — zero
+//! extra oracle work. Confidence bands are left out: a haircut only shifts collateral shares,
+//! which has no conservative direction in a mix, and would let a borrower lower the rate by
+//! posting a wide-band update for high-rate collateral. The rate still varies slightly by
+//! triggering instruction (Initial uses EMA for Pyth).
 //! No risk weights; ReduceOnly collateral still counts (Initial zeroes it for health only).
 //! Prices never scale the materialized amount (`debt_tokens × rate × time` is price-free),
 //! so price quality is second-order here — health/liquidation pricing is untouched.
