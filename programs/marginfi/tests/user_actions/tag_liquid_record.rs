@@ -961,13 +961,13 @@ async fn tag_allowed_while_frozen() -> anyhow::Result<()> {
     Ok(())
 }
 
-// The health check bounds the loss by the premium taken, so a premium grown past what a 0.96
+// The health check bounds the loss by the premium taken, so a premium grown past what a 0.95
 // maintenance weight would fund is still reachable.
 #[tokio::test]
 async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()> {
-    // $20 of SOL against $19.50 of USDC debt, weighted at a 25x maintenance leverage
+    // $20 of SOL against $19.50 of USDC debt, weighted at a 20x maintenance leverage
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
-        setup_liquidatee_with(19.5, I80F48!(0.95), I80F48!(0.96)).await?;
+        setup_liquidatee_with(19.5, I80F48!(0.94), I80F48!(0.95)).await?;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);

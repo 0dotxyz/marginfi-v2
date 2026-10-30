@@ -65,6 +65,11 @@ profitable route between A and B, simply abort the entire tx.
 - The liquidator cannot profit more than percentage configured by the global fee admin (default
   10%), see `FeeState.liquidation_max_fee` for the current max profit.
 
+- Some accounts are leveraged so highly that a liquidation paying the configured max fee cannot
+  raise their health. If such an account still has more assets than debt, the liquidator must repay
+  all of its debt. A partial liquidation fails with `LiquidationCloseoutRequired`. Collateral left
+  after the debt is repaid stays with the user.
+
 - The liquidator pays a nominal fee in lamports to use this service. This is automatically billed to
   the global fee wallet at End. See `FeeState.liquidation_flat_sol_fee` to see the fee in lamps.
 

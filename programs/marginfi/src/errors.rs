@@ -293,6 +293,8 @@ pub enum MarginfiError {
     InvalidFastBankOperationalState, // 6143
     #[msg("Governance bank configuration may only transition a bank to Operational")]
     InvalidGovernanceBankOperationalState, // 6144
+    #[msg("Liquidation must repay all debt when the premium cannot raise the account's health")]
+    LiquidationCloseoutRequired, // 6145
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -712,6 +714,7 @@ impl From<u32> for MarginfiError {
             6142 => MarginfiError::MixedGroupConfigAuthority,
             6143 => MarginfiError::InvalidFastBankOperationalState,
             6144 => MarginfiError::InvalidGovernanceBankOperationalState,
+            6145 => MarginfiError::LiquidationCloseoutRequired,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

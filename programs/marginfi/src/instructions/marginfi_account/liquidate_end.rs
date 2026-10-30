@@ -6,10 +6,11 @@ use crate::{
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
     state::{
-        liquidation_record::{tag_adjusted_premium, tag_after_liquidation},
+        liquidation_record::{premium_fits_leverage, tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
-            clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+            clear_liquidation_price_cache_locks, get_health_components, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
@@ -31,6 +32,8 @@ use marginfi_type_crate::{
 /// small flat sol fee to the global fee wallet.
 /// * Fails if the account lost more health than the value the liquidator took out of it
 /// * Fails if a solvent account would be left in bad debt
+/// * Fails if a solvent account keeps any debt when a liquidation at the base premium cannot raise
+///   its health
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed). A tag grows that allowance over time, except on emode-boosted
 ///   collateral or an account already in bad debt, which hold it at the configured base.
@@ -50,6 +53,17 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
+    let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
+    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
+    let must_close_out = !in_bad_debt
+        && !premium_fits_leverage(
+            liq_record.cache.asset_value_maint.into(),
+            liq_record.cache.liability_value_maint.into(),
+            pre_assets_equity,
+            pre_liabs_equity,
+            base_premium,
+        );
+
     // Read before `end_receivership` updates them. The receivership legs leave both alone: the
     // cache write and the lending-only tag clear are both suspended while in receivership.
     let tagged_at = marginfi_account.liquidation_tagged_at;
@@ -59,12 +73,15 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        below_closeout_threshold,
+        // A closed-out account has no debt, so any collateral left makes it healthy
+        below_closeout_threshold || must_close_out,
         true,
     )?;
+    check!(
+        !must_close_out || !marginfi_account.lending_account.has_liabilities(),
+        MarginfiError::LiquidationCloseoutRequired
+    );
 
-    let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
-    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
     let premium = if emode_boosted || in_bad_debt {
         base_premium
     } else {
@@ -130,7 +147,7 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
 }
 
 // Common logic for both liquidation and deleverage.
-// * `below_closeout_threshold`: the account may end healthy. Deleverage always allows it.
+// * `may_end_healthy`: the account may end healthy. Deleverage always allows it.
 // * `premium_capped`: the caller enforces a premium cap on what the receiver seized, so health may
 //   fall by up to that premium. Deleverage takes no premium and must not worsen health at all.
 pub fn end_receivership<'info>(
@@ -138,7 +155,7 @@ pub fn end_receivership<'info>(
     group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
-    below_closeout_threshold: bool,
+    may_end_healthy: bool,
     premium_capped: bool,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
     let pre_assets: I80F48 = liq_record.cache.asset_value_maint.into();
@@ -157,7 +174,7 @@ pub fn end_receivership<'info>(
             None,
             &mut Some(&mut post_hc),
             HealthPriceMode::Cached,
-            below_closeout_threshold,
+            may_end_healthy,
         )?;
     let mut premium_scratch = PremiumScratch::default();
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
