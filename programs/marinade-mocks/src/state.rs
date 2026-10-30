@@ -10,7 +10,7 @@ pub const MSOL_PRICE_PRECISION: u128 = 1 << 32;
 
 /// Minimal zero-copy view of Marinade's `State`.
 #[account(zero_copy, discriminator = &STATE_DISCRIMINATOR)]
-#[repr(C, packed)]
+#[repr(C)]
 pub struct MinimalMarinadeState {
     pub msol_mint: Pubkey, // 0
     pub _padding1: [u8; 128],
@@ -18,7 +18,7 @@ pub struct MinimalMarinadeState {
     pub _padding3: [u8; 16],
     pub _padding4: [u8; 8],
     pub _padding5: [u8; 2],
-    pub delayed_unstake_cooling_down: u64, // 218 (stake_system)
+    pub delayed_unstake_cooling_down: [u8; 8], // 218 (stake_system)
     pub _padding6: [u8; 128],
     pub _padding7: [u8; 8],
     pub _padding8: [u8; 4],
@@ -34,9 +34,12 @@ pub struct MinimalMarinadeState {
     pub circulating_ticket_balance: u64, // 520
     pub _padding14: [u8; 32],
     pub emergency_cooling_down: u64, // 560
+    pub _padding15: [u8; 32],
+    pub paused: u8,
+    pub _padding16: [u8; 7],
 }
 
-assert_struct_size!(MinimalMarinadeState, 568);
+assert_struct_size!(MinimalMarinadeState, 608);
 
 impl MinimalMarinadeState {
     #[inline]
@@ -54,13 +57,20 @@ impl MinimalMarinadeState {
         self.msol_supply
     }
 
+    /// True while Marinade's emergency pause is on. Marinade then rejects deposits, unstakes, and
+    /// the `update` crank, so mSOL cannot be redeemed through it and its rate stops accruing.
+    #[inline]
+    pub fn is_paused(&self) -> bool {
+        self.paused != 0
+    }
+
     /// Mirrors Marinade's `total_virtual_staked_lamports` (`None` only on additive overflow):
     /// https://github.com/marinade-finance/liquid-staking-program/blob/b8fe3f8f9a2bb0978fb40ba5bb1c2855dd12940f/programs/marinade-finance/src/state/mod.rs#L229
     #[inline]
     pub fn total_virtual_staked_lamports(&self) -> Option<u64> {
         let under_control = self
             .total_active_balance
-            .checked_add(self.delayed_unstake_cooling_down)?
+            .checked_add(u64::from_le_bytes(self.delayed_unstake_cooling_down))?
             .checked_add(self.emergency_cooling_down)?
             .checked_add(self.available_reserve_balance)?;
         Some(under_control.saturating_sub(self.circulating_ticket_balance))
