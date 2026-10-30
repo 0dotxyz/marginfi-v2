@@ -7,6 +7,7 @@ use marginfi::{
     assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
 };
 use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
+use marginfi_type_crate::types::{Bank, BankOperationalState};
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
@@ -901,6 +902,51 @@ async fn kamino_account_data(
         data.push(setup.test_f.try_load(&address).await?.unwrap().data);
     }
     Ok(data)
+}
+
+#[tokio::test]
+async fn kamino_deposit_refreshes_before_bank_validation() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+
+    let mut bank = setup.test_f.try_load(&setup.bank_f.key).await?.unwrap();
+    bytemuck::from_bytes_mut::<Bank>(&mut bank.data[8..])
+        .config
+        .operational_state = BankOperationalState::Paused;
+    setup
+        .test_f
+        .context
+        .borrow_mut()
+        .set_account(&setup.bank_f.key, &AccountSharedData::from(bank));
+    let before = kamino_account_data(&setup, user.key, user_token.key).await?;
+
+    let mut ix = user
+        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, 1_000_000)
+        .await;
+    ix.data = marginfi::instruction::KaminoDeposit {
+        amount: 1_000_000,
+        refresh_reserve: Some(true),
+    }
+    .data();
+    let (result, logs) = send_kamino_ix(&setup, ix).await?;
+    assert!(result.is_err(), "deposit into a paused bank must fail");
+    let reserve_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshReservesBatch"));
+    let obligation_refresh = logs
+        .iter()
+        .position(|l| l.contains("Instruction: RefreshObligation"));
+    let validation_error = logs.iter().position(|l| l.contains("BankPaused"));
+    assert!(
+        matches!((reserve_refresh, obligation_refresh, validation_error),
+            (Some(r), Some(o), Some(e)) if r < o && o < e),
+        "expected reserve refresh, obligation refresh, then bank validation: {logs:#?}"
+    );
+    assert_eq!(
+        before,
+        kamino_account_data(&setup, user.key, user_token.key).await?
+    );
+    Ok(())
 }
 
 #[test_case(false; "partial")]

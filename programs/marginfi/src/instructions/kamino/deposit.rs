@@ -53,6 +53,12 @@ pub fn kamino_deposit<'info>(
     refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
     let refresh_reserve = refresh_reserve.unwrap_or(false);
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+        ctx.accounts.cpi_refresh_obligation()?;
+    }
+
     let authority_bump: u8;
     {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
@@ -65,11 +71,6 @@ pub fn kamino_deposit<'info>(
             InstructionKind::FailsIfPausedOrReduceState,
             deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
         )?;
-    }
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-        ctx.accounts.cpi_refresh_obligation()?;
     }
 
     // Get initial obligation data to verify deposit amount later.
