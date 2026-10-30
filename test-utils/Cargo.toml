@@ -9,23 +9,23 @@ default = []
 transfer-hook = ["transfer_hook"]
 
 [dependencies]
+solana-account-v3 = { package = "solana-account", version = "3.4.0" }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
-kamino-mocks = { path = "../programs/kamino-mocks" , features = ["no-entrypoint"]}
+kamino-mocks = { path = "../programs/kamino-mocks" , features = ["no-entrypoint", "agave-v4-test"]}
 drift-mocks = { path = "../programs/drift-mocks" , features = ["no-entrypoint"]}
 juplend-mocks = { path = "../programs/juplend-mocks" , features = ["no-entrypoint"]}
 
 solana-cli-output = { workspace = true }
-solana-address = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-logger = { workspace = true }
-solana-program = { workspace = true }
 solana-program-pack = { workspace = true }
+solana-sha256-hasher = { workspace = true }
 solana-program-test = { workspace = true }
-solana-sdk = { workspace = true }
+solana-sdk = "4.0.1"
 solana-instructions-sysvar = { workspace = true }
 solana-system-interface = { workspace = true }
-solana-system-transaction = { workspace = true }
+solana-system-transaction = "4.0.0"
 spl-transfer-hook-interface = { workspace = true }
 spl-pod = { workspace = true }
 
@@ -33,7 +33,6 @@ anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
 pyth-solana-receiver-sdk = { workspace = true }
-switchboard-on-demand = { workspace = true }
 
 bytemuck = { workspace = true }
 fixed = { workspace = true }

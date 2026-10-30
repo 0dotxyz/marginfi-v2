@@ -20,15 +20,14 @@ defaults:
     working-directory: .
 
 env:
-  RUST_TOOLCHAIN: 1.90.0
-  SOLANA_CLI_VERSION: 3.1.13
-  ANCHOR_CLI_VERSION: 1.0.2
+  RUST_TOOLCHAIN: 1.95.0
+  SOLANA_CLI_VERSION: 4.1.2
+  ANCHOR_CLI_VERSION: 1.2.2
   CARGO_TERM_COLOR: always
   # Trident-stack-only env. Kept here so the whole file shares one
   # convention; the libfuzzer + anchor stacks ignore these.
   TRIDENT_VERSION: "0.13.0-rc.4"
-  # cargo-fuzz 0.13.2 pulls cargo-platform 0.3.3, whose MSRV is rustc 1.91.
-  # Keep the libfuzzer job on a version compatible with the repo's 1.90 toolchain.
+  # Keep the libfuzzer version pinned for reproducible CI builds.
   CARGO_FUZZ_VERSION: "0.13.1"
   # `anchor idl build` writes `"address": ""` (Anchor 0.30+ moved the
   # address out of the source). Trident bakes the address into
@@ -100,9 +99,9 @@ jobs:
       with:
         path: |
           target/sbf
-        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-sbf-split-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.toml', 'Cargo.lock', 'scripts/build-workspace.sh', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**', 'type-crate/**', 'id-crate/**') }}
         restore-keys: |
-          anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+          anchor-sbf-split-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-
     - name: Cache Anchor localnet build (TS bankrun consumers)
       uses: actions/cache@v4
       with:
@@ -110,17 +109,17 @@ jobs:
           target/deploy
           target/idl
           target/types
-        key: anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-localnet-sbpf3-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
-          anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+          anchor-localnet-sbpf3-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
     - name: Build workspace (mainnet IDs → target/sbf/)
       uses: ./.github/actions/build-workspace/
     - name: Build mocks (target/deploy/)
-      run: anchor build -p mocks --ignore-keys
+      run: anchor build --arch v3 -p mocks --ignore-keys
     - name: Build transfer-hook (target/deploy/)
-      run: anchor build -p test_transfer_hook --no-idl
+      run: anchor build --arch v3 -p test_transfer_hook --no-idl
     - name: Build marginfi localnet (target/deploy/)
-      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+      run: anchor build --arch v3 -p marginfi -- --no-default-features --features custom-heap
     - name: Upload anchor-build artifact
       uses: actions/upload-artifact@v4
       with:
@@ -302,11 +301,11 @@ jobs:
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
+        key: anchor-transfer-hook-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl --ignore-keys
+      run: anchor build --arch v3 -p test_transfer_hook --no-idl --ignore-keys
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
@@ -317,15 +316,15 @@ jobs:
           target/deploy/mocks.so
           target/idl/mocks.json
           target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
+        key: anchor-mocks-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks --ignore-keys
+      run: anchor build --arch v3 -p mocks --ignore-keys
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
-      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+      run: anchor build --arch v3 -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
       run: |

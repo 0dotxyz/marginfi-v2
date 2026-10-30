@@ -1,7 +1,8 @@
 use anchor_lang::prelude::{AccountInfo, Clock, Pubkey};
+use anchor_lang::solana_program::{entrypoint::ProgramResult, instruction::Instruction};
 use anchor_lang::system_program;
 use lazy_static::lazy_static;
-use solana_program::{entrypoint::ProgramResult, instruction::Instruction, program_stubs};
+use solana_sdk::program_stubs;
 use spl_token_2022::processor::Processor as Token2022Processor;
 
 use crate::log;
@@ -94,7 +95,7 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                 ..Clock::default()
             };
         }
-        solana_program::entrypoint::SUCCESS
+        anchor_lang::solana_program::entrypoint::SUCCESS
     }
 }
 

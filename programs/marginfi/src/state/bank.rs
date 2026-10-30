@@ -141,7 +141,7 @@ fn invoke_client_token_transfer<'info>(
     };
     account_infos.extend_from_slice(remaining_accounts);
 
-    solana_program::program::invoke_signed(&ix, &account_infos, signer_seeds)?;
+    anchor_lang::solana_program::program::invoke_signed(&ix, &account_infos, signer_seeds)?;
 
     Ok(())
 }

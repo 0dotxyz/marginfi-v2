@@ -1,5 +1,6 @@
 use crate::{ui_to_native, utils::load_account_from_file};
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program_pack::{Pack, Sealed};
 use anchor_spl::{
     associated_token::{
         get_associated_token_address_with_program_id,
@@ -20,7 +21,6 @@ use anchor_spl::{
     },
 };
 use solana_commitment_config::CommitmentLevel;
-use solana_program::program_pack::{Pack, Sealed};
 use solana_program_test::ProgramTestContext;
 #[cfg(feature = "transfer-hook")]
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
@@ -400,7 +400,7 @@ pub struct TokenAccountFixture {
 impl TokenAccountFixture {
     pub async fn create_ixs(
         ctx: &Rc<RefCell<ProgramTestContext>>,
-        rent: Rent,
+        rent: solana_sdk::rent::Rent,
         mint_pk: &Pubkey,
         payer_pk: &Pubkey,
         owner_pk: &Pubkey,

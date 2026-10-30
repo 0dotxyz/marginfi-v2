@@ -41,8 +41,10 @@ use pyth_solana_receiver_sdk::{
 };
 use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
-use std::{cell::Ref, cmp::min};
-use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
+use std::cmp::min;
+
+/// Decimal places used by Switchboard pull feed values.
+pub const SWITCHBOARD_PULL_PRECISION: usize = 18;
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
@@ -2197,10 +2199,10 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let (lite_feed, last_updated) = load_swb_lite_feed(ai_data)?;
+        let lite_feed = parse_swb_pull_feed(&ai_data)?;
 
         // Check staleness
-        if current_timestamp.saturating_sub(last_updated) > max_age as i64 {
+        if current_timestamp.saturating_sub(lite_feed.last_update_timestamp) > max_age as i64 {
             return err!(MarginfiError::SwitchboardStalePrice);
         }
 
@@ -2218,7 +2220,7 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        load_swb_lite_feed(ai_data)?;
+        parse_swb_pull_feed(&ai_data)?;
 
         Ok(())
     }
@@ -2227,7 +2229,7 @@ impl SwitchboardPullPriceFeed {
         let sw_result = self.feed.result;
         // Note: Pull oracles support mean (result.mean) or median (result.value)
         let price: I80F48 = I80F48::from_num(sw_result.value)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
+            .checked_div(EXP_10_I80F48[SWITCHBOARD_PULL_PRECISION])
             .ok_or_else(math_error!())?;
         Ok(price)
     }
@@ -2305,62 +2307,42 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
     }
 }
 
-/// Parse a Switchboard pull feed into the lite form we retain, plus its `last_update_timestamp`
-/// (for the caller's staleness check).
-///
-/// `PullFeedAccountData` is ~3.2 KB and its 16-byte alignment comes from the `i128` fields in
-/// `CurrentResult`/`OracleSubmission`. The two targets disagree on that alignment, so we parse
-/// differently per target:
-///
-/// * On-chain (`target_os = "solana"`): `i128` is 8-byte aligned (the SBF data layout has no
-///   `i128:128` entry, so it inherits `i64`'s 8-byte alignment), and account data sits at an
-///   8-aligned offset, so upstream's zero-copy `PullFeedAccountData::parse` succeeds. We use it to
-///   avoid copying ~3.2 KB onto the 4 KB BPF stack on every price read.
-/// * Off-chain (host / `client`): native `i128` is 16-byte aligned, so the data at offset 8 is
-///   misaligned and `parse`'s `bytemuck::try_from_bytes` fails with `AccountDeserializeError`. We
-///   copy via `parse_swb_ignore_alignment` (`try_pod_read_unaligned`), which has no alignment
-///   requirement.
-///
-/// Verified alignment-sensitive upstream through switchboard-sdk `main` and the pinned rev f1a570a
-/// (2026-06-01) — `parse` still returns a `Ref` via `try_from_bytes`, so the off-chain copy stays.
-fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccountData, i64)> {
-    #[cfg(target_os = "solana")]
-    {
-        let feed = PullFeedAccountData::parse(data)
-            .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
-        Ok((
-            LitePullFeedAccountData::from(&*feed),
-            feed.last_update_timestamp,
-        ))
-    }
-    #[cfg(not(target_os = "solana"))]
-    {
-        let feed = parse_swb_ignore_alignment(data)?;
-        Ok((
-            LitePullFeedAccountData::from(&feed),
-            feed.last_update_timestamp,
-        ))
-    }
-}
+/// Read the fields used by marginfi from the Switchboard pull feed wire layout. Offsets include the
+/// eight-byte account discriminator. Reading little-endian bytes directly avoids the different i128
+/// alignment requirements of host and SBF targets, without copying the entire 3.2 KB account onto
+/// the SBF stack.
+/// 
+/// This is used only for legacy test suites that still utilize Switchboard: the mainnet program is
+/// defunct, this should not be interpreted as a substitute for using swb's crate if they were ever
+/// to be supported again.
+pub fn parse_swb_pull_feed(data: &[u8]) -> MarginfiResult<LitePullFeedAccountData> {
+    const ACCOUNT_SIZE: usize = 3208;
+    const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
+    #[cfg(feature = "client")]
+    const FEED_HASH_OFFSET: usize = 2120;
+    const TIMESTAMP_OFFSET: usize = 2216;
+    const VALUE_OFFSET: usize = 2264;
+    const SLOT_OFFSET: usize = 2368;
 
-/// The same as PullFeedAccountData::parse but completely ignores input alignment by copying the
-/// bytes (`try_pod_read_unaligned`). Used off-chain, where native `i128` alignment (16) makes the
-/// zero-copy reference cast fail — see [`load_swb_lite_feed`]. Also reused by tests/clients.
-pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFeedAccountData> {
-    if data.len() < 8 + std::mem::size_of::<PullFeedAccountData>() {
+    if data.len() < ACCOUNT_SIZE || data[..8] != DISCRIMINATOR {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
-    if &data[..8] != PullFeedAccountData::DISCRIMINATOR {
-        return err!(MarginfiError::SwitchboardInvalidAccount);
-    }
-
-    let feed = bytemuck::try_pod_read_unaligned::<PullFeedAccountData>(
-        &data[8..8 + std::mem::size_of::<PullFeedAccountData>()],
-    )
-    .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
-
-    Ok(feed)
+    Ok(LitePullFeedAccountData {
+        result: SwitchboardPullResult {
+            value: i128::from_le_bytes(data[VALUE_OFFSET..VALUE_OFFSET + 16].try_into().unwrap()),
+            slot: u64::from_le_bytes(data[SLOT_OFFSET..SLOT_OFFSET + 8].try_into().unwrap()),
+        },
+        #[cfg(feature = "client")]
+        feed_hash: data[FEED_HASH_OFFSET..FEED_HASH_OFFSET + 32]
+            .try_into()
+            .unwrap(),
+        last_update_timestamp: i64::from_le_bytes(
+            data[TIMESTAMP_OFFSET..TIMESTAMP_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        ),
+    })
 }
 
 pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpdateV2> {
@@ -2631,36 +2613,19 @@ impl PriceAdapter for PythPushOraclePriceFeed {
     }
 }
 
-/// A slimmed down version of the PullFeedAccountData struct copied from the
-/// switchboard-on-demand/src/pull_feed.rs
+/// Fields of a Switchboard pull feed used by marginfi and its clients.
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct LitePullFeedAccountData {
-    pub result: CurrentResult,
+    pub result: SwitchboardPullResult,
     #[cfg(feature = "client")]
     pub feed_hash: [u8; 32],
     pub last_update_timestamp: i64,
 }
 
-impl From<&PullFeedAccountData> for LitePullFeedAccountData {
-    fn from(feed: &PullFeedAccountData) -> Self {
-        Self {
-            result: feed.result,
-            #[cfg(feature = "client")]
-            feed_hash: feed.feed_hash,
-            last_update_timestamp: feed.last_update_timestamp,
-        }
-    }
-}
-
-impl From<Ref<'_, PullFeedAccountData>> for LitePullFeedAccountData {
-    fn from(feed: Ref<'_, PullFeedAccountData>) -> Self {
-        Self {
-            result: feed.result,
-            #[cfg(feature = "client")]
-            feed_hash: feed.feed_hash,
-            last_update_timestamp: feed.last_update_timestamp,
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub struct SwitchboardPullResult {
+    pub value: i128,
+    pub slot: u64,
 }
 
 #[inline(always)]
@@ -2743,26 +2708,49 @@ mod tests {
         SwitchboardPullPriceFeed {
             has_borrow_power: true,
             feed: Box::new(LitePullFeedAccountData {
-                result: CurrentResult {
-                    value,
-                    // Deliberately non-zero to prove confidence no longer reads Switchboard std_dev.
-                    std_dev: value / 2,
-                    mean: value,
-                    range: 0,
-                    min_value: value,
-                    max_value: value,
-                    num_samples: 1,
-                    submission_idx: 0,
-                    padding1: [0; 6],
-                    slot: 0,
-                    min_slot: 0,
-                    max_slot: 0,
-                },
+                result: SwitchboardPullResult { value, slot: 0 },
                 #[cfg(feature = "client")]
                 feed_hash: [0; 32],
                 last_update_timestamp: 42,
             }),
         }
+    }
+
+    #[test]
+    fn swb_pull_parses_fixture_and_unaligned_data() {
+        let fixture = include_bytes!("../../../../test-utils/data/swb_pull_sol_price.bin");
+        let mut unaligned = vec![0];
+        unaligned.extend_from_slice(fixture);
+        let feed = parse_swb_pull_feed(&unaligned[1..]).unwrap();
+        assert_eq!(feed.result.value, 155_594_045_270_000_000_000);
+        assert_eq!(feed.result.slot, 282_612_970);
+        assert_eq!(feed.last_update_timestamp, 1_723_244_190);
+        #[cfg(feature = "client")]
+        assert_eq!(
+            feed.feed_hash,
+            hex_to_bytes("4c935636f2523f6aeeb6dc7b7dab0e86a13ff2c794f7895fc78851d69fdb593b")
+                .as_slice()
+        );
+
+        assert!(parse_swb_pull_feed(&fixture[..fixture.len() - 1]).is_err());
+        unaligned[1] ^= 1;
+        assert!(parse_swb_pull_feed(&unaligned[1..]).is_err());
+        assert!(parse_swb_pull_feed(&[]).is_err());
+    }
+
+    #[test]
+    fn swb_pull_checks_owner_and_age() {
+        let mut data =
+            include_bytes!("../../../../test-utils/data/swb_pull_sol_price.bin").to_vec();
+        let key = Pubkey::new_unique();
+        let mut lamports = 1;
+        let owner = Pubkey::new_unique();
+        let ai = test_account_info(&key, &mut lamports, &mut data, &owner);
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_190, 60).is_err());
+
+        let ai = test_account_info(&key, &mut lamports, &mut data, &SWITCHBOARD_PULL_ID);
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_250, 60).is_ok());
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_251, 60).is_err());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use types::FeeState;
 
 pub mod constants;
 pub mod macros;
+pub mod marginfi_cpi_stubs;
 pub mod types;
 
 #[cfg(feature = "anchor")]
