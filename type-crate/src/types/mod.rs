@@ -18,8 +18,6 @@ pub mod pubkey;
 pub mod rate_limiter;
 pub mod rebalance;
 pub mod same_asset_emode_registry;
-#[cfg(all(feature = "client", not(target_os = "solana")))]
-pub mod scope_feed;
 pub mod staked_settings;
 pub mod user_account;
 pub mod wrapped_i80f48;
@@ -44,8 +42,6 @@ pub use pubkey::*;
 pub use rate_limiter::*;
 pub use rebalance::*;
 pub use same_asset_emode_registry::*;
-#[cfg(all(feature = "client", not(target_os = "solana")))]
-pub use scope_feed::*;
 pub use staked_settings::*;
 pub use user_account::*;
 pub use wrapped_i80f48::*;
