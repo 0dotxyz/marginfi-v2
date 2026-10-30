@@ -42,10 +42,11 @@ use marginfi_type_crate::types::{
 /// Deposit into a Kamino pool through a marginfi account
 ///
 /// This function performs the following steps:
-/// 1. Transfers tokens from the user's source account to the obligation owner's account
-/// 2. Deposits the tokens into Kamino through a CPI call
-/// 3. Verifies the obligation deposit amount was increased correctly
-/// 4. Updates the marginfi account's balance to reflect the deposit
+/// 1. Optionally refreshes the reserve and obligation
+/// 2. Calculates the expected collateral, then transfers tokens to the obligation owner's account
+/// 3. Deposits the tokens into Kamino through a CPI call
+/// 4. Verifies the obligation deposit amount was increased correctly
+/// 5. Updates the marginfi account's balance to reflect the deposit
 pub fn kamino_deposit<'info>(
     ctx: Context<'info, KaminoDeposit<'info>>,
     amount: u64,
@@ -66,14 +67,14 @@ pub fn kamino_deposit<'info>(
         )?;
     }
 
-    // Get initial obligation data to verify deposit amount later
-    let initial_obligation_deposited_amount =
-        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
-
     if refresh_reserve {
         ctx.accounts.cpi_refresh_reserve()?;
         ctx.accounts.cpi_refresh_obligation()?;
     }
+
+    // Get initial obligation data to verify deposit amount later.
+    let initial_obligation_deposited_amount =
+        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let expected_collateral_amount = ctx
         .accounts
@@ -291,6 +292,8 @@ impl<'info> KaminoDeposit<'info> {
     }
 
     pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
+        // The bank-owned obligation holds only the linked reserve and has no Kamino borrows.
+        // Kamino validates the remaining accounts against the actual obligation state.
         let accounts = RefreshObligation {
             lending_market: self.lending_market.to_account_info(),
             obligation: self.integration_acc_2.to_account_info(),

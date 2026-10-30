@@ -1114,8 +1114,10 @@ pub mod marginfi {
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
-    /// * refresh_reserve - when true, internally refresh the reserve and then the obligation
-    ///   before depositing.
+    /// * refresh_reserve - defaults to false. When true, refresh the reserve and then the
+    ///   obligation before calculating amounts. The reserve refresh skips oracle price updates;
+    ///   callers may need a separate Kamino price refresh. When false, callers must supply the
+    ///   necessary reserve and obligation refreshes before this instruction.
     pub fn kamino_deposit<'info>(
         ctx: Context<'info, KaminoDeposit<'info>>,
         amount: u64,
@@ -1131,7 +1133,10 @@ pub mod marginfi {
     ///   `remaining_accounts`
     /// * flags - optional bitflags:
     ///   - bit 0 (`0x01`): withdraw all
-    ///   - bit 1 (`0x02`): internally refresh the reserve and obligation before withdrawing
+    ///   - bit 1 (`0x02`): refresh the reserve and then the obligation before calculating amounts
+    ///     (the reserve refresh skips oracle price updates)
+    ///   With bit 1 unset, callers must supply the necessary reserve and obligation refreshes.
+    ///   A separate Kamino price refresh may still be needed when bit 1 is set.
     pub fn kamino_withdraw<'info>(
         ctx: Context<'info, KaminoWithdraw<'info>>,
         amount: u64,

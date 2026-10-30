@@ -72,12 +72,11 @@ use marginfi_type_crate::{
 ///    trying to calculate the exact amount.
 ///
 /// This function performs the following steps:
-/// 1. Gets the user's asset shares and initial obligation data
-/// 2. Calculates the appropriate number of collateral tokens to withdraw
-/// 3. Performs a CPI call to Kamino to withdraw tokens
-/// 4. Verifies the obligation deposit amount was reduced correctly
-/// 5. Transfers funds to the user's account
-/// 6. Updates the marginfi account's balance to reflect the withdrawal
+/// 1. Optionally refreshes the reserve and obligation
+/// 2. Calculates the collateral to withdraw and updates the marginfi balance
+/// 3. Calculates the expected liquidity and records the withdrawal outflow
+/// 4. Performs a CPI call to Kamino, then verifies the obligation and vault changes
+/// 5. Transfers funds to the user's account and checks health when required
 pub fn kamino_withdraw<'info>(
     ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
@@ -89,6 +88,11 @@ pub fn kamino_withdraw<'info>(
     let flags = flags.unwrap_or(0);
     let withdraw_all = (flags & WITHDRAW_ALL_FLAG) != 0;
     let refresh_reserve = (flags & REFRESH_RESERVE_FLAG) != 0;
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+        ctx.accounts.cpi_refresh_obligation()?;
+    }
 
     // Get initial values to verify successful withdrawal later
     let pre_transfer_vault_balance =
@@ -127,11 +131,6 @@ pub fn kamino_withdraw<'info>(
             let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
             (amount, share_amount)
         };
-    }
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-        ctx.accounts.cpi_refresh_obligation()?;
     }
 
     let expected_liquidity_amount = ctx
@@ -473,6 +472,8 @@ impl<'info> KaminoWithdraw<'info> {
     }
 
     pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
+        // The bank-owned obligation holds only the linked reserve and has no Kamino borrows.
+        // Kamino validates the remaining accounts against the actual obligation state.
         let accounts = RefreshObligation {
             lending_market: self.lending_market.to_account_info(),
             obligation: self.integration_acc_2.to_account_info(),
