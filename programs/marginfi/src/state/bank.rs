@@ -224,6 +224,7 @@ pub trait BankImpl {
         slot: u64,
         oracle: OraclePriceWithConfidence,
     ) -> MarginfiResult<()>;
+    fn set_circuit_breaker_enabled(&mut self, enabled: bool) -> MarginfiResult;
     fn reset_cb_runtime_state(&mut self, now: i64);
     fn trip_cb_halt(&mut self, now: i64, deviation_bps: u64, breached_tier: u8);
     fn deposit_spl_transfer<'info>(
@@ -569,47 +570,7 @@ impl BankImpl for Bank {
 
         if let Some(flag) = config.circuit_breaker_enabled {
             msg!("setting circuit breaker enabled: {:?}", flag);
-            let was_enabled = self.get_flag(CIRCUIT_BREAKER_ENABLED);
-            // Seed the EMA reference from the cached oracle price (must be non-zero and recent):
-            // a warm-cache sanity gate that also stops an attacker sandwiching the enable tx to
-            // pick the seed. NOT a defense against sustained manipulation — if the feed is
-            // already compromised, so is the cache. CB is meant to be enabled proactively under
-            // normal conditions; `clear_circuit_breaker` reseeds the reference if it ever ends
-            // up anchored badly.
-            if flag && !was_enabled {
-                let last: I80F48 = self.cache.last_oracle_price.into();
-                check!(
-                    last > I80F48::ZERO,
-                    MarginfiError::CircuitBreakerRequiresWarmCache
-                );
-                let now = Clock::get()?.unix_timestamp;
-                let age = now.saturating_sub(self.cache.last_oracle_price_timestamp);
-                check!(
-                    (0..=CB_ENABLE_MAX_PRICE_AGE_SECONDS).contains(&age),
-                    MarginfiError::CircuitBreakerRequiresWarmCache
-                );
-                // Seed with the multiplier-adjusted price so the reference matches the effective
-                // price observations feed (see `OraclePriceWithMultiplier::cb_observation`);
-                // seeding the raw price would spuriously trip the first observation on integration
-                // banks whose multiplier differs from one.
-                let multiplier: I80F48 = self.cache.price_multiplier.into();
-                let last_adjusted = last.checked_mul(multiplier).ok_or_else(math_error!())?;
-                let ref_price: I80F48 = self.cb_reference_price.into();
-                if ref_price == I80F48::ZERO {
-                    self.cb_reference_price = last_adjusted.into();
-                }
-                let window_ref_price: I80F48 = self.cb_window_reference_price.into();
-                if window_ref_price == I80F48::ZERO {
-                    self.cb_window_reference_price = last_adjusted.into();
-                    self.cb_window_started_at = now;
-                }
-            }
-            // Disable: zero halt + dedup state so a later re-enable starts clean.
-            // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
-            if !flag && was_enabled {
-                self.reset_cb_runtime_state(Clock::get()?.unix_timestamp);
-            }
-            self.update_flag(flag, CIRCUIT_BREAKER_ENABLED);
+            self.set_circuit_breaker_enabled(flag)?;
         }
         set_if_some!(
             self.config.cb_deviation_bps_tiers,
@@ -1381,6 +1342,45 @@ impl BankImpl for Bank {
 
     fn decrement_borrowing_position_count(&mut self) {
         self.borrowing_position_count = self.borrowing_position_count.saturating_sub(1);
+    }
+
+    /// Turns the circuit breaker on or off. Turning it on requires a cached price no older than
+    /// `CB_ENABLE_MAX_PRICE_AGE_SECONDS`. Callers accrue interest before turning it off.
+    fn set_circuit_breaker_enabled(&mut self, enabled: bool) -> MarginfiResult {
+        let was_enabled = self.get_flag(CIRCUIT_BREAKER_ENABLED);
+        // The warm cache stops a sandwiched seed, not an already-manipulated feed.
+        if enabled && !was_enabled {
+            let last: I80F48 = self.cache.last_oracle_price.into();
+            check!(
+                last > I80F48::ZERO,
+                MarginfiError::CircuitBreakerRequiresWarmCache
+            );
+            let now = Clock::get()?.unix_timestamp;
+            let age = now.saturating_sub(self.cache.last_oracle_price_timestamp);
+            check!(
+                (0..=CB_ENABLE_MAX_PRICE_AGE_SECONDS).contains(&age),
+                MarginfiError::CircuitBreakerRequiresWarmCache
+            );
+            // Same multiplier-adjusted domain as `OraclePriceWithMultiplier::cb_observation`.
+            let multiplier: I80F48 = self.cache.price_multiplier.into();
+            let last_adjusted = last.checked_mul(multiplier).ok_or_else(math_error!())?;
+            let ref_price: I80F48 = self.cb_reference_price.into();
+            if ref_price == I80F48::ZERO {
+                self.cb_reference_price = last_adjusted.into();
+            }
+            let window_ref_price: I80F48 = self.cb_window_reference_price.into();
+            if window_ref_price == I80F48::ZERO {
+                self.cb_window_reference_price = last_adjusted.into();
+                self.cb_window_started_at = now;
+            }
+        }
+        // Disable: zero halt + dedup state so a later re-enable starts clean.
+        // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
+        if !enabled && was_enabled {
+            self.reset_cb_runtime_state(Clock::get()?.unix_timestamp);
+        }
+        self.update_flag(enabled, CIRCUIT_BREAKER_ENABLED);
+        Ok(())
     }
 
     fn reset_cb_runtime_state(&mut self, now: i64) {
