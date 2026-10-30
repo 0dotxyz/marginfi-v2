@@ -16,8 +16,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS,
-        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, JUPLEND_EMERGENCY, MAX_COSTLY_POSITIONS,
+        ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, premium_liability_value, reconcile_emode_configs,
@@ -549,6 +549,13 @@ fn calc_weighted_asset_value_cached_standalone(
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
+
+            if matches!(requirement_type, RequirementType::Initial)
+                && bank.config.asset_tag == ASSET_TAG_JUPLEND
+                && bank.get_flag(JUPLEND_EMERGENCY)
+            {
+                return Ok((I80F48::ZERO, lower_price));
+            }
 
             if matches!(requirement_type, RequirementType::Initial) {
                 if let Some(discount) = bank.maybe_get_asset_weight_init_discount(lower_price)? {
@@ -3074,6 +3081,35 @@ mod test {
         .unwrap();
         assert_eq!(asset_value, I80F48::ZERO);
         assert_eq!(price, I80F48::ZERO);
+    }
+
+    #[test]
+    fn juplend_emergency_cached_health_preserves_maintenance_and_equity() {
+        let mut bank = Bank::zeroed();
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.asset_weight_init = I80F48!(0.8).into();
+        bank.config.asset_weight_maint = I80F48!(0.9).into();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt = I80F48::ONE.into();
+        bank.cache.liquidation_price_twap = I80F48::ONE.into();
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48::ONE.into();
+        let emode = ReconciledEmodeConfig::default();
+        let value = |bank: &Bank, requirement| {
+            calc_weighted_asset_value_cached_standalone(&balance, bank, requirement, &emode)
+                .unwrap()
+                .0
+        };
+        let maintenance = value(&bank, RequirementType::Maintenance);
+        let equity = value(&bank, RequirementType::Equity);
+        assert!(value(&bank, RequirementType::Initial) > I80F48::ZERO);
+        bank.flags |= JUPLEND_EMERGENCY;
+        assert_eq!(value(&bank, RequirementType::Initial), I80F48::ZERO);
+        assert_eq!(value(&bank, RequirementType::Maintenance), maintenance);
+        assert_eq!(value(&bank, RequirementType::Equity), equity);
     }
 
     #[test]

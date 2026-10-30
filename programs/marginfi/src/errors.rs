@@ -450,6 +450,8 @@ pub enum MarginfiError {
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     #[msg("Account is already at (or above) the target size")]
     InvalidResize, // 6513
+    #[msg("JupLend emergency account validation failed")]
+    JuplendEmergencyValidationFailed, // 6514
     // **************END JUPLEND ERRORS
 
     // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
@@ -793,6 +795,7 @@ impl From<u32> for MarginfiError {
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
             6513 => MarginfiError::InvalidResize,
+            6514 => MarginfiError::JuplendEmergencyValidationFailed,
             6600 => MarginfiError::BankCircuitBreakerHalted,
             6601 => MarginfiError::CircuitBreakerAdminOnly,
             6602 => MarginfiError::CircuitBreakerInvalidConfig,

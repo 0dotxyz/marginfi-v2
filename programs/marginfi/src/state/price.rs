@@ -21,7 +21,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, KAMINO_MARKET_EMERGENCY,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, JUPLEND_EMERGENCY, KAMINO_MARKET_EMERGENCY,
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -150,6 +150,11 @@ pub(crate) fn load_kamino_reserve<'info>(
 /// because the market account never reaches the pricing path.
 pub fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
     !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
+}
+
+/// Borrow power follows the last permissionless propagation of Fluid's emergency states.
+pub fn juplend_borrow_power(bank: &Bank) -> bool {
+    !bank.get_flag(JUPLEND_EMERGENCY)
 }
 
 fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
@@ -451,6 +456,8 @@ impl OraclePriceFeedAdapter {
                     .price
                     .checked_mul(multiplier)
                     .ok_or_else(math_error!())?;
+
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
@@ -961,7 +968,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                        has_borrow_power: true,
+                        has_borrow_power: juplend_borrow_power(bank),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1016,6 +1023,8 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
+
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
                     cache_raw_price,
@@ -1063,6 +1072,8 @@ impl OraclePriceFeedAdapter {
                     EXCHANGE_PRICES_PRECISION,
                 )
                 .ok_or_else(math_error!())?;
+
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
@@ -1176,6 +1187,8 @@ impl OraclePriceFeedAdapter {
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
 
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
+
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
                     cache_raw_price,
@@ -1280,6 +1293,8 @@ impl OraclePriceFeedAdapter {
 
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
+
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
@@ -3421,6 +3436,73 @@ mod tests {
         data: &'a mut [u8],
     ) -> AccountInfo<'a> {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+
+    #[test]
+    fn juplend_fixed_and_scope_emergency_preserve_price_without_borrow_power() {
+        use bytemuck::Zeroable;
+        use juplend_mocks::state::LENDING_DISCRIMINATOR;
+
+        let lending_key = Pubkey::new_unique();
+        let feed_key = Pubkey::new_unique();
+        let mut lending = JuplendLending::zeroed();
+        lending.token_exchange_price = EXCHANGE_PRICES_PRECISION as u64;
+        lending.last_update_timestamp = 1_000;
+        let mut lending_data = LENDING_DISCRIMINATOR.to_vec();
+        lending_data.extend_from_slice(bytemuck::bytes_of(&lending));
+        let mut lending_lamports = 0;
+        let lending_ai = scope_ai(
+            &lending_key,
+            &juplend_mocks::ID,
+            &mut lending_lamports,
+            &mut lending_data,
+        );
+        let mut feed_data = scope_account_data(42, 100, 2, 1_000);
+        let mut feed_lamports = 0;
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let mut bank = Bank::zeroed();
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        bank.config.oracle_keys[0] = feed_key;
+        bank.config.oracle_keys[1] = lending_key;
+        bank.config.scope_entry_index = 42;
+        bank.config.fixed_price = I80F48::ONE.into();
+        let clock = Clock {
+            unix_timestamp: 1_000,
+            ..Clock::default()
+        };
+
+        let fixed_ais = [lending_ai.clone()];
+        let scope_ais = [feed_ai.clone(), lending_ai.clone()];
+        for (setup, ais) in [
+            (OracleSetup::FixedJuplend, fixed_ais.as_slice()),
+            (OracleSetup::ScopeJuplend, scope_ais.as_slice()),
+        ] {
+            bank.config.oracle_setup = setup;
+            bank.flags &= !JUPLEND_EMERGENCY;
+            let active =
+                OraclePriceFeedAdapter::try_from_bank_with_max_age(&bank, ais, &clock, 100)
+                    .unwrap();
+            assert!(active.has_borrow_power());
+            let price = active
+                .get_price_of_type(OraclePriceType::RealTime, None, 0)
+                .unwrap();
+            bank.flags |= JUPLEND_EMERGENCY;
+            let halted =
+                OraclePriceFeedAdapter::try_from_bank_with_max_age(&bank, ais, &clock, 100)
+                    .unwrap();
+            assert!(!halted.has_borrow_power());
+            assert_eq!(
+                halted
+                    .get_price_of_type(OraclePriceType::RealTime, None, 0)
+                    .unwrap(),
+                price
+            );
+        }
     }
 
     #[test]

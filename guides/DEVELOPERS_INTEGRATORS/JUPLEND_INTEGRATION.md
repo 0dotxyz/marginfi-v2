@@ -54,6 +54,8 @@ vault`.
   assets, the liquidator/receiver claims those assets with `juplend_withdraw`.
 - Native JupLend `updateRate` (Lending program) - Used to refresh JupLend exchange rates before risk
   checks. Must run before withdraw, borrow, etc for every bank involved, in the same tx.
+- `propagate_juplend_emergency` (permissionless) - Refreshes a bank's emergency flag from the
+  global Liquidity account, the pool's TokenReserve, and Earn's supply position.
 
 ## Big Picture Overview
 
@@ -82,6 +84,27 @@ For risk checks such as borrows and liquidations, remember that Juplend pricing 
 Lending state exchange rate. Include the correct remaining risk accounts and refresh with
 `updateRate` in the same transaction for flows that do not already call it internally. Remember that
 Juplend risk accounts are the `bank, oracle, Lending` accounts, in that order.
+
+## Emergency state propagation
+
+JupLend may lock Liquidity globally, lock a token's reserve, or pause Earn's supply position. A
+keeper should monitor all three and call `propagate_juplend_emergency` for each affected bank when
+any state changes, and again after recovery. The instruction takes the bank's Lending account,
+the global Liquidity PDA, the Lending account's `token_reserves_liquidity` and
+`supply_position_on_liquidity`, and the marginfi bank. It verifies the accounts and updates the
+`JUPLEND_EMERGENCY` bank flag (bit 15); it clears the flag only when all three states are healthy.
+Malformed or incorrectly owned canonical Fluid accounts set the flag rather than clearing it.
+
+An emergency flag makes the bank's collateral worth zero for Initial health while preserving its
+oracle price, Maintenance value, and Equity value. It therefore prevents new debt backed by that
+collateral without making positions liquidatable solely because of the flag. It does not guarantee
+that JupLend withdrawals or liquidator redemptions will succeed during an emergency.
+
+The flag reflects the **last successful propagation**, not live Fluid state. Before propagation,
+new borrowing may still use collateral after Fluid has halted it; after recovery the restriction
+remains until the next propagation. Monitor and propagate every affected bank promptly, including
+newly configured banks. No Liquidity, TokenReserve, or supply-position account is added to ordinary
+risk checks. Continue refreshing Lending with `updateRate` as described above.
 
 ## Juplend Rewards
 
