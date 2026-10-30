@@ -90,8 +90,9 @@ pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
 /// less than this amount in dollars. The liquidation bonus cap still applies. This roughly covers
 /// the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
-/// Headroom `fees_fit_leverage` adds to the liquidation cuts, keeping a config off the exact
-/// fee-versus-leverage boundary where a liquidation would improve health only by rounding.
+/// Headroom `fees_fit_leverage` and `premium_fits_leverage` add to the liquidation cuts. It keeps a
+/// config or an account off the exact boundary, where a liquidation improves health only by
+/// rounding.
 pub const LIQUIDATION_HEALTH_GAIN_MARGIN: I80F48 = I80F48!(0.0001);
 /// Time after an account is tagged before the allowed liquidation premium starts to grow.
 pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour

@@ -693,8 +693,10 @@ describe("d16: Drift same-asset emode", () => {
     const sameAssetRemaining = getSameAssetRemainingGroups();
     const startRemaining =
       composeRemainingAccountsWriteableMeta(sameAssetRemaining);
-    const endRemaining =
-      composeRemainingAccountsMetaBanksOnly(sameAssetRemaining);
+    // The liquidation repays all of the debt, leaving only the Drift collateral to price
+    const endRemaining = composeRemainingAccountsMetaBanksOnly([
+      getSameAssetRemainingGroups()[0],
+    ]);
 
     await mintToTokenAccount(
       ecosystem.tokenAMint.publicKey,
@@ -756,11 +758,13 @@ describe("d16: Drift same-asset emode", () => {
           },
           driftBankrunProgram
         ),
+        // At 98x the configured max fee cannot raise health, so the liquidator must repay all debt
         await repayIx(liquidator.mrgnBankrunProgram, {
           marginfiAccount: liquidateeAccount,
           bank: regularTokenABank,
           tokenAccount: liquidator.tokenAAccount,
-          amount: RECEIVERSHIP_DRIFT_WITHDRAW,
+          amount: new BN(0),
+          repayAll: true,
           remaining: composeRemainingAccounts(sameAssetRemaining),
         }),
         await endLiquidationIx(liquidator.mrgnBankrunProgram, {
