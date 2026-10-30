@@ -280,6 +280,25 @@ pub struct KaminoBankSetup {
     pub reserve_liquidity_supply: Pubkey,
 }
 
+/// Select external and internal Kamino refreshes independently.
+#[derive(Clone, Copy, Debug)]
+pub struct KaminoRefreshOptions {
+    pub external: bool,
+    pub internal: bool,
+    /// Use a batch reserve refresh without oracle updates for the external refresh.
+    pub skip_external_price_updates: bool,
+}
+
+impl Default for KaminoRefreshOptions {
+    fn default() -> Self {
+        Self {
+            external: true,
+            internal: false,
+            skip_external_price_updates: false,
+        }
+    }
+}
+
 impl KaminoBankSetup {
     pub async fn create_user_with_liquidity(
         &self,
@@ -1287,7 +1306,7 @@ impl TestFixture {
             .unwrap()
     }
 
-    async fn process_ixs(
+    pub async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
@@ -2283,13 +2302,34 @@ impl TestFixture {
         signer_token_account: Pubkey,
         amount: u64,
     ) -> std::result::Result<(), BanksClientError> {
-        let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
-        let refresh_obligation_ix = user.make_kamino_refresh_obligation_ix(bank_f).await;
-        let deposit_ix = user
+        self.run_kamino_deposit_with_options(
+            bank_f,
+            user,
+            signer_token_account,
+            amount,
+            KaminoRefreshOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn run_kamino_deposit_with_options(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        signer_token_account: Pubkey,
+        amount: u64,
+        refresh: KaminoRefreshOptions,
+    ) -> std::result::Result<(), BanksClientError> {
+        let mut ixs = self.kamino_refresh_ixs(bank_f, user, refresh).await;
+        let mut deposit_ix = user
             .make_kamino_deposit_ix(signer_token_account, bank_f, amount)
             .await;
-
-        let ixs = vec![refresh_reserve_ix, refresh_obligation_ix, deposit_ix];
+        deposit_ix.data = marginfi::instruction::KaminoDeposit {
+            amount,
+            refresh_reserve: Some(refresh.internal),
+        }
+        .data();
+        ixs.push(deposit_ix);
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
@@ -2301,14 +2341,60 @@ impl TestFixture {
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> std::result::Result<(), BanksClientError> {
-        let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
-        let refresh_obligation_ix = user.make_kamino_refresh_obligation_ix(bank_f).await;
-        let withdraw_ix = user
+        self.run_kamino_withdraw_with_options(
+            bank_f,
+            user,
+            destination_token_account,
+            amount,
+            withdraw_all,
+            KaminoRefreshOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn run_kamino_withdraw_with_options(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        refresh: KaminoRefreshOptions,
+    ) -> std::result::Result<(), BanksClientError> {
+        let mut ixs = self.kamino_refresh_ixs(bank_f, user, refresh).await;
+        let mut withdraw_ix = user
             .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
-
-        let ixs = vec![refresh_reserve_ix, refresh_obligation_ix, withdraw_ix];
+        let flags = u8::from(withdraw_all.unwrap_or(false)) | (u8::from(refresh.internal) << 1);
+        withdraw_ix.data = marginfi::instruction::KaminoWithdraw {
+            amount,
+            flags: (flags != 0).then_some(flags),
+        }
+        .data();
+        ixs.push(withdraw_ix);
         Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
+    async fn kamino_refresh_ixs(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        refresh: KaminoRefreshOptions,
+    ) -> Vec<Instruction> {
+        let mut ixs = Vec::new();
+        if refresh.internal || refresh.skip_external_price_updates {
+            ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(800_000));
+        }
+        if refresh.external {
+            let reserve_ix = if refresh.skip_external_price_updates {
+                user.make_kamino_refresh_reserves_batch_ix(bank_f).await
+            } else {
+                user.make_kamino_refresh_reserve_ix(bank_f).await
+            };
+            ixs.push(reserve_ix);
+            ixs.push(user.make_kamino_refresh_obligation_ix(bank_f).await);
+        }
+        ixs
     }
 
     pub async fn run_drift_deposit(
