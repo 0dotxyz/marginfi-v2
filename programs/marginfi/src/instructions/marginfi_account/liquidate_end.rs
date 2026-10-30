@@ -32,8 +32,8 @@ use marginfi_type_crate::{
 /// small flat sol fee to the global fee wallet.
 /// * Fails if the account lost more health than the value the liquidator took out of it
 /// * Fails if a solvent account would be left in bad debt
-/// * Fails if a solvent account keeps any debt when a liquidation at the base premium cannot raise
-///   its health
+/// * Fails if the account keeps any debt when a liquidation at the base premium cannot raise its
+///   health, even if the account is in bad debt
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed). A tag grows that allowance over time, except on emode-boosted
 ///   collateral or an account already in bad debt, which hold it at the configured base.
@@ -55,14 +55,13 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
     let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
-    let must_close_out = !in_bad_debt
-        && !premium_fits_leverage(
-            liq_record.cache.asset_value_maint.into(),
-            liq_record.cache.liability_value_maint.into(),
-            pre_assets_equity,
-            pre_liabs_equity,
-            base_premium,
-        );
+    let must_close_out = !premium_fits_leverage(
+        liq_record.cache.asset_value_maint.into(),
+        liq_record.cache.liability_value_maint.into(),
+        pre_assets_equity,
+        pre_liabs_equity,
+        base_premium,
+    );
 
     // Read before `end_receivership` updates them. The receivership legs leave both alone: the
     // cache write and the lending-only tag clear are both suspended while in receivership.

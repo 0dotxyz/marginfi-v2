@@ -56,7 +56,8 @@ pub fn tag_after_liquidation(
 
 /// Whether a liquidation paying `premium` raises maintenance health by more than rounding. Each
 /// dollar repaid lowers the requirement by `liabs_maint / liabs_equity`. Each of the `1 + premium`
-/// dollars seized for it lowers weighted collateral by `assets_maint / assets_equity`.
+/// dollars seized for it lowers weighted collateral by `assets_maint / assets_equity`. An account
+/// with no collateral cannot pay a premium, so it never fits.
 pub fn premium_fits_leverage(
     assets_maint: I80F48,
     liabs_maint: I80F48,
@@ -269,6 +270,17 @@ mod tests {
             ASSETS,
             I80F48!(1050.2),
             ASSETS,
+            LIABS,
+            BASE
+        ));
+    }
+
+    #[test]
+    fn premium_never_fits_without_collateral() {
+        assert!(!premium_fits_leverage(
+            I80F48::ZERO,
+            I80F48!(1050),
+            I80F48::ZERO,
             LIABS,
             BASE
         ));

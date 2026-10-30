@@ -2558,6 +2558,107 @@ async fn liquidate_receiver_high_leverage_must_close_out() -> anyhow::Result<()>
     Ok(())
 }
 
+// Bad debt does not lift the closeout, so the liquidator absorbs the shortfall.
+#[tokio::test]
+async fn liquidate_receiver_high_leverage_bad_debt_must_close_out() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) =
+        setup_high_leverage_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    // SOL falls to $9.50: $19 of collateral against $19.50 of debt
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 9_500_000_000, 0, 0)
+        .await;
+    let payer = test_f.payer().clone();
+
+    // Seizing all $19 of SOL for $18.10 repaid leaves $1.40 of debt and no collateral
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix_include_closing_bank(
+                liquidator_sol_acc.key,
+                sol_bank,
+                2.0,
+                Some(true),
+            )
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 18.1, None)
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![sol_bank.key],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::LiquidationCloseoutRequired);
+    }
+
+    // Repaying all $19.50 for the $19 of SOL closes the account out
+    let ixs = vec![
+        liquidatee.make_start_liquidation_ix(record_pk, payer).await,
+        liquidatee
+            .make_bank_withdraw_ix_include_closing_bank(
+                liquidator_sol_acc.key,
+                sol_bank,
+                2.0,
+                Some(true),
+            )
+            .await,
+        liquidatee
+            .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 19.5, Some(true))
+            .await,
+        liquidatee
+            .make_end_liquidation_ix(
+                record_pk,
+                payer,
+                test_f.marginfi_group.fee_state,
+                test_f.marginfi_group.fee_wallet,
+                vec![usdc_bank.key, sol_bank.key],
+            )
+            .await,
+    ];
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    assert_eq!(liquidator_sol_acc.balance().await, native!(2, "SOL"));
+    assert!(liquidatee
+        .load()
+        .await
+        .lending_account
+        .get_active_balances_iter()
+        .next()
+        .is_none());
+    Ok(())
+}
+
 // The premium comes out of the account's $0.50 of equity, so it stops where the account would be
 // left in bad debt. At a 0.9 weight the 5% premium raises health, so partials are allowed here.
 #[tokio::test]
