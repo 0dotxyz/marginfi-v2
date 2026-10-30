@@ -20,6 +20,15 @@ use fixed::types::I80F48;
 use super::Pubkey;
 use super::WrappedI80F48;
 
+/// The Scope entries a bank prices from: `entry_index` for the spot price and, when set,
+/// `smoothed_entry` for the time-weighted price. Two banks price the same only if both match. The
+/// default (entry 0, no smoothed entry) stands for banks that do not read Scope.
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
+pub struct ScopePriceSelection {
+    pub entry_index: u16,
+    pub smoothed_entry: Option<u16>,
+}
+
 assert_struct_size!(BankConfig, 544);
 assert_struct_align!(BankConfig, 8);
 #[repr(C)]
@@ -60,7 +69,10 @@ pub struct BankConfig {
     pub cb_window_max_up_bps: u16,
     /// CB long-window downward move cap in bps; `0` uses the `CB_WINDOW_MAX_DOWN_BPS` default.
     pub cb_window_max_down_bps: u16,
-    pub _pad0: [u8; 2], // Bank state (1) + Oracle Setup (1) + 2x u16 (4) + 2 = 8
+    /// Scope entry for the time-weighted price, a `PythLazerEMA` or `ScopeTwap*` slot of the
+    /// price entry; 0 = none (entry 0 can never be a smoothed entry). Read only on Scope-priced
+    /// setups. Occupies what was previously `_pad0: [u8; 2]`, so the layout is unchanged.
+    pub scope_smoothed_entry_index: u16, // Bank state (1) + Oracle Setup (1) + 3x u16 (6) = 8
 
     /// Maximum total borrows allowed in this bank. `u64::MAX` disables the limit; 0 blocks
     /// borrowing. All integration banks (Kamino, Juplend, etc) do not support borrowing and have
@@ -108,8 +120,9 @@ pub struct BankConfig {
     /// Time window in seconds for the oracle price feed to be considered live.
     pub oracle_max_age: u16,
 
-    /// Entry index into the Scope `OraclePrices` price list. Only read by the Scope setups
-    /// (`Scope`, `ScopeKamino`, `ScopeJuplend`); ignored (and zero) for every other setup.
+    /// Entry index into the Scope `OraclePrices` price list. Read by every Scope-priced setup
+    /// (`OracleSetup::is_scope_priced`); ignored for every other bank (older oracle transitions
+    /// may have left a nonzero value).
     /// Occupies what was previously `_padding0`, so the layout is unchanged.
     pub scope_entry_index: u16,
 
@@ -154,7 +167,7 @@ impl Default for BankConfig {
             oracle_keys: [Pubkey::default(); MAX_ORACLE_KEYS],
             cb_window_max_up_bps: 0,
             cb_window_max_down_bps: 0,
-            _pad0: [0; 2],
+            scope_smoothed_entry_index: 0,
             risk_tier: RiskTier::Isolated,
             asset_tag: ASSET_TAG_DEFAULT,
             config_flags: 0,
@@ -175,6 +188,34 @@ impl Default for BankConfig {
 }
 
 impl BankConfig {
+    /// Scope entries used by the bank's price identity. Ignore legacy entries left behind by
+    /// earlier transitions away from Scope when the current setup does not read them.
+    #[inline]
+    pub fn effective_scope_selection(&self) -> ScopePriceSelection {
+        if self.oracle_setup.is_scope_priced() {
+            ScopePriceSelection {
+                entry_index: self.scope_entry_index,
+                smoothed_entry: self.scope_smoothed_entry(),
+            }
+        } else {
+            ScopePriceSelection::default()
+        }
+    }
+
+    /// `Some(entry_index)` when the time-weighted price is read from a Scope entry. Only
+    /// Scope-priced setups (`OracleSetup::is_scope_priced`) can carry one; every move to another
+    /// setup clears it, and a leftover index is never read.
+    #[inline]
+    pub fn scope_smoothed_entry(&self) -> Option<u16> {
+        (self.oracle_setup.is_scope_priced() && self.scope_smoothed_entry_index != 0)
+            .then_some(self.scope_smoothed_entry_index)
+    }
+
+    /// Points the time-weighted price at a Scope entry (`Some`) or back to the spot price (`None`).
+    pub fn set_scope_smoothed_entry(&mut self, entry_index: Option<u16>) {
+        self.scope_smoothed_entry_index = entry_index.unwrap_or(0);
+    }
+
     #[inline]
     pub fn get_weight(
         &self,
@@ -519,7 +560,7 @@ impl From<BankConfigCompact> for BankConfig {
             oracle_keys: keys,
             cb_window_max_up_bps: 0,
             cb_window_max_down_bps: 0,
-            _pad0: [0; 2],
+            scope_smoothed_entry_index: 0,
             borrow_limit: config.borrow_limit,
             risk_tier: config.risk_tier,
             asset_tag: config.asset_tag,

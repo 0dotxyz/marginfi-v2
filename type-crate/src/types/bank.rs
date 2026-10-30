@@ -323,6 +323,7 @@ impl Bank {
             && self.config.oracle_keys[0] == same_asset.oracle_key
             && self.config.oracle_setup.feed_family() == same_asset.feed_family
             && I80F48::from(self.config.fixed_price) == same_asset.fixed_price
+            && self.config.effective_scope_selection() == same_asset.scope_selection
             && self.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE != 0
             && matches!(self.config.risk_tier, RiskTier::Collateral)
             && !matches!(
@@ -437,6 +438,14 @@ pub enum OracleSetup {
     PTFixed,                // 26
     ScopeKamino,            // 27
     ScopeJuplend,           // 28
+    ScopeLST,               // 29
+    ScopeMSOL,              // 30
+    ScopeKaminoLST,         // 31
+    ScopePT,                // 32
+    StakedWithScope,        // 33
+    ScopeKaminoMSOL,        // 34
+    ScopeJuplendMSOL,       // 35
+    ScopeJuplendLST,        // 36
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -473,8 +482,41 @@ impl OracleSetup {
             26 => Some(Self::PTFixed),
             27 => Some(Self::ScopeKamino),
             28 => Some(Self::ScopeJuplend),
+            29 => Some(Self::ScopeLST),
+            30 => Some(Self::ScopeMSOL),
+            31 => Some(Self::ScopeKaminoLST),
+            32 => Some(Self::ScopePT),
+            33 => Some(Self::StakedWithScope),
+            34 => Some(Self::ScopeKaminoMSOL),
+            35 => Some(Self::ScopeJuplendMSOL),
+            36 => Some(Self::ScopeJuplendLST),
             _ => None,
         }
+    }
+
+    /// Multiplier setups whose base (underlying/USD) price is Scope entry `scope_entry_index` of
+    /// the `OraclePrices` account in `oracle_keys[0]`, instead of a Pyth push feed. Each is the
+    /// Scope-fed twin of a Pyth setup and applies the same rate on top.
+    pub fn reads_scope_base_feed(self) -> bool {
+        matches!(
+            self,
+            Self::StakedWithScope
+                | Self::ScopeMSOL
+                | Self::ScopeLST
+                | Self::ScopeKaminoLST
+                | Self::ScopePT
+                | Self::ScopeKaminoMSOL
+                | Self::ScopeJuplendMSOL
+                | Self::ScopeJuplendLST
+        )
+    }
+
+    /// Every setup whose price comes from a Scope entry: the plain and venue Scope setups plus the
+    /// Scope-fed multiplier setups. These are the setups that may carry a smoothed entry and
+    /// whose `scope_entry_index` is part of their price identity.
+    pub fn is_scope_priced(self) -> bool {
+        matches!(self, Self::Scope | Self::ScopeKamino | Self::ScopeJuplend)
+            || self.reads_scope_base_feed()
     }
 
     pub fn is_fixed_price(self) -> bool {
@@ -484,10 +526,9 @@ impl OracleSetup {
         )
     }
 
-    /// Base feed semantics for `oracle_keys[0]`. Setups in the same family read that key as the
-    /// same kind of feed account *and* derive the mint's price from it the same way, so two banks
-    /// sharing a family and `oracle_keys[0]` price from the same source. Venue integrations
-    /// stay in their base family.
+    /// Base-feed and multiplier family used for same-asset matching. Venue integrations stay in
+    /// their base family. The feed key, effective Scope entries, and PT start price are checked
+    /// separately as part of the price identity.
     /// Returns `None` for fixed-price, deprecated, and unset setups.
     pub fn feed_family(self) -> Option<OracleFeedFamily> {
         match self {
@@ -508,6 +549,22 @@ impl OracleSetup {
                 Some(OracleFeedFamily::LSTPythPull)
             }
             Self::PTPyth => Some(OracleFeedFamily::PtPythPull),
+            // Scope-fed twins of the multiplier setups: same rate, a Scope entry for the base
+            // price, so they never pair with their Pyth-fed twins (different `oracle_keys[0]`
+            // anyway) nor with plain Scope.
+            Self::StakedWithScope => Some(OracleFeedFamily::StakedScope),
+            Self::ScopeMSOL | Self::ScopeKaminoMSOL | Self::ScopeJuplendMSOL => {
+                Some(OracleFeedFamily::ScopeMSOL)
+            }
+            Self::ScopeLST | Self::ScopeKaminoLST | Self::ScopeJuplendLST => {
+                Some(OracleFeedFamily::ScopeLST)
+            }
+            Self::ScopePT => Some(OracleFeedFamily::ScopePT),
+            // Scope spot and optional smoothed entries are compared separately through
+            // `effective_scope_selection()`.
+            Self::Scope | Self::ScopeKamino | Self::ScopeJuplend => {
+                Some(OracleFeedFamily::ScopeFeed)
+            }
             Self::SwitchboardPull
             | Self::KaminoSwitchboardPull
             | Self::DriftSwitchboardPull
@@ -520,12 +577,6 @@ impl OracleSetup {
             | Self::FixedKamino
             | Self::FixedDrift
             | Self::FixedJuplend
-            // Scope's price identity is (oracle_keys[0], scope_entry_index); a family that only
-            // covers `oracle_keys[0]` cannot express that, so Scope banks (venue-wrapped or not)
-            // never pair.
-            | Self::Scope
-            | Self::ScopeKamino
-            | Self::ScopeJuplend
             | Self::PTFixed => None,
         }
     }
@@ -540,11 +591,17 @@ pub enum OracleFeedFamily {
     MSOLPythPull,
     LSTPythPull,
     PtPythPull,
+    ScopeFeed,
+    StakedScope,
+    ScopeMSOL,
+    ScopeLST,
+    ScopePT,
 }
 
 #[cfg(test)]
 mod feed_family_tests {
     use super::*;
+    use crate::types::{ScopePriceSelection, StakedSettings};
 
     /// Integration setups read `oracle_keys[0]` as the same feed the native bank does, so they stay
     /// price-equivalent to it. Staked derives the mint's price from a pool multiplier over a proxy
@@ -587,16 +644,116 @@ mod feed_family_tests {
         }
     }
 
-    /// A Scope bank is identified by `(oracle_keys[0], scope_entry_index)`, which no family can
-    /// express, so neither the plain setup nor its venue wrappers may ever pair with anything.
+    /// Plain Scope and its venue wrappers read `oracle_keys[0]` the same way, so they share a
+    /// family (the entry index is compared separately), distinct from every Pyth/Switchboard one.
     #[test]
-    fn scope_setups_have_no_feed_family() {
+    fn scope_setups_share_their_own_feed_family() {
         for setup in [
             OracleSetup::Scope,
             OracleSetup::ScopeKamino,
             OracleSetup::ScopeJuplend,
         ] {
-            assert_eq!(setup.feed_family(), None);
+            assert_eq!(setup.feed_family(), Some(OracleFeedFamily::ScopeFeed));
+        }
+        for other in [
+            OracleSetup::PythPushOracle,
+            OracleSetup::SwitchboardPull,
+            OracleSetup::PythLST,
+            OracleSetup::PythMSOL,
+            OracleSetup::PTPyth,
+            OracleSetup::StakedWithPythPush,
+        ] {
+            assert_ne!(other.feed_family(), Some(OracleFeedFamily::ScopeFeed));
+        }
+    }
+
+    /// A smoothed entry is only ever read on a Scope-priced setup.
+    #[test]
+    fn scope_smoothed_entry_is_only_read_on_scope_priced_setups() {
+        let mut config = BankConfig::default();
+        config.scope_entry_index = 13;
+        config.set_scope_smoothed_entry(Some(113));
+        for value in 0..=u8::MAX {
+            let Some(setup) = OracleSetup::from_u8(value) else {
+                continue;
+            };
+            config.oracle_setup = setup;
+            if setup.is_scope_priced() {
+                assert_eq!(config.scope_smoothed_entry(), Some(113), "{setup:?}");
+                assert_eq!(config.effective_scope_selection().smoothed_entry, Some(113));
+            } else {
+                assert_eq!(config.scope_smoothed_entry(), None, "{setup:?}");
+                assert_eq!(
+                    config.effective_scope_selection(),
+                    ScopePriceSelection::default(),
+                    "{setup:?}"
+                );
+            }
+        }
+
+        let mut settings = StakedSettings::default();
+        settings.set_scope_base_feed(Some(13));
+        settings.set_scope_smoothed_entry(Some(113));
+        assert_eq!(settings.scope_smoothed_entry(), Some(113));
+        settings.set_scope_base_feed(None);
+        assert_eq!(settings.scope_smoothed_entry(), None);
+        assert_eq!(settings.scope_smoothed_entry_index, 0);
+    }
+
+    /// Scope-fed multiplier setups get their own families, distinct from their Pyth twins, plain
+    /// Scope, and each other; venue wrappers stay in their native multiplier's family.
+    #[test]
+    fn scope_fed_multiplier_setups_have_their_own_families() {
+        let natives = [
+            (
+                OracleSetup::StakedWithScope,
+                OracleSetup::StakedWithPythPush,
+            ),
+            (OracleSetup::ScopeMSOL, OracleSetup::PythMSOL),
+            (OracleSetup::ScopeLST, OracleSetup::PythLST),
+            (OracleSetup::ScopePT, OracleSetup::PTPyth),
+        ];
+        for (scope_fed, pyth_fed) in natives {
+            assert!(scope_fed.reads_scope_base_feed() && scope_fed.is_scope_priced());
+            assert!(!pyth_fed.reads_scope_base_feed() && !pyth_fed.is_scope_priced());
+            let family = scope_fed.feed_family();
+            assert!(family.is_some(), "{scope_fed:?}");
+            assert_ne!(family, pyth_fed.feed_family(), "{scope_fed:?}");
+            assert_ne!(family, Some(OracleFeedFamily::ScopeFeed), "{scope_fed:?}");
+        }
+        for (i, (a, _)) in natives.iter().enumerate() {
+            for (b, _) in &natives[i + 1..] {
+                assert_ne!(a.feed_family(), b.feed_family());
+            }
+        }
+        // Venue wrappers share their native multiplier's family.
+        for (wrapper, native) in [
+            (OracleSetup::ScopeKaminoLST, OracleSetup::ScopeLST),
+            (OracleSetup::ScopeJuplendLST, OracleSetup::ScopeLST),
+            (OracleSetup::ScopeKaminoMSOL, OracleSetup::ScopeMSOL),
+            (OracleSetup::ScopeJuplendMSOL, OracleSetup::ScopeMSOL),
+        ] {
+            assert!(wrapper.reads_scope_base_feed(), "{wrapper:?}");
+            assert_eq!(wrapper.feed_family(), native.feed_family(), "{wrapper:?}");
+        }
+        for setup in [
+            OracleSetup::Scope,
+            OracleSetup::ScopeKamino,
+            OracleSetup::ScopeJuplend,
+        ] {
+            assert!(
+                setup.is_scope_priced() && !setup.reads_scope_base_feed(),
+                "{setup:?}"
+            );
+        }
+        for value in 0..=u8::MAX {
+            let Some(setup) = OracleSetup::from_u8(value) else {
+                continue;
+            };
+            assert_eq!(setup as u8, value);
+            if setup.is_scope_priced() {
+                assert!(setup.feed_family().is_some(), "{setup:?}");
+            }
         }
     }
 

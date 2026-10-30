@@ -136,6 +136,7 @@ describe("k21: Scope-priced Kamino bank", () => {
   ) => {
     const tx = new Transaction().add(
       await configureBankOracleScope(groupAdmin.mrgnBankrunProgram, {
+        type: ORACLE_SETUP_SCOPE_KAMINO,
         bank: scopeKaminoBank,
         oracle: feed,
         entryIndex,

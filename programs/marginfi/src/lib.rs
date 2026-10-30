@@ -233,17 +233,33 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_oracle(ctx, setup, oracle)
     }
 
-    /// (governance_admin only) Point a bank at a Scope feed entry. Picks `Scope`, `ScopeKamino`, or
-    /// `ScopeJuplend` from the bank's asset tag; Kamino/JupLend banks pass their reserve/lending
-    /// account after the feed in remaining accounts.
+    /// (governance_admin only) Point a bank at a Scope feed entry (table on the handler in
+    /// `marginfi_group`).
+    /// * setup - `OracleSetup` as u8: `Scope` / `ScopeKamino` / `ScopeJuplend`, or a Scope-fed
+    ///   multiplier setup (`ScopeMSOL` / `ScopeLST` / `ScopePT`, or the `ScopeKamino*` /
+    ///   `ScopeJuplend*` mSOL / LST wrappers), which reads the Scope entry as its base price
     /// * oracle - the feed's `OraclePrices` account
     /// * entry_index - which of the 512 entries in that account prices this bank
+    /// * pt_start_price - the PT linear-pricing start price, in (0, 1]; required for `ScopePT`
+    ///   and rejected for every other setup
+    /// * smoothed_entry_index - optional entry for the time-weighted (initial margin) price, the
+    ///   `PythLazerEMA` of `entry_index` in the same feed (taken on trust like `entry_index`)
     pub fn lending_pool_configure_bank_oracle_scope(
         ctx: Context<LendingPoolConfigureBankOracle>,
+        setup: u8,
         oracle: Pubkey,
         entry_index: u16,
+        pt_start_price: Option<WrappedI80F48>,
+        smoothed_entry_index: Option<u16>,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_configure_bank_oracle_scope(ctx, oracle, entry_index)
+        marginfi_group::lending_pool_configure_bank_oracle_scope(
+            ctx,
+            setup,
+            oracle,
+            entry_index,
+            pt_start_price,
+            smoothed_entry_index,
+        )
     }
 
     /// (governance_admin only)
@@ -929,6 +945,11 @@ pub mod marginfi {
     }
 
     /// (slow governance_admin only) Edit the staked collateral settings for the group.
+    /// * `base_feed` - switch the SOL/USD source between the Pyth push oracle and a Scope entry;
+    ///   staked banks propagate as `StakedWithPythPush` / `StakedWithScope` accordingly
+    /// * `smoothed_entry` - set (`Scope { entry_index }`) or disable the Scope smoothed entry.
+    ///   Switching `base_feed` to Pyth clears it; changing the Scope `oracle` / entry while one
+    ///   is set requires restating or disabling it.
     pub fn edit_staked_settings(
         ctx: Context<EditStakedSettings>,
         settings: StakedSettingsEditConfig,

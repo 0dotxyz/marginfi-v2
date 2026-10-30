@@ -543,7 +543,7 @@ impl FuzzTest {
                 vec![bank.config.oracle_keys[0]]
             }
 
-            OracleSetup::StakedWithPythPush => vec![
+            OracleSetup::StakedWithPythPush | OracleSetup::StakedWithScope => vec![
                 bank.config.oracle_keys[0],
                 bank.config.oracle_keys[1],
                 bank.config.oracle_keys[2],
@@ -570,14 +570,23 @@ impl FuzzTest {
                 vec![bank.config.oracle_keys[0]]
             }
 
-            OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
+            OracleSetup::PythMSOL
+            | OracleSetup::PythLST
+            | OracleSetup::PTPyth
+            | OracleSetup::ScopeMSOL
+            | OracleSetup::ScopeLST
+            | OracleSetup::ScopePT => {
                 vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
             }
 
             OracleSetup::KaminoMSOL
             | OracleSetup::JuplendMSOL
             | OracleSetup::KaminoLST
-            | OracleSetup::JuplendLST => vec![
+            | OracleSetup::JuplendLST
+            | OracleSetup::ScopeKaminoMSOL
+            | OracleSetup::ScopeJuplendMSOL
+            | OracleSetup::ScopeKaminoLST
+            | OracleSetup::ScopeJuplendLST => vec![
                 bank.config.oracle_keys[0],
                 bank.config.oracle_keys[1],
                 bank.config.oracle_keys[2],

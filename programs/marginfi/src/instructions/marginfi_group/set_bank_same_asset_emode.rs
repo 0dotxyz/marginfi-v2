@@ -31,7 +31,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
         check!(
             bank.config.oracle_setup.feed_family().is_some(),
             MarginfiError::BadEmodeConfig,
-            "same-asset e-mode requires a Pyth push or Switchboard pull based oracle setup"
+            "same-asset e-mode requires a Pyth push, Switchboard pull, or Scope based oracle setup"
         );
         check!(
             bank.config.oracle_keys[0] != Pubkey::default(),

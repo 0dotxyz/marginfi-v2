@@ -148,9 +148,9 @@ impl BankConfigImpl for BankConfig {
         }
     }
 
-    /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring
-    ///   `OracleSetup::StakedWithPythPush` on initial setup. If configuring a staked bank after
-    ///   initial setup, can be omitted.
+    /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring a staked
+    ///   setup (`StakedWithPythPush` / `StakedWithScope`) on initial setup. If configuring a
+    ///   staked bank after initial setup, can be omitted.
     fn validate_oracle_setup<'info>(
         &self,
         bank_mint: Pubkey,

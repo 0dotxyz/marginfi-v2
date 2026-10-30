@@ -398,7 +398,7 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
             vec![keys[1]]
         }
-        OracleSetup::StakedWithPythPush => {
+        OracleSetup::StakedWithPythPush | OracleSetup::StakedWithScope => {
             let onramp = if keys[3] != Pubkey::default() {
                 keys[3]
             } else if bank.integration_acc_1 != Pubkey::default() {
@@ -424,15 +424,22 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::JuplendSwitchboardPull
         | OracleSetup::ScopeKamino
         | OracleSetup::ScopeJuplend => vec![keys[0], keys[1]],
-        // Pyth + Marinade State / SPL StakePool / Exponent vault
-        OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
-            vec![keys[0], keys[1]]
-        }
-        // Pyth + reserve/lending + Marinade State / SPL StakePool
+        // Pyth or Scope feed + Marinade State / SPL StakePool / Exponent vault
+        OracleSetup::PythMSOL
+        | OracleSetup::PythLST
+        | OracleSetup::PTPyth
+        | OracleSetup::ScopeMSOL
+        | OracleSetup::ScopeLST
+        | OracleSetup::ScopePT => vec![keys[0], keys[1]],
+        // Pyth or Scope feed + reserve/lending + Marinade State / SPL StakePool
         OracleSetup::KaminoMSOL
         | OracleSetup::JuplendMSOL
         | OracleSetup::KaminoLST
-        | OracleSetup::JuplendLST => vec![keys[0], keys[1], keys[2]],
+        | OracleSetup::JuplendLST
+        | OracleSetup::ScopeKaminoMSOL
+        | OracleSetup::ScopeJuplendMSOL
+        | OracleSetup::ScopeKaminoLST
+        | OracleSetup::ScopeJuplendLST => vec![keys[0], keys[1], keys[2]],
     };
 
     out.retain(|pk| *pk != Pubkey::default());
