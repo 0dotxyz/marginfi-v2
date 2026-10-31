@@ -541,20 +541,19 @@ async fn pulse_clears_the_tag_when_healthy() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A withdraw proves init health, which clears the tag while the account still carries debt.
-#[tokio::test]
-async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
-    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
-        setup_unhealthy_liquidatee().await?;
-    let sol_bank = test_f.get_bank(&BankMint::Sol);
+/// Tags the liquidatee at `T0`, then restores the SOL weights so it is init-healthy while keeping
+/// its $10 USDC debt.
+async fn tag_then_restore_init_health(
+    test_f: &TestFixture,
+    liquidatee: &MarginfiAccountFixture,
+) -> anyhow::Result<()> {
+    set_timestamp(test_f, T0).await;
+    refresh_oracles(test_f).await;
+    send_tag(test_f, liquidatee, 0).await?;
+    assert_eq!(load_tag(liquidatee).await, T0);
 
-    set_timestamp(&test_f, T0).await;
-    refresh_oracles(&test_f).await;
-    send_tag(&test_f, &liquidatee, 0).await?;
-    assert_eq!(load_tag(&liquidatee).await, T0);
-
-    // Restore weights so the account is init-healthy while keeping its $10 USDC debt
-    sol_bank
+    test_f
+        .get_bank(&BankMint::Sol)
         .update_config(
             BankConfigOpt {
                 asset_weight_init: Some(I80F48!(1).into()),
@@ -564,8 +563,18 @@ async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
             None,
         )
         .await?;
-    set_timestamp(&test_f, T0 + 60).await;
-    refresh_oracles(&test_f).await;
+    set_timestamp(test_f, T0 + 60).await;
+    refresh_oracles(test_f).await;
+    Ok(())
+}
+
+/// A withdraw proves init health, which clears the tag while the account still carries debt.
+#[tokio::test]
+async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    tag_then_restore_init_health(&test_f, &liquidatee).await?;
 
     let sol_acc = test_f
         .sol_mint
@@ -573,6 +582,33 @@ async fn withdraw_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
         .await;
     liquidatee
         .try_bank_withdraw_with_authority(sol_acc.key, sol_bank, 0.1, None, &liquidatee_authority)
+        .await?;
+
+    assert_eq!(load_tag(&liquidatee).await, 0);
+    Ok(())
+}
+
+/// A position transfer proves init health, which clears the tag while the account still carries
+/// debt.
+#[tokio::test]
+async fn position_transfer_clears_the_tag_once_init_healthy() -> anyhow::Result<()> {
+    let (test_f, liquidatee, _liquidator, _record_pk, _liquidator_usdc_acc, liquidatee_authority) =
+        setup_unhealthy_liquidatee().await?;
+    tag_then_restore_init_health(&test_f, &liquidatee).await?;
+
+    let destination = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
+    liquidatee
+        .try_position_transfer_with_authority(
+            &destination,
+            test_f.get_bank(&BankMint::Sol),
+            0.5,
+            &liquidatee_authority,
+        )
         .await?;
 
     assert_eq!(load_tag(&liquidatee).await, 0);

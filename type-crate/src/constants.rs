@@ -26,6 +26,7 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 pub const REBALANCE_ORDER_SEED: &str = "rebalance_order";
 pub const REBALANCE_RECORD_SEED: &str = "rebalance_record";
 pub const REBALANCE_FEE_POOL_SEED: &str = "rebalance_fee_pool";
+pub const POSITION_ESCROW_SEED: &str = "position_escrow";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -269,6 +270,7 @@ pub mod discriminators {
     pub const REBALANCE_RECORD: [u8; 8] = [190, 69, 228, 114, 34, 217, 70, 102];
     pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
     pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
+    pub const POSITION_ESCROW: [u8; 8] = [154, 108, 125, 210, 230, 9, 90, 231];
 }
 
 pub mod ix_discriminators {

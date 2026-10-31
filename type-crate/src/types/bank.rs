@@ -93,6 +93,7 @@ pub struct Bank {
     /// * For Kamino banks, this is the quantity of collateral tokens (NOT liquidity tokens) in the
     ///   bank, and also uses `mint_decimals`, though the mint itself will always show (6) decimals
     ///   exactly (i.e Kamino ignores this and treats it as if it was using `mint_decimals`)
+    /// * Includes `total_escrowed_asset_shares`.
     pub total_asset_shares: WrappedI80F48,
 
     /// Unix timestamp (i64) of the last interest accrual
@@ -251,14 +252,18 @@ pub struct Bank {
     /// * 0 on banks that never activated premium.
     pub premium_activated_at: i64,
 
-    pub _padding_1: [[u64; 8]; 32],
+    /// Asset shares that position escrows hold for receivers who have not accepted them yet. Part
+    /// of `total_asset_shares`, so depositors' balances sum to `total_asset_shares` minus this.
+    pub total_escrowed_asset_shares: WrappedI80F48,
+    pub _padding_1: [[u64; 8]; 31],
+    pub _padding_2: [u64; 6],
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
     /// Struct size of the PREVIOUS (v1) bank layout: the size of accounts created before
-    /// `_padding_1` existed, and a byte-identical prefix of the current layout.
+    /// `total_escrowed_asset_shares` existed, and a byte-identical prefix of the current layout.
     pub const V1_LEN: usize = 1856;
 
     #[inline]

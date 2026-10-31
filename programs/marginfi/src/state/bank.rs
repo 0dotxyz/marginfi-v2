@@ -207,6 +207,7 @@ pub trait BankImpl {
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
+    fn change_escrowed_asset_shares(&mut self, shares: I80F48) -> MarginfiResult;
     fn maybe_get_asset_weight_init_discount(&self, price: I80F48)
         -> MarginfiResult<Option<I80F48>>;
     fn change_liability_shares(
@@ -419,6 +420,16 @@ impl BankImpl for Bank {
 
         self.total_asset_shares = new_total_shares.into();
 
+        Ok(())
+    }
+
+    /// Changes both `total_asset_shares` and `total_escrowed_asset_shares` by `shares`.
+    fn change_escrowed_asset_shares(&mut self, shares: I80F48) -> MarginfiResult {
+        self.change_asset_shares(shares, true)?;
+        self.total_escrowed_asset_shares = I80F48::from(self.total_escrowed_asset_shares)
+            .checked_add(shares)
+            .ok_or_else(math_error!())?
+            .into();
         Ok(())
     }
 

@@ -41,7 +41,7 @@ solana-borsh = { workspace = true }
 solana-instructions-sysvar = { workspace = true }
 solana-msg = { workspace = true }
 
-anchor-lang = { workspace = true }
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl = { workspace = true }
 
 pyth-solana-receiver-sdk = { workspace = true }

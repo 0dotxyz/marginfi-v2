@@ -543,7 +543,22 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    // **************END SCOPE ERRORS
+
+    // ************** BEGIN POSITION TRANSFER ERRORS (starting at 6900)
+    #[msg("Account is not allowed to receive position transfers")]
+    PositionTransferReceiveDisabled = 900, // 6900
+    #[msg("Invalid position transfer amount")]
+    InvalidPositionTransferAmount, // 6901
+    #[msg("Insufficient funds for position transfer")]
+    PositionTransferInsufficientFunds, // 6902
+    #[msg("Cannot transfer a position to the same account")]
+    PositionTransferIdenticalAccounts, // 6903
+    #[msg("Receiving debt or a new position requires the destination authority's consent")]
+    PositionTransferConsentRequired, // 6904
+    #[msg("Only the receiver may return an escrowed position before it expires")]
+    PositionEscrowNotExpired, // 6905
+                              // ************** END POSITION TRANSFER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -834,6 +849,14 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+
+            // Position-transfer errors (starting at 6900)
+            6900 => MarginfiError::PositionTransferReceiveDisabled,
+            6901 => MarginfiError::InvalidPositionTransferAmount,
+            6902 => MarginfiError::PositionTransferInsufficientFunds,
+            6903 => MarginfiError::PositionTransferIdenticalAccounts,
+            6904 => MarginfiError::PositionTransferConsentRequired,
+            6905 => MarginfiError::PositionEscrowNotExpired,
 
             _ => MarginfiError::InternalLogicError,
         }

@@ -251,6 +251,50 @@ pub struct LendingAccountWithdrawEvent {
     pub share_amount: WrappedI80F48,
 }
 
+#[event]
+pub struct LendingAccountTransferPositionEvent {
+    pub header: AccountEventHeader,
+    pub source_account: Pubkey,
+    pub source_account_authority: Pubkey,
+    pub destination_account: Pubkey,
+    pub destination_account_authority: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub is_liability: bool,
+    pub transfer_amount: u64,
+    pub transfer_share_amount: WrappedI80F48,
+    pub premium_carried: WrappedI80F48,
+    pub protocol_fee_lamports: u32,
+}
+
+#[event]
+pub struct LendingAccountEscrowPositionEvent {
+    pub header: AccountEventHeader,
+    pub position_escrow: Pubkey,
+    pub receiver_account: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub share_amount: WrappedI80F48,
+    /// Shares the escrow holds after this send.
+    pub escrow_shares: WrappedI80F48,
+    pub expires_at: i64,
+    pub protocol_fee_lamports: u32,
+}
+
+#[event]
+pub struct PositionEscrowReleasedEvent {
+    /// `marginfi_account` is the account the shares landed in.
+    pub header: AccountEventHeader,
+    pub position_escrow: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// True when the shares went back to the sender, false when the receiver took them.
+    pub returned: bool,
+    pub amount: u64,
+    pub share_amount: WrappedI80F48,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct LiquidationBalances {
     pub liquidatee_asset_balance: f64,
@@ -287,6 +331,12 @@ pub struct MarginfiAccountTransferToNewAccount {
 pub struct MarginfiAccountFreezeEvent {
     pub header: AccountEventHeader,
     pub frozen: bool,
+}
+
+#[event]
+pub struct MarginfiAccountFlagUpdateEvent {
+    pub header: AccountEventHeader,
+    pub disable_position_transfer_receive: bool,
 }
 
 #[event]

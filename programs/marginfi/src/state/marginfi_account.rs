@@ -373,6 +373,8 @@ pub enum BalanceIncreaseType {
     RepayOnly,
     DepositOnly,
     BypassDepositLimit,
+    /// Deposit-only, from another balance of the same bank: exempt from the deposit cap.
+    TransferIn,
 }
 
 #[derive(Debug)]
@@ -380,6 +382,10 @@ pub enum BalanceDecreaseType {
     WithdrawOnly,
     BorrowOnly,
     BypassBorrowLimit,
+    /// Withdraw-only, to another balance of the same bank: exempt from the utilization floor.
+    TransferOut,
+    /// Borrow-only, from another balance of the same bank: exempt from the borrow cap.
+    DebtTransferIn,
 }
 
 #[inline]
@@ -2348,6 +2354,24 @@ impl<'a> BankAccountWrapper<'a> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BorrowOnly)
     }
 
+    /// Deposit an asset arriving from another balance of the same bank. Returns the asset share
+    /// delta minted.
+    pub fn transfer_in(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
+        self.increase_balance_internal(amount, BalanceIncreaseType::TransferIn)
+    }
+
+    /// Withdraw an asset leaving for another balance of the same bank. Returns the asset share
+    /// delta burned.
+    pub fn transfer_out(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
+        self.decrease_balance_internal(amount, BalanceDecreaseType::TransferOut)
+    }
+
+    /// Borrow debt arriving from another balance of the same bank. Returns the liability share
+    /// delta minted.
+    pub fn debt_transfer_in(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
+        self.decrease_balance_internal(amount, BalanceDecreaseType::DebtTransferIn)
+    }
+
     /// Deposit an asset, ignoring deposit caps, will error if this repays a liability instead of increasing a asset.
     /// Returns the asset share delta minted. Note: in the bypass/flip case (liability -> asset) only the
     /// asset side is reported, not any liability shares burned, so don't use this return value for events.
@@ -2634,7 +2658,7 @@ impl<'a> BankAccountWrapper<'a> {
                 // Clamp tolerated dust to zero so it isn't booked as a new asset position.
                 asset_amount_increase = I80F48::ZERO;
             }
-            BalanceIncreaseType::DepositOnly => {
+            BalanceIncreaseType::DepositOnly | BalanceIncreaseType::TransferIn => {
                 check!(
                     liability_amount_decrease.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationDepositOnly
@@ -2653,7 +2677,10 @@ impl<'a> BankAccountWrapper<'a> {
             balance.change_asset_shares(shares)?;
             bank.change_asset_shares(
                 shares,
-                matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
+                matches!(
+                    operation_type,
+                    BalanceIncreaseType::BypassDepositLimit | BalanceIncreaseType::TransferIn
+                ),
             )?;
             shares
         } else {
@@ -2695,8 +2722,9 @@ impl<'a> BankAccountWrapper<'a> {
         // the SAME `Balance::is_empty` predicate); the LIQUIDATOR's asset_bank leg — the one
         // reachable full close — settles via `settle_premium` in `lending_account_liquidate`
         // before the credit lands here; receivership's `repay_all` settles likewise. So this
-        // write-off only ever clears a receivable that was already settled or legitimately
-        // forgiven (bankruptcy / tokenless repayment / asset-side flips).
+        // write-off only ever clears a receivable that was already settled, legitimately
+        // forgiven (bankruptcy / tokenless repayment / asset-side flips), or carried to the
+        // receiver of a full debt transfer.
         if had_liabs && balance.is_empty(BalanceSide::Liabilities) {
             balance.write_off_premium();
         }
@@ -2705,7 +2733,8 @@ impl<'a> BankAccountWrapper<'a> {
             BalanceIncreaseType::RepayOnly => liability_shares_decrease,
             BalanceIncreaseType::Any
             | BalanceIncreaseType::DepositOnly
-            | BalanceIncreaseType::BypassDepositLimit => asset_shares_increase,
+            | BalanceIncreaseType::BypassDepositLimit
+            | BalanceIncreaseType::TransferIn => asset_shares_increase,
         };
 
         Ok(share_amount)
@@ -2762,7 +2791,7 @@ impl<'a> BankAccountWrapper<'a> {
         );
 
         match operation_type {
-            BalanceDecreaseType::WithdrawOnly => {
+            BalanceDecreaseType::WithdrawOnly | BalanceDecreaseType::TransferOut => {
                 check!(
                     liability_amount_increase.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationWithdrawOnly
@@ -2770,7 +2799,7 @@ impl<'a> BankAccountWrapper<'a> {
                 // Clamp tolerated dust to zero so it isn't booked as a new liability position.
                 liability_amount_increase = I80F48::ZERO;
             }
-            BalanceDecreaseType::BorrowOnly => {
+            BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::DebtTransferIn => {
                 check!(
                     asset_amount_decrease.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationBorrowOnly
@@ -2804,15 +2833,22 @@ impl<'a> BankAccountWrapper<'a> {
             balance.change_liability_shares(shares)?;
             bank.change_liability_shares(
                 shares,
-                matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
+                matches!(
+                    operation_type,
+                    BalanceDecreaseType::BypassBorrowLimit | BalanceDecreaseType::DebtTransferIn
+                ),
             )?;
             shares
         } else {
             I80F48::ZERO
         };
 
-        // Only liquidation is allowed to bypass this check.
-        if !matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit) {
+        // Liquidation may run with assets < liabs; a same-bank transfer restores the total in the
+        // same instruction.
+        if !matches!(
+            operation_type,
+            BalanceDecreaseType::BypassBorrowLimit | BalanceDecreaseType::TransferOut
+        ) {
             bank.check_utilization_ratio()?;
         }
 
@@ -2835,10 +2871,12 @@ impl<'a> BankAccountWrapper<'a> {
         }
 
         let share_amount = match operation_type {
-            BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::BypassBorrowLimit => {
-                liability_shares_increase
+            BalanceDecreaseType::BorrowOnly
+            | BalanceDecreaseType::BypassBorrowLimit
+            | BalanceDecreaseType::DebtTransferIn => liability_shares_increase,
+            BalanceDecreaseType::WithdrawOnly | BalanceDecreaseType::TransferOut => {
+                asset_shares_decrease
             }
-            BalanceDecreaseType::WithdrawOnly => asset_shares_decrease,
         };
 
         Ok(share_amount)

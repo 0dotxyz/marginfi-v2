@@ -5,7 +5,7 @@ use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
-use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
+use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED, POSITION_ESCROW_SEED};
 use marginfi_type_crate::types::BankConfigOpt;
 use pyth_solana_receiver_sdk::{
     price_update::{FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel},
@@ -496,6 +496,22 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
     let hash = keys_sha256_hash(bank_keys);
     Pubkey::find_program_address(
         &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
+        &marginfi::ID,
+    )
+}
+
+pub fn find_position_escrow_pda(
+    bank: &Pubkey,
+    receiver_account: &Pubkey,
+    source_account: &Pubkey,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            POSITION_ESCROW_SEED.as_bytes(),
+            bank.as_ref(),
+            receiver_account.as_ref(),
+            source_account.as_ref(),
+        ],
         &marginfi::ID,
     )
 }

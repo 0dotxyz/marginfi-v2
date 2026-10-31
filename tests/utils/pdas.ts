@@ -172,6 +172,23 @@ export const deriveLiquidationRecord = (
   );
 };
 
+export const derivePositionEscrow = (
+  programId: PublicKey,
+  bank: PublicKey,
+  receiverAccount: PublicKey,
+  sourceAccount: PublicKey,
+) => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("position_escrow", "utf-8"),
+      bank.toBuffer(),
+      receiverAccount.toBuffer(),
+      sourceAccount.toBuffer(),
+    ],
+    programId,
+  );
+};
+
 export const deriveMarginfiAccountPda = (
   programId: PublicKey,
   group: PublicKey,

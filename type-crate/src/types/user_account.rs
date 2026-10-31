@@ -256,6 +256,7 @@ pub const ACCOUNT_IN_REBALANCE: u64 = 1 << 8;
 /// A liquidation signed by the risk admin, which (like deleverage) may price PT banks through an
 /// Exponent emergency. Transient: cleared within `lending_account_liquidate`, or at `end_liquidation`.
 pub const ACCOUNT_IN_RISK_ADMIN_LIQUIDATION: u64 = 1 << 9;
+pub const ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED: u64 = 1 << 10;
 
 /// Account states that block placing or starting an order/rebalance sandwich (disabled, in a
 /// flashloan, frozen, in receivership, or being deleveraged). The transient in-flight flags

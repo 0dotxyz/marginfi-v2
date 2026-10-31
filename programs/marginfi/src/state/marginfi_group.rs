@@ -393,7 +393,9 @@ mod tests {
         assert_eq!(offset_of!(Bank, premium_tag), 1840);
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
-        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN);
+        // The escrowed share total begins the post-v1 extension.
+        assert_eq!(offset_of!(Bank, total_escrowed_asset_shares), Bank::V1_LEN);
+        assert_eq!(offset_of!(Bank, _padding_1), Bank::V1_LEN + 16);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

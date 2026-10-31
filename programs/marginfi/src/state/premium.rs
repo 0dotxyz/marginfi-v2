@@ -262,9 +262,10 @@ pub trait MarginfiAccountPremiumImpl {
     /// highest pair rate among unpriceable legs)` — it can only ever move UP. This closes the
     /// dilute-then-supply-a-bad-oracle rate freeze without blocking the action itself.
     /// * Pass `true` ONLY where the account's own authority signs and picks the oracles: the
-    ///   five withdraw paths, the gate-guarded borrow/flashloan-end, and the LIQUIDATOR's own
-    ///   refresh in `lending_account_liquidate`. Where a third party picks the oracles (pulse,
-    ///   the liquidatee's refresh, order/rebalance end) a hostile caller could feed a bad
+    ///   five withdraw paths, the position-transfer source, the gate-guarded
+    ///   borrow/flashloan-end, and the LIQUIDATOR's own refresh in `lending_account_liquidate`.
+    ///   Where a third party picks the oracles (pulse, the liquidatee's refresh, the
+    ///   position-transfer destination, order/rebalance end) a hostile caller could feed a bad
     ///   oracle and ratchet a victim's rate — those must pass `false`.
     fn update_premium_snapshots(
         &mut self,
