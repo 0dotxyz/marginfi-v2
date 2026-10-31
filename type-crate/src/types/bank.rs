@@ -484,6 +484,22 @@ impl OracleSetup {
         )
     }
 
+    /// Setups whose confidence is the admin-set `oracle_max_confidence` band rather than a value
+    /// the feed publishes. That band is a pricing haircut, not measured uncertainty.
+    pub fn has_static_confidence(self) -> bool {
+        matches!(
+            self,
+            Self::SwitchboardPull
+                | Self::KaminoSwitchboardPull
+                | Self::DriftSwitchboardPull
+                | Self::SolendSwitchboardPull
+                | Self::JuplendSwitchboardPull
+                | Self::Scope
+                | Self::ScopeKamino
+                | Self::ScopeJuplend
+        )
+    }
+
     /// Base feed semantics for `oracle_keys[0]`. Setups in the same family read that key as the
     /// same kind of feed account *and* derive the mint's price from it the same way, so two banks
     /// sharing a family and `oracle_keys[0]` price from the same source. Venue integrations
