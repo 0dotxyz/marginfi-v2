@@ -308,15 +308,15 @@ async fn marginfi_account_deposit_up_to_limit_success(
         .balance()
         .await;
 
-    let expected_remaining_capacity = deposit_cap - first_deposit;
-    let expected_second_deposit = I80F48::from(native!(
-        expected_remaining_capacity.min(second_deposit),
-        bank_f.mint.mint.decimals,
-        f64
-    ));
-    let actual_deposit = I80F48::from(post_vault_balance - pre_vault_balance);
-
-    assert_eq_with_tolerance!(expected_second_deposit, actual_deposit, 1);
+    let decimals = bank_f.mint.mint.decimals;
+    let expected_second_deposit = native!(deposit_cap, decimals, f64)
+        .saturating_sub(native!(first_deposit, decimals, f64))
+        .saturating_sub(1)
+        .min(native!(second_deposit, decimals, f64));
+    assert_eq!(
+        post_vault_balance - pre_vault_balance,
+        expected_second_deposit
+    );
 
     // Third deposit goes over limit -- with deposit_up_to_limit set -- when already at capacity
     // Should succeed with no balance changes
@@ -338,6 +338,166 @@ async fn marginfi_account_deposit_up_to_limit_success(
         .await;
 
     assert_eq!(pre_vault_balance, post_vault_balance);
+
+    Ok(())
+}
+
+#[test_case(-1, 0, false; "over_limit")]
+#[test_case(0, 0, false; "at_limit")]
+#[test_case(1, 0, false; "half_unit_headroom_empty_position")]
+#[test_case(1, 0, true; "half_unit_headroom_existing_position")]
+#[test_case(2, 0, false; "one_unit_headroom_empty_position")]
+#[test_case(2, 0, true; "one_unit_headroom_existing_position")]
+#[test_case(3, 0, false; "one_and_a_half_units_headroom")]
+#[test_case(4, 1, false; "two_units_headroom")]
+#[test_case(5, 1, false; "two_and_a_half_units_headroom")]
+#[tokio::test]
+async fn deposit_up_to_limit_native_unit_boundary(
+    headroom_half_units: i64,
+    expected_deposit: u64,
+    existing_position: bool,
+) -> anyhow::Result<()> {
+    const LIMIT: u64 = 64;
+    const INITIAL_DEPOSIT: u64 = 32;
+    const REQUESTED_DEPOSIT: u64 = 10;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            config: Some(BankConfig {
+                deposit_limit: LIMIT,
+                ..*DEFAULT_USDC_TEST_BANK_CONFIG
+            }),
+        }],
+        protocol_fees: false,
+    }))
+    .await;
+    let bank_f = test_f.get_bank(&BankMint::Usdc);
+    let lender = test_f.create_marginfi_account().await;
+    let depositor = if existing_position {
+        &lender
+    } else {
+        &test_f.create_marginfi_account().await
+    };
+    let wallet = bank_f.mint.create_token_account_and_mint_to(1).await;
+
+    // Encode raw native amounts directly: UI f64 conversion could obscure a one-unit boundary.
+    let deposit_ix = |account, amount, deposit_up_to_limit| Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::LendingAccountDeposit {
+            group: test_f.marginfi_group.key,
+            marginfi_account: account,
+            authority: test_f.payer(),
+            bank: bank_f.key,
+            signer_token_account: wallet.key,
+            liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
+            token_program: bank_f.mint.token_program,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingAccountDeposit {
+            amount,
+            deposit_up_to_limit,
+        }
+        .data(),
+    };
+    let seed_tx = Transaction::new_signed_with_payer(
+        &[deposit_ix(lender.key, INITIAL_DEPOSIT, None)],
+        Some(&test_f.payer()),
+        &[&test_f.payer_keypair()],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(seed_tx)
+        .await?;
+
+    // Model accrued yield. Dividing these half-unit totals by 32 shares is exact in I80F48.
+    let headroom = I80F48::from_num(headroom_half_units) / I80F48::from_num(2);
+    let assets = I80F48::from_num(LIMIT) - headroom;
+    bank_f
+        .set_asset_share_value(assets / I80F48::from_num(INITIAL_DEPOSIT))
+        .await;
+    let bank_before = bank_f.load().await;
+    assert_eq!(
+        bank_before.get_asset_amount(bank_before.total_asset_shares.into())?,
+        assets
+    );
+    assert_eq!(
+        bank_before.get_remaining_deposit_capacity()?,
+        expected_deposit
+    );
+    let account_before = depositor.load().await;
+    let wallet_before = wallet.balance().await;
+    let vault = bank_f
+        .get_vault_token_account(BankVaultType::Liquidity)
+        .await;
+    let vault_before = vault.balance().await;
+
+    // The same request without clamping must still enforce the ceiling.
+    let uncapped_tx = Transaction::new_signed_with_payer(
+        &[deposit_ix(depositor.key, REQUESTED_DEPOSIT, None)],
+        Some(&test_f.payer()),
+        &[&test_f.payer_keypair()],
+        latest_blockhash(&test_f.context).await,
+    );
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(uncapped_tx)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BankAssetCapacityExceeded);
+
+    let capped_tx = Transaction::new_signed_with_payer(
+        &[deposit_ix(depositor.key, REQUESTED_DEPOSIT, Some(true))],
+        Some(&test_f.payer()),
+        &[&test_f.payer_keypair()],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(capped_tx)
+        .await?;
+    assert_eq!(wallet_before - wallet.balance().await, expected_deposit);
+    assert_eq!(vault.balance().await - vault_before, expected_deposit);
+    let bank_after = bank_f.load().await;
+    let account_after = depositor.load().await;
+    if expected_deposit == 0 {
+        assert_eq!(
+            bank_after.total_asset_shares,
+            bank_before.total_asset_shares
+        );
+        assert_eq!(
+            bank_after.lending_position_count,
+            bank_before.lending_position_count
+        );
+        assert_eq!(bank_after.rate_limiter, bank_before.rate_limiter);
+        assert_eq!(
+            bytemuck::bytes_of(&account_after),
+            bytemuck::bytes_of(&account_before)
+        );
+    } else {
+        assert!(
+            I80F48::from(bank_after.total_asset_shares)
+                > I80F48::from(bank_before.total_asset_shares)
+        );
+        assert_eq!(
+            bank_after.lending_position_count,
+            bank_before.lending_position_count + 1
+        );
+        assert!(account_after
+            .lending_account
+            .get_balance(&bank_f.key)
+            .is_some());
+        assert!(
+            bank_after.get_asset_amount(bank_after.total_asset_shares.into())?
+                < I80F48::from_num(LIMIT)
+        );
+    }
 
     Ok(())
 }

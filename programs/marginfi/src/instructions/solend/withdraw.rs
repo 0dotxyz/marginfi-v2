@@ -284,18 +284,20 @@ pub fn solend_withdraw<'info>(
                 )?;
             }
 
-            let bank_loader = &ctx.accounts.bank;
-            let mut bank = bank_loader.load_mut()?;
-            let clock = Clock::get()?;
-            let price_for_cache = fetch_unbiased_price_for_bank_cache(
-                &bank_loader.key(),
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )
-            .ok();
+            {
+                let bank_loader = &ctx.accounts.bank;
+                let mut bank = bank_loader.load_mut()?;
+                let clock = Clock::get()?;
+                let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                    &bank_loader.key(),
+                    &bank,
+                    &clock,
+                    ctx.remaining_accounts,
+                )
+                .ok();
 
-            bank.update_cache_price(price_for_cache)?;
+                bank.update_cache_price(price_for_cache)?;
+            }
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
