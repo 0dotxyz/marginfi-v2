@@ -1,7 +1,9 @@
 use super::price::{OraclePriceFeedAdapter, PriceAdapter};
 use crate::{
     allocator::{heap_pos, heap_restore},
-    check, check_eq, debug, live, math_error,
+    check, check_eq,
+    constants::PROGRAM_VERSION,
+    debug, live, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
     state::premium::{
@@ -33,6 +35,13 @@ use std::{
     cmp::{max, min},
     collections::BTreeSet,
 };
+
+/// Call only after a successful health computation; this marks the engine as OK.
+pub(crate) fn finalize_health_cache(cache: &mut HealthCache, now: i64) {
+    cache.timestamp = now;
+    cache.program_version = PROGRAM_VERSION;
+    cache.set_engine_ok(true);
+}
 
 /// Returns the number of remaining accounts required for a bank (bank account + oracle/venue accounts).
 ///
@@ -2850,7 +2859,21 @@ mod test {
     use super::*;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
-    use marginfi_type_crate::types::basis_to_u32;
+    use marginfi_type_crate::types::{basis_to_u32, ENGINE_OK};
+
+    #[test]
+    fn finalize_health_cache_sets_engine_ok_and_keeps_other_flags() {
+        let mut cache = HealthCache::zeroed();
+        cache.set_oracle_ok(true);
+        cache.set_emode_boosted(true);
+        let flags_before = cache.flags;
+
+        finalize_health_cache(&mut cache, 123);
+
+        assert_eq!(cache.timestamp, 123);
+        assert_eq!(cache.program_version, PROGRAM_VERSION);
+        assert_eq!(cache.flags, flags_before | ENGINE_OK);
+    }
 
     fn same_asset_eligible_bank(mint: Pubkey, oracle_key: Pubkey, liab_weight: I80F48) -> Bank {
         let mut bank = Bank::zeroed();

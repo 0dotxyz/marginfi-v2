@@ -1,13 +1,12 @@
 use crate::{
     bank_signer, check,
-    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
-            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            finalize_health_cache, is_signer_authorized, run_cb_price_gate, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -284,7 +283,6 @@ pub fn juplend_withdraw<'info>(
         });
 
         let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = clock.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
         marginfi_account.sync_indexer_flags();
@@ -303,7 +301,6 @@ pub fn juplend_withdraw<'info>(
                 &mut Some(&mut health_cache),
                 &mut Some(&mut premium_scratch),
             )?;
-            health_cache.program_version = PROGRAM_VERSION;
 
             // Claim premium at the old rates and refresh every liability's premium rate
             // snapshot with the post-withdraw collateral mix.
@@ -328,7 +325,7 @@ pub fn juplend_withdraw<'info>(
                 bank.update_cache_price(price_for_cache)?;
             }
 
-            health_cache.set_engine_ok(true);
+            finalize_health_cache(&mut health_cache, clock.unix_timestamp);
             marginfi_account.health_cache = health_cache;
 
             // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live

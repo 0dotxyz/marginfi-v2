@@ -1,14 +1,13 @@
 use crate::{
-    bank_signer, check,
-    constants::PROGRAM_VERSION,
-    debug,
+    bank_signer, check, debug,
     events::{AccountEventHeader, LendingPoolBankHandleBankruptcyEvent},
     ix_utils, math_error,
     prelude::MarginfiError,
     state::{
         bank::BankImpl,
         marginfi_account::{
-            check_account_bankrupt, run_cb_price_gate, BankAccountWrapper, MarginfiAccountImpl,
+            check_account_bankrupt, finalize_health_cache, run_cb_price_gate, BankAccountWrapper,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -78,8 +77,6 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
 
     let mut health_cache = HealthCache::zeroed();
-    health_cache.timestamp = clock.unix_timestamp;
-    health_cache.program_version = PROGRAM_VERSION;
 
     let group = marginfi_group_loader.load()?;
 
@@ -106,7 +103,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     .ok();
     drop(bank);
 
-    health_cache.set_engine_ok(true);
+    finalize_health_cache(&mut health_cache, clock.unix_timestamp);
     marginfi_account.health_cache = health_cache;
 
     let mut bank = bank_loader.load_mut()?;
