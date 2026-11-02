@@ -148,6 +148,7 @@ pub fn end_receivership<'info>(
     let pre_health: I80F48 = pre_assets - pre_liabs;
 
     let mut post_hc = HealthCache::zeroed();
+    post_hc.timestamp = Clock::get()?.unix_timestamp;
     let (post_health, _post_assets, _post_liabs) =
         check_pre_liquidation_condition_and_get_account_health(
             marginfi_account,

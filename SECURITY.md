@@ -590,3 +590,46 @@ to "save an account for later" will compete against that profit motive and likel
 We cannot allow the tag to be cleared by a liquidation of any size (or the eligible user would just
 liquidate themselves for 1 lamport at regular intervals). Tracking cumulative progress is too
 cumbersome because the amount eligible for liquidation also fluctuates with prices.
+
+### Dust Balances Can Be Skipped During Orders/Liquidation/etc
+
+When a Balance is below the EMPTY_BALANCE_THRESHOLD (1 share), start/end flows such as receivership
+liquidation and Order fulfillment ignore that Balance. This means the executor/keeper can
+theoretically withdraw them. However, balances below the dust threshold are usually worth less than
+1-token-atom and are generally not transferable. We can consider the worst-case where the dust has
+above-threshold value: for BTC (with 8 decimals), assuming EMPTY_BALANCE_THRESHOLD is 1 share,
+assuming the user has .99999999 shares, and asset_share_value > 1, the attacker can claim 1 satoshi,
+which is around 10 cents in October 2026. Essentially the keeper can take up to asset_share_value
+satoshis, so if the asset_share_value is >2 then they can claim 2 and so forth. The
+asset_share_value rarely exceeds 2 even on banks that have sustained interest for several years.
+
+
+### Some Mathematical Protections Break When Share Value > 2^48
+
+There are certain protections that break down when the asset or liability share_value exceed 2^48.
+While reports regarding these are generally bounty eligible, they are capped to WONTFIX/INFO status
+unless paired with a mechanism that can reasonably raise the share value to this threshold, which
+currently would require centuries at max interest. One such bounty-eligible report involved emission
+donation, which is now prevented from raising the asset_share_value beyond a certain threshold for
+this reason.
+
+### Large Confidence Bands Can Walk Circuit Breaker Windows Up Faster
+
+The long-window deviation check subtracts the oracle confidence from the measured price move.
+Assuming a confidence of just under 5%, one 24h window admits a move of up to 1.03 / (1 - 0.05) =
++8.42% above the window reference with zero circuit breaker trips. A clean pulse then re-anchors
+this window.
+
+We consider this an acceptable design tradeoff: sustained poor confidence is rare, and the effect is
+minimal. The circuit breaker feature is intended to capture large moves, and walking up slightly
+more than would perhaps be expected, only during times of poor confidence, is acceptable. 
+
+### Empty Fee Pool Lets Keepers Incorrectly Earn Tips
+
+Alice funds a fee account and opens a rebalance Order. Bob fills it, escrowing a tip T. Alice then
+closes her fee account, returning the rent R. When Bob goes to settle his tip, let's assume he
+didn't earn it (rebalance failed to get a better yield), it should now be returned to the fee pool.
+The fee pool needs R, the rent, to be reopened. To avoid Alice griefing in this manner to steal R
+from the Keeper, the Keeper gets to keep T instead -- this is Alice's fault for draining her fee
+pool. At some point we may instead reopen the fee pool if T > R, but the current behavior
+discourages trolls from closing their fee pool.

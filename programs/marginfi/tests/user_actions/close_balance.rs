@@ -1,11 +1,15 @@
 use bytemuck::from_bytes_mut;
+use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{
     assert_custom_error,
+    bank::BankFixture,
+    marginfi_account::MarginfiAccountFixture,
+    marginfi_group::MarginfiGroupFixture,
     test::{BankMint, TestFixture, TestSettings},
 };
 use marginfi::errors::MarginfiError;
-use marginfi_type_crate::types::Bank;
+use marginfi_type_crate::types::{Bank, BankConfigOpt, BankOperationalState};
 use solana_program_test::tokio;
 use solana_sdk::clock::Clock;
 
@@ -146,6 +150,166 @@ async fn lending_account_close_balance() -> anyhow::Result<()> {
     assert_eq!(account.last_update, last_update_before_close + 1);
     assert_eq!(account.indexer_flags.is_lending_only, 0);
     assert_eq!(account.indexer_flags.is_single_borrower, 1);
+
+    Ok(())
+}
+
+async fn set_operational_state(
+    group: &MarginfiGroupFixture,
+    bank: &BankFixture,
+    state: BankOperationalState,
+) -> anyhow::Result<()> {
+    group
+        .try_lending_pool_configure_bank(
+            bank,
+            BankConfigOpt {
+                operational_state: Some(state),
+                ..BankConfigOpt::default()
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+async fn has_active_balance(user: &MarginfiAccountFixture, bank: &BankFixture) -> bool {
+    user.load()
+        .await
+        .lending_account
+        .get_balance(&bank.key)
+        .is_some()
+}
+
+/// Withdrawing an integration position's exact amount without `withdraw_all` leaves an active
+/// balance with zero shares. Its own `withdraw_all` rejects it and a Paused bank blocks the
+/// deposit-then-withdraw_all workaround, so `close_balance` is the only way to free the slot.
+#[tokio::test]
+async fn close_balance_frees_empty_kamino_balance_on_paused_bank() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let test_f = &setup.test_f;
+    let bank_f = &setup.bank_f;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+
+    test_f
+        .run_kamino_deposit(bank_f, &user, user_token.key, 1_000_000)
+        .await?;
+    let collateral = setup
+        .load_user_accounted_collateral(&user)
+        .await
+        .expect("kamino balance should be active after deposit");
+    test_f
+        .run_kamino_withdraw(bank_f, &user, user_token.key, collateral, None)
+        .await?;
+
+    let account = user.load().await;
+    let balance = account
+        .lending_account
+        .get_balance(&bank_f.key)
+        .expect("partial-path withdraw of the full amount leaves the balance active");
+    assert_eq!(I80F48::from(balance.asset_shares), I80F48::ZERO);
+    assert_eq!(I80F48::from(balance.liability_shares), I80F48::ZERO);
+
+    let res = test_f
+        .run_kamino_withdraw(bank_f, &user, user_token.key, 0, Some(true))
+        .await;
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::NoAssetFound);
+
+    set_operational_state(&test_f.marginfi_group, bank_f, BankOperationalState::Paused).await?;
+    let res = test_f
+        .run_kamino_deposit(bank_f, &user, user_token.key, 1_000_000)
+        .await;
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BankPaused);
+
+    let bank_before = bank_f.load().await;
+    user.try_balance_close(bank_f).await?;
+
+    assert!(!has_active_balance(&user, bank_f).await);
+    let bank_after = bank_f.load().await;
+    assert_eq!(
+        bank_after.lending_position_count, bank_before.lending_position_count,
+        "the withdraw already released the position count; close must not decrement it again"
+    );
+    assert_eq!(
+        I80F48::from(bank_after.total_asset_shares),
+        I80F48::from(bank_before.total_asset_shares)
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn close_balance_rejects_integration_balance_with_assets() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 1_000_000)
+        .await?;
+
+    let res = user.try_balance_close(&setup.bank_f).await;
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+    assert!(has_active_balance(&user, &setup.bank_f).await);
+
+    Ok(())
+}
+
+/// Drift and JupLend withdraws take token amounts that convert to venue shares with rounding, so
+/// an exact zero is not reliably reachable through their withdraw. Seed the empty-but-active state
+/// directly to cover the asset-tag gate for these venues.
+async fn zero_out_balance(user: &MarginfiAccountFixture, bank: &BankFixture) -> anyhow::Result<()> {
+    let mut account = user.load().await;
+    let balance = account
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|b| b.is_active() && b.bank_pk == bank.key)
+        .expect("balance should be active after deposit");
+    balance.asset_shares = I80F48::ZERO.into();
+    user.set_account(&account).await
+}
+
+#[tokio::test]
+async fn close_balance_frees_empty_drift_balance_on_reduce_only_bank() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_drift_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+    setup
+        .test_f
+        .run_drift_deposit(&setup.bank_f, &user, user_token.key, 1_000_000)
+        .await?;
+    zero_out_balance(&user, &setup.bank_f).await?;
+    set_operational_state(
+        &setup.test_f.marginfi_group,
+        &setup.bank_f,
+        BankOperationalState::ReduceOnly,
+    )
+    .await?;
+
+    user.try_balance_close(&setup.bank_f).await?;
+    assert!(!has_active_balance(&user, &setup.bank_f).await);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn close_balance_frees_empty_juplend_balance_on_reduce_only_bank() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_juplend_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10.0).await;
+    setup
+        .test_f
+        .run_juplend_deposit(&setup.bank_f, &user, user_token.key, 1_000_000)
+        .await?;
+    zero_out_balance(&user, &setup.bank_f).await?;
+    set_operational_state(
+        &setup.test_f.marginfi_group,
+        &setup.bank_f,
+        BankOperationalState::ReduceOnly,
+    )
+    .await?;
+
+    user.try_balance_close(&setup.bank_f).await?;
+    assert!(!has_active_balance(&user, &setup.bank_f).await);
 
     Ok(())
 }
