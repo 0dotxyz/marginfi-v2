@@ -526,6 +526,19 @@ impl OracleSetup {
         )
     }
 
+    /// Setups whose confidence is an admin-set pricing haircut, not measured uncertainty.
+    pub fn has_static_confidence(self) -> bool {
+        self.is_scope_priced()
+            || matches!(
+                self,
+                Self::SwitchboardPull
+                    | Self::KaminoSwitchboardPull
+                    | Self::DriftSwitchboardPull
+                    | Self::SolendSwitchboardPull
+                    | Self::JuplendSwitchboardPull
+            )
+    }
+
     /// Base-feed and multiplier family used for same-asset matching. Venue integrations stay in
     /// their base family. The feed key, effective Scope entries, and PT start price are checked
     /// separately as part of the price identity.
