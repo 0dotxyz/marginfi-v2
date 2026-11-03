@@ -842,14 +842,7 @@ async fn marginfi_account_liquidation_success_many_balances() -> anyhow::Result<
 
     // Synthetically bring down the borrower account health by reducing the asset weights of the SOL bank
     sol_bank_f
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.5).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.5))
         .await?;
 
     lender_mfi_account_f
@@ -1034,14 +1027,7 @@ async fn marginfi_account_liquidation_failure_liquidation_too_severe() -> anyhow
         .await?;
 
     sol_bank_f
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.5).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.5))
         .await?;
 
     let res = lender_mfi_account_f
@@ -1114,14 +1100,7 @@ async fn marginfi_account_liquidation_failure_liquidator_no_collateral() -> anyh
         .await?;
 
     sol_bank_f
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.3).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.3))
         .await?;
 
     let res = lender_mfi_account_f
@@ -1171,14 +1150,7 @@ async fn marginfi_account_liquidation_failure_bank_not_liquidatable() -> anyhow:
         .await?;
 
     sol_bank_f
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let res = lender_mfi_account_f
@@ -1535,5 +1507,113 @@ async fn marginfi_account_liquidation_emode(
         assert!(res.is_ok());
     }
 
+    Ok(())
+}
+
+async fn setup_liquidatee_with_zero_weight_sol() -> anyhow::Result<(
+    TestFixture,
+    fixtures::marginfi_account::MarginfiAccountFixture,
+    fixtures::marginfi_account::MarginfiAccountFixture,
+    TokenAccountFixture,
+)> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let fixed_bank = test_f.get_bank(&BankMint::Fixed);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_usdc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc.key, usdc_bank, 200, None)
+        .await?;
+
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_fixed_tokens = test_f.fixed_mint.create_token_account_and_mint_to(20).await;
+    let liquidatee_sol_tokens = test_f.sol_mint.create_token_account_and_mint_to(20).await;
+    liquidatee
+        .try_bank_deposit(liquidatee_fixed_tokens.key, fixed_bank, 10, None)
+        .await?;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol_tokens.key, sol_bank, 10, None)
+        .await?;
+    let borrowed = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(borrowed.key, usdc_bank, 10)
+        .await?;
+
+    fixed_bank
+        .set_asset_weights(I80F48!(0.001), I80F48!(0.002))
+        .await?;
+    sol_bank.set_asset_weights_to_zero().await?;
+
+    Ok((test_f, liquidator, liquidatee, liquidatee_fixed_tokens))
+}
+
+#[test_case(false; "zero weight, confidence breach")]
+#[test_case(true; "zero weight, stale feed")]
+#[tokio::test]
+async fn liquidate_zero_weight_asset_with_unusable_oracle_blocks_only_that_leg(
+    oracle_is_stale: bool,
+) -> anyhow::Result<()> {
+    let (test_f, liquidator, liquidatee, _) = setup_liquidatee_with_zero_weight_sol().await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let fixed_bank = test_f.get_bank(&BankMint::Fixed);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    if oracle_is_stale {
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+            .await;
+    } else {
+        test_f
+            .set_pyth_oracle_price_native(
+                PYTH_SOL_FEED,
+                10_000_000_000,
+                CONFIDENCE_BREACHING_ALL_READS,
+                now,
+            )
+            .await;
+    }
+
+    let seize_zero_weight_result = liquidator
+        .try_liquidate(&liquidatee, sol_bank, 1, usdc_bank)
+        .await;
+    assert_custom_error!(
+        seize_zero_weight_result.unwrap_err(),
+        if oracle_is_stale {
+            MarginfiError::PythPushStalePrice
+        } else {
+            MarginfiError::OracleMaxConfidenceExceeded
+        }
+    );
+
+    liquidator
+        .try_liquidate(&liquidatee, fixed_bank, 1, usdc_bank)
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unusable_liability_oracle_blocks_withdraw_and_liquidation() -> anyhow::Result<()> {
+    let (test_f, liquidator, liquidatee, liquidatee_fixed_tokens) =
+        setup_liquidatee_with_zero_weight_sol().await?;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let fixed = test_f.get_bank(&BankMint::Fixed);
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+        .await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, now - 3_600)
+        .await;
+
+    let blocked = liquidatee
+        .try_bank_withdraw(liquidatee_fixed_tokens.key, fixed, 1, None)
+        .await;
+    assert_custom_error!(blocked.unwrap_err(), MarginfiError::PythPushStalePrice);
+    let blocked = liquidator.try_liquidate(&liquidatee, fixed, 1, usdc).await;
+    assert_custom_error!(blocked.unwrap_err(), MarginfiError::PythPushStalePrice);
     Ok(())
 }

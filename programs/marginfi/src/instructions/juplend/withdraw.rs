@@ -6,8 +6,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
-            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate_skip_zero_weight, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -334,7 +334,11 @@ pub fn juplend_withdraw<'info>(
             // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
             // price has jumped past the breach threshold; a liability-free withdraw skips it.
             if marginfi_account.lending_account.has_liabilities() {
-                run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+                run_cb_price_gate_skip_zero_weight(
+                    &marginfi_account,
+                    &group,
+                    ctx.remaining_accounts,
+                )?;
             }
         } else {
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,

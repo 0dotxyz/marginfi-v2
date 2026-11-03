@@ -886,3 +886,13 @@ impl MarginfiError {
         matches!(self, MarginfiError::RiskEngineInitRejected)
     }
 }
+
+pub(crate) fn extract_anchor_error_code(e: &anchor_lang::error::Error) -> u32 {
+    match e {
+        anchor_lang::error::Error::AnchorError(inner) => inner.error_code_number,
+        anchor_lang::error::Error::ProgramError(inner) => match inner.as_ref().program_error {
+            anchor_lang::solana_program::program_error::ProgramError::Custom(code) => code,
+            _ => u32::from(MarginfiError::InternalLogicError),
+        },
+    }
+}

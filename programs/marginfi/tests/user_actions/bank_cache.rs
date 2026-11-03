@@ -2,7 +2,8 @@ use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_eq_noise, marginfi_account::MarginfiAccountFixture, prelude::*};
-use marginfi_type_crate::types::BankConfigOpt;
+use marginfi::prelude::MarginfiError;
+
 use solana_program_test::tokio;
 
 async fn setup_borrow_with_price_cache(
@@ -213,14 +214,7 @@ async fn bank_cache_updates_on_liquidation() -> anyhow::Result<()> {
 
     // Make borrower unhealthy by reducing collateral weight significantly
     sol_bank_f
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.5).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.5))
         .await?;
 
     // Perform liquidation
@@ -350,5 +344,72 @@ async fn bank_last_update_reflects_cache_update() -> anyhow::Result<()> {
         "last_update should be a valid timestamp"
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn pulse_health_zero_weight_collateral_oracle_policy() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let account = test_f.create_marginfi_account().await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let sol_tokens = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    account
+        .try_bank_deposit(sol_tokens.key, sol_bank, 1, None)
+        .await?;
+    account.try_lending_account_pulse_health().await?;
+    let before = account.load().await;
+    let sol_balance_index = before
+        .lending_account
+        .get_active_balances_iter()
+        .position(|balance| balance.bank_pk == sol_bank.key)
+        .unwrap();
+    assert!(f64::from_le_bytes(before.health_cache.prices[sol_balance_index]) > 0.0);
+    sol_bank.set_asset_weights_to_zero().await?;
+    for stale in [false, true] {
+        if stale {
+            let now = test_f.get_clock().await.unix_timestamp;
+            test_f
+                .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+                .await;
+        }
+        account.try_lending_account_pulse_health().await?;
+        let after = account.load().await;
+        if stale {
+            assert_eq!(
+                f64::from_le_bytes(after.health_cache.prices[sol_balance_index]),
+                0.0
+            );
+            assert_eq!(
+                after.health_cache.internal_err,
+                u32::from(MarginfiError::PythPushStalePrice)
+            );
+        } else {
+            assert!(f64::from_le_bytes(after.health_cache.prices[sol_balance_index]) > 0.0);
+            assert_eq!(after.health_cache.internal_err, 0);
+        }
+    }
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_price_native(
+            PYTH_SOL_FEED,
+            10_000_000_000,
+            CONFIDENCE_BREACHING_ALL_READS,
+            now,
+        )
+        .await;
+    account.try_lending_account_pulse_health().await?;
+    let after_confidence_breach = account.load().await;
+    assert_eq!(
+        f64::from_le_bytes(after_confidence_breach.health_cache.prices[sol_balance_index]),
+        0.0,
+        "confidence-rejected zero-weight asset should have zero price"
+    );
+    assert_eq!(
+        after_confidence_breach.health_cache.internal_err,
+        u32::from(MarginfiError::OracleMaxConfidenceExceeded),
+        "confidence failure on zero-weight should be recorded in internal_err"
+    );
+    assert!(!after_confidence_breach.health_cache.is_oracle_ok());
     Ok(())
 }

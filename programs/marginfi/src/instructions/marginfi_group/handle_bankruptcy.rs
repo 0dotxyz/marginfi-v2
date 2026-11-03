@@ -86,7 +86,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     // Inline CB gate: the insolvency decision below values the whole portfolio at live
     // prices with no other CB check on this path. Admins can settle in any state.
     if !is_admin_or_risk_admin {
-        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        run_cb_price_gate(&marginfi_account, &group, ctx.remaining_accounts)?;
     }
 
     check_account_bankrupt(

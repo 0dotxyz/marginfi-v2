@@ -131,14 +131,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
         .await?;
 
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.001).into()),
-                asset_weight_maint: Some(I80F48!(0.002).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.001), I80F48!(0.002))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -332,14 +325,7 @@ async fn liquidate_end_missing_fails() -> anyhow::Result<()> {
         .await?;
 
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.001).into()),
-                asset_weight_maint: Some(I80F48!(0.002).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.001), I80F48!(0.002))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -458,14 +444,7 @@ async fn liquidate_with_forbidden_ix_fails() -> anyhow::Result<()> {
         )
         .await?;
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.001).into()),
-                asset_weight_maint: Some(I80F48!(0.002).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.001), I80F48!(0.002))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -571,14 +550,7 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
 
     // make liquidatee unhealthy ($20 of SOL now worth $8)
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -786,14 +758,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
         .await?;
 
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -919,14 +884,7 @@ async fn liquidate_receiver_premium_too_high() -> anyhow::Result<()> {
         )
         .await?;
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -1033,16 +991,7 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
         )
         .await?;
 
-    sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48::ZERO.into()),
-                asset_weight_maint: Some(I80F48::ZERO.into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .await?;
+    sol_bank.set_asset_weights_to_zero().await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
         &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
@@ -1111,6 +1060,21 @@ async fn setup_liquidatee(
     TokenAccountFixture,
     Pubkey,
 )> {
+    let (test_f, liquidatee, usdc_acc, record_pk, _authority) =
+        setup_liquidatee_with_authority(sol_deposit, usdc_borrow).await?;
+    Ok((test_f, liquidatee, usdc_acc, record_pk))
+}
+
+async fn setup_liquidatee_with_authority(
+    sol_deposit: f64,
+    usdc_borrow: f64,
+) -> anyhow::Result<(
+    TestFixture,
+    MarginfiAccountFixture,
+    TokenAccountFixture,
+    Pubkey,
+    Keypair,
+)> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1176,7 +1140,95 @@ async fn setup_liquidatee(
             .await?;
     }
 
-    Ok((test_f, liquidatee, liquidator_usdc_acc, record_pk))
+    Ok((
+        test_f,
+        liquidatee,
+        liquidator_usdc_acc,
+        record_pk,
+        liquidatee_authority,
+    ))
+}
+
+async fn setup_liquidatee_with_zero_weight_collateral(
+    zero_weight_mint: BankMint,
+) -> anyhow::Result<(TestFixture, MarginfiAccountFixture, Pubkey)> {
+    let (test_f, liquidatee, _, record_pk, liquidatee_authority) =
+        setup_liquidatee_with_authority(0.4, 2.0).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let zero_bank = test_f.get_bank(&zero_weight_mint);
+
+    let tokens = zero_bank
+        .mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    liquidatee
+        .try_bank_deposit_with_authority(tokens.key, zero_bank, 10, None, &liquidatee_authority)
+        .await?;
+    zero_bank.set_asset_weights_to_zero().await?;
+    sol_bank
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
+        .await?;
+
+    Ok((test_f, liquidatee, record_pk))
+}
+
+async fn send_start_and_end_liquidation_tx(
+    test_f: &TestFixture,
+    liquidatee: &MarginfiAccountFixture,
+    record_pk: Pubkey,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let payer = test_f.payer();
+    let mut start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let mut end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+    for ix in [&mut start_ix, &mut end_ix] {
+        for meta in ix.accounts.iter_mut().filter(|m| m.pubkey == payer) {
+            meta.is_signer = true;
+        }
+    }
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, end_ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await
+}
+
+#[tokio::test]
+async fn start_liquidation_rejects_stale_zero_weight_oracle() -> anyhow::Result<()> {
+    let (test_f, liquidatee, record_pk) =
+        setup_liquidatee_with_zero_weight_collateral(BankMint::SolEquivalent).await?;
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_EQUIVALENT_FEED, now - 3_600)
+        .await;
+    let result = send_start_and_end_liquidation_tx(&test_f, &liquidatee, record_pk).await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::PythPushStalePrice);
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_liquidation_rejects_spiked_zero_weight_cb_leg() -> anyhow::Result<()> {
+    let (test_f, liquidatee, record_pk) =
+        setup_liquidatee_with_zero_weight_collateral(BankMint::PyUSD).await?;
+    let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
+    arm_circuit_breaker(&test_f, pyusd_bank, PYTH_PYUSD_FEED, 1_000_000).await?;
+    set_oracle_price_now(&test_f, PYTH_PYUSD_FEED, 2_000_000).await;
+    let result = send_start_and_end_liquidation_tx(&test_f, &liquidatee, record_pk).await;
+    let err = result.expect_err("start_liquidation must reject the spiked zero-weight leg");
+    assert_custom_error!(err, MarginfiError::CircuitBreakerPriceJump);
+    Ok(())
 }
 
 // Below the minimum value threshold the account may end healthy, but the premium cap still
@@ -1188,14 +1240,7 @@ async fn liquidate_receiver_low_value_acc_may_end_healthy() -> anyhow::Result<()
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let payer = test_f.payer().clone();
@@ -1291,14 +1336,7 @@ async fn liquidate_receiver_low_value_bad_debt_acc_still_pays_premium_cap() -> a
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, 2_000_000_000, 0, 0)
         .await;
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.5).into()),
-                asset_weight_maint: Some(I80F48!(0.8).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.5), I80F48!(0.8))
         .await?;
 
     let payer = test_f.payer().clone();
@@ -1444,14 +1482,7 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
         )
         .await?;
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -1570,14 +1601,7 @@ async fn liquidate_receiver_other_account_withdraw_all_does_not_clear_bank_cache
 
     // Make liquidatee unhealthy
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -1719,14 +1743,7 @@ async fn liquidate_receiver_other_account_repay_all_does_not_clear_bank_cache_lo
 
     // Make liquidatee unhealthy
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -1868,14 +1885,7 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
 
     // Make liquidatee unhealthy.
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -2051,14 +2061,7 @@ async fn liquidate_receiver_external_user_signed_withdraw_all_does_not_clear_ban
 
     // Make liquidatee unhealthy.
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -2194,14 +2197,7 @@ async fn liquidate_receiver_same_authority_withdraw_fails_unauthorized() -> anyh
 
     // Make liquidatee unhealthy so liquidation can start.
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -2284,14 +2280,7 @@ async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
         .await?;
 
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -2370,14 +2359,7 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     sol_bank
-        .update_config(
-            BankConfigOpt {
-                asset_weight_init: Some(I80F48!(0.25).into()),
-                asset_weight_maint: Some(I80F48!(0.4).into()),
-                ..Default::default()
-            },
-            None,
-        )
+        .set_asset_weights(I80F48!(0.25), I80F48!(0.4))
         .await?;
 
     // Confirm banks are unlocked before liquidation

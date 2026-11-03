@@ -284,14 +284,16 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         order: order_loader,
         execute_record: execute_record_loader,
         instruction_sysvar,
+        group,
         ..
     } = &ctx.accounts;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let mut order = order_loader.load_mut()?;
+    let group_ref = group.load()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    run_cb_price_gate(&marginfi_account, &group_ref, ctx.remaining_accounts)?;
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
         get_tagged_account_health_components(
@@ -315,7 +317,7 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
 
     // Also gate at start: the order can close a tagged balance before the end gate runs, so a bank
     // whose breaching price sets the trigger must be caught here while it's still active.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    run_cb_price_gate(&marginfi_account, &group_ref, ctx.remaining_accounts)?;
 
     let net = order_assets_in_equity
         .checked_sub(order_liabs_in_equity)
@@ -367,10 +369,12 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         order: order_loader,
         execute_record: execute_record_loader,
         fee_state: fee_state_loader,
+        group,
         ..
     } = &ctx.accounts;
 
     validate_not_cpi_by_stack_height()?;
+    let group_ref = group.load()?;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let order = order_loader.load()?;
@@ -417,7 +421,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     // Inline CB gate: order execution moves funds at oracle prices, so revert if any involved
     // bank's live price has jumped past the breach threshold relative to its reference.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    run_cb_price_gate(&marginfi_account, &group_ref, ctx.remaining_accounts)?;
 
     check!(
         order_liab_count.eq(&0), // All order liabilities should be closed

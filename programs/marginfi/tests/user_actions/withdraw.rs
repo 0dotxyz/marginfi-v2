@@ -1,18 +1,23 @@
-use anchor_lang::InstructionData;
+use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token_2022::spl_token_2022::extension::{
     transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
 };
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use fixtures::{assert_custom_error, prelude::*, ui_to_native};
+use fixtures::{
+    assert_custom_error, marginfi_account::replace_oracle_account_after_bank, prelude::*,
+    ui_to_native,
+};
 use marginfi::{assert_eq_with_tolerance, prelude::*, state::bank::BankImpl};
 use marginfi_type_crate::{
     constants::ZERO_AMOUNT_THRESHOLD,
-    types::{BankConfig, BankVaultType},
+    types::{milli_to_u32, u32_to_milli, BankConfig, BankConfigOpt, BankVaultType, PremiumEntry},
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::{clock::Clock, signer::Signer, transaction::Transaction};
+use solana_sdk::{
+    clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
+};
 use test_case::test_case;
 
 #[test_case(0.03, 0.012, BankMint::Usdc)]
@@ -185,6 +190,334 @@ async fn marginfi_account_withdraw_success(
             }
         }
     }
+
+    Ok(())
+}
+
+#[test_case(CONFIDENCE_BREACHING_HEALTH_CAP_ONLY, false; "priceable confidence breach")]
+#[test_case(CONFIDENCE_BREACHING_ALL_READS, true; "unpriceable confidence breach")]
+#[tokio::test]
+async fn withdraw_premium_only_oracle_policy_for_zero_initial_weight(
+    oracle_confidence_native: u64,
+    premium_unpriceable: bool,
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp = 1;
+        ctx.set_sysvar(&clock);
+    }
+    test_f
+        .marginfi_group
+        .try_configure_group_premium(PremiumEntry {
+            collateral_tag: 1,
+            liability_tag: 2,
+            rate: milli_to_u32(I80F48!(0.01)),
+        })
+        .await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let usdc_bank_key = usdc_bank.key;
+    test_f
+        .marginfi_group
+        .try_configure_bank_premium(sol_bank, 1, true)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_configure_bank_premium(usdc_bank, 2, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank, 100, None)
+        .await?;
+    let account = test_f.create_marginfi_account().await;
+
+    let sol_token = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    let sol_eq_token = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    {
+        let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+        account
+            .try_bank_deposit(sol_token.key, sol_bank, 100, None)
+            .await?;
+        account
+            .try_bank_deposit(sol_eq_token.key, sol_eq_bank, 100, None)
+            .await?;
+    }
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    account
+        .try_bank_borrow(borrower_usdc.key, usdc_bank, 10)
+        .await?;
+    let account_before = account.load().await;
+    let full_premium_rate = u32_to_milli(milli_to_u32(I80F48!(0.01)));
+    let rate_before = u32_to_milli(
+        account_before
+            .lending_account
+            .get_balance(&usdc_bank_key)
+            .unwrap()
+            .premium_rate_snapshot,
+    );
+    assert!(rate_before < full_premium_rate);
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let now = test_f.get_clock().await.unix_timestamp;
+    assert_confidence_exceeds_health_cap(sol_bank).await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, oracle_confidence_native, now)
+        .await;
+
+    {
+        let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+        account
+            .try_bank_withdraw(sol_eq_token.key, sol_eq_bank, 1, None)
+            .await?;
+    }
+
+    let account_after = account.load().await;
+    let rate_after = u32_to_milli(
+        account_after
+            .lending_account
+            .get_balance(&usdc_bank_key)
+            .unwrap()
+            .premium_rate_snapshot,
+    );
+    if premium_unpriceable {
+        assert!(
+            (rate_after - full_premium_rate).abs() < I80F48!(0.000001),
+            "an unpriceable premium-only oracle must ratchet the rate without blocking withdrawal"
+        );
+    } else {
+        assert!(
+            rate_after > I80F48::ZERO && rate_after < full_premium_rate,
+            "a priceable confidence breach must keep the weighted premium rate"
+        );
+    }
+
+    if !premium_unpriceable {
+        let stale_clock_time = {
+            let ctx = test_f.context.borrow_mut();
+            let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.unix_timestamp += 3_600;
+            ctx.set_sysvar(&clock);
+            clock.unix_timestamp
+        };
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, stale_clock_time - 3_600)
+            .await;
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, stale_clock_time)
+            .await;
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_EQUIVALENT_FEED, stale_clock_time)
+            .await;
+        let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+        account
+            .try_bank_withdraw(sol_eq_token.key, sol_eq_bank, 1, None)
+            .await?;
+        let account_after_stale = account.load().await;
+        let rate_after_stale = u32_to_milli(
+            account_after_stale
+                .lending_account
+                .get_balance(&usdc_bank_key)
+                .unwrap()
+                .premium_rate_snapshot,
+        );
+        assert!(
+            (rate_after_stale - full_premium_rate).abs() < I80F48!(0.000001),
+            "successful stale-premium withdrawal must ratchet and preserve the 1% snapshot"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn group_rate_limit_keeps_zero_weight_withdraw_oracle_mandatory() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let account = test_f.create_marginfi_account().await;
+    let sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    account.try_bank_deposit(sol.key, sol_bank, 5, None).await?;
+    sol_bank.set_asset_weights_to_zero().await?;
+
+    let configure_rate_limits_ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureGroupRateLimits {
+            marginfi_group: test_f.marginfi_group.key,
+            admin: test_f.payer(),
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureGroupRateLimits {
+            hourly_max_outflow_usd: Some(1000),
+            daily_max_outflow_usd: None,
+        }
+        .data(),
+    };
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[configure_rate_limits_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+        .await;
+    let blocked = account.try_bank_withdraw(sol.key, sol_bank, 1, None).await;
+    assert_custom_error!(blocked.unwrap_err(), MarginfiError::PythPushStalePrice);
+
+    test_f.set_pyth_oracle_timestamp(PYTH_SOL_FEED, now).await;
+    account
+        .try_bank_withdraw(sol.key, sol_bank, 1, None)
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn withdraw_ignores_unusable_oracle_of_zero_weight_collateral_without_premium(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let account = test_f.create_marginfi_account().await;
+    let sol_token = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    let sol_eq_token = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
+
+    account
+        .try_bank_deposit(sol_token.key, sol_bank, 100, None)
+        .await?;
+    account
+        .try_bank_deposit(sol_eq_token.key, sol_eq_bank, 100, None)
+        .await?;
+
+    let account_state = account.load().await;
+    let last_active_bank = account_state
+        .lending_account
+        .balances
+        .iter()
+        .rfind(|balance| balance.is_active())
+        .expect("two active collateral balances")
+        .bank_pk;
+    let (zero_weight_bank, healthy_bank, healthy_token_key, zero_weight_feed) =
+        if last_active_bank == sol_bank.key {
+            (sol_bank, sol_eq_bank, sol_eq_token.key, PYTH_SOL_FEED)
+        } else {
+            assert_eq!(last_active_bank, sol_eq_bank.key);
+            (
+                sol_eq_bank,
+                sol_bank,
+                sol_token.key,
+                PYTH_SOL_EQUIVALENT_FEED,
+            )
+        };
+    let zero_weight_bank_key = zero_weight_bank.key;
+    zero_weight_bank.set_asset_weights_to_zero().await?;
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_price_native(
+            zero_weight_feed,
+            10_000_000_000,
+            CONFIDENCE_BREACHING_ALL_READS,
+            now,
+        )
+        .await;
+
+    zero_weight_bank
+        .set_asset_weights(I80F48!(0.1), I80F48!(0.1))
+        .await?;
+    let positive_weight_result = account
+        .try_bank_withdraw(healthy_token_key, healthy_bank, 1, None)
+        .await;
+    assert_custom_error!(
+        positive_weight_result.unwrap_err(),
+        MarginfiError::OracleMaxConfidenceExceeded
+    );
+    zero_weight_bank.set_asset_weights_to_zero().await?;
+
+    account
+        .try_bank_withdraw(healthy_token_key, healthy_bank, 1, None)
+        .await?;
+
+    test_f
+        .set_pyth_oracle_timestamp(zero_weight_feed, now - 3_600)
+        .await;
+
+    account
+        .try_bank_withdraw(healthy_token_key, healthy_bank, 1, None)
+        .await?;
+
+    let mut ix = account
+        .make_bank_withdraw_ix(healthy_token_key, healthy_bank, 1, None)
+        .await;
+    assert_eq!(
+        ix.accounts.last().unwrap().pubkey,
+        zero_weight_feed,
+        "zero-weight oracle must be the final remaining account"
+    );
+    replace_oracle_account_after_bank(
+        &mut ix,
+        zero_weight_bank_key,
+        zero_weight_feed,
+        test_f.get_bank(&BankMint::Usdc).key,
+    );
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await?;
+    drop(ctx);
+
+    let mut truncated_ix = account
+        .make_bank_withdraw_ix(healthy_token_key, healthy_bank, 1, None)
+        .await;
+    truncated_ix.accounts.pop().expect("final oracle account");
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[truncated_ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let result = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::WrongNumberOfOracleAccounts
+    );
+    drop(ctx);
 
     Ok(())
 }
@@ -452,4 +785,77 @@ async fn send(
         .banks_client
         .process_transaction(tx)
         .await
+}
+
+#[test_case(false, true; "partial, confidence breach")]
+#[test_case(true, true; "full close, confidence breach")]
+#[test_case(false, false; "partial, stale (guard)")]
+#[tokio::test]
+async fn withdraw_zero_weight_asset_with_unusable_oracle(
+    withdraw_all: bool,
+    oracle_confidence_breach: bool,
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let sol_eq = test_f.get_bank(&BankMint::SolEquivalent);
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let lender = test_f.create_marginfi_account().await;
+    let lender_tokens = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(2_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_tokens.key, usdc, 2_000, None)
+        .await?;
+    let borrower = test_f.create_marginfi_account().await;
+    let zero_tokens = test_f.sol_mint.create_token_account_and_mint_to(20).await;
+    let healthy = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    borrower
+        .try_bank_deposit(healthy.key, sol_eq, 100, None)
+        .await?;
+    borrower
+        .try_bank_deposit(zero_tokens.key, sol, 10, None)
+        .await?;
+    let debt_tokens = test_f.usdc_mint.create_empty_token_account().await;
+    borrower.try_bank_borrow(debt_tokens.key, usdc, 1).await?;
+    sol.set_asset_weights_to_zero().await?;
+    let now = test_f.get_clock().await.unix_timestamp;
+    if oracle_confidence_breach {
+        test_f
+            .set_pyth_oracle_price_native(
+                PYTH_SOL_FEED,
+                10_000_000_000,
+                CONFIDENCE_BREACHING_ALL_READS,
+                now,
+            )
+            .await;
+    } else {
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+            .await;
+    }
+    if withdraw_all {
+        borrower
+            .try_bank_withdraw(zero_tokens.key, sol, 0, Some(true))
+            .await?;
+    } else {
+        borrower
+            .try_bank_withdraw(zero_tokens.key, sol, 2, None)
+            .await?;
+    }
+    let after = borrower.load().await;
+    let remaining = after
+        .lending_account
+        .get_balance(&sol.key)
+        .map(|bal| I80F48::from(bal.asset_shares))
+        .unwrap_or(I80F48::ZERO);
+    if withdraw_all {
+        assert_eq!(remaining, I80F48::ZERO);
+    } else {
+        assert!(remaining > I80F48::ZERO);
+    }
+    Ok(())
 }

@@ -38,14 +38,19 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
+use marginfi::errors::MarginfiError;
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::types::{
     make_points, milli_to_u32, u32_to_milli, Balance, BankConfig, BankConfigOpt,
-    BankOperationalState, InterestRateConfig, MarginfiAccount, PremiumEntry,
+    BankOperationalState, EmodeEntry, InterestRateConfig, MarginfiAccount, OrderTrigger,
+    PremiumEntry, WrappedI80F48,
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_sdk::{
+    account::Account, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
+};
+use test_case::test_case;
 
 const TAG_STABLE: u16 = 100;
 const TAG_SOL: u16 = 200;
@@ -696,8 +701,6 @@ const LST_EMODE_TAG: u16 = 502;
 
 #[tokio::test]
 async fn premium_composes_with_emode() -> anyhow::Result<()> {
-    use marginfi_type_crate::types::EmodeEntry;
-
     // SOL: weak base collateral (0.5/0.6) boosted by emode to 0.9/0.94 for LST borrows.
     // USDC: 0.8/0.9, NO emode entry. LST (SolEquivalent): zero-interest premium-active borrow.
     let test_f = TestFixture::new(Some(TestSettings {
@@ -994,9 +997,6 @@ async fn premium_direct_liquidation_refreshes_snapshots() -> anyhow::Result<()> 
 /// snapshot refresh that withdraw deferred while ACCOUNT_IN_ORDER_EXECUTION was set.
 #[tokio::test]
 async fn premium_order_execution_reweights_surviving_liability() -> anyhow::Result<()> {
-    use marginfi_type_crate::types::{OrderTrigger, WrappedI80F48};
-    use solana_sdk::{account::Account, transaction::Transaction};
-
     // USDC: surviving premium-active debt. PyUSD: order debt (closed by the keeper).
     // SOL: tagged order collateral. SolEq: untagged (0% leg) bystander collateral.
     let test_f = TestFixture::new(Some(TestSettings {
@@ -1607,13 +1607,148 @@ async fn premium_pulse_with_stale_collateral_oracle_never_rewrites_snapshots() -
     Ok(())
 }
 
+async fn setup_zero_initial_premium_borrower(
+) -> anyhow::Result<(TestFixture, MarginfiAccountFixture)> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48::ZERO.into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    Ok((test_f, borrower))
+}
+
+#[test_case(true, 0, true; "stale feed is rejected")]
+#[test_case(false, CONFIDENCE_BREACHING_HEALTH_CAP_ONLY, false; "priceable confidence breach is accepted")]
+#[test_case(false, CONFIDENCE_BREACHING_ALL_READS, true; "unpriceable confidence breach is rejected")]
+#[tokio::test]
+async fn premium_borrow_zero_initial_collateral_oracle_policy(
+    oracle_is_stale: bool,
+    oracle_confidence_native: u64,
+    expect_rejection: bool,
+) -> anyhow::Result<()> {
+    let (test_f, borrower) = setup_zero_initial_premium_borrower().await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+
+    if oracle_is_stale {
+        advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+    } else {
+        assert_confidence_exceeds_health_cap(test_f.get_bank(&BankMint::Sol)).await;
+        let now = test_f.get_clock().await.unix_timestamp;
+        test_f
+            .set_pyth_oracle_price_native(
+                PYTH_SOL_FEED,
+                10_000_000_000,
+                oracle_confidence_native,
+                now,
+            )
+            .await;
+    }
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let result = borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await;
+    if !expect_rejection {
+        result?;
+        return Ok(());
+    }
+
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+    assert_eq!(borrower_usdc.balance().await, 0);
+    assert!(borrower
+        .load()
+        .await
+        .lending_account
+        .get_balance(&usdc_bank_f.key)
+        .is_none());
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, now)
+        .await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+    assert_eq!(
+        borrower_usdc.balance().await,
+        native!(100, "USDC"),
+        "restoring the premium oracle must permit the same debt change"
+    );
+
+    Ok(())
+}
+
 /// Debt origination during an oracle outage must revert, not open at 0%: with the snapshot
 /// pass gated off (incomplete scratch), a fresh premium-active borrow would otherwise keep its
 /// initial 0% snapshot for the whole outage.
 #[tokio::test]
 async fn premium_borrow_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
-    use marginfi::errors::MarginfiError;
-
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -1868,8 +2003,6 @@ async fn premium_withdraw_during_oracle_outage_ratchets_not_blocked() -> anyhow:
 /// pass there must revert, not leave the new liability at its 0% snapshot.
 #[tokio::test]
 async fn premium_flashloan_end_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
-    use marginfi::errors::MarginfiError;
-
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -3908,5 +4041,152 @@ async fn premium_reduce_only_wide_conf_does_not_block_initial_checks() -> anyhow
     borrower
         .try_bank_withdraw(borrower_sol.key, sol_bank_f, 1, None)
         .await?;
+    Ok(())
+}
+
+#[test_case(false; "confidence breach on premium-only collateral")]
+#[test_case(true; "stale feed on premium-only collateral (guard)")]
+#[tokio::test]
+async fn direct_liquidation_ratchets_liquidator_premium_when_collateral_unpriceable(
+    oracle_is_stale: bool,
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let sol_eq = test_f.get_bank(&BankMint::SolEquivalent);
+
+    let full_rate = u32_to_milli(milli_to_u32(I80F48!(0.01)));
+    test_f
+        .marginfi_group
+        .try_configure_group_premium(PremiumEntry {
+            collateral_tag: TAG_SOL,
+            liability_tag: TAG_STABLE,
+            rate: milli_to_u32(I80F48!(0.01)),
+        })
+        .await?;
+    test_f
+        .marginfi_group
+        .try_configure_bank_premium(usdc, TAG_STABLE, true)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_configure_bank_premium(sol, TAG_SOL, true)
+        .await?;
+    let usdc_premium_rate_of = |acc: &MarginfiAccount| {
+        u32_to_milli(
+            acc.lending_account
+                .get_balance(&usdc.key)
+                .unwrap()
+                .premium_rate_snapshot,
+        )
+    };
+
+    let lender = test_f.create_marginfi_account().await;
+    let supply = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(supply.key, usdc, 100_000, None)
+        .await?;
+
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_collateral = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_collateral.key, sol_eq, 999, None)
+        .await?;
+    let liquidatee_debt = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_debt.key, usdc, 1_000)
+        .await?;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let tagged_sol_tokens = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(8_000)
+        .await;
+    let untagged_sol_eq_tokens = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(8_000)
+        .await;
+    liquidator
+        .try_bank_deposit(tagged_sol_tokens.key, sol, 8_000, None)
+        .await?;
+    liquidator
+        .try_bank_deposit(untagged_sol_eq_tokens.key, sol_eq, 8_000, None)
+        .await?;
+    let liquidator_debt = test_f.usdc_mint.create_empty_token_account().await;
+    liquidator
+        .try_bank_borrow(liquidator_debt.key, usdc, 10)
+        .await?;
+    let rate_before = usdc_premium_rate_of(&liquidator.load().await);
+    assert!(
+        rate_before > I80F48::ZERO && rate_before < full_rate,
+        "mixed collateral must dilute the rate"
+    );
+
+    sol.set_asset_weights(I80F48::ZERO, I80F48!(0.5)).await?;
+    sol_eq
+        .set_asset_weights(I80F48!(0.01), I80F48!(0.02))
+        .await?;
+    let now = test_f.get_clock().await.unix_timestamp;
+    if oracle_is_stale {
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
+            .await;
+    } else {
+        test_f
+            .set_pyth_oracle_price_native(
+                PYTH_SOL_FEED,
+                10_000_000_000,
+                CONFIDENCE_BREACHING_ALL_READS,
+                now,
+            )
+            .await;
+    }
+
+    liquidator
+        .try_liquidate(&liquidatee, sol_eq, 50, usdc)
+        .await?;
+
+    let rate_after = usdc_premium_rate_of(&liquidator.load().await);
+    assert!(
+        rate_after >= rate_before,
+        "an unpriceable premium leg must never lower the snapshot"
+    );
+    assert!(
+        (rate_after - full_rate).abs() < I80F48!(0.000001),
+        "unpriceable tagged collateral should ratchet to the full premium"
+    );
     Ok(())
 }

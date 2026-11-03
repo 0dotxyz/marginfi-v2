@@ -526,3 +526,140 @@ impl Debug for BankFixture {
             .finish()
     }
 }
+
+pub async fn arm_and_trip_circuit_breaker(
+    test_f: &crate::test::TestFixture,
+    bank: &BankFixture,
+    feed: Pubkey,
+    base_native: i64,
+) -> anyhow::Result<()> {
+    arm_and_trip_circuit_breakers(test_f, &[(bank, feed, base_native)]).await
+}
+
+pub async fn arm_and_trip_circuit_breakers(
+    test_f: &crate::test::TestFixture,
+    banks: &[(&BankFixture, Pubkey, i64)],
+) -> anyhow::Result<()> {
+    warm_price_cache_and_enable_cb(test_f, banks).await?;
+
+    let trip_time = CB_WARM_UNIX_TIME + 1;
+    test_f.set_clock(CB_WARM_SLOT + 10, trip_time).await;
+    for (_, feed, base) in banks {
+        test_f
+            .set_pyth_oracle_price_native(*feed, base.saturating_mul(2), 0, trip_time)
+            .await;
+    }
+    for (bank, _, _) in banks {
+        test_f
+            .marginfi_group
+            .try_pulse_bank_price_cache(bank)
+            .await?;
+    }
+
+    for (_, feed, base) in banks {
+        test_f
+            .set_pyth_oracle_price_native(*feed, *base, 0, trip_time)
+            .await;
+    }
+    refresh_cb_scenario_feeds(test_f, trip_time).await;
+    Ok(())
+}
+
+pub async fn arm_circuit_breakers(
+    test_f: &crate::test::TestFixture,
+    banks: &[(&BankFixture, Pubkey, i64)],
+) -> anyhow::Result<()> {
+    warm_price_cache_and_enable_cb(test_f, banks).await?;
+    refresh_cb_scenario_feeds(test_f, CB_WARM_UNIX_TIME).await;
+    Ok(())
+}
+
+const CB_WARM_UNIX_TIME: i64 = 100;
+const CB_WARM_SLOT: u64 = 1_000;
+
+async fn warm_price_cache_and_enable_cb(
+    test_f: &crate::test::TestFixture,
+    banks: &[(&BankFixture, Pubkey, i64)],
+) -> anyhow::Result<()> {
+    for (_, feed, base) in banks {
+        test_f
+            .set_pyth_oracle_price_native(*feed, *base, 0, CB_WARM_UNIX_TIME)
+            .await;
+    }
+    test_f.set_clock(CB_WARM_SLOT, CB_WARM_UNIX_TIME).await;
+    for (bank, _, _) in banks {
+        test_f
+            .marginfi_group
+            .try_pulse_bank_price_cache(bank)
+            .await?;
+    }
+    for (bank, _, _) in banks {
+        bank.update_config(crate::utils::standard_cb_config(), None)
+            .await?;
+    }
+    Ok(())
+}
+
+pub async fn arm_circuit_breaker(
+    test_f: &crate::test::TestFixture,
+    bank: &BankFixture,
+    feed: Pubkey,
+    base_native: i64,
+) -> anyhow::Result<()> {
+    arm_circuit_breakers(test_f, &[(bank, feed, base_native)]).await
+}
+
+async fn refresh_cb_scenario_feeds(test_f: &crate::test::TestFixture, timestamp: i64) {
+    for feed in [
+        crate::test::PYTH_SOL_FEED,
+        crate::test::PYTH_USDC_FEED,
+        crate::test::PYTH_PYUSD_FEED,
+        crate::test::PYTH_SOL_EQUIVALENT_FEED,
+    ] {
+        test_f.set_pyth_oracle_timestamp(feed, timestamp).await;
+    }
+}
+
+pub async fn set_oracle_price_now(test_f: &crate::test::TestFixture, feed: Pubkey, native: i64) {
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_price_native(feed, native, 0, now)
+        .await;
+}
+
+pub const CONFIDENCE_BREACHING_HEALTH_CAP_ONLY: u64 = 1_000_000_000;
+
+pub const CONFIDENCE_BREACHING_ALL_READS: u64 = 60_000_000_000;
+
+pub async fn assert_confidence_exceeds_health_cap(bank: &BankFixture) {
+    let raw_cap = bank.load().await.config.oracle_max_confidence;
+    let effective_cap = if raw_cap == 0 { u32::MAX / 10 } else { raw_cap };
+    assert!(
+        u64::from(effective_cap) * 1_000 < u64::from(u32::MAX) * 212,
+        "the test oracle confidence must breach the configured health-read cap"
+    );
+}
+
+impl BankFixture {
+    pub async fn set_asset_weights(
+        &self,
+        init: impl Into<marginfi_type_crate::types::WrappedI80F48>,
+        maint: impl Into<marginfi_type_crate::types::WrappedI80F48>,
+    ) -> anyhow::Result<()> {
+        self.update_config(
+            marginfi_type_crate::types::BankConfigOpt {
+                asset_weight_init: Some(init.into()),
+                asset_weight_maint: Some(maint.into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn set_asset_weights_to_zero(&self) -> anyhow::Result<()> {
+        self.set_asset_weights(fixed::types::I80F48::ZERO, fixed::types::I80F48::ZERO)
+            .await
+    }
+}

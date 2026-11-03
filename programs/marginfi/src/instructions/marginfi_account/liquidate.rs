@@ -10,7 +10,8 @@ use crate::state::{
         check_account_init_health_and_clear_tag,
         check_post_liquidation_condition_and_get_account_health,
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-        is_signer_authorized, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+        is_signer_authorized, run_cb_price_gate_skip_zero_weight, LendingAccountImpl,
+        MarginfiAccountImpl,
     },
     premium::{
         max_premium_rate_for_liability_tag, BalancePremiumImpl, MarginfiAccountPremiumImpl,
@@ -32,7 +33,8 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PREMIUM_ACTIVE,
+        CIRCUIT_BREAKER_ENABLED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED, PREMIUM_ACTIVE,
     },
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
@@ -185,7 +187,11 @@ pub fn lending_account_liquidate<'info>(
             // Inline CB gate: the liquidation math below consumes live oracle prices and
             // `update_cache_price` trips the breaker without reverting, so a breach must
             // revert here first. Admins liquidate through a breach via the branch above.
-            run_cb_price_gate(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
+            run_cb_price_gate_skip_zero_weight(
+                &liquidatee_marginfi_account,
+                &group,
+                liquidatee_remaining_accounts,
+            )?;
         }
 
         // Liquidators must repay debts in allowed asset types. A SOL debt can be repaid in any
@@ -255,6 +261,25 @@ pub fn lending_account_liquidate<'info>(
 
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
         let asset_bank_remaining_accounts_len = get_remaining_accounts_per_bank(&asset_bank)? - 1;
+
+        // Seized collateral needs a CB check even at zero weight: the liquidatee gate above
+        // skips zero-weight asset legs. The liability bank needs no separate check here because
+        // that gate never skips liability legs.
+        if asset_bank.get_flag(CIRCUIT_BREAKER_ENABLED) && !cb_admin_liquidation {
+            let oracle_ais = ctx
+                .remaining_accounts
+                .get(..asset_bank_remaining_accounts_len)
+                .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+            let (_, cache_price) =
+                OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+                    &asset_bank,
+                    oracle_ais,
+                    &clock,
+                    OraclePriceType::RealTime,
+                    liquidatee_marginfi_account.prices_through_pt_emergency(),
+                )?;
+            asset_bank.cb_price_gate(cache_price.cb_observation()?)?;
+        }
 
         let asset_price: I80F48 = fetch_asset_price_for_bank_low_bias(
             &asset_bank_key,
@@ -605,7 +630,11 @@ pub fn lending_account_liquidate<'info>(
     // The liquidator takes on the liability at live prices, so their account is subject to the
     // same gate as a borrow.
     if !cb_admin_liquidation {
-        run_cb_price_gate(&liquidator_marginfi_account, liquidator_remaining_accounts)?;
+        run_cb_price_gate_skip_zero_weight(
+            &liquidator_marginfi_account,
+            group,
+            liquidator_remaining_accounts,
+        )?;
     }
     liquidatee_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);
     liquidator_marginfi_account.unset_flag(ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, false);

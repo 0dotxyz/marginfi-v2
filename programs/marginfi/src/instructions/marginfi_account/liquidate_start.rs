@@ -54,7 +54,7 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
     );
     // Inline CB gate: the live prices fetched below are locked into the liquidation cache for
     // the whole receivership and no later sub-step re-validates them.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    run_cb_price_gate(&marginfi_account, &group, ctx.remaining_accounts)?;
     start_receivership(
         &mut marginfi_account,
         &group,

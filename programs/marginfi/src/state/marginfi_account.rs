@@ -217,12 +217,66 @@ pub fn deposit_is_halt_safe(marginfi_account: &MarginfiAccount, bank_pk: &Pubkey
 /// a liability-free withdraw is treated as halt-safe.
 ///
 /// `remaining_ais` must be the standard bank+oracle layout used by the health computation.
+///
+/// Strict gate: validates every CB-enabled leg, including zero-weight collateral.
+///
+/// Which gate to call:
+/// - Use this strict gate when the instruction consumes Equity-weighted values or locks prices
+///   (receivership start, bankruptcy, order execution).
+/// - Use `run_cb_price_gate_skip_zero_weight` only when the downstream math is limited to
+///   Initial or Maintenance health, where a zero-effective-weight asset leg cannot move health.
 pub fn run_cb_price_gate<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
 ) -> MarginfiResult<()> {
+    run_cb_price_gate_scoped(
+        marginfi_account,
+        group,
+        remaining_ais,
+        CbGateLegScope::AllEnabledLegs,
+    )
+}
+
+/// Lenient CB price gate: skips asset legs whose effective Maintenance weight is zero.
+///
+/// For withdraw, borrow, flashloan end and rebalance end, where a zero-weight collateral leg
+/// cannot move Initial/Maintenance health. Liability legs are never skipped. While the account
+/// is in receivership this behaves exactly like `run_cb_price_gate`: prices are locked for the
+/// whole receivership, and a zero-weight leg can become weighted as liabilities are repaid.
+pub fn run_cb_price_gate_skip_zero_weight<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<()> {
+    let scope = if marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+        CbGateLegScope::AllEnabledLegs
+    } else {
+        CbGateLegScope::SkipZeroWeightLegs
+    };
+    run_cb_price_gate_scoped(marginfi_account, group, remaining_ais, scope)
+}
+
+// Check effective Maintenance weight, including e-mode boosts.
+const CB_GATE_ZERO_WEIGHT_REQUIREMENT: RequirementType = RequirementType::Maintenance;
+
+#[derive(Clone, Copy)]
+enum CbGateLegScope {
+    SkipZeroWeightLegs,
+    AllEnabledLegs,
+}
+
+fn run_cb_price_gate_scoped<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    scope: CbGateLegScope,
+) -> MarginfiResult<()> {
     let clock = Clock::get()?;
-    let mut account_index = 0usize;
+
+    let mut emode_config_cache: Option<ReconciledEmodeConfig> = None;
+
+    let mut remaining_ais_cursor = 0usize;
     for balance in marginfi_account
         .lending_account
         .balances
@@ -230,7 +284,7 @@ pub fn run_cb_price_gate<'info>(
         .filter(|b| b.is_active())
     {
         let bank_ai = remaining_ais
-            .get(account_index)
+            .get(remaining_ais_cursor)
             .ok_or(MarginfiError::InvalidBankAccount)?;
         let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
         let bank = bank_al.load()?;
@@ -246,33 +300,89 @@ pub fn run_cb_price_gate<'info>(
             MarginfiError::BankCircuitBreakerHalted
         );
 
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+        let accounts_per_bank = get_remaining_accounts_per_bank(&bank)?;
+        let oracle_start = remaining_ais_cursor + 1;
+        // Skipped banks must still advance the oracle-account cursor.
+        remaining_ais_cursor = remaining_ais_cursor.saturating_add(accounts_per_bank);
 
-        if bank.get_flag(CIRCUIT_BREAKER_ENABLED) {
-            let oracle_start = account_index + 1;
-            let oracle_end = oracle_start + num_accounts - 1;
-            require_gte!(
-                remaining_ais.len(),
-                oracle_end,
-                MarginfiError::WrongNumberOfOracleAccounts
-            );
-            let oracle_ais = &remaining_ais[oracle_start..oracle_end];
-            // The breaker tracks the multiplier-adjusted price (see `cb_observation`), so the gate
-            // must compare against the same effective price.
-            let (_, cache_price) =
-                OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
-                    &bank,
-                    oracle_ais,
-                    &clock,
-                    OraclePriceType::RealTime,
-                    marginfi_account.prices_through_pt_emergency(),
-                )?;
-            bank.cb_price_gate(cache_price.cb_observation()?)?;
+        if !bank.get_flag(CIRCUIT_BREAKER_ENABLED) {
+            continue;
         }
 
-        account_index = account_index.saturating_add(num_accounts);
+        match scope {
+            CbGateLegScope::SkipZeroWeightLegs => {
+                if cb_gate_can_skip_leg(
+                    marginfi_account,
+                    group,
+                    remaining_ais,
+                    balance,
+                    &bank,
+                    &mut emode_config_cache,
+                ) {
+                    continue;
+                }
+            }
+            CbGateLegScope::AllEnabledLegs => {
+                // Validate all legs; don't skip any
+            }
+        }
+
+        let oracle_end = oracle_start + accounts_per_bank - 1;
+        require_gte!(
+            remaining_ais.len(),
+            oracle_end,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        let oracle_ais = &remaining_ais[oracle_start..oracle_end];
+        // The breaker tracks the multiplier-adjusted price (see `cb_observation`), so the gate
+        // must compare against the same effective price.
+        let (_, cache_price) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+            &bank,
+            oracle_ais,
+            &clock,
+            OraclePriceType::RealTime,
+            marginfi_account.prices_through_pt_emergency(),
+        )?;
+        bank.cb_price_gate(cache_price.cb_observation()?)?;
     }
     Ok(())
+}
+
+fn reconcile_emode_config_releasing_heap<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> ReconciledEmodeConfig {
+    let heap_checkpoint = heap_pos();
+    let same_asset_leverage =
+        same_asset_leverage_for_requirement(CB_GATE_ZERO_WEIGHT_REQUIREMENT, group);
+    let config = EmodeConfigIterator::new(
+        &marginfi_account.lending_account,
+        remaining_ais,
+        false,
+        CB_GATE_ZERO_WEIGHT_REQUIREMENT,
+        same_asset_leverage,
+    )
+    .reconcile();
+    heap_restore(heap_checkpoint);
+    config
+}
+
+fn cb_gate_can_skip_leg<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    balance: &Balance,
+    bank: &Bank,
+    emode_config_cache: &mut Option<ReconciledEmodeConfig>,
+) -> bool {
+    if !matches!(balance.get_side(), Some(BalanceSide::Assets)) {
+        return false;
+    }
+    let emode = emode_config_cache.get_or_insert_with(|| {
+        reconcile_emode_config_releasing_heap(marginfi_account, group, remaining_ais)
+    });
+    has_zero_effective_asset_weight(balance, bank, CB_GATE_ZERO_WEIGHT_REQUIREMENT, emode)
 }
 
 impl MarginfiAccountImpl for MarginfiAccount {
@@ -526,13 +636,12 @@ fn get_cached_price_with_confidence(
 }
 
 #[inline(always)]
-/// Returns `(value, health_price, premium_price)`; `premium_price` is the unbiased cached price.
 fn calc_weighted_asset_value_cached_standalone(
     balance: &Balance,
     bank: &Bank,
     requirement_type: RequirementType,
     reconciled_emode_config: &ReconciledEmodeConfig,
-) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
+) -> MarginfiResult<(I80F48, I80F48)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
             if matches!(
@@ -543,7 +652,7 @@ fn calc_weighted_asset_value_cached_standalone(
                 )
             ) {
                 debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
-                return Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO));
+                return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
             let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
@@ -565,9 +674,9 @@ fn calc_weighted_asset_value_cached_standalone(
                 Some(asset_weight),
             )?;
 
-            Ok((value, lower_price, price_with_confidence.price))
+            Ok((value, lower_price))
         }
-        RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO)),
+        RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO)),
     }
 }
 
@@ -612,8 +721,8 @@ fn calc_premium_liab_value(
 
 /// Record a balance into the premium scratch during the health loop.
 ///
-/// `premium_price` is the unbiased price from the pass's own oracle read (see the premium module
-/// docs). No risk weights; ReduceOnly always counts; isolated never
+/// `premium_price` is the pass's biased health price, reused for free (accepted rate wobble
+/// — see the premium module docs). No risk weights; ReduceOnly always counts; isolated never
 /// does. Unpriceable legs weigh zero and keep the scratch incomplete
 /// (`err_code` / `unpriceable_leg`).
 #[inline(always)]
@@ -670,33 +779,31 @@ fn collect_premium_scratch_entry(
     Ok(())
 }
 
-/// Returns `(asset_value, liability_value, health_price, premium_price)`; `premium_price` is only
-/// set for collateral, matching the live branch.
 #[inline(always)]
 fn calc_weighted_value_cached_for_balance(
     balance: &Balance,
     bank: &Bank,
     requirement_type: RequirementType,
     reconciled_emode_config: &ReconciledEmodeConfig,
-) -> MarginfiResult<(I80F48, I80F48, I80F48, I80F48)> {
+) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
     match balance.get_side() {
         Some(side) => match side {
             BalanceSide::Assets => {
-                let (value, price, premium_price) = calc_weighted_asset_value_cached_standalone(
+                let (value, price) = calc_weighted_asset_value_cached_standalone(
                     balance,
                     bank,
                     requirement_type,
                     reconciled_emode_config,
                 )?;
-                Ok((value, I80F48::ZERO, price, premium_price))
+                Ok((value, I80F48::ZERO, price))
             }
             BalanceSide::Liabilities => {
                 let (value, price) =
                     calc_weighted_liab_value_cached_standalone(balance, bank, requirement_type)?;
-                Ok((I80F48::ZERO, value, price, I80F48::ZERO))
+                Ok((I80F48::ZERO, value, price))
             }
         },
-        None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, I80F48::ZERO)),
+        None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO)),
     }
 }
 /// Calculate the value of an asset, given its quantity with a decimal exponent, and a price with a decimal exponent, and an optional weight.
@@ -1129,92 +1236,87 @@ pub fn get_health_components<'info>(
             get_remaining_accounts_per_bank(&bank)?
         };
 
-        let (asset_val, liab_val, price, err_code, premium_price, leg_unpriceable) = if is_cached {
-            let (asset_val, liab_val, price, premium_price) =
-                calc_weighted_value_cached_for_balance(
+        let (asset_val, liab_val, price, err_code, premium_price, premium_leg_unpriceable) =
+            if is_cached {
+                let (asset_val, liab_val, price) = calc_weighted_value_cached_for_balance(
                     balance,
                     &bank,
                     requirement_type,
                     &reconciled_emode_config,
                 )?;
-            // Premium weights use the unbiased cached price, same as the live branch.
-            (asset_val, liab_val, price, 0, premium_price, false)
-        } else {
-            // Load oracle (this is the heap-intensive operation)
-            let oracle_ai_idx = account_index + 1;
-            let end_idx = oracle_ai_idx + num_accounts - 1;
-            require_gte!(
-                remaining_ais.len(),
-                end_idx,
-                MarginfiError::WrongNumberOfOracleAccounts
-            );
-            let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
-
-            // Create oracle adapter (heap allocation happens here)
-            let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(
-                &bank,
-                oracle_ais,
-                &clock,
-                ignore_pt_emergency,
-            );
-
-            // Premium weights use the unbiased price from the calc's own oracle read — no extra
-            // adapter work (see the premium module docs).
-            // `price_for_premium` gate: skip when no computable rate can exist — empty
-            // matrix, or no premium-active liability on the account. Isolated legs are also
-            // skipped: they always weigh zero in the scratch.
-            let need_premium_price = premium_scratch.is_some()
-                && price_for_premium
-                && matches!(balance.get_side(), Some(BalanceSide::Assets))
-                && !matches!(bank.config.risk_tier, RiskTier::Isolated)
-                && I80F48::from(bank.config.asset_weight_maint) > I80F48::ZERO;
-
-            // A countable collateral leg the premium weighting cannot price. The health pass
-            // may not flag this itself (ReduceOnly + Initial soft-zeroes; stale-skip only
-            // sets err_code), so mark the scratch directly — an incomplete pass must never
-            // plainly write rates (the withdraw paths ratchet instead). Zero-weight legs
-            // (`need_premium_price == false`) can't affect the mix, so their broken oracle
-            // doesn't taint the pass.
-            let leg_unpriceable = need_premium_price && price_adapter_result.is_err();
-            if leg_unpriceable {
-                if let Some(scratch) = premium_scratch.as_mut() {
-                    scratch.unpriceable_leg = true;
-                }
-            }
-
-            // Log heap usage per position for measurement/debugging
-            // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
-            #[cfg(target_os = "solana")]
-            {
-                let heap_after_oracle = heap_pos();
-                let _heap_used = heap_after_oracle.saturating_sub(heap_checkpoint);
-                debug!(
-                    "HEAP_MEASURE: position={} heap_used={} bytes",
-                    position_index, _heap_used
+                // Premium weights reuse the biased health price, same as the live branch.
+                (asset_val, liab_val, price, 0, price, false)
+            } else {
+                // Load oracle (this is the heap-intensive operation)
+                let oracle_ai_idx = account_index + 1;
+                let end_idx = oracle_ai_idx + num_accounts - 1;
+                require_gte!(
+                    remaining_ais.len(),
+                    end_idx,
+                    MarginfiError::WrongNumberOfOracleAccounts
                 );
-            }
+                let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
-            // Calculate weighted value for this position
-            let (asset_val, liab_val, price, err_code, premium_price) =
-                calc_weighted_value_for_balance(
-                    balance,
+                // Create oracle adapter (heap allocation happens here)
+                let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(
                     &bank,
-                    &price_adapter_result,
-                    requirement_type,
-                    &reconciled_emode_config,
-                    &mut liq_cache,
-                    position_index,
-                    need_premium_price,
-                )?;
-            (
-                asset_val,
-                liab_val,
-                price,
-                err_code,
-                premium_price,
-                leg_unpriceable,
-            )
-        };
+                    oracle_ais,
+                    &clock,
+                    ignore_pt_emergency,
+                );
+
+                // Premium weights reuse the biased health price computed inside the calc — no
+                // extra adapter work (see the premium module docs for the accepted rate wobble).
+                // `price_for_premium` gate: skip when no computable rate can exist — empty
+                // matrix, or no premium-active liability on the account. Isolated legs are also
+                // skipped: they always weigh zero in the scratch.
+                let need_premium_price = premium_scratch.is_some()
+                    && price_for_premium
+                    && matches!(balance.get_side(), Some(BalanceSide::Assets))
+                    && !matches!(bank.config.risk_tier, RiskTier::Isolated)
+                    && I80F48::from(bank.config.asset_weight_maint) > I80F48::ZERO;
+
+                // Log heap usage per position for measurement/debugging
+                // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
+                #[cfg(target_os = "solana")]
+                {
+                    let heap_after_oracle = heap_pos();
+                    let _heap_used = heap_after_oracle.saturating_sub(heap_checkpoint);
+                    debug!(
+                        "HEAP_MEASURE: position={} heap_used={} bytes",
+                        position_index, _heap_used
+                    );
+                }
+
+                // Calculate weighted value for this position
+                let (asset_val, liab_val, price, err_code, premium_price) =
+                    calc_weighted_value_for_balance(
+                        balance,
+                        &bank,
+                        &price_adapter_result,
+                        requirement_type,
+                        &reconciled_emode_config,
+                        &mut liq_cache,
+                        position_index,
+                        need_premium_price,
+                    )?;
+
+                let premium_leg_unpriceable = need_premium_price
+                    && (price_adapter_result.is_err() || premium_price <= I80F48::ZERO);
+                if premium_leg_unpriceable {
+                    if let Some(scratch) = premium_scratch.as_mut() {
+                        scratch.unpriceable_leg = true;
+                    }
+                }
+                (
+                    asset_val,
+                    liab_val,
+                    price,
+                    err_code,
+                    premium_price,
+                    premium_leg_unpriceable,
+                )
+            };
 
         if emode_possible && !balance.is_empty(BalanceSide::Assets) {
             collateral_seen = true;
@@ -1254,7 +1356,7 @@ pub fn get_health_components<'info>(
                 &bank,
                 premium_price,
                 balance_index,
-                leg_unpriceable,
+                premium_leg_unpriceable,
             )?;
         }
 
@@ -1872,9 +1974,34 @@ fn calc_weighted_value_for_balance(
     }
 }
 
+fn has_zero_effective_asset_weight(
+    balance: &Balance,
+    bank: &Bank,
+    requirement: RequirementType,
+    emode: &ReconciledEmodeConfig,
+) -> bool {
+    if !matches!(balance.get_side(), Some(BalanceSide::Assets)) {
+        return false;
+    }
+
+    let effective_weight = bank.get_asset_weight(requirement, emode);
+    effective_weight == I80F48::ZERO
+}
+
+fn read_premium_price_zero_if_unavailable(
+    feed: &OraclePriceFeedAdapter,
+    price_type: OraclePriceType,
+    need_premium_price: bool,
+) -> I80F48 {
+    if !need_premium_price {
+        return I80F48::ZERO;
+    }
+    feed.get_price_of_type_ignore_conf(price_type, Some(PriceBias::Low))
+        .unwrap_or(I80F48::ZERO)
+}
+
 /// Calculate weighted asset value (standalone version for heap reuse). Returns
-/// `(value, health_price, premium_price, err_code)`; `premium_price` is ZERO unless
-/// `need_premium_price`.
+/// `(value, health_price, premium_price, oracle_err_code)`.
 #[inline(always)]
 fn calc_weighted_asset_value_standalone(
     balance: &Balance,
@@ -1889,8 +2016,8 @@ fn calc_weighted_asset_value_standalone(
     match bank.config.risk_tier {
         RiskTier::Collateral => {
             // Paused/ReduceOnly banks should not be counted as collateral for Initial checks —
-            // for HEALTH. The premium scratch still counts this collateral, so its unbiased price
-            // is derived even on this early exit.
+            // for HEALTH. The premium scratch still counts this collateral, so its (biased,
+            // same-as-health) price is derived even on this early exit.
             if matches!(
                 (bank.config.operational_state, requirement_type),
                 (
@@ -1899,64 +2026,17 @@ fn calc_weighted_asset_value_standalone(
                 )
             ) {
                 debug!("Paused/ReduceOnly bank assets worth 0 for Initial margin");
-                // Premium weighting only: an unbiased read never consults confidence, so a wide
-                // Pyth band cannot revert the instruction over a leg health doesn't price.
-                let premium_price = match (need_premium_price, price_adapter_result) {
-                    (true, Ok(feed)) => feed.get_price_of_type(
+                // Premium weighting only: health never prices this leg, so a wide confidence
+                // band must not revert the instruction. The bias still haircuts by the
+                // interval, capped at 5% of price.
+                let premium_price = match price_adapter_result {
+                    Ok(feed) => read_premium_price_zero_if_unavailable(
+                        feed,
                         requirement_type.get_oracle_price_type(),
-                        None,
-                        bank.config.oracle_max_confidence,
-                    )?,
+                        need_premium_price,
+                    ),
                     // Err: caller marks `unpriceable_leg`; zero weight is never consumed.
-                    _ => I80F48::ZERO,
-                };
-                return Ok((I80F48::ZERO, I80F48::ZERO, premium_price, 0));
-            }
-
-            // Extract error code if oracle failed
-            let err_code = match price_adapter_result {
-                Ok(_) => 0,
-                Err(e) => match e {
-                    anchor_lang::error::Error::AnchorError(inner) => {
-                        inner.as_ref().error_code_number
-                    }
-                    anchor_lang::error::Error::ProgramError(inner) => {
-                        match inner.as_ref().program_error {
-                            ProgramError::Custom(code) => code,
-                            _ => MarginfiError::InternalLogicError as u32,
-                        }
-                    }
-                },
-            };
-
-            // Skip stale oracles for Initial requirement
-            if matches!(
-                (price_adapter_result, requirement_type),
-                (&Err(_), RequirementType::Initial)
-            ) {
-                debug!("Skipping stale oracle");
-                return Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, err_code));
-            }
-
-            let price_feed = price_adapter_result
-                .as_ref()
-                .map_err(|_| error!(MarginfiError::from(err_code)))?;
-
-            // Worth nothing for new borrows, but keeps Maintenance value for liquidation. As with
-            // Paused/ReduceOnly above, the premium scratch still counts this collateral.
-            if !price_feed.has_borrow_power()
-                && matches!(requirement_type, RequirementType::Initial)
-            {
-                debug!("Bank without borrow power is worth 0 for Initial margin");
-                // Same as the Paused/ReduceOnly exit: unbiased premium-only read.
-                let premium_price = if need_premium_price {
-                    price_feed.get_price_of_type(
-                        requirement_type.get_oracle_price_type(),
-                        None,
-                        bank.config.oracle_max_confidence,
-                    )?
-                } else {
-                    I80F48::ZERO
+                    Err(_) => I80F48::ZERO,
                 };
                 return Ok((I80F48::ZERO, I80F48::ZERO, premium_price, 0));
             }
@@ -1964,19 +2044,74 @@ fn calc_weighted_asset_value_standalone(
             // Determine asset weight (bank default, cross-asset e-mode, or same-asset e-mode)
             let mut asset_weight = bank.get_asset_weight(requirement_type, reconciled_emode_config);
 
-            let oracle_price_type = requirement_type.get_oracle_price_type();
-            let price_with_confidence = price_feed.get_price_and_confidence_of_type(
-                oracle_price_type,
-                bank.config.oracle_max_confidence,
-            )?;
-            if let Some(cache) = liq_cache.as_mut() {
-                cache.record(requirement_type, position_index, price_with_confidence);
+            // Never soft-zero prices captured for receivership.
+            let may_soft_zero_unusable_oracle = asset_weight == I80F48::ZERO && liq_cache.is_none();
+
+            // Extract error code if oracle failed
+            let oracle_err_code = match price_adapter_result {
+                Ok(_) => 0,
+                Err(e) => crate::errors::extract_anchor_error_code(e),
+            };
+
+            // Initial soft-zeroes oracle failures; Maintenance does so only at zero weight.
+            if price_adapter_result.is_err()
+                && (matches!(requirement_type, RequirementType::Initial)
+                    || may_soft_zero_unusable_oracle)
+            {
+                debug!("Skipping unusable oracle");
+                return Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, oracle_err_code));
             }
-            let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
-            // Premium weights use the unbiased price from the same read: a confidence haircut has
-            // no conservative direction in a collateral mix (see the premium module docs).
+
+            let price_feed = price_adapter_result
+                .as_ref()
+                .map_err(|_| error!(MarginfiError::from(oracle_err_code)))?;
+
+            // Worth nothing for new borrows, but keeps Maintenance value for liquidation. As with
+            // Paused/ReduceOnly above, the premium scratch still counts this collateral.
+            if !price_feed.has_borrow_power()
+                && matches!(requirement_type, RequirementType::Initial)
+            {
+                debug!("Bank without borrow power is worth 0 for Initial margin");
+                // Same as the Paused/ReduceOnly exit: premium-only read, confidence ignored.
+                let premium_price = read_premium_price_zero_if_unavailable(
+                    price_feed,
+                    requirement_type.get_oracle_price_type(),
+                    need_premium_price,
+                );
+                return Ok((I80F48::ZERO, I80F48::ZERO, premium_price, 0));
+            }
+
+            let oracle_price_type = requirement_type.get_oracle_price_type();
+            let lower_price = if let Some(cache) = liq_cache.as_mut() {
+                let price_with_confidence = price_feed.get_price_and_confidence_of_type(
+                    oracle_price_type,
+                    bank.config.oracle_max_confidence,
+                )?;
+                cache.record(requirement_type, position_index, price_with_confidence);
+                apply_price_bias(price_with_confidence, PriceBias::Low)?
+            } else {
+                match price_feed.get_price_of_type(
+                    oracle_price_type,
+                    Some(PriceBias::Low),
+                    bank.config.oracle_max_confidence,
+                ) {
+                    Ok(price) => price,
+                    Err(err) if may_soft_zero_unusable_oracle => {
+                        let oracle_err_code = crate::errors::extract_anchor_error_code(&err);
+                        let premium_price = read_premium_price_zero_if_unavailable(
+                            price_feed,
+                            oracle_price_type,
+                            need_premium_price,
+                        );
+                        return Ok((I80F48::ZERO, I80F48::ZERO, premium_price, oracle_err_code));
+                    }
+                    Err(err) => return Err(err),
+                }
+            };
+            // Premium weights reuse the biased health price — accepted rate skew, see the
+            // premium module docs.
             let premium_price = if need_premium_price {
-                price_with_confidence.price
+                lower_price
             } else {
                 I80F48::ZERO
             };
@@ -2850,7 +2985,7 @@ mod test {
     use super::*;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
-    use marginfi_type_crate::types::basis_to_u32;
+    use marginfi_type_crate::types::{basis_to_u32, ReconciledEmodeEntry};
 
     fn same_asset_eligible_bank(mint: Pubkey, oracle_key: Pubkey, liab_weight: I80F48) -> Bank {
         let mut bank = Bank::zeroed();
@@ -2861,6 +2996,364 @@ mod test {
         bank.config.liability_weight_maint = liab_weight.into();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
         bank
+    }
+
+    const BOOSTED_COLLATERAL_EMODE_TAG: u16 = 42;
+
+    fn emode_config_boosting_tag(weight: I80F48) -> ReconciledEmodeConfig {
+        let mut config = ReconciledEmodeConfig {
+            count: 1,
+            ..Default::default()
+        };
+        config.entries[0] = ReconciledEmodeEntry {
+            collateral_bank_emode_tag: BOOSTED_COLLATERAL_EMODE_TAG,
+            flags: 0,
+            asset_weight: weight,
+        };
+        config
+    }
+
+    fn fixed_price_bank_and_asset_balance(init: I80F48, maint: I80F48) -> (Bank, Balance) {
+        let mut bank = Bank::zeroed();
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::Fixed;
+        bank.config.fixed_price = I80F48!(10).into();
+        bank.config.asset_weight_init = init.into();
+        bank.config.asset_weight_maint = maint.into();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.mint_decimals = 0;
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+        (bank, balance)
+    }
+
+    fn eval_weighted_asset_capturing_cache(
+        bank: &Bank,
+        balance: &Balance,
+        feed: &MarginfiResult<OraclePriceFeedAdapter>,
+        requirement: RequirementType,
+        emode: &ReconciledEmodeConfig,
+        capture_liquidation_cache: bool,
+        needs_premium_price: bool,
+    ) -> (
+        MarginfiResult<(I80F48, I80F48, I80F48, u32)>,
+        LiquidationPriceCache,
+    ) {
+        let mut cache = LiquidationPriceCache::default();
+        let result = {
+            let mut cache_ref = if capture_liquidation_cache {
+                Some(&mut cache)
+            } else {
+                None
+            };
+            calc_weighted_asset_value_standalone(
+                balance,
+                bank,
+                feed,
+                requirement,
+                emode,
+                &mut cache_ref,
+                0,
+                needs_premium_price,
+            )
+        };
+        (result, cache)
+    }
+
+    fn eval_weighted_asset(
+        bank: &Bank,
+        balance: &Balance,
+        feed: &MarginfiResult<OraclePriceFeedAdapter>,
+        requirement: RequirementType,
+        emode: &ReconciledEmodeConfig,
+        capture_liquidation_cache: bool,
+        needs_premium_price: bool,
+    ) -> MarginfiResult<(I80F48, I80F48, I80F48, u32)> {
+        eval_weighted_asset_capturing_cache(
+            bank,
+            balance,
+            feed,
+            requirement,
+            emode,
+            capture_liquidation_cache,
+            needs_premium_price,
+        )
+        .0
+    }
+
+    fn stale_oracle_result() -> MarginfiResult<OraclePriceFeedAdapter> {
+        Err(error!(MarginfiError::PythPushStalePrice))
+    }
+
+    fn confidence_breach_oracle_result() -> MarginfiResult<OraclePriceFeedAdapter> {
+        Err(error!(MarginfiError::OracleMaxConfidenceExceeded))
+    }
+
+    fn healthy_fixed_oracle_result(bank: &Bank) -> MarginfiResult<OraclePriceFeedAdapter> {
+        OraclePriceFeedAdapter::try_from_bank(bank, &[], &Clock::default(), false)
+    }
+
+    struct OracleFailureCase {
+        name: &'static str,
+        weight_init: I80F48,
+        weight_maint: I80F48,
+        requirement: RequirementType,
+        with_emode_boost: bool,
+        capture_liquidation_cache: bool,
+        oracle_result_fn: fn() -> MarginfiResult<OraclePriceFeedAdapter>,
+        expected_error: MarginfiError,
+        expect_soft_zero: bool,
+        needs_premium_price: bool,
+    }
+
+    #[test]
+    fn oracle_failure_policy_matrix() {
+        use RequirementType::{Equity, Initial, Maintenance};
+
+        let zero = I80F48::ZERO;
+        let half_weight = I80F48!(0.5);
+        let no_emode_config = ReconciledEmodeConfig::default();
+        let boosted_emode_config = emode_config_boosting_tag(half_weight);
+
+        let cases = [
+            OracleFailureCase {
+                name: "zero weight, Maintenance, stale, premium price needed",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Maintenance,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: true,
+                needs_premium_price: true,
+            },
+            OracleFailureCase {
+                name: "zero weight, Maintenance, stale",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Maintenance,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: true,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "zero weight, Initial, adapter confidence error",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Initial,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: confidence_breach_oracle_result,
+                expected_error: MarginfiError::OracleMaxConfidenceExceeded,
+                expect_soft_zero: true,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "positive weight, Initial, stale (existing soft-zero)",
+                weight_init: half_weight,
+                weight_maint: half_weight,
+                requirement: Initial,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: true,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "positive weight, Maintenance",
+                weight_init: half_weight,
+                weight_maint: half_weight,
+                requirement: Maintenance,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: false,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "zero Initial only, Maintenance",
+                weight_init: zero,
+                weight_maint: half_weight,
+                requirement: Maintenance,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: false,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "e-mode boost, Maintenance",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Maintenance,
+                with_emode_boost: true,
+                capture_liquidation_cache: false,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: false,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "Equity, adapter confidence error",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Equity,
+                with_emode_boost: false,
+                capture_liquidation_cache: false,
+                oracle_result_fn: confidence_breach_oracle_result,
+                expected_error: MarginfiError::OracleMaxConfidenceExceeded,
+                expect_soft_zero: false,
+                needs_premium_price: false,
+            },
+            OracleFailureCase {
+                name: "receivership capture",
+                weight_init: zero,
+                weight_maint: zero,
+                requirement: Maintenance,
+                with_emode_boost: false,
+                capture_liquidation_cache: true,
+                oracle_result_fn: stale_oracle_result,
+                expected_error: MarginfiError::PythPushStalePrice,
+                expect_soft_zero: false,
+                needs_premium_price: false,
+            },
+        ];
+
+        for case in cases {
+            let (mut bank, balance) =
+                fixed_price_bank_and_asset_balance(case.weight_init, case.weight_maint);
+            let emode = if case.with_emode_boost {
+                bank.emode.emode_tag = BOOSTED_COLLATERAL_EMODE_TAG;
+                &boosted_emode_config
+            } else {
+                &no_emode_config
+            };
+            let feed_result = (case.oracle_result_fn)();
+            assert!(feed_result.is_err(), "{}: test feed must fail", case.name);
+            let expected_code = u32::from(case.expected_error);
+            let result = eval_weighted_asset(
+                &bank,
+                &balance,
+                &feed_result,
+                case.requirement,
+                emode,
+                case.capture_liquidation_cache,
+                case.needs_premium_price,
+            );
+            let name = case.name;
+            if case.expect_soft_zero {
+                let (value, health_price, premium_price, oracle_err_code) =
+                    result.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                assert_eq!(
+                    (value, health_price, premium_price),
+                    (zero, zero, zero),
+                    "{name}"
+                );
+                assert_eq!(oracle_err_code, expected_code, "{name}: err_code");
+            } else {
+                let err = result.expect_err(name);
+                assert_eq!(
+                    crate::errors::extract_anchor_error_code(&err),
+                    expected_code,
+                    "{name}: error"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn zero_weight_asset_with_healthy_oracle_keeps_price() {
+        let (bank, balance) = fixed_price_bank_and_asset_balance(I80F48::ZERO, I80F48::ZERO);
+        let feed = healthy_fixed_oracle_result(&bank);
+        for (capture, premium) in [(false, false), (false, true), (true, false)] {
+            let (result, cache) = eval_weighted_asset_capturing_cache(
+                &bank,
+                &balance,
+                &feed,
+                RequirementType::Maintenance,
+                &ReconciledEmodeConfig::default(),
+                capture,
+                premium,
+            );
+            let (value, health_price, premium_price, oracle_err_code) = result.unwrap();
+            assert_eq!(value, I80F48::ZERO);
+            if capture {
+                assert!(health_price > I80F48::ZERO);
+            } else {
+                assert_eq!(health_price, I80F48!(10));
+            }
+            assert_eq!(
+                premium_price,
+                if premium { I80F48!(10) } else { I80F48::ZERO }
+            );
+            assert_eq!(oracle_err_code, 0);
+            if capture {
+                let _captured = cache
+                    .get_price(OraclePriceType::RealTime, 0)
+                    .expect("Maintenance price must be captured even at zero weight");
+            }
+        }
+    }
+
+    #[test]
+    fn extract_anchor_error_code_covers_all_error_variants() {
+        use anchor_lang::error::Error;
+        use anchor_lang::solana_program::program_error::ProgramError;
+        let anchor: Error = error!(MarginfiError::OracleMaxConfidenceExceeded);
+        assert_eq!(
+            crate::errors::extract_anchor_error_code(&anchor),
+            u32::from(MarginfiError::OracleMaxConfidenceExceeded)
+        );
+        let custom: Error = ProgramError::Custom(7731).into();
+        assert_eq!(crate::errors::extract_anchor_error_code(&custom), 7731);
+        let non_custom: Error = ProgramError::InvalidArgument.into();
+        assert_eq!(
+            crate::errors::extract_anchor_error_code(&non_custom),
+            u32::from(MarginfiError::InternalLogicError)
+        );
+    }
+
+    #[test]
+    fn has_zero_effective_asset_weight_cases() {
+        let maint = RequirementType::Maintenance;
+        let no_boost = ReconciledEmodeConfig::default();
+        let (mut bank, mut balance) =
+            fixed_price_bank_and_asset_balance(I80F48::ZERO, I80F48::ZERO);
+        assert!(has_zero_effective_asset_weight(
+            &balance, &bank, maint, &no_boost
+        ));
+
+        bank.config.asset_weight_maint = I80F48!(0.4).into();
+        assert!(!has_zero_effective_asset_weight(
+            &balance, &bank, maint, &no_boost
+        ));
+        bank.config.asset_weight_maint = I80F48::ZERO.into();
+
+        balance.asset_shares = I80F48::ZERO.into();
+        balance.liability_shares = I80F48!(1).into();
+        assert!(!has_zero_effective_asset_weight(
+            &balance, &bank, maint, &no_boost
+        ));
+        balance.liability_shares = I80F48::ZERO.into();
+        balance.asset_shares = I80F48!(1).into();
+
+        bank.emode.emode_tag = BOOSTED_COLLATERAL_EMODE_TAG;
+        let boosted_emode_config = emode_config_boosting_tag(I80F48!(0.5));
+        assert!(!has_zero_effective_asset_weight(
+            &balance,
+            &bank,
+            maint,
+            &boosted_emode_config
+        ));
     }
 
     #[test]
@@ -3034,84 +3527,6 @@ mod test {
         );
     }
 
-    /// Collateral bank of one token at $100 with a 1% static confidence band.
-    fn banded_collateral(
-        operational_state: BankOperationalState,
-    ) -> (Bank, Balance, MarginfiResult<OraclePriceFeedAdapter>) {
-        let mut bank = Bank::zeroed();
-        bank.config.risk_tier = RiskTier::Collateral;
-        bank.config.operational_state = operational_state;
-        bank.config.oracle_setup = OracleSetup::Scope;
-        bank.config.oracle_max_confidence = u32::MAX / 100;
-        bank.config.asset_weight_init = I80F48!(1).into();
-        bank.config.asset_weight_maint = I80F48!(1).into();
-        bank.asset_share_value = I80F48!(1).into();
-        bank.cache.liquidation_price_rt = I80F48!(100).into();
-        bank.cache.liquidation_price_rt_confidence = I80F48!(1).into();
-
-        let mut balance = Balance::empty_deactivated();
-        balance.set_active(true);
-        balance.asset_shares = I80F48!(1).into();
-
-        let feed = crate::state::price::ScopePriceFeed::new_for_tests(I80F48!(100), true);
-        (bank, balance, Ok(OraclePriceFeedAdapter::Scope(feed)))
-    }
-
-    #[test]
-    fn premium_price_is_unbiased_while_health_keeps_the_band() {
-        let raw = I80F48!(100);
-        let banded = I80F48!(99);
-        let tolerance = I80F48!(0.000001);
-        let reconciled = ReconciledEmodeConfig::default();
-
-        // Live, Operational: health takes the Low-biased price, premium the raw one.
-        let (bank, balance, feed) = banded_collateral(BankOperationalState::Operational);
-        let (value, health_price, premium_price, err_code) = calc_weighted_asset_value_standalone(
-            &balance,
-            &bank,
-            &feed,
-            RequirementType::Maintenance,
-            &reconciled,
-            &mut None,
-            0,
-            true,
-        )
-        .unwrap();
-        assert_eq!(err_code, 0);
-        assert!((health_price - banded).abs() < tolerance);
-        assert_eq!(value, health_price);
-        assert_eq!(premium_price, raw);
-
-        // Live, ReduceOnly under Initial: worth nothing for health, raw price for premium.
-        let (bank, balance, feed) = banded_collateral(BankOperationalState::ReduceOnly);
-        let (value, health_price, premium_price, _) = calc_weighted_asset_value_standalone(
-            &balance,
-            &bank,
-            &feed,
-            RequirementType::Initial,
-            &reconciled,
-            &mut None,
-            0,
-            true,
-        )
-        .unwrap();
-        assert_eq!((value, health_price), (I80F48::ZERO, I80F48::ZERO));
-        assert_eq!(premium_price, raw);
-
-        // Cached (receivership): same split from the locked price and its confidence.
-        let (bank, balance, _) = banded_collateral(BankOperationalState::Operational);
-        let (value, health_price, premium_price) = calc_weighted_asset_value_cached_standalone(
-            &balance,
-            &bank,
-            RequirementType::Maintenance,
-            &reconciled,
-        )
-        .unwrap();
-        assert_eq!(health_price, banded);
-        assert_eq!(value, banded);
-        assert_eq!(premium_price, raw);
-    }
-
     #[test]
     fn paused_bank_assets_confer_no_initial_borrowing_power() {
         let mint = Pubkey::new_unique();
@@ -3142,7 +3557,7 @@ mod test {
             I80F48!(0.99)
         );
 
-        let (asset_value, price, premium_price) = calc_weighted_asset_value_cached_standalone(
+        let (asset_value, price) = calc_weighted_asset_value_cached_standalone(
             &balance,
             &bank,
             RequirementType::Initial,
@@ -3151,7 +3566,6 @@ mod test {
         .unwrap();
         assert_eq!(asset_value, I80F48::ZERO);
         assert_eq!(price, I80F48::ZERO);
-        assert_eq!(premium_price, I80F48::ZERO);
     }
 
     #[test]
