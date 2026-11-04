@@ -24,9 +24,10 @@ const CLOSE_VAULT_ACCOUNTS: usize = 9;
 ///   holding value can never be force-closed.
 ///
 /// Optional remaining accounts: `CLOSE_VAULT_ACCOUNTS`, then (Kamino / JupLend) the venue accounts
-/// (see `close_bank_venue`), then transfer hook accounts. Venue banks first withdraw their seed
-/// position into the liquidity vault and close the venue accounts. Then every vault is swept to the
-/// admin's token account and closed. All rent goes to the admin.
+/// (see `close_bank_venue`; Drift has none, Solend is unsupported), then transfer hook accounts.
+/// Venue banks first withdraw their seed position into the liquidity vault and close the venue
+/// accounts. Then every vault is swept to the admin's token account and closed. All rent goes to
+/// the admin.
 pub fn lending_pool_close_bank<'info>(
     ctx: Context<'info, LendingPoolCloseBank<'info>>,
     force_close: Option<bool>,
@@ -65,16 +66,18 @@ pub fn lending_pool_close_bank<'info>(
         MarginfiError::BankCannotClose
     );
 
+    // Owed to the protocol, not the group admin (sub-unit dust is uncollectable). Checked whether
+    // or not the vaults close: once the bank is gone nothing can sign for them.
+    check!(
+        I80F48::from(bank.collected_program_fees_outstanding) < I80F48::ONE
+            && I80F48::from(bank.collected_premium_outstanding) < I80F48::ONE,
+        MarginfiError::BankCannotClose,
+        "collect the program fees and premium before closing the bank"
+    );
+
     let remaining = ctx.remaining_accounts;
     if !remaining.is_empty() {
-        // Owed to the protocol, not the group admin (sub-unit dust is uncollectable).
-        check!(
-            I80F48::from(bank.collected_program_fees_outstanding) < I80F48::ONE
-                && I80F48::from(bank.collected_premium_outstanding) < I80F48::ONE,
-            MarginfiError::BankCannotClose,
-            "collect the program fees and premium before closing the vaults"
-        );
-        let venue_accounts = venue_accounts_len(bank.config.asset_tag);
+        let venue_accounts = venue_accounts_len(bank.config.asset_tag)?;
         check!(
             remaining.len() >= CLOSE_VAULT_ACCOUNTS + venue_accounts,
             MarginfiError::BankCannotClose,

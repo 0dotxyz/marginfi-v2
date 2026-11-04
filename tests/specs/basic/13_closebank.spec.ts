@@ -267,7 +267,7 @@ describe("Close bank", () => {
 
         await expectFailedTxWithMessage(
           async () => send(await closeIx()),
-          "collect the program fees and premium before closing the vaults"
+          "collect the program fees and premium before closing the bank"
         );
         bankrunContext.setAccount(vaultBank, original);
       });
