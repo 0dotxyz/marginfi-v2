@@ -1176,6 +1176,8 @@ const releasePositionEscrowAccounts = (
     args.receiverMarginfiAccount,
     args.sourceMarginfiAccount,
   )[0],
+  sourceMarginfiAccount: args.sourceMarginfiAccount,
+  receiverMarginfiAccount: args.receiverMarginfiAccount,
   destinationMarginfiAccount: args.destinationMarginfiAccount,
   bank: args.bank,
   authority: args.authority,

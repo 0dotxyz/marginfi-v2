@@ -57,7 +57,10 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
     assert_eq!(account.liquidation_tagged_at, 0);
-    assert_eq!(account._padding0, [0; 2]);
+    assert_eq!(account.source_escrows, 0);
+    assert_eq!(account.receiver_escrows, 0);
+    assert_eq!(account._pad1, [0; 4]);
+    assert_eq!(account._padding0, [0; 1]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -139,7 +142,10 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.last_update, 0);
     assert_eq!(account.rebalance_execution_seq, 0);
     assert_eq!(account.liquidation_tagged_at, 0);
-    assert_eq!(account._padding0, [0; 2]);
+    assert_eq!(account.source_escrows, 0);
+    assert_eq!(account.receiver_escrows, 0);
+    assert_eq!(account._pad1, [0; 4]);
+    assert_eq!(account._padding0, [0; 1]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -226,7 +232,10 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account.rebalance_execution_seq, 0);
     assert_eq!(account.liquidation_tagged_at, 0);
-    assert_eq!(account._padding0, [0; 2]);
+    assert_eq!(account.source_escrows, 0);
+    assert_eq!(account.receiver_escrows, 0);
+    assert_eq!(account._pad1, [0; 4]);
+    assert_eq!(account._padding0, [0; 1]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(!balance_1.is_active());

@@ -47,7 +47,7 @@ pub fn lending_account_escrow_position<'info>(
     let clock = Clock::get()?;
     let bank_key = ctx.accounts.bank.key();
     let mut source_account = ctx.accounts.source_marginfi_account.load_mut()?;
-    let receiver_account = ctx.accounts.receiver_marginfi_account.load()?;
+    let mut receiver_account = ctx.accounts.receiver_marginfi_account.load_mut()?;
     // `load_init` succeeds only on the first send, before Anchor writes the discriminator.
     let mut escrow = match ctx.accounts.position_escrow.load_init() {
         Ok(mut escrow) => {
@@ -56,6 +56,8 @@ pub fn lending_account_escrow_position<'info>(
             escrow.receiver_account = ctx.accounts.receiver_marginfi_account.key();
             escrow.rent_payer = ctx.accounts.fee_payer.key();
             escrow.bump = ctx.bumps.position_escrow;
+            source_account.increment_source_escrows()?;
+            receiver_account.increment_receiver_escrows()?;
             escrow
         }
         Err(_) => ctx.accounts.position_escrow.load_mut()?,
@@ -243,6 +245,15 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
     let clock = Clock::get()?;
     let bank_key = ctx.accounts.bank.key();
     let escrow_shares: I80F48 = ctx.accounts.position_escrow.load()?.asset_shares.into();
+    // The destination may be the same account as the source or the receiver.
+    ctx.accounts
+        .source_marginfi_account
+        .load_mut()?
+        .decrement_source_escrows()?;
+    ctx.accounts
+        .receiver_marginfi_account
+        .load_mut()?
+        .decrement_receiver_escrows()?;
     let mut destination = ctx.accounts.destination_marginfi_account.load_mut()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
@@ -314,7 +325,7 @@ pub struct LendingAccountEscrowPosition<'info> {
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    #[account(has_one = group @ MarginfiError::InvalidGroup)]
+    #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub receiver_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     #[account(
@@ -373,6 +384,20 @@ pub struct ReleasePositionEscrow<'info> {
         has_one = rent_payer @ MarginfiError::Unauthorized,
     )]
     pub position_escrow: AccountLoader<'info, PositionEscrow>,
+
+    #[account(
+        mut,
+        constraint = source_marginfi_account.key() == position_escrow.load()?.source_account
+            @ MarginfiError::Unauthorized,
+    )]
+    pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
+
+    #[account(
+        mut,
+        constraint = receiver_marginfi_account.key() == position_escrow.load()?.receiver_account
+            @ MarginfiError::Unauthorized,
+    )]
+    pub receiver_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub destination_marginfi_account: AccountLoader<'info, MarginfiAccount>,

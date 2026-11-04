@@ -91,7 +91,12 @@ pub trait MarginfiAccountImpl {
     fn prices_through_pt_emergency(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
+    fn increment_source_escrows(&mut self) -> MarginfiResult;
+    fn decrement_source_escrows(&mut self) -> MarginfiResult;
+    fn increment_receiver_escrows(&mut self) -> MarginfiResult;
+    fn decrement_receiver_escrows(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
+    fn has_open_position_escrows(&self) -> bool;
     fn sync_indexer_flags(&mut self);
 }
 
@@ -338,6 +343,36 @@ impl MarginfiAccountImpl for MarginfiAccount {
         Ok(())
     }
 
+    fn increment_source_escrows(&mut self) -> MarginfiResult {
+        check!(
+            self.source_escrows < u16::MAX,
+            MarginfiError::IllegalAction,
+            "Too many open position escrows"
+        );
+        self.source_escrows += 1;
+        Ok(())
+    }
+
+    fn decrement_source_escrows(&mut self) -> MarginfiResult {
+        self.source_escrows = self.source_escrows.saturating_sub(1);
+        Ok(())
+    }
+
+    fn increment_receiver_escrows(&mut self) -> MarginfiResult {
+        check!(
+            self.receiver_escrows < u16::MAX,
+            MarginfiError::IllegalAction,
+            "Too many open position escrows"
+        );
+        self.receiver_escrows += 1;
+        Ok(())
+    }
+
+    fn decrement_receiver_escrows(&mut self) -> MarginfiResult {
+        self.receiver_escrows = self.receiver_escrows.saturating_sub(1);
+        Ok(())
+    }
+
     fn can_be_closed(&self) -> bool {
         let is_disabled = self.get_flag(ACCOUNT_DISABLED);
         let is_in_flashloan = self.get_flag(ACCOUNT_IN_FLASHLOAN);
@@ -353,6 +388,10 @@ impl MarginfiAccountImpl for MarginfiAccount {
             && !is_in_flashloan
             && !is_in_receivership
             && !is_frozen
+    }
+
+    fn has_open_position_escrows(&self) -> bool {
+        self.source_escrows > 0 || self.receiver_escrows > 0
     }
 
     fn sync_indexer_flags(&mut self) {

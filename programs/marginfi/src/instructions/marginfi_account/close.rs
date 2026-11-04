@@ -24,6 +24,12 @@ pub fn close_account(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
     );
 
     check!(
+        !marginfi_account.has_open_position_escrows(),
+        MarginfiError::IllegalAction,
+        "Close all position escrows before closing account"
+    );
+
+    check!(
         marginfi_account.can_be_closed(),
         MarginfiError::IllegalAction,
         "Account cannot be closed"

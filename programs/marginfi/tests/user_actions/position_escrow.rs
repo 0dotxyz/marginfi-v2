@@ -10,10 +10,12 @@ use fixtures::utils::find_position_escrow_pda;
 use fixtures::{assert_custom_error, native, prelude::*};
 use marginfi::constants::POSITION_ESCROW_EXPIRY_SECONDS;
 use marginfi::prelude::*;
-use marginfi_type_crate::types::{PositionEscrow, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED};
+use marginfi_type_crate::types::{
+    PositionEscrow, ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED, SECONDS_PER_DAY,
+};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 /// Asset shares worth `ui` whole USDC while the bank has no borrows.
 fn usdc_shares(ui: u64) -> I80F48 {
@@ -309,6 +311,71 @@ async fn position_escrow_frozen_source_blocks_returns_but_not_claims() -> anyhow
         .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
         .await?;
     assert_eq!(asset_shares(&receiver, usdc_bank_f).await, usdc_shares(5));
+    Ok(())
+}
+
+/// An open escrow keeps the source from closing, by its owner or by `admin_close_account`, and from
+/// migrating. Repeat sends into the same escrow count once.
+#[tokio::test]
+async fn position_escrow_keeps_the_source_open() -> anyhow::Result<()> {
+    let test_f = premium_test_fixture().await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source = usdc_depositor(&test_f).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 200.0).await?;
+    escrow_usdc(&test_f, &source, &receiver, 300.0).await?;
+
+    let res = source.try_close_account(0).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+    let new_account = Keypair::new();
+    let res = source
+        .try_transfer_account(
+            new_account.pubkey(),
+            test_f.payer(),
+            None,
+            None,
+            &new_account,
+            test_f.marginfi_group.fee_wallet,
+        )
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+    advance_clock(&test_f, 60 * SECONDS_PER_DAY + 1).await;
+    let res = source
+        .try_admin_close_account(test_f.marginfi_group.fee_wallet)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+
+    receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await?;
+    source
+        .try_admin_close_account(test_f.marginfi_group.fee_wallet)
+        .await?;
+    assert!(is_closed(&test_f, source.key).await);
+    Ok(())
+}
+
+/// An open escrow keeps the receiver from closing until it is claimed or returned.
+#[tokio::test]
+async fn position_escrow_keeps_the_receiver_open() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (owner, source) = user_with_usdc_deposit(&test_f).await;
+    let receiver = test_f.create_marginfi_account().await;
+    source
+        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
+        .await?;
+    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
+
+    let res = receiver.try_close_account(0).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+
+    let payer = test_f.payer_keypair();
+    source
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&payer))
+        .await?;
+    receiver.try_close_account(1).await?;
+    assert!(is_closed(&test_f, receiver.key).await);
     Ok(())
 }
 

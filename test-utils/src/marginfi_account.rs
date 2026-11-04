@@ -2899,18 +2899,19 @@ impl MarginfiAccountFixture {
         authority: Option<&Keypair>,
         data: Vec<u8>,
     ) -> anyhow::Result<(), BanksClientError> {
-        let rent_payer = load_and_deserialize::<PositionEscrow>(self.ctx.clone(), &escrow)
-            .await
-            .rent_payer;
+        let escrow_account =
+            load_and_deserialize::<PositionEscrow>(self.ctx.clone(), &escrow).await;
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::ReleasePositionEscrow {
                 group: self.load().await.group,
                 position_escrow: escrow,
+                source_marginfi_account: escrow_account.source_account,
+                receiver_marginfi_account: escrow_account.receiver_account,
                 destination_marginfi_account: self.key,
                 bank: bank.key,
                 authority: authority.map(|k| k.pubkey()),
-                rent_payer,
+                rent_payer: escrow_account.rent_payer,
             }
             .to_account_metas(Some(true)),
             data,
