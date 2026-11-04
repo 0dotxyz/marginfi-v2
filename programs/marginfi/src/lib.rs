@@ -622,8 +622,8 @@ pub mod marginfi {
     }
 
     /// (source authority) Move part of a deposit into an escrow for `receiver_authority` to accept.
-    /// Each memo has its own escrow. The fee payer pays its rent and gets it back when the escrow
-    /// closes. Each send restarts the expiry.
+    /// The source must hold no debts. Each memo has its own escrow. The fee payer pays its rent and
+    /// gets it back when the escrow closes. Each send restarts the expiry.
     pub fn lending_account_escrow_position<'info>(
         ctx: Context<'info, LendingAccountEscrowPosition<'info>>,
         amount: u64,

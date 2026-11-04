@@ -511,14 +511,45 @@ async fn position_escrow_keeps_the_source_open() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A send needs only the sent bank and its oracle, even when the sender holds other deposits.
+#[tokio::test]
+async fn position_escrow_needs_only_the_sent_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source = usdc_depositor(&test_f).await;
+    let source_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    source
+        .try_bank_deposit(source_sol.key, sol_bank_f, 10.0, None)
+        .await?;
+    let (_receiver_key, receiver) = empty_receiver(&test_f).await;
+
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
+    let escrow_account = test_f.load_and_deserialize::<PositionEscrow>(&escrow).await;
+    assert_eq!(I80F48::from(escrow_account.asset_shares), usdc_shares(100));
+    assert_eq!(asset_shares(&source, usdc_bank_f).await, usdc_shares(400));
+    Ok(())
+}
+
+/// A sender must hold no debts, even when its collateral would stay healthy, and needs a deposit in
+/// the bank it sends from.
 #[tokio::test]
 async fn position_escrow_rejects_debt() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let sol_bank_f = test_f.get_bank(&BankMint::Sol);
-    let source = indebted_source(&test_f, 500.0).await;
+    let indebted = indebted_source(&test_f, 500.0).await;
     let (_receiver_key, receiver) = empty_receiver(&test_f).await;
     let payer = test_f.payer_keypair();
-    let res = source
+
+    let res = indebted
+        .try_escrow_position(&receiver, usdc_bank_f, 10.0, &payer)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PositionEscrowSourceHasDebt);
+    assert_eq!(asset_shares(&indebted, usdc_bank_f).await, usdc_shares(500));
+
+    let depositor = usdc_depositor(&test_f).await;
+    let res = depositor
         .try_escrow_position(&receiver, sol_bank_f, 10.0, &payer)
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::NoAssetFound);

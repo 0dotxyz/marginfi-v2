@@ -64,6 +64,11 @@ describe("Position transfer", () => {
     return banksClient.tryProcessTransaction(tx);
   };
 
+  const bankAndOracle = async (bank: PublicKey) => [
+    bank,
+    (await bankrunProgram.account.bank.fetch(bank)).config.oracleKeys[0],
+  ];
+
   /** `[bank, oracle]` per active balance (plus `extraBank`), in the on-chain descending order */
   const observation = async (accountPk: PublicKey, extraBank?: PublicKey) => {
     const acc = await bankrunProgram.account.marginfiAccount.fetch(accountPk);
@@ -73,12 +78,7 @@ describe("Position transfer", () => {
     if (extraBank && !banks.some((b) => b.equals(extraBank))) {
       banks.push(extraBank);
     }
-    const groups = await Promise.all(
-      banks.map(async (b) => {
-        const collateralBankcc = await bankrunProgram.account.bank.fetch(b);
-        return [b, collateralBankcc.config.oracleKeys[0]];
-      }),
-    );
+    const groups = await Promise.all(banks.map(bankAndOracle));
     return composeRemainingAccounts(groups);
   };
 
@@ -365,28 +365,28 @@ describe("Position transfer", () => {
 
   const noMemo = new Array(16).fill(0);
 
-  /** Sends `amount` from user 0 into its escrow for `receiver` in the collateral bank */
+  /** Sends `amount` from user 1 into its escrow for `receiver` in the collateral bank */
   const escrow = async (receiver: MockUser, amount: BN) => {
     const tx = new Transaction().add(
       await escrowPositionIx(bankrunProgram, {
         group,
-        sourceMarginfiAccount: account(users[0]),
+        sourceMarginfiAccount: account(users[1]),
         receiverAuthority: receiver.wallet.publicKey,
         receiverAccount: account(receiver),
         memo: noMemo,
         bank: collateralBank,
-        authority: users[0].wallet.publicKey,
-        feePayer: users[0].wallet.publicKey,
+        authority: users[1].wallet.publicKey,
+        feePayer: users[1].wallet.publicKey,
         globalFeeWallet: feeWallet,
         amount,
-        sourceRemaining: await observation(account(users[0])),
+        remaining: composeRemainingAccounts([await bankAndOracle(collateralBank)]),
       }),
     );
-    const result = await send(tx, users[0]);
+    const result = await send(tx, users[1]);
     assert.isNull(result.result);
   };
 
-  /** Releases user 0's escrow for `receiver` into `destination`, signed by `signer` */
+  /** Releases user 1's escrow for `receiver` into `destination`, signed by `signer` */
   const release = async (
     ixFn: typeof claimPositionEscrowIx,
     receiver: MockUser,
@@ -397,12 +397,12 @@ describe("Position transfer", () => {
       await ixFn(bankrunProgram, {
         group,
         bank: collateralBank,
-        sourceMarginfiAccount: account(users[0]),
+        sourceMarginfiAccount: account(users[1]),
         receiverAuthority: receiver.wallet.publicKey,
         memo: noMemo,
         destinationMarginfiAccount: account(destination),
         authority: signer.wallet.publicKey,
-        rentPayer: users[0].wallet.publicKey,
+        rentPayer: users[1].wallet.publicKey,
       }),
     );
     return send(tx, signer);
@@ -414,14 +414,14 @@ describe("Position transfer", () => {
         .totalEscrowedAssetShares,
     );
 
-  it("(user 0 -> user 3) escrows a position until user 3 accepts it", async () => {
+  it("(user 1 -> user 3) escrows a position until user 3 accepts it", async () => {
     const sourceBefore = toI80Scaled(
-      (await balance(users[0], collateralBank)).assetShares,
+      (await balance(users[1], collateralBank)).assetShares,
     );
     await escrow(users[3], lst);
     // With no borrows in this bank, one share is one native unit.
     assert.equal(
-      toI80Scaled((await balance(users[0], collateralBank)).assetShares),
+      toI80Scaled((await balance(users[1], collateralBank)).assetShares),
       sourceBefore - nativeToI80Scaled(lst),
     );
     assert.equal(await escrowedShares(), nativeToI80Scaled(lst));
@@ -435,16 +435,16 @@ describe("Position transfer", () => {
     assert.equal(await escrowedShares(), 0n);
   });
 
-  it("(user 0 -> user 3) user 3 declines an escrowed position, which returns to user 0", async () => {
+  it("(user 1 -> user 3) user 3 declines an escrowed position, which returns to user 1", async () => {
     const sourceBefore = toI80Scaled(
-      (await balance(users[0], collateralBank)).assetShares,
+      (await balance(users[1], collateralBank)).assetShares,
     );
     await escrow(users[3], lst);
 
-    const result = await release(returnPositionEscrowIx, users[3], users[0], users[3]);
+    const result = await release(returnPositionEscrowIx, users[3], users[1], users[3]);
     assert.isNull(result.result);
     assert.equal(
-      toI80Scaled((await balance(users[0], collateralBank)).assetShares),
+      toI80Scaled((await balance(users[1], collateralBank)).assetShares),
       sourceBefore,
     );
   });

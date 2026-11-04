@@ -1126,8 +1126,8 @@ export type EscrowPositionArgs = {
   feePayer: PublicKey;
   globalFeeWallet: PublicKey;
   amount: BN;
-  /** Source observation set: `[bank, oracles...]` per active balance, as it stands after the send */
-  sourceRemaining: PublicKey[];
+  /** The bank and its oracles: `[bank, oracles...]` */
+  remaining: PublicKey[];
 };
 
 /** Send part of the source's deposit into its escrow for the receiver, opening it on the first send. */
@@ -1153,7 +1153,7 @@ export const escrowPositionIx = (
       // feeState = deriveGlobalFeeState(id)
     })
     .remainingAccounts(
-      args.sourceRemaining.map((pubkey) => ({
+      args.remaining.map((pubkey) => ({
         pubkey,
         isSigner: false,
         isWritable: false,

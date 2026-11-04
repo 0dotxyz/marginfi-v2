@@ -1,6 +1,5 @@
 use super::transfer_position::{
-    charge_position_transfer, check_can_receive, check_health_and_refresh_premium,
-    check_position_flags, takes_unsolicited_deposit,
+    charge_position_transfer, check_can_receive, check_position_flags, takes_unsolicited_deposit,
 };
 use crate::{
     check,
@@ -30,9 +29,9 @@ use marginfi_type_crate::{
     },
 };
 
-/// Moves `amount` of the source's deposit in `bank` into the escrow for `receiver_authority`, who
-/// may accept it into any of its accounts. The receiver is checked only when it accepts. Each send
-/// restarts the expiry. Remaining accounts: the source's observation set.
+/// Moves `amount` of the source's deposit in `bank` into an escrow `receiver_authority` may accept
+/// into any of its accounts. The source must hold no debts; the receiver is checked only at accept.
+/// Each send restarts the expiry. Remaining accounts: the bank and its oracles.
 pub fn lending_account_escrow_position<'info>(
     ctx: Context<'info, LendingAccountEscrowPosition<'info>>,
     amount: u64,
@@ -64,6 +63,10 @@ pub fn lending_account_escrow_position<'info>(
     let group = ctx.accounts.group.load()?;
 
     check_position_flags(&source_account)?;
+    check!(
+        !source_account.lending_account.has_liabilities(),
+        MarginfiError::PositionEscrowSourceHasDebt
+    );
 
     let source_shares: I80F48 = match source_account.lending_account.get_balance(&bank_key) {
         Some(balance) if matches!(balance.get_side(), Some(BalanceSide::Assets)) => {
@@ -71,11 +74,7 @@ pub fn lending_account_escrow_position<'info>(
         }
         _ => return err!(MarginfiError::NoAssetFound),
     };
-    validate_bank_state(
-        &bank,
-        InstructionKind::FailsIfPausedOrReduceState,
-        !source_account.lending_account.has_liabilities(),
-    )?;
+    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
 
     let amount = I80F48::from_num(amount);
     let position_transfer_fee = charge_position_transfer(
@@ -120,17 +119,6 @@ pub fn lending_account_escrow_position<'info>(
     bank.update_bank_cache(&group)?;
     let bank_mint = bank.mint;
     drop(bank);
-
-    let source_carries_risk = source_account.lending_account.has_liabilities();
-    check_health_and_refresh_premium(
-        &mut source_account,
-        &group,
-        ctx.remaining_accounts,
-        &clock,
-        source_carries_risk,
-        false,
-        true,
-    )?;
 
     let maybe_price = fetch_unbiased_price_for_bank_cache(
         &bank_key,

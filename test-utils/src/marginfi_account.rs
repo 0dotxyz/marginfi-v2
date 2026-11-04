@@ -2867,8 +2867,9 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
         let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
+        let source = self.load().await;
         let mut accounts = marginfi::accounts::LendingAccountEscrowPosition {
-            group: self.load().await.group,
+            group: source.group,
             source_marginfi_account: self.key,
             position_escrow: find_position_escrow_pda(
                 &bank.key,
@@ -2885,7 +2886,17 @@ impl MarginfiAccountFixture {
             system_program: system_program::ID,
         }
         .to_account_metas(Some(true));
-        accounts.extend(self.load_observation_account_metas(vec![], vec![]).await);
+        let other_banks = source
+            .lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && b.bank_pk != bank.key)
+            .map(|b| b.bank_pk)
+            .collect();
+        accounts.extend(
+            self.load_observation_account_metas(vec![bank.key], other_banks)
+                .await,
+        );
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts,
