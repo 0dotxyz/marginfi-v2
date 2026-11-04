@@ -1085,6 +1085,8 @@ pub fn get_health_components<'info>(
     // =========================================================================
 
     let same_asset_leverage = same_asset_leverage_for_requirement(requirement_type, group);
+    // Initial health also tracks the lowest maintenance liability weight so the synthesized
+    // initial same-asset weight can be capped at the maintenance weight.
     let same_asset_maint_leverage = matches!(requirement_type, RequirementType::Initial)
         .then(|| u32_to_basis(group.same_asset_emode_maint_leverage));
     let emode_checkpoint = heap_pos();

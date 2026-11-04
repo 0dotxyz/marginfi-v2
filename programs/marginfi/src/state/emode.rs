@@ -3,8 +3,8 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::constants::BANK_SAME_ASSET_EMODE_ELIGIBLE;
 use marginfi_type_crate::types::{
-    BalanceSide, Bank, BankConfig, EmodeSettings, MarginfiGroup, RequirementType, EMODE_ON,
-    EMODE_TAG_EMPTY,
+    compute_same_asset_emode_weight, BalanceSide, Bank, BankConfig, EmodeSettings, MarginfiGroup,
+    RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
 };
 
 use crate::constants::LIQUIDATION_HEALTH_GAIN_MARGIN;
@@ -120,18 +120,6 @@ pub fn check_same_asset_fee(bank: &Bank, group: &MarginfiGroup) -> MarginfiResul
     Ok(())
 }
 
-/// The synthesized same-asset collateral weight for one requirement type:
-/// `liability_weight * (1 - 1/leverage)`, or 0 when that type's leverage is disabled.
-fn same_asset_weight_for(leverage: I80F48, liability_weight: I80F48) -> I80F48 {
-    if leverage <= I80F48::ONE {
-        return I80F48::ZERO;
-    }
-    let factor = I80F48::ONE
-        .checked_sub(I80F48::ONE.checked_div(leverage).unwrap_or(I80F48::ZERO))
-        .unwrap_or(I80F48::ZERO);
-    liability_weight.checked_mul(factor).unwrap_or(I80F48::ZERO)
-}
-
 /// Rejects a same-asset e-mode config whose synthesized collateral weight would invert the
 /// init/maintenance ordering (init weight > maintenance weight).
 ///
@@ -165,8 +153,8 @@ pub fn check_same_asset_weight_ordering(bank: &Bank, group: &MarginfiGroup) -> M
         .config
         .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
 
-    let init_weight = same_asset_weight_for(init_leverage, liab_init_w);
-    let maint_weight = same_asset_weight_for(maint_leverage, liab_maint_w);
+    let init_weight = compute_same_asset_emode_weight(init_leverage, liab_init_w);
+    let maint_weight = compute_same_asset_emode_weight(maint_leverage, liab_maint_w);
 
     check!(
         init_weight <= maint_weight,
