@@ -260,9 +260,9 @@ async fn position_escrow_rejects_a_receiver_that_disabled_receiving() -> anyhow:
     Ok(())
 }
 
-/// A frozen source blocks its authority but not the group admin.
+/// A frozen source cannot send, and the group admin cannot send for it.
 #[tokio::test]
-async fn position_escrow_frozen_source_admin_only() -> anyhow::Result<()> {
+async fn position_escrow_frozen_source_cannot_send() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let (owner, source) = user_with_usdc_deposit(&test_f).await;
@@ -273,12 +273,12 @@ async fn position_escrow_frozen_source_admin_only() -> anyhow::Result<()> {
         .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
-
     let admin = test_f.payer_keypair();
-    source
+    let res = source
         .try_escrow_position(&receiver, usdc_bank_f, 5.0, &admin)
-        .await?;
-    assert_eq!(asset_shares(&source, usdc_bank_f).await, usdc_shares(5));
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
+    assert_eq!(asset_shares(&source, usdc_bank_f).await, usdc_shares(10));
     Ok(())
 }
 

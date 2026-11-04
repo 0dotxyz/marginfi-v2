@@ -11,8 +11,7 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            deposit_is_halt_safe, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -326,15 +325,9 @@ pub struct LendingAccountEscrowPosition<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        constraint = {
-            let a = source_marginfi_account.load()?;
-            account_not_frozen_for_authority(&a, authority.key())
-        } @ MarginfiError::AccountFrozen,
-        constraint = {
-            let a = source_marginfi_account.load()?;
-            let g = group.load()?;
-            is_signer_authorized(&a, g.governance_admin, authority.key(), false, false, false)
-        } @ MarginfiError::Unauthorized
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = !source_marginfi_account.load()?.get_flag(ACCOUNT_FROZEN)
+            @ MarginfiError::AccountFrozen,
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
