@@ -158,7 +158,7 @@ pub fn lending_account_end_flashloan<'info>(
     }
 
     finalize_health_cache(&mut health_cache, Clock::get()?.unix_timestamp);
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_health_cache(health_cache);
 
     Ok(())
 }

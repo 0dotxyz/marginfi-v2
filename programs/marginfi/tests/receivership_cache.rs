@@ -4,7 +4,9 @@ use marginfi::{
     constants::PROGRAM_VERSION,
     instructions::marginfi_account::{end_receivership, start_receivership},
 };
-use marginfi_type_crate::types::{HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::types::{
+    HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup, ReceivershipCacheOrigin,
+};
 use solana_sdk::program_stubs::{set_syscall_stubs, SyscallStubs};
 
 const STUB_UNIX_TIMESTAMP: i64 = 123;
@@ -31,11 +33,18 @@ fn start_and_end_receivership_stamp_partial_health_cache() -> anyhow::Result<()>
     let group = MarginfiGroup::default();
     let mut liquidation_record = LiquidationRecord::zeroed();
     set_syscall_stubs(Box::new(FixedClockStub));
-    start_receivership(&mut liquidatee, &group, &mut liquidation_record, &[], true)?;
+    start_receivership(
+        &mut liquidatee,
+        &group,
+        &mut liquidation_record,
+        &[],
+        ReceivershipCacheOrigin::Deleverage,
+    )?;
     let cache_after_start = liquidatee.health_cache;
+    assert!(cache_after_start.has_receivership_origin(ReceivershipCacheOrigin::Deleverage));
 
     // Clear the start snapshot so it cannot mask a missing end-cache update.
-    liquidatee.health_cache = HealthCache::zeroed();
+    liquidatee.set_health_cache(HealthCache::zeroed());
     end_receivership(
         &mut liquidatee,
         &group,
@@ -45,6 +54,7 @@ fn start_and_end_receivership_stamp_partial_health_cache() -> anyhow::Result<()>
         false,
     )?;
     let cache_after_end = liquidatee.health_cache;
+    assert!(!cache_after_end.has_receivership_origin(ReceivershipCacheOrigin::Deleverage));
 
     for (ix, cache) in [("start", cache_after_start), ("end", cache_after_end)] {
         assert_eq!(cache.timestamp, STUB_UNIX_TIMESTAMP, "{ix}: timestamp");

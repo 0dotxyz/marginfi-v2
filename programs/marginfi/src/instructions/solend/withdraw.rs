@@ -300,7 +300,7 @@ pub fn solend_withdraw<'info>(
             // Flashloan health is checked at the end, so this pass produced no cache.
             if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
                 finalize_health_cache(&mut health_cache, Clock::get()?.unix_timestamp);
-                marginfi_account.health_cache = health_cache;
+                marginfi_account.set_health_cache(health_cache);
             }
 
             // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
