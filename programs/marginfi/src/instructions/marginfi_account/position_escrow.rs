@@ -118,7 +118,6 @@ pub fn lending_account_escrow_position<'info>(
         .unix_timestamp
         .checked_add(POSITION_ESCROW_EXPIRY_SECONDS)
         .ok_or_else(math_error!())?;
-    escrow.source_authority = source_account.authority;
     escrow.receiver_authority = receiver_account.authority;
 
     source_account.last_update = clock.unix_timestamp as u64;
@@ -206,7 +205,7 @@ pub fn lending_account_claim_position_escrow(
 }
 
 /// Moves the escrowed shares back to the source account on the receiver's decline, or by anyone
-/// after expiry. The sender's authority may sign to pick another of its accounts. Closes the escrow.
+/// after expiry. Closes the escrow.
 pub fn lending_account_return_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
@@ -221,9 +220,7 @@ pub fn lending_account_return_position_escrow(
         MarginfiError::PositionEscrowNotExpired
     );
     check!(
-        destination_key == escrow.source_account
-            || (signer == Some(escrow.source_authority)
-                && destination.authority == escrow.source_authority),
+        destination_key == escrow.source_account,
         MarginfiError::Unauthorized
     );
     check!(
@@ -383,8 +380,7 @@ pub struct ReleasePositionEscrow<'info> {
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// The receiver's authority to accept or decline, or the sender's authority to pick the
-    /// account a return lands in. Omitted for a sweep or an expired return.
+    /// The receiver's authority, to accept or decline. Omitted for a sweep or an expired return.
     pub authority: Option<Signer<'info>>,
 
     /// CHECK: matched against `position_escrow.rent_payer`.

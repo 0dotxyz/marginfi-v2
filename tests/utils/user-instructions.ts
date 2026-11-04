@@ -1160,7 +1160,7 @@ export type ReleasePositionEscrowArgs = {
   receiverMarginfiAccount: PublicKey;
   /** The account the shares land in */
   destinationMarginfiAccount: PublicKey;
-  /** Receiver's authority to accept or decline, sender's to pick the return account; null otherwise */
+  /** Receiver's authority to accept or decline; null otherwise */
   authority: PublicKey | null;
   rentPayer: PublicKey;
 };

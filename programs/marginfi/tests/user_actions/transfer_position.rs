@@ -978,31 +978,31 @@ pub(super) async fn usdc_depositor(test_f: &TestFixture) -> MarginfiAccountFixtu
 }
 
 /// An account of a new authority holding a 10 USDC deposit.
-pub(super) async fn receiver_with_usdc_deposit(
+pub(super) async fn user_with_usdc_deposit(
     test_f: &TestFixture,
 ) -> (Keypair, MarginfiAccountFixture) {
-    let receiver = Keypair::new();
-    let receiver_f = MarginfiAccountFixture::new_with_authority(
+    let user = Keypair::new();
+    let user_f = MarginfiAccountFixture::new_with_authority(
         test_f.context.clone(),
         &test_f.marginfi_group.key,
-        &receiver,
+        &user,
     )
     .await;
-    let receiver_usdc = test_f
+    let user_usdc = test_f
         .usdc_mint
-        .create_token_account_and_mint_to_with_owner(&receiver.pubkey(), 10)
+        .create_token_account_and_mint_to_with_owner(&user.pubkey(), 10)
         .await;
-    receiver_f
+    user_f
         .try_bank_deposit_with_authority(
-            receiver_usdc.key,
+            user_usdc.key,
             test_f.get_bank(&BankMint::Usdc),
             10.0,
             None,
-            &receiver,
+            &user,
         )
         .await
         .unwrap();
-    (receiver, receiver_f)
+    (user, user_f)
 }
 
 pub(super) async fn asset_shares(account: &MarginfiAccountFixture, bank: &BankFixture) -> I80F48 {
@@ -1023,7 +1023,7 @@ async fn test_position_transfer_collateral_top_up_needs_no_receiver_signature() 
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source_f = usdc_depositor(&test_f).await;
-    let (_receiver, dest_f) = receiver_with_usdc_deposit(&test_f).await;
+    let (_receiver, dest_f) = user_with_usdc_deposit(&test_f).await;
 
     source_f
         .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
@@ -1083,7 +1083,7 @@ async fn test_position_transfer_tagged_deposit_requires_receiver_consent() -> an
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source_f = usdc_depositor(&test_f).await;
-    let (_receiver, dest_f) = receiver_with_usdc_deposit(&test_f).await;
+    let (_receiver, dest_f) = user_with_usdc_deposit(&test_f).await;
     let mut dest_account = dest_f.load().await;
     dest_account
         .lending_account

@@ -641,7 +641,7 @@ pub mod marginfi {
     }
 
     /// (receiver authority, or permissionless after expiry) Move the escrowed shares back to the
-    /// source account, or to an account of the sender's authority when it signs. Closes the escrow.
+    /// source account. Closes the escrow.
     pub fn lending_account_return_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {

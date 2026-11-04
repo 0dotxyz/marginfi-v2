@@ -1,6 +1,6 @@
 use super::premium::{advance_clock, premium_test_fixture};
 use super::transfer_position::{
-    asset_shares, indebted_source, receiver_with_usdc_deposit, usdc_depositor,
+    asset_shares, indebted_source, usdc_depositor, user_with_usdc_deposit,
 };
 use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
@@ -155,7 +155,7 @@ async fn position_escrow_sweeps_into_an_existing_deposit() -> anyhow::Result<()>
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source = usdc_depositor(&test_f).await;
-    let (_receiver_key, receiver) = receiver_with_usdc_deposit(&test_f).await;
+    let (_receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
     let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
 
     receiver
@@ -213,28 +213,6 @@ async fn position_escrow_returns_to_the_source_after_expiry() -> anyhow::Result<
     Ok(())
 }
 
-/// After expiry the sender's authority may return the shares into any of its accounts.
-#[tokio::test]
-async fn position_escrow_sender_picks_the_return_account() -> anyhow::Result<()> {
-    let test_f = premium_test_fixture().await;
-    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
-    let source = usdc_depositor(&test_f).await;
-    let source_other = test_f.create_marginfi_account().await;
-    let (_receiver_key, receiver) = empty_receiver(&test_f).await;
-    let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
-    advance_clock(&test_f, POSITION_ESCROW_EXPIRY_SECONDS).await;
-
-    let payer = test_f.payer_keypair();
-    source_other
-        .try_return_position_escrow(escrow, usdc_bank_f, Some(&payer))
-        .await?;
-    assert_eq!(
-        asset_shares(&source_other, usdc_bank_f).await,
-        usdc_shares(100)
-    );
-    Ok(())
-}
-
 /// Each send adds to the escrow and restarts its expiry.
 #[tokio::test]
 async fn position_escrow_send_restarts_the_expiry() -> anyhow::Result<()> {
@@ -277,6 +255,60 @@ async fn position_escrow_rejects_a_receiver_that_disabled_receiving() -> anyhow:
         res.unwrap_err(),
         MarginfiError::PositionTransferReceiveDisabled
     );
+    Ok(())
+}
+
+/// A frozen source blocks its authority but not the group admin.
+#[tokio::test]
+async fn position_escrow_frozen_source_admin_only() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (owner, source) = user_with_usdc_deposit(&test_f).await;
+    let (_receiver_key, receiver) = empty_receiver(&test_f).await;
+    source.try_set_freeze(true).await?;
+
+    let res = source
+        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+
+    let admin = test_f.payer_keypair();
+    source
+        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &admin)
+        .await?;
+    assert_eq!(asset_shares(&source, usdc_bank_f).await, usdc_shares(5));
+    Ok(())
+}
+
+/// While the source is frozen, an expired escrow cannot be returned anywhere, and the receiver may
+/// still accept it.
+#[tokio::test]
+async fn position_escrow_frozen_source_blocks_returns_but_not_claims() -> anyhow::Result<()> {
+    let test_f = premium_test_fixture().await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (owner, source) = user_with_usdc_deposit(&test_f).await;
+    let owner_other = account_of(&test_f, &owner).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    source
+        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
+        .await?;
+    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
+    source.try_set_freeze(true).await?;
+    advance_clock(&test_f, POSITION_ESCROW_EXPIRY_SECONDS).await;
+
+    let res = source
+        .try_return_position_escrow(escrow, usdc_bank_f, None)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+    let res = owner_other
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&owner))
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
+
+    receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await?;
+    assert_eq!(asset_shares(&receiver, usdc_bank_f).await, usdc_shares(5));
     Ok(())
 }
 

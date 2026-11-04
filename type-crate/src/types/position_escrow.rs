@@ -24,9 +24,6 @@ pub struct PositionEscrow {
     pub bank: Pubkey,
     /// The sending account. Returned shares go back here.
     pub source_account: Pubkey,
-    /// Authority of `source_account` at the last send. May return the shares into any of its
-    /// accounts.
-    pub source_authority: Pubkey,
     pub receiver_account: Pubkey,
     /// Authority of `receiver_account` at the last send. Accepts into any of its accounts, or
     /// declines.
@@ -38,7 +35,7 @@ pub struct PositionEscrow {
     pub expires_at: i64,
     pub bump: u8,
     pub _pad0: [u8; 7],
-    pub _reserved0: [u8; 32],
+    pub _reserved0: [u8; 64],
 }
 
 impl PositionEscrow {
