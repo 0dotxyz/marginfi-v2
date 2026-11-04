@@ -635,9 +635,9 @@ export const configureBankOracleScope = (
 
   const ix = program.methods
     .lendingPoolConfigureBankOracleScope(
-      args.type,
       args.oracle,
       args.entryIndex,
+      args.type,
       args.ptStartPrice === undefined
         ? null
         : bigNumberToWrappedI80F48(args.ptStartPrice),

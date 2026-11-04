@@ -2266,6 +2266,10 @@ impl ScopePriceFeed {
 
     /// Validates the account and reads `entry_index`, without a staleness check (used by config
     /// validation, where the feed may legitimately not have been cranked yet).
+    ///
+    /// `value / 10^exp` is computed in I80F48, so a price below 2^-48 (~3.6e-15) truncates to
+    /// zero. Intentional: Pyth and Switchboard prices land in the same type, and no listed asset
+    /// is within ten orders of magnitude of that floor (BONK is ~1e-5).
     fn read_entry(ai: &AccountInfo, entry_index: u16) -> MarginfiResult<Self> {
         check!(
             ai.owner.eq(&SCOPE_PROGRAM_ID),

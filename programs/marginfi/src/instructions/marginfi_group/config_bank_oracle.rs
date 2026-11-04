@@ -102,7 +102,9 @@ pub fn lending_pool_configure_bank_oracle(
             },
             bank: ctx.accounts.bank.key(),
             oracle_setup: setup,
-            oracle
+            oracle,
+            scope_entry_index: bank.config.scope_entry_index,
+            scope_smoothed_entry_index: bank.config.scope_smoothed_entry_index,
         });
     }
 
@@ -136,9 +138,9 @@ pub fn lending_pool_configure_bank_oracle(
 /// indices alongside the feed account key.
 pub fn lending_pool_configure_bank_oracle_scope(
     ctx: Context<LendingPoolConfigureBankOracle>,
-    setup: u8,
     oracle: Pubkey,
     entry_index: u16,
+    setup: u8,
     pt_start_price: Option<WrappedI80F48>,
     smoothed_entry_index: Option<u16>,
 ) -> MarginfiResult {
@@ -233,7 +235,9 @@ pub fn lending_pool_configure_bank_oracle_scope(
         header: header(),
         bank: ctx.accounts.bank.key(),
         oracle_setup: setup_type as u8,
-        oracle
+        oracle,
+        scope_entry_index: bank.config.scope_entry_index,
+        scope_smoothed_entry_index: bank.config.scope_smoothed_entry_index,
     });
 
     Ok(())

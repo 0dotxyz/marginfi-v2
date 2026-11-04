@@ -235,28 +235,32 @@ pub mod marginfi {
 
     /// (governance_admin only) Point a bank at a Scope feed entry (table on the handler in
     /// `marginfi_group`).
+    /// * oracle - the feed's `OraclePrices` account
+    /// * entry_index - which of the 512 entries in that account prices this bank
     /// * setup - `OracleSetup` as u8: `Scope` / `ScopeKamino` / `ScopeJuplend`, or a Scope-fed
     ///   multiplier setup (`ScopeMSOL` / `ScopeLST` / `ScopePT`, or the `ScopeKamino*` /
     ///   `ScopeJuplend*` mSOL / LST wrappers), which reads the Scope entry as its base price
-    /// * oracle - the feed's `OraclePrices` account
-    /// * entry_index - which of the 512 entries in that account prices this bank
     /// * pt_start_price - the PT linear-pricing start price, in (0, 1]; required for `ScopePT`
     ///   and rejected for every other setup
     /// * smoothed_entry_index - optional entry for the time-weighted (initial margin) price, the
     ///   `PythLazerEMA` of `entry_index` in the same feed (taken on trust like `entry_index`)
+    ///
+    /// The 0.1.13 arguments `(oracle, entry_index)` keep their position; the rest were appended
+    /// so an instruction encoded against the previous layout fails to decode instead of being
+    /// misread.
     pub fn lending_pool_configure_bank_oracle_scope(
         ctx: Context<LendingPoolConfigureBankOracle>,
-        setup: u8,
         oracle: Pubkey,
         entry_index: u16,
+        setup: u8,
         pt_start_price: Option<WrappedI80F48>,
         smoothed_entry_index: Option<u16>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_configure_bank_oracle_scope(
             ctx,
-            setup,
             oracle,
             entry_index,
+            setup,
             pt_start_price,
             smoothed_entry_index,
         )
