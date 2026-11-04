@@ -621,19 +621,28 @@ pub mod marginfi {
         )
     }
 
-    /// (source authority) Move part of a deposit into the escrow for the receiver to accept. The
-    /// first send opens the escrow. The fee payer pays its rent and gets it back when the escrow
+    /// (source authority) Move part of a deposit into an escrow for `receiver_authority` to accept.
+    /// Each memo has its own escrow. The fee payer pays its rent and gets it back when the escrow
     /// closes. Each send restarts the expiry.
     pub fn lending_account_escrow_position<'info>(
         ctx: Context<'info, LendingAccountEscrowPosition<'info>>,
         amount: u64,
+        receiver_authority: Pubkey,
+        receiver_account: Pubkey,
+        memo: [u8; 16],
     ) -> MarginfiResult {
-        marginfi_account::lending_account_escrow_position(ctx, amount)
+        marginfi_account::lending_account_escrow_position(
+            ctx,
+            amount,
+            receiver_authority,
+            receiver_account,
+            memo,
+        )
     }
 
-    /// (receiver authority, or permissionless sweep; group admin if the receiver is frozen) Move
-    /// the escrowed shares into an account of the receiver's authority, or into the receiver's
-    /// account once it holds a deposit in the bank that no order tags. Closes the escrow.
+    /// (receiver authority, or permissionless sweep; group admin if the destination is frozen)
+    /// Move the escrowed shares into an account of the receiver's authority: any of them when it
+    /// signs, or else one holding a deposit in the bank that no order tags. Closes the escrow.
     pub fn lending_account_claim_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {

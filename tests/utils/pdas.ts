@@ -175,15 +175,17 @@ export const deriveLiquidationRecord = (
 export const derivePositionEscrow = (
   programId: PublicKey,
   bank: PublicKey,
-  receiverAccount: PublicKey,
+  receiverAuthority: PublicKey,
   sourceAccount: PublicKey,
+  memo: number[],
 ) => {
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from("position_escrow", "utf-8"),
       bank.toBuffer(),
-      receiverAccount.toBuffer(),
+      receiverAuthority.toBuffer(),
       sourceAccount.toBuffer(),
+      Buffer.from(memo),
     ],
     programId,
   );

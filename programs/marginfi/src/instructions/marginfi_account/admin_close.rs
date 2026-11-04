@@ -34,7 +34,7 @@ pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
         !marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE)
             && !marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
             && marginfi_account.active_orders == 0
-            && !marginfi_account.has_open_position_escrows()
+            && marginfi_account.active_position_escrows == 0
             && marginfi_account.liquidation_record == Pubkey::default(),
         MarginfiError::IllegalAction,
         "Account cannot be closed"

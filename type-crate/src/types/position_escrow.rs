@@ -11,9 +11,9 @@ use {
 
 use super::WrappedI80F48;
 
-// Asset shares one account sent toward another that the receiver has not accepted yet. The shares
-// stay in the bank's totals, so they keep earning interest while held here.
-// PDA: [POSITION_ESCROW_SEED, bank, receiver_account, source_account].
+// Asset shares one account sent toward a wallet that has not accepted them yet. The shares stay in
+// the bank's totals, so they keep earning interest while held here.
+// PDA: [POSITION_ESCROW_SEED, bank, receiver_authority, source_account, memo].
 assert_struct_size!(PositionEscrow, 256);
 assert_struct_align!(PositionEscrow, 8);
 #[repr(C)]
@@ -24,18 +24,22 @@ pub struct PositionEscrow {
     pub bank: Pubkey,
     /// The sending account. Returned shares go back here.
     pub source_account: Pubkey,
+    /// The account the opening send named as the one the shares are for. Kept for accounting, not
+    /// checked.
     pub receiver_account: Pubkey,
-    /// Authority of `receiver_account` at the last send. Accepts into any of its accounts, or
-    /// declines.
+    /// Accepts into any of its accounts, or declines.
     pub receiver_authority: Pubkey,
     /// Paid the rent and gets it back when the escrow closes.
     pub rent_payer: Pubkey,
     pub asset_shares: WrappedI80F48,
+    /// The sender's tag, such as a distribution ID. Part of the PDA, so each memo has its own
+    /// escrow.
+    pub memo: [u8; 16],
     /// Unix timestamp after which anyone may return the shares to the sender.
     pub expires_at: i64,
     pub bump: u8,
     pub _pad0: [u8; 7],
-    pub _reserved0: [u8; 64],
+    pub _reserved0: [u8; 48],
 }
 
 impl PositionEscrow {

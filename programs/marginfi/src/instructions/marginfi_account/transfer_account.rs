@@ -90,7 +90,7 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
     );
 
     check!(
-        !old_account.has_open_position_escrows(),
+        old_account.active_position_escrows == 0,
         MarginfiError::IllegalAction,
         "Close all position escrows before transfer"
     );
@@ -249,7 +249,7 @@ pub fn transfer_to_new_account_pda(
     );
 
     check!(
-        !old_account.has_open_position_escrows(),
+        old_account.active_position_escrows == 0,
         MarginfiError::IllegalAction,
         "Close all position escrows before transfer"
     );

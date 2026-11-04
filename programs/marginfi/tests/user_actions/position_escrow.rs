@@ -50,7 +50,20 @@ async fn escrow_usdc(
     source
         .try_escrow_position(receiver, usdc_bank_f, ui, &payer)
         .await?;
-    Ok(find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0)
+    Ok(escrow_pda(
+        usdc_bank_f,
+        &receiver.load().await.authority,
+        source,
+    ))
+}
+
+/// The escrow `source` sends into for `receiver_authority` with an empty memo.
+fn escrow_pda(
+    bank: &BankFixture,
+    receiver_authority: &Pubkey,
+    source: &MarginfiAccountFixture,
+) -> Pubkey {
+    find_position_escrow_pda(&bank.key, receiver_authority, &source.key, &[0; 16]).0
 }
 
 async fn total_asset_shares(bank: &BankFixture) -> I80F48 {
@@ -106,24 +119,74 @@ async fn position_escrow_holds_shares_until_the_receiver_accepts() -> anyhow::Re
     Ok(())
 }
 
-/// An account cannot send into an escrow to itself.
+/// An escrow can be sent to a wallet with no account yet. The named account and the memo are kept
+/// for accounting, and the wallet accepts into an account it opens later.
 #[tokio::test]
-async fn position_escrow_rejects_identical_accounts() -> anyhow::Result<()> {
+async fn position_escrow_reaches_a_wallet_with_no_account() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source = usdc_depositor(&test_f).await;
+    let wallet = Keypair::new();
+    let named_account = Pubkey::new_unique();
+    let memo = [7; 16];
+    source
+        .try_escrow_position_with_memo(
+            wallet.pubkey(),
+            named_account,
+            usdc_bank_f,
+            100.0,
+            memo,
+            &test_f.payer_keypair(),
+        )
+        .await?;
+    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &wallet.pubkey(), &source.key, &memo).0;
+    let escrow_account = test_f.load_and_deserialize::<PositionEscrow>(&escrow).await;
+    assert_eq!(escrow_account.receiver_authority, wallet.pubkey());
+    assert_eq!(escrow_account.receiver_account, named_account);
+    assert_eq!(escrow_account.memo, memo);
 
-    let res = source
-        .try_escrow_position(&source, usdc_bank_f, 100.0, &test_f.payer_keypair())
-        .await;
-    assert_custom_error!(
-        res.unwrap_err(),
-        MarginfiError::PositionTransferIdenticalAccounts
-    );
+    let account = account_of(&test_f, &wallet).await;
+    account
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&wallet))
+        .await?;
+    assert_eq!(asset_shares(&account, usdc_bank_f).await, usdc_shares(100));
     Ok(())
 }
 
-/// Without the receiver's signature, an escrow lands nowhere the receiver holds no deposit.
+/// Each memo opens its own escrow, and a repeat memo adds to the escrow it opened.
+#[tokio::test]
+async fn position_escrow_opens_one_escrow_per_memo() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source = usdc_depositor(&test_f).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    let payer = test_f.payer_keypair();
+    for (memo, ui) in [([1; 16], 100.0), ([2; 16], 30.0), ([1; 16], 50.0)] {
+        source
+            .try_escrow_position_with_memo(
+                receiver_key.pubkey(),
+                receiver.key,
+                usdc_bank_f,
+                ui,
+                memo,
+                &payer,
+            )
+            .await?;
+    }
+
+    for (memo, ui) in [([1; 16], 150), ([2; 16], 30)] {
+        let escrow =
+            find_position_escrow_pda(&usdc_bank_f.key, &receiver_key.pubkey(), &source.key, &memo)
+                .0;
+        let escrow_account = test_f.load_and_deserialize::<PositionEscrow>(&escrow).await;
+        assert_eq!(I80F48::from(escrow_account.asset_shares), usdc_shares(ui));
+    }
+    assert_eq!(source.load().await.active_position_escrows, 2);
+    Ok(())
+}
+
+/// Without the receiver's signature, an escrow lands only in an untagged deposit that an account of
+/// the receiver's authority holds, never in a stranger's.
 #[tokio::test]
 async fn position_escrow_claim_needs_the_receivers_signature() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -148,17 +211,29 @@ async fn position_escrow_claim_needs_the_receivers_signature() -> anyhow::Result
         res.unwrap_err(),
         MarginfiError::PositionTransferConsentRequired
     );
+
+    let (_depositor_key, depositor) = user_with_usdc_deposit(&test_f).await;
+    let res = depositor
+        .try_claim_position_escrow(escrow, usdc_bank_f, None)
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferConsentRequired
+    );
+    assert_eq!(asset_shares(&depositor, usdc_bank_f).await, usdc_shares(10));
     Ok(())
 }
 
-/// Anyone may sweep an escrow into the receiver's existing, untagged deposit in the bank.
+/// Anyone may sweep an escrow into an untagged deposit in the bank that any account of the
+/// receiver's authority holds.
 #[tokio::test]
 async fn position_escrow_sweeps_into_an_existing_deposit() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source = usdc_depositor(&test_f).await;
-    let (_receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
-    let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
+    let (receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
+    let named = account_of(&test_f, &receiver_key).await;
+    let escrow = escrow_usdc(&test_f, &source, &named, 100.0).await?;
 
     receiver
         .try_claim_position_escrow(escrow, usdc_bank_f, None)
@@ -239,23 +314,41 @@ async fn position_escrow_send_restarts_the_expiry() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Disabling receiving does not stop a send, but no claim lands in that account, even with the
+/// receiver's signature. The receiver may accept into another of its accounts.
 #[tokio::test]
-async fn position_escrow_rejects_a_receiver_that_disabled_receiving() -> anyhow::Result<()> {
+async fn position_escrow_receive_opt_out_blocks_claims_not_sends() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source = usdc_depositor(&test_f).await;
-    let (_receiver_key, receiver) = empty_receiver(&test_f).await;
+    let (receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
+    let receiver_other = account_of(&test_f, &receiver_key).await;
     let mut receiver_account = receiver.load().await;
     receiver_account.account_flags |= ACCOUNT_POSITION_TRANSFER_RECEIVE_DISABLED;
     receiver.set_account(&receiver_account).await?;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
 
-    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
-    let payer = test_f.payer_keypair();
-    let res = source
-        .try_escrow_position(&receiver, usdc_bank_f, 100.0, &payer)
+    let res = receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, None)
         .await;
     assert_custom_error!(
         res.unwrap_err(),
         MarginfiError::PositionTransferReceiveDisabled
+    );
+    let res = receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferReceiveDisabled
+    );
+
+    receiver_other
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await?;
+    assert_eq!(
+        asset_shares(&receiver_other, usdc_bank_f).await,
+        usdc_shares(100)
     );
     Ok(())
 }
@@ -294,7 +387,7 @@ async fn position_escrow_frozen_source_takes_returns_only_from_the_admin() -> an
     source
         .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
         .await?;
-    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
+    let escrow = escrow_pda(usdc_bank_f, &receiver_key.pubkey(), &source);
     source.try_set_freeze(true).await?;
     advance_clock(&test_f, POSITION_ESCROW_EXPIRY_SECONDS).await;
 
@@ -330,7 +423,7 @@ async fn position_escrow_frozen_source_does_not_block_claims() -> anyhow::Result
     source
         .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
         .await?;
-    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
+    let escrow = escrow_pda(usdc_bank_f, &receiver_key.pubkey(), &source);
     source.try_set_freeze(true).await?;
 
     receiver
@@ -340,7 +433,8 @@ async fn position_escrow_frozen_source_does_not_block_claims() -> anyhow::Result
     Ok(())
 }
 
-/// While the receiver is frozen, only the group admin may accept, and only into the receiver.
+/// A frozen receiver can still be sent to. While it is frozen, only the group admin may accept, and
+/// only into the frozen account.
 #[tokio::test]
 async fn position_escrow_frozen_receiver_takes_claims_only_from_the_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -348,8 +442,8 @@ async fn position_escrow_frozen_receiver_takes_claims_only_from_the_admin() -> a
     let source = usdc_depositor(&test_f).await;
     let (receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
     let receiver_other = account_of(&test_f, &receiver_key).await;
-    let escrow = escrow_usdc(&test_f, &source, &receiver, 5.0).await?;
     receiver.try_set_freeze(true).await?;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 5.0).await?;
 
     let res = receiver
         .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
@@ -414,30 +508,6 @@ async fn position_escrow_keeps_the_source_open() -> anyhow::Result<()> {
         .try_admin_close_account(test_f.marginfi_group.fee_wallet)
         .await?;
     assert!(is_closed(&test_f, source.key).await);
-    Ok(())
-}
-
-/// An open escrow keeps the receiver from closing until it is claimed or returned.
-#[tokio::test]
-async fn position_escrow_keeps_the_receiver_open() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
-    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
-    let (owner, source) = user_with_usdc_deposit(&test_f).await;
-    let receiver = test_f.create_marginfi_account().await;
-    source
-        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
-        .await?;
-    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
-
-    let res = receiver.try_close_account(0).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
-
-    let payer = test_f.payer_keypair();
-    source
-        .try_return_position_escrow(escrow, usdc_bank_f, Some(&payer))
-        .await?;
-    receiver.try_close_account(1).await?;
-    assert!(is_closed(&test_f, receiver.key).await);
     Ok(())
 }
 

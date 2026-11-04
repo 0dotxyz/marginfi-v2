@@ -502,15 +502,17 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
 
 pub fn find_position_escrow_pda(
     bank: &Pubkey,
-    receiver_account: &Pubkey,
+    receiver_authority: &Pubkey,
     source_account: &Pubkey,
+    memo: &[u8; 16],
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
             POSITION_ESCROW_SEED.as_bytes(),
             bank.as_ref(),
-            receiver_account.as_ref(),
+            receiver_authority.as_ref(),
             source_account.as_ref(),
+            memo,
         ],
         &marginfi::ID,
     )

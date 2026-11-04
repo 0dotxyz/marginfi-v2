@@ -2834,7 +2834,8 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    /// Sends `ui_amount` of this account's deposit in `bank` into its escrow for `receiver`.
+    /// Sends `ui_amount` of this account's deposit in `bank` into its escrow for `receiver`'s
+    /// authority, naming `receiver` as the account and leaving the memo empty.
     pub async fn try_escrow_position<T: Into<f64> + Copy>(
         &self,
         receiver: &MarginfiAccountFixture,
@@ -2842,12 +2843,40 @@ impl MarginfiAccountFixture {
         ui_amount: T,
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
+        let receiver_authority = receiver.load().await.authority;
+        self.try_escrow_position_with_memo(
+            receiver_authority,
+            receiver.key,
+            bank,
+            ui_amount,
+            [0; 16],
+            authority,
+        )
+        .await
+    }
+
+    /// Sends `ui_amount` of this account's deposit in `bank` into its escrow for
+    /// `receiver_authority` under `memo`.
+    pub async fn try_escrow_position_with_memo<T: Into<f64> + Copy>(
+        &self,
+        receiver_authority: Pubkey,
+        receiver_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        memo: [u8; 16],
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
         let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
         let mut accounts = marginfi::accounts::LendingAccountEscrowPosition {
             group: self.load().await.group,
             source_marginfi_account: self.key,
-            receiver_marginfi_account: receiver.key,
-            position_escrow: find_position_escrow_pda(&bank.key, &receiver.key, &self.key).0,
+            position_escrow: find_position_escrow_pda(
+                &bank.key,
+                &receiver_authority,
+                &self.key,
+                &memo,
+            )
+            .0,
             authority: authority.pubkey(),
             fee_payer: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
@@ -2862,6 +2891,9 @@ impl MarginfiAccountFixture {
             accounts,
             data: marginfi::instruction::LendingAccountEscrowPosition {
                 amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                receiver_authority,
+                receiver_account,
+                memo,
             }
             .data(),
         };
@@ -2907,7 +2939,6 @@ impl MarginfiAccountFixture {
                 group: self.load().await.group,
                 position_escrow: escrow,
                 source_marginfi_account: escrow_account.source_account,
-                receiver_marginfi_account: escrow_account.receiver_account,
                 destination_marginfi_account: self.key,
                 bank: bank.key,
                 authority: authority.map(|k| k.pubkey()),

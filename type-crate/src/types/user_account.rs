@@ -90,12 +90,10 @@ pub struct MarginfiAccount {
     /// deficit or repays a material share of the debt.
     /// * 0 if not tagged
     pub liquidation_tagged_at: i64,
-    /// Count of open position escrows this account sent. The account cannot close or migrate while
-    /// any are open.
-    pub source_escrows: u16,
-    /// Count of open position escrows sent to this account, with the same limits.
-    pub receiver_escrows: u16,
-    pub _pad1: [u8; 4],
+    /// Count of position escrows this account sent that are still open. The account cannot close or
+    /// migrate while any are.
+    pub active_position_escrows: u16,
+    pub _pad1: [u8; 6],
     pub _padding0: [u64; 1],
 }
 

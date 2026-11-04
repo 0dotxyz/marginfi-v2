@@ -363,13 +363,17 @@ describe("Position transfer", () => {
     );
   });
 
+  const noMemo = new Array(16).fill(0);
+
   /** Sends `amount` from user 0 into its escrow for `receiver` in the collateral bank */
   const escrow = async (receiver: MockUser, amount: BN) => {
     const tx = new Transaction().add(
       await escrowPositionIx(bankrunProgram, {
         group,
         sourceMarginfiAccount: account(users[0]),
-        receiverMarginfiAccount: account(receiver),
+        receiverAuthority: receiver.wallet.publicKey,
+        receiverAccount: account(receiver),
+        memo: noMemo,
         bank: collateralBank,
         authority: users[0].wallet.publicKey,
         feePayer: users[0].wallet.publicKey,
@@ -394,7 +398,8 @@ describe("Position transfer", () => {
         group,
         bank: collateralBank,
         sourceMarginfiAccount: account(users[0]),
-        receiverMarginfiAccount: account(receiver),
+        receiverAuthority: receiver.wallet.publicKey,
+        memo: noMemo,
         destinationMarginfiAccount: account(destination),
         authority: signer.wallet.publicKey,
         rentPayer: users[0].wallet.publicKey,

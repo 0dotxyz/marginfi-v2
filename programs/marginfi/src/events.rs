@@ -271,7 +271,10 @@ pub struct LendingAccountTransferPositionEvent {
 pub struct LendingAccountEscrowPositionEvent {
     pub header: AccountEventHeader,
     pub position_escrow: Pubkey,
+    pub receiver_authority: Pubkey,
+    /// The account this send names as the one the shares are for. Not checked.
     pub receiver_account: Pubkey,
+    pub memo: [u8; 16],
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,

@@ -26,37 +26,36 @@ use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, POSITION_ESCROW_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, FeeState, MarginfiAccount, MarginfiGroup,
-        PositionEscrow, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        PositionEscrow, ACCOUNT_FROZEN,
     },
 };
 
-/// Moves `amount` of the source's deposit in `bank` into the escrow, where the receiver may accept
-/// it. The first send opens the escrow. The fee payer pays its rent and gets it back when the
-/// escrow closes. Each send restarts the expiry. Remaining accounts: the source's observation set.
+/// Moves `amount` of the source's deposit in `bank` into the escrow for `receiver_authority`, who
+/// may accept it into any of its accounts. The receiver is checked only when it accepts. Each send
+/// restarts the expiry. Remaining accounts: the source's observation set.
 pub fn lending_account_escrow_position<'info>(
     ctx: Context<'info, LendingAccountEscrowPosition<'info>>,
     amount: u64,
+    receiver_authority: Pubkey,
+    receiver_account: Pubkey,
+    memo: [u8; 16],
 ) -> MarginfiResult {
-    check!(
-        ctx.accounts.source_marginfi_account.key() != ctx.accounts.receiver_marginfi_account.key(),
-        MarginfiError::PositionTransferIdenticalAccounts
-    );
     check!(amount > 0, MarginfiError::InvalidPositionTransferAmount);
 
     let clock = Clock::get()?;
     let bank_key = ctx.accounts.bank.key();
     let mut source_account = ctx.accounts.source_marginfi_account.load_mut()?;
-    let mut receiver_account = ctx.accounts.receiver_marginfi_account.load_mut()?;
     // `load_init` succeeds only on the first send, before Anchor writes the discriminator.
     let mut escrow = match ctx.accounts.position_escrow.load_init() {
         Ok(mut escrow) => {
             escrow.bank = bank_key;
             escrow.source_account = ctx.accounts.source_marginfi_account.key();
-            escrow.receiver_account = ctx.accounts.receiver_marginfi_account.key();
+            escrow.receiver_account = receiver_account;
+            escrow.receiver_authority = receiver_authority;
+            escrow.memo = memo;
             escrow.rent_payer = ctx.accounts.fee_payer.key();
             escrow.bump = ctx.bumps.position_escrow;
-            source_account.increment_source_escrows()?;
-            receiver_account.increment_receiver_escrows()?;
+            source_account.increment_active_position_escrows()?;
             escrow
         }
         Err(_) => ctx.accounts.position_escrow.load_mut()?,
@@ -65,11 +64,6 @@ pub fn lending_account_escrow_position<'info>(
     let group = ctx.accounts.group.load()?;
 
     check_position_flags(&source_account)?;
-    check!(
-        !receiver_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-    check_can_receive(&receiver_account, false)?;
 
     let source_shares: I80F48 = match source_account.lending_account.get_balance(&bank_key) {
         Some(balance) if matches!(balance.get_side(), Some(BalanceSide::Assets)) => {
@@ -119,7 +113,6 @@ pub fn lending_account_escrow_position<'info>(
         .unix_timestamp
         .checked_add(POSITION_ESCROW_EXPIRY_SECONDS)
         .ok_or_else(math_error!())?;
-    escrow.receiver_authority = receiver_account.authority;
 
     source_account.last_update = clock.unix_timestamp as u64;
     source_account.lending_account.sort_balances();
@@ -159,7 +152,9 @@ pub fn lending_account_escrow_position<'info>(
             marginfi_group: source_account.group,
         },
         position_escrow: ctx.accounts.position_escrow.key(),
-        receiver_account: ctx.accounts.receiver_marginfi_account.key(),
+        receiver_authority,
+        receiver_account,
+        memo,
         bank: bank_key,
         mint: bank_mint,
         amount: amount.checked_to_num().ok_or_else(math_error!())?,
@@ -172,27 +167,25 @@ pub fn lending_account_escrow_position<'info>(
     Ok(())
 }
 
-/// Moves the escrowed shares into an account of the receiver's authority when it signs, or else
-/// into the receiver's untagged deposit in the bank. The group admin may accept into a frozen
-/// receiver. Closes the escrow.
+/// Moves the escrowed shares into an account of the receiver's authority: any of them when it
+/// signs, or else one holding an untagged deposit in the bank. The group admin may accept into a
+/// frozen account of the receiver's authority. Closes the escrow.
 pub fn lending_account_claim_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
     let escrow = ctx.accounts.position_escrow.load()?;
-    let destination_key = ctx.accounts.destination_marginfi_account.key();
     let destination = ctx.accounts.destination_marginfi_account.load()?;
 
+    let owned_by_receiver = destination.authority == escrow.receiver_authority;
     let receiver_signed = ctx
         .accounts
         .authority
         .as_ref()
         .is_some_and(|signer| signer.key() == escrow.receiver_authority);
-    let accepted = receiver_signed && destination.authority == escrow.receiver_authority;
-    let admin_accepted = destination_key == escrow.receiver_account
-        && destination.get_flag(ACCOUNT_FROZEN)
-        && admin_signed(ctx.accounts)?;
-    let swept = destination_key == escrow.receiver_account
-        && takes_unsolicited_deposit(&destination, &escrow.bank);
+    let accepted = owned_by_receiver && receiver_signed;
+    let admin_accepted =
+        owned_by_receiver && destination.get_flag(ACCOUNT_FROZEN) && admin_signed(ctx.accounts)?;
+    let swept = owned_by_receiver && takes_unsolicited_deposit(&destination, &escrow.bank);
     check!(
         accepted || admin_accepted || swept,
         MarginfiError::PositionTransferConsentRequired
@@ -248,15 +241,11 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
     let clock = Clock::get()?;
     let bank_key = ctx.accounts.bank.key();
     let escrow_shares: I80F48 = ctx.accounts.position_escrow.load()?.asset_shares.into();
-    // The destination may be the same account as the source or the receiver.
+    // The destination may be the same account as the source.
     ctx.accounts
         .source_marginfi_account
         .load_mut()?
-        .decrement_source_escrows()?;
-    ctx.accounts
-        .receiver_marginfi_account
-        .load_mut()?
-        .decrement_receiver_escrows()?;
+        .decrement_active_position_escrows()?;
     let mut destination = ctx.accounts.destination_marginfi_account.load_mut()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
@@ -316,6 +305,7 @@ fn admin_signed(accounts: &ReleasePositionEscrow) -> MarginfiResult<bool> {
 }
 
 #[derive(Accounts)]
+#[instruction(amount: u64, receiver_authority: Pubkey, receiver_account: Pubkey, memo: [u8; 16])]
 pub struct LendingAccountEscrowPosition<'info> {
     #[account(
         constraint = !group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
@@ -331,17 +321,15 @@ pub struct LendingAccountEscrowPosition<'info> {
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
-    pub receiver_marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
     #[account(
         init_if_needed,
         payer = fee_payer,
         seeds = [
             POSITION_ESCROW_SEED.as_bytes(),
             bank.key().as_ref(),
-            receiver_marginfi_account.key().as_ref(),
+            receiver_authority.as_ref(),
             source_marginfi_account.key().as_ref(),
+            memo.as_ref(),
         ],
         bump,
         space = 8 + PositionEscrow::LEN
@@ -398,21 +386,14 @@ pub struct ReleasePositionEscrow<'info> {
     )]
     pub source_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    #[account(
-        mut,
-        constraint = receiver_marginfi_account.key() == position_escrow.load()?.receiver_account
-            @ MarginfiError::Unauthorized,
-    )]
-    pub receiver_marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub destination_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// The receiver's authority to accept or decline, or the group admin for a frozen receiver or
-    /// source. Omitted for a sweep or an expired return.
+    /// The receiver's authority to accept or decline, or the group admin for a frozen destination.
+    /// Omitted for a sweep or an expired return.
     pub authority: Option<Signer<'info>>,
 
     /// CHECK: matched against `position_escrow.rent_payer`.

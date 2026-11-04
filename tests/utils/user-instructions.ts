@@ -1113,7 +1113,12 @@ export const lendingAccountTransferPositionIx = (
 export type EscrowPositionArgs = {
   group: PublicKey;
   sourceMarginfiAccount: PublicKey;
-  receiverMarginfiAccount: PublicKey;
+  /** Accepts into any of its accounts, or declines */
+  receiverAuthority: PublicKey;
+  /** The account the shares are for, kept for accounting only */
+  receiverAccount: PublicKey;
+  /** 16 bytes, such as a distribution ID; each memo has its own escrow */
+  memo: number[];
   bank: PublicKey;
   /** The source account's authority */
   authority: PublicKey;
@@ -1131,16 +1136,20 @@ export const escrowPositionIx = (
   args: EscrowPositionArgs,
 ) => {
   return program.methods
-    .lendingAccountEscrowPosition(args.amount)
+    .lendingAccountEscrowPosition(
+      args.amount,
+      args.receiverAuthority,
+      args.receiverAccount,
+      args.memo,
+    )
     .accounts({
       group: args.group,
       sourceMarginfiAccount: args.sourceMarginfiAccount,
-      receiverMarginfiAccount: args.receiverMarginfiAccount,
       authority: args.authority,
       feePayer: args.feePayer,
       bank: args.bank,
       globalFeeWallet: args.globalFeeWallet,
-      // positionEscrow = derivePositionEscrow(id, bank, receiver, source)
+      // positionEscrow = derivePositionEscrow(id, bank, receiverAuthority, source, memo)
       // feeState = deriveGlobalFeeState(id)
     })
     .remainingAccounts(
@@ -1157,10 +1166,11 @@ export type ReleasePositionEscrowArgs = {
   group: PublicKey;
   bank: PublicKey;
   sourceMarginfiAccount: PublicKey;
-  receiverMarginfiAccount: PublicKey;
+  receiverAuthority: PublicKey;
+  memo: number[];
   /** The account the shares land in */
   destinationMarginfiAccount: PublicKey;
-  /** Receiver's authority to accept or decline, or the group admin for a frozen receiver or source; null otherwise */
+  /** Receiver's authority to accept or decline, or the group admin for a frozen destination; null otherwise */
   authority: PublicKey | null;
   rentPayer: PublicKey;
 };
@@ -1173,18 +1183,18 @@ const releasePositionEscrowAccounts = (
   positionEscrow: derivePositionEscrow(
     program.programId,
     args.bank,
-    args.receiverMarginfiAccount,
+    args.receiverAuthority,
     args.sourceMarginfiAccount,
+    args.memo,
   )[0],
   sourceMarginfiAccount: args.sourceMarginfiAccount,
-  receiverMarginfiAccount: args.receiverMarginfiAccount,
   destinationMarginfiAccount: args.destinationMarginfiAccount,
   bank: args.bank,
   authority: args.authority,
   rentPayer: args.rentPayer,
 });
 
-/** Move the escrowed shares into a receiver account and close the escrow. */
+/** Move the escrowed shares into one of the receiver's accounts and close the escrow. */
 export const claimPositionEscrowIx = (
   program: Program<Marginfi>,
   args: ReleasePositionEscrowArgs,
