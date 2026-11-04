@@ -759,8 +759,11 @@ pub mod marginfi {
     ///   is lost **FOREVER**), including the liquidity vault
     /// * all three outstanding-fee fields are zero (or you don't care if anything remaining is lost
     ///   **FOREVER**)
-    pub fn lending_pool_close_bank(
-        ctx: Context<LendingPoolCloseBank>,
+    ///
+    /// Optional remaining accounts also sweep the vaults to the admin and close them and, for
+    /// Kamino/JupLend banks, unwind the seed position first (see `close_bank.rs`).
+    pub fn lending_pool_close_bank<'info>(
+        ctx: Context<'info, LendingPoolCloseBank<'info>>,
         force_close: Option<bool>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_close_bank(ctx, force_close)

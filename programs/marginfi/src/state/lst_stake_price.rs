@@ -258,8 +258,9 @@ pub(crate) fn validate_exponent_vault_account<'info>(
 }
 
 /// Ceiling on what a PT can redeem for, in asset per PT. Exponent's `sy_for_pt / pt_supply` is SY
-/// per PT, converted here with `last_seen_sy_exchange_rate` (asset per SY). Reads exactly 1.0 while
-/// the vault is fully backed, and drops below only when its escrow is short of PT supply.
+/// per PT, converted here with `last_seen_sy_exchange_rate` (asset per SY). Reads 1.0 while the vault
+/// is fully backed, `live / watermark` while the SY rate sits below its watermark (negative yield),
+/// and less still when the escrow is short of PT supply.
 fn pt_redemption_multiplier(vault: &MinimalExponentVault) -> MarginfiResult<I80F48> {
     let pt_supply = vault.pt_supply();
     check!(pt_supply > 0, MarginfiError::ExponentVaultValidationFailed);
@@ -291,15 +292,7 @@ pub(crate) fn pt_linear_multiplier(
     vault: &MinimalExponentVault,
     clock: &Clock,
     start_price: I80F48,
-    ignore_pt_emergency: bool,
 ) -> MarginfiResult<I80F48> {
-    // Refuse to price a depegged vault: in Exponent's "emergency mode" (SY rate below its all-time
-    // high) the linear accretion to par no longer holds and the redemption backing is unreliable.
-    check!(
-        ignore_pt_emergency || !vault.is_in_emergency_mode(),
-        MarginfiError::ExponentVaultValidationFailed
-    );
-
     let start_ts = vault.start_ts() as i64;
     let maturity = start_ts
         .checked_add(vault.duration() as i64)

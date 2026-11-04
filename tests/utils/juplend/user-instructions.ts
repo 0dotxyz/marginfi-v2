@@ -2,9 +2,13 @@ import { BN, Program } from "@coral-xyz/anchor";
 import {
   AccountMeta,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 
 import { Marginfi } from "../../../target/types/marginfi";
 import type {
@@ -12,7 +16,10 @@ import type {
   JuplendLiquidityIdl,
   JuplendPoolKeys,
 } from "./types";
-import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import {
+  JUPLEND_LENDING_PROGRAM_ID,
+  JUPLEND_LIQUIDITY_PROGRAM_ID,
+} from "./juplend-pdas";
 
 export type JuplendDepositAccounts = {
   marginfiAccount: PublicKey;
@@ -258,4 +265,41 @@ export const makeJuplendNativeUpdateRateIx = async (
       rewardsRateModel: accounts.rewardsRateModel,
     })
     .instruction();
+};
+
+export type JuplendCloseBankAccountsArgs = {
+  pool: JuplendPoolKeys;
+  fTokenVault: PublicKey;
+  withdrawIntermediaryAta: PublicKey;
+  claimAccount: PublicKey;
+};
+
+/** The JupLend tail of `closeBank`'s remaining accounts, in the order `close_bank.rs` expects. */
+export const juplendCloseBankAccounts = (
+  args: JuplendCloseBankAccountsArgs,
+): AccountMeta[] => {
+  const meta = (pubkey: PublicKey, isWritable: boolean): AccountMeta => ({
+    pubkey,
+    isSigner: false,
+    isWritable,
+  });
+  const { pool } = args;
+  return [
+    meta(pool.lending, true),
+    meta(pool.fTokenMint, true),
+    meta(args.fTokenVault, true),
+    meta(args.withdrawIntermediaryAta, true),
+    meta(pool.lendingAdmin, false),
+    meta(pool.tokenReserve, true),
+    meta(pool.supplyPositionOnLiquidity, true),
+    meta(pool.rateModel, false),
+    meta(pool.vault, true),
+    meta(args.claimAccount, true),
+    meta(pool.liquidity, true),
+    meta(JUPLEND_LIQUIDITY_PROGRAM_ID, false),
+    meta(pool.lendingRewardsRateModel, false),
+    meta(JUPLEND_LENDING_PROGRAM_ID, false),
+    meta(ASSOCIATED_TOKEN_PROGRAM_ID, false),
+    meta(SystemProgram.programId, false),
+  ];
 };

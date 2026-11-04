@@ -8,6 +8,7 @@ mod backfill_staked_bank_validator_vote_account;
 mod clear_circuit_breaker;
 mod clone_bank;
 mod close_bank;
+mod close_bank_venue;
 mod collect_bank_fees;
 mod collect_bank_premium_fees;
 mod config_bank_emode;
