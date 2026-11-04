@@ -1,4 +1,4 @@
-use crate::constants::MIN_EMISSIONS_SHARE_SUPPLY;
+use crate::constants::{MAX_EMISSIONS_ASSET_SHARE_VALUE, MIN_EMISSIONS_SHARE_SUPPLY};
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -255,6 +255,19 @@ pub fn lending_pool_emissions_deposit(
         ctx.accounts.bank.key(),
     )?;
 
+    let total_assets = bank.get_asset_amount(total_asset_shares)?;
+    let updated_total_assets = total_assets
+        .checked_add(I80F48::from_num(amount))
+        .ok_or_else(math_error!())?;
+    let new_asset_share_value = updated_total_assets
+        .checked_div(total_asset_shares)
+        .ok_or_else(math_error!())?;
+    check!(
+        new_asset_share_value < MAX_EMISSIONS_ASSET_SHARE_VALUE,
+        MarginfiError::EmissionsUpdateError,
+        "Emissions would raise asset share value to or above the limit"
+    );
+
     transfer_checked(
         CpiContext::new(
             ctx.accounts.token_program.key(),
@@ -269,15 +282,7 @@ pub fn lending_pool_emissions_deposit(
         ctx.accounts.mint.decimals,
     )?;
 
-    let total_assets = bank.get_asset_amount(total_asset_shares)?;
-    let updated_total_assets = total_assets
-        .checked_add(I80F48::from_num(amount))
-        .ok_or_else(math_error!())?;
-
-    bank.asset_share_value = updated_total_assets
-        .checked_div(total_asset_shares)
-        .ok_or_else(math_error!())?
-        .into();
+    bank.asset_share_value = new_asset_share_value.into();
 
     bank.update_bank_cache(&group)?;
 
