@@ -7,17 +7,19 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_account_init_health_and_clear_tag, run_cb_price_gate, LendingAccountImpl,
-        MarginfiAccountImpl,
+        check_account_init_health_and_clear_tag, finalize_health_cache, run_cb_price_gate,
+        LendingAccountImpl, MarginfiAccountImpl,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
 use anchor_lang::prelude::*;
+use bytemuck::Zeroable;
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
     types::{
-        MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use solana_instructions_sysvar::load_instruction_at_checked;
@@ -124,12 +126,13 @@ pub fn lending_account_end_flashloan<'info>(
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
     let group = ctx.accounts.group.load()?;
+    let mut health_cache = HealthCache::zeroed();
     let mut premium_scratch = PremiumScratch::default();
     check_account_init_health_and_clear_tag(
         &mut marginfi_account,
         &group,
         ctx.remaining_accounts,
-        &mut None,
+        &mut Some(&mut health_cache),
         &mut Some(&mut premium_scratch),
     )?;
 
@@ -153,6 +156,9 @@ pub fn lending_account_end_flashloan<'info>(
     if marginfi_account.lending_account.has_liabilities() {
         run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
     }
+
+    finalize_health_cache(&mut health_cache, Clock::get()?.unix_timestamp);
+    marginfi_account.health_cache = health_cache;
 
     Ok(())
 }
