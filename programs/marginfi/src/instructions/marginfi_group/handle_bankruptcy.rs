@@ -107,7 +107,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     drop(bank);
 
     health_cache.set_engine_ok(true);
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_health_cache(health_cache);
 
     let mut bank = bank_loader.load_mut()?;
     let group = &marginfi_group_loader.load()?;

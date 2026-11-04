@@ -31,7 +31,10 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
     pdas::DRIFT_PROGRAM_ID,
-    types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{
+        Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Deposit into a Drift spot market through a marginfi account
@@ -150,7 +153,7 @@ pub struct DriftDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
-            !acc.get_flag(ACCOUNT_DISABLED)
+            !acc.get_flag(ACCOUNT_DISABLED | ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
