@@ -2,6 +2,16 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
+use juplend_mocks::{
+    liquidity_instructions::{
+        CHANGE_STATUS_DISCRIMINATOR, PAUSE_TOKEN_DISCRIMINATOR, PAUSE_USER_DISCRIMINATOR,
+        UNPAUSE_TOKEN_DISCRIMINATOR, UNPAUSE_USER_DISCRIMINATOR, UPDATE_GUARDIANS_DISCRIMINATOR,
+        UPDATE_USER_CLASS_DISCRIMINATOR,
+    },
+    state::{
+        LIQUIDITY_STATUS_OFFSET, RESERVE_INTERACTING_PROTOCOL_OFFSET, SUPPLY_POSITION_STATUS_OFFSET,
+    },
+};
 use marginfi::{errors::MarginfiError, state::bank::BankImpl};
 use marginfi_type_crate::{
     constants::JUPLEND_EMERGENCY,
@@ -153,7 +163,7 @@ async fn juplend_emergency_propagation_blocks_borrow_and_preserves_maintenance(
     assert!(I80F48::from(initial.asset_value) > I80F48::ZERO);
 
     // Without propagation the bank deliberately continues using its previous state.
-    set_bytes(&setup, liquidity, 72, &[1]).await;
+    set_bytes(&setup, liquidity, LIQUIDITY_STATUS_OFFSET, &[1]).await;
     pulse(&setup, &borrower, 2).await?;
     assert!(I80F48::from(borrower.load().await.health_cache.asset_value) > I80F48::ZERO);
     propagate(&setup, reserve, position, 1).await?;
@@ -171,8 +181,14 @@ async fn juplend_emergency_propagation_blocks_borrow_and_preserves_maintenance(
     );
 
     // Unpausing global state must not clear a token lock or an Earn position pause.
-    set_bytes(&setup, reserve, 144, JUPLEND_LIQUIDITY_PROGRAM_ID.as_ref()).await;
-    set_bytes(&setup, liquidity, 72, &[0]).await;
+    set_bytes(
+        &setup,
+        reserve,
+        RESERVE_INTERACTING_PROTOCOL_OFFSET,
+        JUPLEND_LIQUIDITY_PROGRAM_ID.as_ref(),
+    )
+    .await;
+    set_bytes(&setup, liquidity, LIQUIDITY_STATUS_OFFSET, &[0]).await;
     propagate(&setup, reserve, position, 2).await?;
     assert!(setup.bank_f.load().await.get_flag(JUPLEND_EMERGENCY));
     assert_custom_error!(
@@ -182,8 +198,14 @@ async fn juplend_emergency_propagation_blocks_borrow_and_preserves_maintenance(
             .unwrap_err(),
         MarginfiError::RiskEngineInitRejected
     );
-    set_bytes(&setup, position, 123, &[1]).await;
-    set_bytes(&setup, reserve, 144, Pubkey::default().as_ref()).await;
+    set_bytes(&setup, position, SUPPLY_POSITION_STATUS_OFFSET, &[1]).await;
+    set_bytes(
+        &setup,
+        reserve,
+        RESERVE_INTERACTING_PROTOCOL_OFFSET,
+        Pubkey::default().as_ref(),
+    )
+    .await;
     propagate(&setup, reserve, position, 3).await?;
     assert!(setup.bank_f.load().await.get_flag(JUPLEND_EMERGENCY));
     assert_custom_error!(
@@ -193,7 +215,7 @@ async fn juplend_emergency_propagation_blocks_borrow_and_preserves_maintenance(
             .unwrap_err(),
         MarginfiError::RiskEngineInitRejected
     );
-    set_bytes(&setup, position, 123, &[0]).await;
+    set_bytes(&setup, position, SUPPLY_POSITION_STATUS_OFFSET, &[0]).await;
     propagate(&setup, reserve, position, 4).await?;
     assert!(!setup.bank_f.load().await.get_flag(JUPLEND_EMERGENCY));
     pulse(&setup, &borrower, 4).await?;
@@ -230,10 +252,7 @@ async fn juplend_emergency_propagation_blocks_borrow_and_preserves_maintenance(
     Ok(())
 }
 
-/// Requires BPF_OUT_DIR with the deployed Fluid Liquidity and Earn binaries overriding the
-/// repository fixtures. The older checked-in Liquidity fixture has no pause_token instruction.
 #[tokio::test]
-#[ignore = "requires deployed Fluid Liquidity and Earn binaries in BPF_OUT_DIR"]
 async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Result<()> {
     let setup = TestFixture::setup_juplend_bank(None).await;
     let (user, tokens) = setup.create_user_with_liquidity(2_000.0).await;
@@ -249,7 +268,7 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
     // Exercise the deployed Liquidity program's real global pause and recovery instructions too.
     for (step, locked) in [true, false].into_iter().enumerate() {
         let ctx = setup.test_f.context.borrow_mut();
-        let mut data = vec![236, 145, 131, 228, 227, 17, 192, 255];
+        let mut data = CHANGE_STATUS_DISCRIMINATOR.to_vec();
         data.push(u8::from(locked));
         let ix = Instruction {
             program_id: JUPLEND_LIQUIDITY_PROGRAM_ID,
@@ -275,12 +294,9 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
         );
     }
 
-    for (step, discriminator) in [
-        [226, 150, 72, 211, 159, 51, 226, 39], // pause_token
-        [108, 117, 62, 30, 200, 92, 255, 202], // unpause_token
-    ]
-    .into_iter()
-    .enumerate()
+    for (step, discriminator) in [PAUSE_TOKEN_DISCRIMINATOR, UNPAUSE_TOKEN_DISCRIMINATOR]
+        .into_iter()
+        .enumerate()
     {
         let ctx = setup.test_f.context.borrow_mut();
         let mut data = discriminator.to_vec();
@@ -309,7 +325,11 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
         } else {
             Pubkey::default()
         };
-        assert_eq!(&account.data[144..176], expected.as_ref());
+        assert_eq!(
+            &account.data
+                [RESERVE_INTERACTING_PROTOCOL_OFFSET..RESERVE_INTERACTING_PROTOCOL_OFFSET + 32],
+            expected.as_ref()
+        );
         propagate(&setup, reserve, position, 20 + step as u32).await?;
         assert_eq!(
             setup.bank_f.load().await.get_flag(JUPLEND_EMERGENCY),
@@ -328,7 +348,8 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
     // The Earn supply position can be paused independently of the token reserve.
     let payer = setup.test_f.payer();
     let auth = derive_juplend_auth_list().0;
-    let mut guardians = vec![43, 62, 250, 138, 141, 117, 132, 97, 1, 0, 0, 0];
+    let mut guardians = UPDATE_GUARDIANS_DISCRIMINATOR.to_vec();
+    guardians.extend_from_slice(&1u32.to_le_bytes());
     guardians.extend_from_slice(payer.as_ref());
     guardians.push(1);
     send_fluid_instruction(
@@ -341,7 +362,8 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
         guardians,
     )
     .await?;
-    let mut class = vec![12, 206, 68, 135, 63, 212, 48, 119, 1, 0, 0, 0];
+    let mut class = UPDATE_USER_CLASS_DISCRIMINATOR.to_vec();
+    class.extend_from_slice(&1u32.to_le_bytes());
     class.extend_from_slice(setup.lending.as_ref());
     class.push(0);
     send_fluid_instruction(
@@ -355,8 +377,8 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
     .await?;
     let borrow_position = derive_juplend_borrow_position(&mint, &setup.lending).0;
     for (step, (discriminator, status)) in [
-        ([18, 63, 43, 94, 239, 53, 101, 14], 1),
-        ([71, 115, 128, 252, 182, 126, 234, 62], 0),
+        (PAUSE_USER_DISCRIMINATOR, 1),
+        (UNPAUSE_USER_DISCRIMINATOR, 0),
     ]
     .into_iter()
     .enumerate()
@@ -378,7 +400,7 @@ async fn juplend_deployed_pause_token_propagates_and_recovers() -> anyhow::Resul
         )
         .await?;
         let account = setup.test_f.try_load(&position).await?.unwrap();
-        assert_eq!(account.data[123], status);
+        assert_eq!(account.data[SUPPLY_POSITION_STATUS_OFFSET], status);
         propagate(&setup, reserve, position, 30 + step as u32).await?;
         assert_eq!(
             setup.bank_f.load().await.get_flag(JUPLEND_EMERGENCY),

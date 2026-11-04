@@ -1,5 +1,9 @@
 use anchor_lang::prelude::*;
-use juplend_mocks::state::{Lending, TOKEN_RESERVE_DISCRIMINATOR};
+use juplend_mocks::state::{
+    Lending, LIQUIDITY_DISCRIMINATOR, LIQUIDITY_STATUS_OFFSET, RESERVE_INTERACTING_PROTOCOL_OFFSET,
+    RESERVE_LEN, SUPPLY_POSITION_DISCRIMINATOR, SUPPLY_POSITION_STATUS_OFFSET,
+    TOKEN_RESERVE_DISCRIMINATOR,
+};
 use marginfi_type_crate::{
     constants::{ASSET_TAG_JUPLEND, JUPLEND_EMERGENCY},
     pdas::{derive_juplend_liquidity, JUPLEND_LIQUIDITY_PROGRAM_ID},
@@ -7,13 +11,6 @@ use marginfi_type_crate::{
 };
 
 use crate::{MarginfiError, MarginfiResult};
-
-const LIQUIDITY_DISCRIMINATOR: [u8; 8] = [54, 252, 249, 226, 137, 172, 121, 58];
-const SUPPLY_POSITION_DISCRIMINATOR: [u8; 8] = [202, 219, 136, 118, 61, 177, 21, 146];
-const LIQUIDITY_STATUS_OFFSET: usize = 8 + 32 + 32;
-const RESERVE_INTERACTING_PROTOCOL_OFFSET: usize = 144;
-const RESERVE_LEN: usize = 192;
-const SUPPLY_POSITION_STATUS_OFFSET: usize = 123;
 
 /// Refresh all emergency sources together. A flag remains set until all three are healthy;
 /// a partial refresh must never clear an unrelated emergency. Anyone can call this instruction.
@@ -127,7 +124,7 @@ mod tests {
     fn emergency_sources_are_combined_and_invalid_data_fails_closed() {
         let mint = Pubkey::new_unique();
         let lending = Pubkey::new_unique();
-        let mut liquidity = vec![0; 74];
+        let mut liquidity = vec![0; LIQUIDITY_STATUS_OFFSET + 2];
         liquidity[..8].copy_from_slice(&LIQUIDITY_DISCRIMINATOR);
         let mut reserve = vec![0; RESERVE_LEN];
         reserve[..8].copy_from_slice(&TOKEN_RESERVE_DISCRIMINATOR);
@@ -150,9 +147,17 @@ mod tests {
         assert!(!healthy(&liquidity, &reserve, &position));
         position[SUPPLY_POSITION_STATUS_OFFSET] = 0;
         assert!(healthy(&liquidity, &reserve, &position));
-        assert!(!healthy(&liquidity[..73], &reserve, &position));
-        assert!(!healthy(&liquidity, &reserve[..191], &position));
-        assert!(!healthy(&liquidity, &reserve, &position[..123]));
+        assert!(!healthy(
+            &liquidity[..LIQUIDITY_STATUS_OFFSET + 1],
+            &reserve,
+            &position
+        ));
+        assert!(!healthy(&liquidity, &reserve[..RESERVE_LEN - 1], &position));
+        assert!(!healthy(
+            &liquidity,
+            &reserve,
+            &position[..SUPPLY_POSITION_STATUS_OFFSET]
+        ));
         position[40] ^= 1;
         assert!(!healthy(&liquidity, &reserve, &position));
     }
