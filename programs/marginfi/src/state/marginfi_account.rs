@@ -555,7 +555,7 @@ fn calc_weighted_asset_value_cached_standalone(
                 && bank.config.asset_tag == ASSET_TAG_JUPLEND
                 && bank.get_flag(JUPLEND_EMERGENCY)
             {
-                return Ok((I80F48::ZERO, lower_price));
+                return Ok((I80F48::ZERO, lower_price, price_with_confidence.price));
             }
 
             if matches!(requirement_type, RequirementType::Initial) {
@@ -3171,7 +3171,9 @@ mod test {
         bank.config.asset_weight_maint = I80F48!(0.9).into();
         bank.asset_share_value = I80F48::ONE.into();
         bank.cache.liquidation_price_rt = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt_confidence = I80F48!(0.01).into();
         bank.cache.liquidation_price_twap = I80F48::ONE.into();
+        bank.cache.liquidation_price_twap_confidence = I80F48!(0.01).into();
         let mut balance = Balance::empty_deactivated();
         balance.set_active(true);
         balance.asset_shares = I80F48::ONE.into();
@@ -3183,9 +3185,25 @@ mod test {
         };
         let maintenance = value(&bank, RequirementType::Maintenance);
         let equity = value(&bank, RequirementType::Equity);
-        assert!(value(&bank, RequirementType::Initial) > I80F48::ZERO);
+        let initial = calc_weighted_asset_value_cached_standalone(
+            &balance,
+            &bank,
+            RequirementType::Initial,
+            &emode,
+        )
+        .unwrap();
+        assert!(initial.0 > I80F48::ZERO);
+        assert!(initial.1 < initial.2);
+        assert_eq!(initial.2, I80F48::ONE);
         bank.flags |= JUPLEND_EMERGENCY;
-        assert_eq!(value(&bank, RequirementType::Initial), I80F48::ZERO);
+        let emergency = calc_weighted_asset_value_cached_standalone(
+            &balance,
+            &bank,
+            RequirementType::Initial,
+            &emode,
+        )
+        .unwrap();
+        assert_eq!(emergency, (I80F48::ZERO, initial.1, initial.2));
         assert_eq!(value(&bank, RequirementType::Maintenance), maintenance);
         assert_eq!(value(&bank, RequirementType::Equity), equity);
     }
