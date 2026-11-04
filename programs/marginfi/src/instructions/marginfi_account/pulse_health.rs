@@ -12,7 +12,7 @@ use crate::{
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
         check_pre_liquidation_condition_and_get_account_health,
-        compute_has_isolated_liability_flag, MarginfiAccountImpl,
+        compute_has_isolated_liability_flag,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     MarginfiError, MarginfiResult,

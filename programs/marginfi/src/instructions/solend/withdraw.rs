@@ -299,7 +299,7 @@ pub fn solend_withdraw<'info>(
 
             // Flashloan health is checked at the end, so this pass produced no cache.
             if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
-                finalize_health_cache(&mut health_cache, clock.unix_timestamp);
+                finalize_health_cache(&mut health_cache, Clock::get()?.unix_timestamp);
                 marginfi_account.health_cache = health_cache;
             }
 
