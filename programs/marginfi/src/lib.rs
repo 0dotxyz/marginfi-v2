@@ -631,9 +631,9 @@ pub mod marginfi {
         marginfi_account::lending_account_escrow_position(ctx, amount)
     }
 
-    /// (receiver authority, or permissionless sweep) Move the escrowed shares into an account of
-    /// the receiver's authority, or into the receiver's account once it holds a deposit in the
-    /// bank that no order tags. Closes the escrow.
+    /// (receiver authority, or permissionless sweep; group admin if the receiver is frozen) Move
+    /// the escrowed shares into an account of the receiver's authority, or into the receiver's
+    /// account once it holds a deposit in the bank that no order tags. Closes the escrow.
     pub fn lending_account_claim_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {

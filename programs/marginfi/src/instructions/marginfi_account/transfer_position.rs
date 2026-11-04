@@ -62,7 +62,7 @@ pub fn lending_account_transfer_position<'info>(
 
     check_position_flags(&source_account)?;
     check_position_flags(&destination_account)?;
-    check_can_receive(&destination_account)?;
+    check_can_receive(&destination_account, false)?;
 
     let source_balance = source_account
         .lending_account
@@ -271,10 +271,11 @@ pub(super) fn check_position_flags(account: &MarginfiAccount) -> MarginfiResult 
     Ok(())
 }
 
-/// Errors if `account` is frozen or has disabled receiving positions.
-pub(super) fn check_can_receive(account: &MarginfiAccount) -> MarginfiResult {
+/// Errors if `account` has disabled receiving positions, or is frozen and the group admin does not
+/// act for it.
+pub(super) fn check_can_receive(account: &MarginfiAccount, admin_acts: bool) -> MarginfiResult {
     check!(
-        !account.get_flag(ACCOUNT_FROZEN),
+        !account.get_flag(ACCOUNT_FROZEN) || admin_acts,
         MarginfiError::AccountFrozen
     );
     check!(

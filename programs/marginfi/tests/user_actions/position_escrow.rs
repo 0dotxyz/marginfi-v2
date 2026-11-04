@@ -340,6 +340,42 @@ async fn position_escrow_frozen_source_does_not_block_claims() -> anyhow::Result
     Ok(())
 }
 
+/// While the receiver is frozen, only the group admin may accept, and only into the receiver.
+#[tokio::test]
+async fn position_escrow_frozen_receiver_takes_claims_only_from_the_admin() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source = usdc_depositor(&test_f).await;
+    let (receiver_key, receiver) = user_with_usdc_deposit(&test_f).await;
+    let receiver_other = account_of(&test_f, &receiver_key).await;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 5.0).await?;
+    receiver.try_set_freeze(true).await?;
+
+    let res = receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+    let res = receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, None)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+    let admin = test_f.payer_keypair();
+    let res = receiver_other
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&admin))
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferConsentRequired
+    );
+
+    receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&admin))
+        .await?;
+    assert_eq!(asset_shares(&receiver, usdc_bank_f).await, usdc_shares(15));
+    assert!(is_closed(&test_f, escrow).await);
+    Ok(())
+}
+
 /// An open escrow keeps the source from closing, by its owner or by `admin_close_account`, and from
 /// migrating. Repeat sends into the same escrow count once.
 #[tokio::test]

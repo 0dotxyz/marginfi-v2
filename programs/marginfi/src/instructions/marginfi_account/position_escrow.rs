@@ -70,7 +70,7 @@ pub fn lending_account_escrow_position<'info>(
         !receiver_account.get_flag(ACCOUNT_DISABLED),
         MarginfiError::AccountDisabled
     );
-    check_can_receive(&receiver_account)?;
+    check_can_receive(&receiver_account, false)?;
 
     let source_shares: I80F48 = match source_account.lending_account.get_balance(&bank_key) {
         Some(balance) if matches!(balance.get_side(), Some(BalanceSide::Assets)) => {
@@ -174,7 +174,8 @@ pub fn lending_account_escrow_position<'info>(
 }
 
 /// Moves the escrowed shares into an account of the receiver's authority when it signs, or else
-/// into the receiver's untagged deposit in the bank. Closes the escrow.
+/// into the receiver's untagged deposit in the bank. The group admin may accept into a frozen
+/// receiver. Closes the escrow.
 pub fn lending_account_claim_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
@@ -188,13 +189,16 @@ pub fn lending_account_claim_position_escrow(
         .as_ref()
         .is_some_and(|signer| signer.key() == escrow.receiver_authority);
     let accepted = receiver_signed && destination.authority == escrow.receiver_authority;
+    let admin_accepted = destination_key == escrow.receiver_account
+        && destination.get_flag(ACCOUNT_FROZEN)
+        && admin_signed(ctx.accounts)?;
     let swept = destination_key == escrow.receiver_account
         && takes_unsolicited_deposit(&destination, &escrow.bank);
     check!(
-        accepted || swept,
+        accepted || admin_accepted || swept,
         MarginfiError::PositionTransferConsentRequired
     );
-    check_can_receive(&destination)?;
+    check_can_receive(&destination, admin_accepted)?;
     validate_bank_state(
         &*ctx.accounts.bank.load()?,
         InstructionKind::FailsIfPausedOrReduceState,
@@ -414,7 +418,7 @@ pub struct ReleasePositionEscrow<'info> {
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// The receiver's authority to accept or decline, or the group admin to return into a frozen
+    /// The receiver's authority to accept or decline, or the group admin for a frozen receiver or
     /// source. Omitted for a sweep or an expired return.
     pub authority: Option<Signer<'info>>,
 
