@@ -282,10 +282,10 @@ async fn position_escrow_frozen_source_admin_only() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// While the source is frozen, an expired escrow cannot be returned anywhere, and the receiver may
-/// still accept it.
+/// While the source is frozen, only the group admin may return an expired escrow, and only into
+/// the source.
 #[tokio::test]
-async fn position_escrow_frozen_source_blocks_returns_but_not_claims() -> anyhow::Result<()> {
+async fn position_escrow_frozen_source_takes_returns_only_from_the_admin() -> anyhow::Result<()> {
     let test_f = premium_test_fixture().await;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let (owner, source) = user_with_usdc_deposit(&test_f).await;
@@ -302,10 +302,36 @@ async fn position_escrow_frozen_source_blocks_returns_but_not_claims() -> anyhow
         .try_return_position_escrow(escrow, usdc_bank_f, None)
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
+    let res = source
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountFrozen);
     let res = owner_other
         .try_return_position_escrow(escrow, usdc_bank_f, Some(&owner))
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
+
+    let admin = test_f.payer_keypair();
+    source
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&admin))
+        .await?;
+    assert_eq!(asset_shares(&source, usdc_bank_f).await, usdc_shares(10));
+    assert!(is_closed(&test_f, escrow).await);
+    Ok(())
+}
+
+/// A frozen source does not stop the receiver from accepting.
+#[tokio::test]
+async fn position_escrow_frozen_source_does_not_block_claims() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (owner, source) = user_with_usdc_deposit(&test_f).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    source
+        .try_escrow_position(&receiver, usdc_bank_f, 5.0, &owner)
+        .await?;
+    let escrow = find_position_escrow_pda(&usdc_bank_f.key, &receiver.key, &source.key).0;
+    source.try_set_freeze(true).await?;
 
     receiver
         .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))

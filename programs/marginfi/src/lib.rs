@@ -640,8 +640,8 @@ pub mod marginfi {
         marginfi_account::lending_account_claim_position_escrow(ctx)
     }
 
-    /// (receiver authority, or permissionless after expiry) Move the escrowed shares back to the
-    /// source account. Closes the escrow.
+    /// (receiver authority, or permissionless after expiry; group admin if the source is frozen)
+    /// Move the escrowed shares back to the source account. Closes the escrow.
     pub fn lending_account_return_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {

@@ -207,7 +207,7 @@ pub fn lending_account_claim_position_escrow(
 }
 
 /// Moves the escrowed shares back to the source account on the receiver's decline, or by anyone
-/// after expiry. Closes the escrow.
+/// after expiry. Only the group admin may return into a frozen source. Closes the escrow.
 pub fn lending_account_return_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
@@ -226,7 +226,7 @@ pub fn lending_account_return_position_escrow(
         MarginfiError::Unauthorized
     );
     check!(
-        !destination.get_flag(ACCOUNT_FROZEN),
+        !destination.get_flag(ACCOUNT_FROZEN) || admin_signed(ctx.accounts)?,
         MarginfiError::AccountFrozen
     );
     validate_bank_state(
@@ -301,6 +301,15 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
     });
 
     Ok(())
+}
+
+/// True if the signer is the group admin (`governance_admin`).
+fn admin_signed(accounts: &ReleasePositionEscrow) -> MarginfiResult<bool> {
+    let admin = accounts.group.load()?.governance_admin;
+    Ok(accounts
+        .authority
+        .as_ref()
+        .is_some_and(|s| s.key() == admin))
 }
 
 #[derive(Accounts)]
@@ -405,7 +414,8 @@ pub struct ReleasePositionEscrow<'info> {
     #[account(mut, has_one = group @ MarginfiError::InvalidGroup)]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// The receiver's authority, to accept or decline. Omitted for a sweep or an expired return.
+    /// The receiver's authority to accept or decline, or the group admin to return into a frozen
+    /// source. Omitted for a sweep or an expired return.
     pub authority: Option<Signer<'info>>,
 
     /// CHECK: matched against `position_escrow.rent_payer`.
