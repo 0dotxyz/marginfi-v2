@@ -16,8 +16,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS,
-        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, JUPLEND_EMERGENCY, KAMINO_MARKET_EMERGENCY,
+        MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, premium_liability_value, reconcile_emode_configs,
@@ -550,6 +550,18 @@ fn calc_weighted_asset_value_cached_standalone(
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
+
+            // Defense in depth: no current production path uses cached Initial health.
+            if matches!(requirement_type, RequirementType::Initial)
+                && match bank.config.asset_tag {
+                    ASSET_TAG_JUPLEND => bank.get_flag(JUPLEND_EMERGENCY),
+                    // The cached path cannot check the Kamino reserve's own emergency state.
+                    ASSET_TAG_KAMINO => bank.get_flag(KAMINO_MARKET_EMERGENCY),
+                    _ => false,
+                }
+            {
+                return Ok((I80F48::ZERO, lower_price, price_with_confidence.price));
+            }
 
             if matches!(requirement_type, RequirementType::Initial) {
                 if let Some(discount) = bank.maybe_get_asset_weight_init_discount(lower_price)? {
@@ -3152,6 +3164,68 @@ mod test {
         assert_eq!(asset_value, I80F48::ZERO);
         assert_eq!(price, I80F48::ZERO);
         assert_eq!(premium_price, I80F48::ZERO);
+    }
+
+    #[test]
+    fn propagated_emergency_cached_health_preserves_maintenance_and_equity() {
+        let mut bank = Bank::zeroed();
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.asset_weight_init = I80F48!(0.8).into();
+        bank.config.asset_weight_maint = I80F48!(0.9).into();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt_confidence = I80F48!(0.01).into();
+        bank.cache.liquidation_price_twap = I80F48::ONE.into();
+        bank.cache.liquidation_price_twap_confidence = I80F48!(0.01).into();
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48::ONE.into();
+        let emode = ReconciledEmodeConfig::default();
+        let value = |bank: &Bank, requirement| {
+            calc_weighted_asset_value_cached_standalone(&balance, bank, requirement, &emode)
+                .unwrap()
+                .0
+        };
+        // Kamino's propagated flag covers the market, not the reserve's own emergency state.
+        for (asset_tag, emergency_flag, unrelated_flag) in [
+            (
+                ASSET_TAG_JUPLEND,
+                JUPLEND_EMERGENCY,
+                KAMINO_MARKET_EMERGENCY,
+            ),
+            (ASSET_TAG_KAMINO, KAMINO_MARKET_EMERGENCY, JUPLEND_EMERGENCY),
+        ] {
+            bank.config.asset_tag = asset_tag;
+            bank.flags = 0;
+            let maintenance = value(&bank, RequirementType::Maintenance);
+            let equity = value(&bank, RequirementType::Equity);
+            let initial = calc_weighted_asset_value_cached_standalone(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &emode,
+            )
+            .unwrap();
+            assert!(initial.0 > I80F48::ZERO);
+            assert!(initial.1 < initial.2);
+            assert_eq!(initial.2, I80F48::ONE);
+
+            bank.flags = unrelated_flag;
+            assert_eq!(value(&bank, RequirementType::Initial), initial.0);
+
+            bank.flags = emergency_flag;
+            let emergency = calc_weighted_asset_value_cached_standalone(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &emode,
+            )
+            .unwrap();
+            assert_eq!(emergency, (I80F48::ZERO, initial.1, initial.2));
+            assert_eq!(value(&bank, RequirementType::Maintenance), maintenance);
+            assert_eq!(value(&bank, RequirementType::Equity), equity);
+        }
     }
 
     #[test]
