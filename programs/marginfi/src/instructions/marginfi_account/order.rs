@@ -1,11 +1,13 @@
+use super::{check_order_close_state, load_marginfi_account_unless_closed};
 use crate::events::{
     AccountEventHeader, KeeperCloseOrderEvent, MarginfiAccountCloseOrderEvent,
-    MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
+    MarginfiAccountExecuteOrderEvent, MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
 };
 use crate::instructions::marginfi_account::liquidate_start::validate_instructions;
 use crate::ix_utils::{
     get_discrim_hash, keys_sha256_hash, validate_not_cpi_by_stack_height, Hashable,
 };
+use crate::math_error;
 use crate::state::marginfi_account::{
     account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
     is_signer_authorized, run_cb_price_gate,
@@ -21,8 +23,7 @@ use crate::{
         order::{ExecuteOrderRecordImpl, OrderImpl},
     },
 };
-use crate::{check_eq, math_error};
-use anchor_lang::{prelude::*, system_program};
+use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -153,6 +154,7 @@ pub fn close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
     } = &ctx.accounts;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
+    check_order_close_state(&marginfi_account)?;
     marginfi_account.decrement_active_orders()?;
 
     emit!(MarginfiAccountCloseOrderEvent {
@@ -178,47 +180,29 @@ pub fn keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
     let order = order_loader.load()?;
     let marginfi_account_info = marginfi_account.to_account_info();
 
-    // Manual owner check: Only attempt to deserialize when the account is not closed
-    let (authority_pk, group_pk, can_close) = if marginfi_account_info.owner.eq(&system_program::ID)
-        && marginfi_account_info.data_is_empty()
-    {
-        (Pubkey::default(), Pubkey::default(), true)
-    } else {
-        // Deserialize manually using bytemuck to avoid lifetime issues
-        let mut data = marginfi_account_info.try_borrow_mut_data()?;
+    let (authority_pk, group_pk, can_close) =
+        match load_marginfi_account_unless_closed(&marginfi_account_info)? {
+            None => (Pubkey::default(), Pubkey::default(), true),
+            Some(mut marginfi_account) => {
+                check_order_close_state(&marginfi_account)?;
 
-        // Check discriminator
-        require!(
-            data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
-            MarginfiError::InternalLogicError
-        );
-
-        let disc = &data[..8];
-        check_eq!(
-            disc,
-            MarginfiAccount::DISCRIMINATOR,
-            MarginfiError::InternalLogicError
-        );
-
-        let marginfi_account: &mut MarginfiAccount =
-            bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
-
-        let balances = &marginfi_account.lending_account.balances;
-        // Can close if any of the balances used in the order no longer exists (or if its tag was cleared)
-        let can_close = order.tags.iter().any(|tag| {
-            !balances
-                .iter()
-                .any(|balance| balance.is_active() && balance.tag == *tag)
-        });
-        if can_close {
-            marginfi_account.decrement_active_orders()?;
-        }
-        (
-            marginfi_account.authority,
-            marginfi_account.group,
-            can_close,
-        )
-    };
+                let balances = &marginfi_account.lending_account.balances;
+                // Can close if any of the balances used in the order no longer exists (or if its tag was cleared)
+                let can_close = order.tags.iter().any(|tag| {
+                    !balances
+                        .iter()
+                        .any(|balance| balance.is_active() && balance.tag == *tag)
+                });
+                if can_close {
+                    marginfi_account.decrement_active_orders()?;
+                }
+                (
+                    marginfi_account.authority,
+                    marginfi_account.group,
+                    can_close,
+                )
+            }
+        };
 
     check!(can_close, MarginfiError::LiquidatorOrderCloseNotAllowed);
 
@@ -413,7 +397,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         )
     };
 
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_health_cache(health_cache);
 
     // Inline CB gate: order execution moves funds at oracle prices, so revert if any involved
     // bank's live price has jumped past the breach threshold relative to its reference.
@@ -453,7 +437,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     let start_health = || -> I80F48 { execute_record.order_start_health.into() };
 
-    match order.trigger {
+    let triggered = match order.trigger {
         OrderTriggerType::StopLoss => {
             let sl: I80F48 = order.stop_loss.into();
             let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
@@ -462,6 +446,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                 net >= allowed_sl,
                 MarginfiError::OrderExecutionOverWithdrawal
             );
+            OrderTriggerType::StopLoss
         }
         OrderTriggerType::TakeProfit => {
             let tp: I80F48 = order.take_profit.into();
@@ -475,6 +460,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                 net >= allowed_diff && net >= allowed_tp,
                 MarginfiError::OrderExecutionOverWithdrawal
             );
+            OrderTriggerType::TakeProfit
         }
         OrderTriggerType::Both => {
             let sl: I80F48 = order.stop_loss.into();
@@ -493,6 +479,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                     net >= allowed_diff && net >= allowed_tp,
                     MarginfiError::OrderExecutionOverWithdrawal
                 );
+                OrderTriggerType::TakeProfit
             } else {
                 let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
@@ -500,9 +487,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                     net >= allowed_sl,
                     MarginfiError::OrderExecutionOverWithdrawal
                 );
+                OrderTriggerType::StopLoss
             }
         }
-    }
+    };
 
     // Only one asset and liab are currently involved in a balance, with the single liability being
     // closed.
@@ -549,6 +537,34 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
     marginfi_account.decrement_active_orders()?;
+
+    // Execution closes the tagged liability balance and preserves all non-order balances,
+    // leaving the tagged asset balance available for event metadata (even if only dust remains).
+    let (asset_bank, asset_shares_after) = marginfi_account
+        .lending_account
+        .get_active_balances_iter()
+        .find(|balance| balance.tag != 0 && order.tags.contains(&balance.tag))
+        .map(|balance| (balance.bank_pk, balance.asset_shares))
+        .unwrap_or_default();
+
+    emit!(MarginfiAccountExecuteOrderEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.executor.key()),
+            marginfi_account: marginfi_account_loader.key(),
+            marginfi_account_authority: marginfi_account.authority,
+            marginfi_group: marginfi_account.group,
+        },
+        order: order_loader.key(),
+        created_at: order.created_at,
+        max_slippage: order.max_slippage,
+        asset_bank,
+        asset_shares_after,
+        triggered,
+        equity_before_usd: execute_record.order_start_health,
+        equity_after_usd: net.into(),
+        closure_recipient: ctx.accounts.fee_recipient.key(),
+        order_lamports_returned: order_loader.to_account_info().lamports(),
+    });
 
     Ok(())
 }
@@ -663,7 +679,7 @@ pub struct CloseOrder<'info> {
 pub struct KeeperCloseOrder<'info> {
     /// CHECK: This uses an unchecked account here so the instruction can be called even when the
     /// marginfi account was closed.
-    /// The ownership check is checked in the handler or/and type checks are made in the handler.
+    /// The handler validates ownership and layout unless the account is already closed.
     #[account(mut)]
     pub marginfi_account: UncheckedAccount<'info>,
 

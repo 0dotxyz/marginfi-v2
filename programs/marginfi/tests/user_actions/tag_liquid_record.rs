@@ -371,8 +371,8 @@ async fn receivership_dust_keeps_tag_material_restarts_clock() -> anyhow::Result
 }
 
 /// Walks the premium growth schedule on one fixture: within the delay the cap is still the 5%
-/// base; halfway through the growth window the cap is 52.5% (halfway from 5% to 100%), so a $2
-/// repayment allows just under $3.05 of collateral.
+/// base; halfway through the growth window the cap is 15% (halfway from 5% to 25%), so a $2
+/// repayment allows $2.30 of collateral. After maturity, the cap stays at 25%.
 #[tokio::test]
 async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
@@ -409,34 +409,70 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
     test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
     test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
 
-    // Mid-window: $3.50 exceeds the $3.05 cap...
+    // Mid-window: $2.31 exceeds the $2.30 cap...
     let res = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.35,
+        0.231,
         2.0,
     )
     .await;
     assert!(res.is_err());
     assert_custom_error!(res.err().unwrap(), MarginfiError::LiquidationPremiumTooHigh);
 
-    // ...while $3.04 is just inside it, and erases $0.78 of the ~$2 deficit, over the 25% bar
+    // ...while $2.29 is just inside it, and erases $1.08 of the ~$2 deficit, over the 25% bar
     let liquidator_sol_acc = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.304,
+        0.229,
         2.0,
     )
     .await?;
     assert_eq!(
         liquidator_sol_acc.balance().await,
-        native!(0.304, "SOL", f64)
+        native!(0.229, "SOL", f64)
     );
     assert_eq!(load_tag(&liquidatee).await, midpoint);
+
+    // Mature the restarted tag, then advance past maturity to check the ceiling holds.
+    set_timestamp(
+        &test_f,
+        midpoint + LIQUIDATION_TAG_FULL_PREMIUM_SECS + 24 * 60 * 60,
+    )
+    .await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    // $0.751 seized for $0.60 repaid exceeds the matured 25% cap of $0.75.
+    let res = run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.0751,
+        0.6,
+    )
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationPremiumTooHigh
+    );
+
+    // $0.749 is just inside the cap and leaves the account unhealthy.
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.0749,
+        0.6,
+    )
+    .await?;
     Ok(())
 }
 
@@ -975,13 +1011,13 @@ async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()>
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
 
-    // Untagged the cap is the 5% minimum, so seizing $0.90 for $0.60 is refused
+    // Untagged the cap is the 5% minimum, so seizing $0.684 for $0.60 is refused
     let res = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.09,
+        0.0684,
         0.6,
     )
     .await;
@@ -993,7 +1029,7 @@ async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()>
     send_tag(&test_f, &liquidatee, 0).await?;
     assert_eq!(load_tag(&liquidatee).await, T0);
 
-    // Halfway through the growth window the cap is ~52.5%
+    // Halfway through the growth window the cap is 15%
     let growth_window = LIQUIDATION_TAG_FULL_PREMIUM_SECS - LIQUIDATION_TAG_DELAY_SECS;
     set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + growth_window / 2).await;
     refresh_oracles(&test_f).await;
@@ -1002,13 +1038,13 @@ async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()>
     test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
     test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
 
-    // The same 50% premium now goes through, paid out of the account's remaining equity
+    // The same 14% premium now goes through, paid out of the account's remaining equity
     run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.09,
+        0.0684,
         0.6,
     )
     .await?;
@@ -1030,19 +1066,19 @@ async fn tag_growth_does_not_apply_to_emode_collateral() -> anyhow::Result<()> {
     refresh_oracles(&test_f).await;
     send_tag(&test_f, &liquidatee, 0).await?;
 
-    // Fully matured: an unboosted account would allow 100% here
+    // Fully matured: an unboosted account would allow 25% here
     set_timestamp(&test_f, T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS).await;
     refresh_oracles(&test_f).await;
     test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
     test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
 
-    // Seizing $1.20 for $0.80 is a 50% premium, refused against the unchanged 5% base
+    // Seizing $0.96 for $0.80 is a 20% premium, refused against the unchanged 5% base
     let res = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.12,
+        0.096,
         0.8,
     )
     .await;
@@ -1094,13 +1130,13 @@ async fn tag_growth_does_not_apply_once_in_bad_debt() -> anyhow::Result<()> {
         "account should be in bad debt before the liquidation"
     );
 
-    // Seizing $1.20 for $0.80 is a 50% premium, refused against the unchanged 5% base
+    // Seizing $0.96 for $0.80 is a 20% premium, refused against the unchanged 5% base
     let res = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.12,
+        0.096,
         0.8,
     )
     .await;
@@ -1152,7 +1188,7 @@ async fn full_closeout_at_grown_premium_survives_repay_first_leg_order() -> anyh
     refresh_oracles(&test_f).await;
     send_tag(&test_f, &liquidatee, 0).await?;
 
-    // One day into growth the cap is about 18%
+    // One day into growth the cap is about 7.9%
     set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + 24 * 60 * 60).await;
     refresh_oracles(&test_f).await;
     test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
@@ -1268,13 +1304,13 @@ async fn dust_emode_deposit_does_not_hold_premium() -> anyhow::Result<()> {
         .try_accrue_interest(sol_eq_bank)
         .await?;
 
-    // $1.20 of SOL for $0.80 repaid is a 50% premium, allowed at the matured cap
+    // $0.96 of SOL for $0.80 repaid is a 20% premium, allowed at the matured 25% cap
     run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.12,
+        0.096,
         0.8,
     )
     .await?;
