@@ -9,7 +9,7 @@ use crate::{
         liquidation_record::{tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
-            clear_liquidation_price_cache_locks, finalize_health_cache, get_health_components,
+            clear_liquidation_price_cache_locks, get_health_components, stamp_health_cache,
             MarginfiAccountImpl,
         },
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -172,7 +172,8 @@ pub fn end_receivership<'info>(
     )?;
 
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
-    finalize_health_cache(&mut post_hc, clock.unix_timestamp);
+    // This snapshot contains maintenance and equity values, but no initial-health pass.
+    stamp_health_cache(&mut post_hc, clock.unix_timestamp);
     marginfi_account.health_cache = post_hc;
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with

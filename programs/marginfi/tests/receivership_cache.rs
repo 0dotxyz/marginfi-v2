@@ -26,7 +26,7 @@ impl SyscallStubs for FixedClockStub {
 
 // Keep this binary to one test: the syscall stub is global, so parallel tests would race.
 #[test]
-fn start_and_end_receivership_finalize_health_cache() -> anyhow::Result<()> {
+fn start_and_end_receivership_stamp_partial_health_cache() -> anyhow::Result<()> {
     let mut liquidatee = MarginfiAccount::zeroed();
     let group = MarginfiGroup::default();
     let mut liquidation_record = LiquidationRecord::zeroed();
@@ -52,7 +52,10 @@ fn start_and_end_receivership_finalize_health_cache() -> anyhow::Result<()> {
             cache.program_version, PROGRAM_VERSION,
             "{ix}: program_version"
         );
-        assert!(cache.is_engine_ok(), "{ix}: engine_ok");
+        assert!(
+            !cache.is_engine_ok(),
+            "{ix}: partial cache must not be engine_ok"
+        );
     }
     Ok(())
 }

@@ -17,9 +17,11 @@ assert_struct_align!(HealthCache, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
-/// A read-only cache of the internal risk engine's information. Only valid in borrow/withdraw if
-/// the tx does not fail. To see the state in any context, e.g. to figure out if the risk engine is
-/// failing due to some bad price information, use `pulse_health`.
+/// A read-only cache of the internal risk engine's information. Borrow and withdraw skip the cache
+/// write during flashloans. To inspect risk-engine errors and refresh all health components, use
+/// `pulse_health` and check its error fields. Receivership snapshots contain maintenance and equity
+/// values but omit initial values and prices; they leave `ENGINE_OK` clear. Balance changes can
+/// make an earlier snapshot stale even when its timestamp and flags are set.
 pub struct HealthCache {
     /// Internal risk engine asset value, using initial weight (e.g. what is used for borrowing
     /// purposes), with all confidence adjustments, and other discounts on price.
@@ -62,9 +64,10 @@ pub struct HealthCache {
     ///
     /// * HEALTHY = 1 - If set, the account cannot be liquidated. If 0, the account is unhealthy and
     ///   can be liquidated.
-    /// * ENGINE STATUS = 2 - If set, the engine did not error during the last health pulse. If 0,
-    ///   the engine would have errored and this cache is likely invalid. `RiskEngineInitRejected`
-    ///   is ignored and will allow the flag to be set anyways.
+    /// * ENGINE STATUS = 2 - If set, the health computation performed for this snapshot succeeded.
+    ///   Different instructions compute different fields; `pulse_health` attempts all components.
+    ///   If 0, the engine may have errored or the snapshot may be partial (as in receivership).
+    ///   `RiskEngineInitRejected` is ignored during a pulse and still allows the flag to be set.
     /// * ORACLE OK = 4 - If set, the engine did not error due to an oracle issue. If 0, engine was
     ///   passed a bad bank or oracle account, or an oracle was stale. Check the order in which
     ///   accounts were passed and ensure each balance has the correct banks/oracles, and that

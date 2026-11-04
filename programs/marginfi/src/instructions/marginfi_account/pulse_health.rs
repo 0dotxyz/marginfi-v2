@@ -2,7 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::types::{
+    HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_FLASHLOAN,
+};
 
 use crate::{
     constants::PROGRAM_VERSION,
@@ -10,7 +12,7 @@ use crate::{
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
         check_pre_liquidation_condition_and_get_account_health,
-        compute_has_isolated_liability_flag,
+        compute_has_isolated_liability_flag, MarginfiAccountImpl,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     MarginfiError, MarginfiResult,
@@ -33,6 +35,12 @@ pub fn lending_account_pulse_health<'info>(
 ) -> MarginfiResult {
     let clock = Clock::get()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+    // Initial health is deliberately skipped in a flashloan, so a pulse cannot produce a
+    // meaningful snapshot until the flashloan has ended.
+    require!(
+        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+        MarginfiError::AccountInFlashloan
+    );
 
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;

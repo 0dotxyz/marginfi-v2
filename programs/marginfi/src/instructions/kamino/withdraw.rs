@@ -45,7 +45,8 @@ use marginfi_type_crate::{
     pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -282,8 +283,11 @@ pub fn kamino_withdraw<'info>(
             bank.update_cache_price(price_for_cache)?;
         }
 
-        finalize_health_cache(&mut health_cache, clock.unix_timestamp);
-        marginfi_account.health_cache = health_cache;
+        // Flashloan health is checked at the end, so this pass produced no cache.
+        if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+            finalize_health_cache(&mut health_cache, clock.unix_timestamp);
+            marginfi_account.health_cache = health_cache;
+        }
 
         // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live price
         // has jumped past the breach threshold; a liability-free withdraw skips it.

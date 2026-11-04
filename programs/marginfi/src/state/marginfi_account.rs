@@ -36,10 +36,15 @@ use std::{
     collections::BTreeSet,
 };
 
-/// Call only after a successful health computation; this marks the engine as OK.
-pub(crate) fn finalize_health_cache(cache: &mut HealthCache, now: i64) {
+/// Stamp a snapshot without asserting that it contains a complete health calculation.
+pub(crate) fn stamp_health_cache(cache: &mut HealthCache, now: i64) {
     cache.timestamp = now;
     cache.program_version = PROGRAM_VERSION;
+}
+
+/// Call only after a successful health computation; this marks the engine as OK.
+pub(crate) fn finalize_health_cache(cache: &mut HealthCache, now: i64) {
+    stamp_health_cache(cache, now);
     cache.set_engine_ok(true);
 }
 

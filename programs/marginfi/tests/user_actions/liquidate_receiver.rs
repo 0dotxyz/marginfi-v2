@@ -657,7 +657,12 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
 
     let liquidatee_ma = liquidatee.load().await;
     let health_cache = &liquidatee_ma.health_cache;
-    assert!(health_cache.is_engine_ok());
+    assert!(!health_cache.is_engine_ok());
+    assert!(I80F48::from(health_cache.asset_value_maint) > I80F48::ZERO);
+    assert!(I80F48::from(health_cache.liability_value_maint) > I80F48::ZERO);
+    assert_eq!(I80F48::from(health_cache.asset_value), I80F48::ZERO);
+    assert_eq!(I80F48::from(health_cache.liability_value), I80F48::ZERO);
+    assert!(health_cache.prices.iter().all(|price| *price == [0; 8]));
     assert_eq!(
         health_cache.program_version,
         marginfi::constants::PROGRAM_VERSION

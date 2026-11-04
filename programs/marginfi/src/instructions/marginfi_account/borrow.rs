@@ -30,7 +30,7 @@ use marginfi_type_crate::{
     },
     types::{
         is_marginfi_asset_tag, Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup,
-        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -269,8 +269,11 @@ pub fn lending_account_borrow<'info>(
     bank.update_bank_cache(&group)?;
     bank.update_cache_price(price_for_cache)?;
 
-    finalize_health_cache(&mut health_cache, clock.unix_timestamp);
-    marginfi_account.health_cache = health_cache;
+    // Flashloan health is checked at the end, so this pass produced no cache.
+    if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+        finalize_health_cache(&mut health_cache, clock.unix_timestamp);
+        marginfi_account.health_cache = health_cache;
+    }
 
     Ok(())
 }

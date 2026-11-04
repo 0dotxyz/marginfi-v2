@@ -35,7 +35,8 @@ use juplend_mocks::state::{
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{
     Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -325,8 +326,11 @@ pub fn juplend_withdraw<'info>(
                 bank.update_cache_price(price_for_cache)?;
             }
 
-            finalize_health_cache(&mut health_cache, clock.unix_timestamp);
-            marginfi_account.health_cache = health_cache;
+            // Flashloan health is checked at the end, so this pass produced no cache.
+            if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+                finalize_health_cache(&mut health_cache, clock.unix_timestamp);
+                marginfi_account.health_cache = health_cache;
+            }
 
             // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
             // price has jumped past the breach threshold; a liability-free withdraw skips it.
