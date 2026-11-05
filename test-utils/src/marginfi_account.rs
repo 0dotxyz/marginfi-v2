@@ -2783,11 +2783,26 @@ impl MarginfiAccountFixture {
         destination_authority: Option<&Keypair>,
     ) -> anyhow::Result<(), BanksClientError> {
         let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
-        // Post-transfer observation sets: the source keeps its slot, the destination gains one.
-        let source_obs = self.load_observation_account_metas(vec![], vec![]).await;
-        let destination_obs = destination_account
-            .load_observation_account_metas(vec![bank.key], vec![])
-            .await;
+        // The account taking on risk is health-checked, so its observation set is the remaining
+        // accounts. A destination gaining a debt slot includes `bank`.
+        let (observation, data) = match side {
+            BalanceSide::Assets => (
+                self.load_observation_account_metas(vec![], vec![]).await,
+                marginfi::instruction::LendingAccountTransferAssetPosition {
+                    transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                }
+                .data(),
+            ),
+            BalanceSide::Liabilities => (
+                destination_account
+                    .load_observation_account_metas(vec![bank.key], vec![])
+                    .await,
+                marginfi::instruction::LendingAccountTransferLiabilityPosition {
+                    transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                }
+                .data(),
+            ),
+        };
 
         let payer = self.ctx.borrow().payer.insecure_clone();
         let mut accounts = marginfi::accounts::LendingAccountTransferPosition {
@@ -2803,25 +2818,7 @@ impl MarginfiAccountFixture {
             system_program: system_program::ID,
         }
         .to_account_metas(Some(true));
-        let destination_accounts = destination_obs.len() as u8;
-        accounts.extend(source_obs);
-        accounts.extend(destination_obs);
-
-        let transfer_amount = ui_to_native!(ui_amount.into(), bank.mint.mint.decimals);
-        let data = match side {
-            BalanceSide::Assets => marginfi::instruction::LendingAccountTransferAssetPosition {
-                transfer_amount,
-                destination_accounts,
-            }
-            .data(),
-            BalanceSide::Liabilities => {
-                marginfi::instruction::LendingAccountTransferLiabilityPosition {
-                    transfer_amount,
-                    destination_accounts,
-                }
-                .data()
-            }
-        };
+        accounts.extend(observation);
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts,

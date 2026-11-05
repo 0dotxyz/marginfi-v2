@@ -1,6 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import { assert } from "chai";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import {
   bankrunContext,
   bankrunProgram,
@@ -115,54 +115,54 @@ describe("Position transfer", () => {
    * `signer` (the source authority unless given) signs and pays the fee; `consenting` signs to
    * accept debt or a new position.
    */
-  const sendTransfer = async (
-    ixFn: typeof lendingAccountTransferAssetPositionIx,
+  const transferArgs = async (
+    source: MockUser,
+    destination: MockUser,
+    bank: PublicKey,
+    amount: BN,
+    consenting: MockUser | undefined,
+    signer: MockUser,
+  ) => ({
+    group,
+    sourceMarginfiAccount: account(source),
+    destinationMarginfiAccount: account(destination),
+    authority: signer.wallet.publicKey,
+    destinationAuthority: consenting ? consenting.wallet.publicKey : null,
+    feePayer: signer.wallet.publicKey,
+    bank,
+    globalFeeWallet: feeWallet,
+    transferAmount: amount,
+  });
+
+  const sendTransfer = (
+    ix: TransactionInstruction,
+    signer: MockUser,
+    consenting?: MockUser,
+  ) => {
+    const tx = new Transaction().add(ix);
+    return consenting ? send(tx, signer, consenting) : send(tx, signer);
+  };
+
+  /** Moves part of `source`'s deposit in `bank` */
+  const transfer = async (
     source: MockUser,
     destination: MockUser,
     bank: PublicKey,
     amount: BN,
     consenting?: MockUser,
     signer: MockUser = source,
-  ) => {
-    const tx = new Transaction().add(
-      await ixFn(bankrunProgram, {
-        group,
-        sourceMarginfiAccount: account(source),
-        destinationMarginfiAccount: account(destination),
-        authority: signer.wallet.publicKey,
-        destinationAuthority: consenting ? consenting.wallet.publicKey : null,
-        feePayer: signer.wallet.publicKey,
-        bank,
-        globalFeeWallet: feeWallet,
-        transferAmount: amount,
-        sourceRemaining: await observation(account(source)),
-        destinationRemaining: await observation(account(destination), bank),
-      }),
-    );
-    return consenting ? send(tx, signer, consenting) : send(tx, signer);
-  };
-
-  /** Moves part of `source`'s deposit in `bank` */
-  const transfer = (
-    source: MockUser,
-    destination: MockUser,
-    bank: PublicKey,
-    amount: BN,
-    consenting?: MockUser,
-    signer?: MockUser,
   ) =>
     sendTransfer(
-      lendingAccountTransferAssetPositionIx,
-      source,
-      destination,
-      bank,
-      amount,
-      consenting,
+      await lendingAccountTransferAssetPositionIx(bankrunProgram, {
+        ...(await transferArgs(source, destination, bank, amount, consenting, signer)),
+        remaining: await observation(account(source)),
+      }),
       signer,
+      consenting,
     );
 
   /** Moves part of `source`'s debt in `bank` */
-  const transferDebt = (
+  const transferDebt = async (
     source: MockUser,
     destination: MockUser,
     bank: PublicKey,
@@ -170,11 +170,11 @@ describe("Position transfer", () => {
     consenting?: MockUser,
   ) =>
     sendTransfer(
-      lendingAccountTransferLiabilityPositionIx,
+      await lendingAccountTransferLiabilityPositionIx(bankrunProgram, {
+        ...(await transferArgs(source, destination, bank, amount, consenting, source)),
+        remaining: await observation(account(destination), bank),
+      }),
       source,
-      destination,
-      bank,
-      amount,
       consenting,
     );
 

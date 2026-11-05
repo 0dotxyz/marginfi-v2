@@ -37,35 +37,22 @@ use marginfi_type_crate::{
 };
 
 /// Moves `transfer_amount` of the source's deposit in `bank` to the destination. The destination
-/// must hold no debt in the bank. Remaining accounts: the source's observation set, then the
-/// destination's.
+/// must hold no debt in the bank. Remaining accounts: the source's observation set.
 pub fn lending_account_transfer_asset_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
-    destination_accounts: u8,
 ) -> MarginfiResult {
-    transfer_position(
-        ctx,
-        transfer_amount,
-        destination_accounts,
-        BalanceSide::Assets,
-    )
+    transfer_position(ctx, transfer_amount, BalanceSide::Assets)
 }
 
 /// Moves `transfer_amount` of the source's debt in `bank` to the destination, or all of it on an
-/// over-ask. The destination must hold no deposit in the bank. Remaining accounts: the source's
-/// observation set, then the destination's.
+/// over-ask. The destination must hold no deposit in the bank. Remaining accounts: the
+/// destination's observation set, including `bank`.
 pub fn lending_account_transfer_liability_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
-    destination_accounts: u8,
 ) -> MarginfiResult {
-    transfer_position(
-        ctx,
-        transfer_amount,
-        destination_accounts,
-        BalanceSide::Liabilities,
-    )
+    transfer_position(ctx, transfer_amount, BalanceSide::Liabilities)
 }
 
 /// Moves exact shares on `side` from the source to the destination. Bank share totals stay
@@ -73,7 +60,6 @@ pub fn lending_account_transfer_liability_position<'info>(
 fn transfer_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
-    destination_accounts: u8,
     side: BalanceSide,
 ) -> MarginfiResult {
     let is_liability = side == BalanceSide::Liabilities;
@@ -241,34 +227,30 @@ fn transfer_position<'info>(
         )
     };
 
-    let split = ctx
-        .remaining_accounts
-        .len()
-        .checked_sub(destination_accounts as usize)
-        .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
-    let (source_obs, destination_obs) = ctx.remaining_accounts.split_at(split);
-    // A source shedding debt is not re-checked, as with repay.
-    if !is_liability {
+    // Only the account taking on risk is checked: the destination of a debt, as with borrow, or the
+    // source of collateral, as with withdraw.
+    if is_liability {
+        check_health_and_refresh_premium(
+            &mut destination_account,
+            &group,
+            ctx.remaining_accounts,
+            &clock,
+            true,
+            true,
+            false,
+        )?;
+    } else {
         let source_carries_risk = source_account.lending_account.has_liabilities();
         check_health_and_refresh_premium(
             &mut source_account,
             &group,
-            source_obs,
+            ctx.remaining_accounts,
             &clock,
             source_carries_risk,
             false,
             true,
         )?;
     }
-    check_health_and_refresh_premium(
-        &mut destination_account,
-        &group,
-        destination_obs,
-        &clock,
-        is_liability,
-        is_liability,
-        false,
-    )?;
 
     let maybe_price = fetch_unbiased_price_for_bank_cache(
         &bank_key,

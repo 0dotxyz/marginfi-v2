@@ -1055,7 +1055,6 @@ export const endExecuteOrderIx = (
     .instruction();
 };
 
-
 export type LendingAccountTransferPositionArgs = {
   group: PublicKey;
   sourceMarginfiAccount: PublicKey;
@@ -1067,10 +1066,12 @@ export type LendingAccountTransferPositionArgs = {
   bank: PublicKey;
   globalFeeWallet: PublicKey;
   transferAmount: BN;
-  /** Source observation set: `[bank, oracles...]` per active balance, as it stands after the move */
-  sourceRemaining: PublicKey[];
-  /** Destination observation set, same layout, including the transferred bank */
-  destinationRemaining: PublicKey[];
+  /**
+   * Observation set of the account taking on risk, as it stands after the move: the source's for
+   * a deposit, the destination's (including the transferred bank) for a debt. `[bank, oracles...]`
+   * per active balance.
+   */
+  remaining: PublicKey[];
 };
 
 const transferPositionAccounts = (args: LendingAccountTransferPositionArgs) => ({
@@ -1085,10 +1086,11 @@ const transferPositionAccounts = (args: LendingAccountTransferPositionArgs) => (
   // feeState = deriveGlobalFeeState(id)
 });
 
-const transferPositionRemaining = (args: LendingAccountTransferPositionArgs) =>
-  [...args.sourceRemaining, ...args.destinationRemaining].map(
-    (pubkey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false }),
-  );
+const readonlyMeta = (pubkey: PublicKey): AccountMeta => ({
+  pubkey,
+  isSigner: false,
+  isWritable: false,
+});
 
 /**
  * Move part of a deposit to another account that holds no debt in the bank.
@@ -1099,12 +1101,9 @@ export const lendingAccountTransferAssetPositionIx = (
   args: LendingAccountTransferPositionArgs,
 ) =>
   program.methods
-    .lendingAccountTransferAssetPosition(
-      args.transferAmount,
-      args.destinationRemaining.length,
-    )
+    .lendingAccountTransferAssetPosition(args.transferAmount)
     .accounts(transferPositionAccounts(args))
-    .remainingAccounts(transferPositionRemaining(args))
+    .remainingAccounts(args.remaining.map(readonlyMeta))
     .instruction();
 
 /**
@@ -1116,12 +1115,9 @@ export const lendingAccountTransferLiabilityPositionIx = (
   args: LendingAccountTransferPositionArgs,
 ) =>
   program.methods
-    .lendingAccountTransferLiabilityPosition(
-      args.transferAmount,
-      args.destinationRemaining.length,
-    )
+    .lendingAccountTransferLiabilityPosition(args.transferAmount)
     .accounts(transferPositionAccounts(args))
-    .remainingAccounts(transferPositionRemaining(args))
+    .remainingAccounts(args.remaining.map(readonlyMeta))
     .instruction();
 
 export type EscrowPositionArgs = {

@@ -612,13 +612,8 @@ pub mod marginfi {
     pub fn lending_account_transfer_asset_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,
-        destination_accounts: u8,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_transfer_asset_position(
-            ctx,
-            transfer_amount,
-            destination_accounts,
-        )
+        marginfi_account::lending_account_transfer_asset_position(ctx, transfer_amount)
     }
 
     /// (source authority, receiver's consent) Move part of a debt in one bank to another account
@@ -626,13 +621,8 @@ pub mod marginfi {
     pub fn lending_account_transfer_liability_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,
-        destination_accounts: u8,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_transfer_liability_position(
-            ctx,
-            transfer_amount,
-            destination_accounts,
-        )
+        marginfi_account::lending_account_transfer_liability_position(ctx, transfer_amount)
     }
 
     /// (source authority) Move part of a deposit into an escrow for `receiver_authority` to accept.

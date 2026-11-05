@@ -1093,6 +1093,37 @@ pub(super) async fn asset_shares(account: &MarginfiAccountFixture, bank: &BankFi
         .into()
 }
 
+/// Receiving collateral is not health-checked, as with a deposit, so a transfer can top up an
+/// account that sits below its initial requirement.
+#[tokio::test]
+async fn test_position_transfer_tops_up_an_account_below_initial_health() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let dest_f = indebted_source(&test_f, 500.0).await;
+    usdc_bank_f
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48::ZERO.into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let source_f = usdc_depositor(&test_f).await;
+    let dest_before = asset_shares(&dest_f, usdc_bank_f).await;
+
+    source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
+        .await?;
+
+    let moved = I80F48::from_num(ui_to_native!(100.0, usdc_bank_f.mint.mint.decimals));
+    assert_eq!(
+        asset_shares(&dest_f, usdc_bank_f).await,
+        dest_before + moved
+    );
+    Ok(())
+}
+
 /// Collateral tops up another authority's existing deposit on the sender's signature alone.
 #[tokio::test]
 async fn test_position_transfer_collateral_top_up_needs_no_receiver_signature() -> anyhow::Result<()>
