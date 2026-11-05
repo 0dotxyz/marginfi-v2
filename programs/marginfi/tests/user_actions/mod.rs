@@ -13,6 +13,7 @@ mod escrow_position;
 mod flash_loan;
 mod indexer_flags;
 mod juplend;
+mod juplend_emergency;
 mod kamino;
 mod limit_orders;
 mod limit_orders_common;
