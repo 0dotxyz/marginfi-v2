@@ -56,6 +56,10 @@ pub struct LendingPoolBankConfigureOracleEvent {
     pub bank: Pubkey,
     pub oracle_setup: u8,
     pub oracle: Pubkey,
+    /// The bank's `scope_entry_index` after the change; 0 for every non-Scope setup.
+    pub scope_entry_index: u16,
+    /// The bank's `scope_smoothed_entry_index` after the change; 0 = none.
+    pub scope_smoothed_entry_index: u16,
 }
 
 #[event]

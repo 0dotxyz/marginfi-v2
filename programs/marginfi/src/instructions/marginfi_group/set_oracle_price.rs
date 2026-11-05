@@ -103,12 +103,19 @@ pub fn lending_pool_set_oracle_price(
             // state where oracles[0] is empty and other slots are not.
             bank.config.oracle_keys[0] = Pubkey::default();
         }
+        // The Scope-fed PT twin takes its entry index from the Scope instruction.
+        OracleSetup::ScopePT => {
+            return err!(MarginfiError::UseConfigureBankOracleScope);
+        }
         _ => {
             return err!(MarginfiError::InvalidOracleSetup);
         }
     }
 
     bank.config.fixed_price = price;
+    // PTPyth set here reads Pyth; Fixed / PTFixed have no base feed. Drop any Scope entries.
+    bank.config.scope_entry_index = 0;
+    bank.config.set_scope_smoothed_entry(None);
 
     bank.config
         .validate_oracle_setup(bank.mint, remaining, None, None, None)?;

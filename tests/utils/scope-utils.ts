@@ -22,8 +22,8 @@ export type ScopeEntry = {
 };
 
 /**
- * Builds a scope `OraclePrices` buffer: discriminator, the oracle_mappings pubkey, then 512
- * `DatedPrice { value: u64, exp: u64, last_updated_slot: u64, unix_timestamp: u64, _pad: [u8;24] }`.
+ * Builds a scope `OraclePrices` buffer: discriminator, the (zeroed) oracle_mappings pubkey, then
+ * 512 `DatedPrice { value: u64, exp: u64, last_updated_slot: u64, unix_timestamp: u64, _pad: [u8;24] }`.
  * Unlisted entries stay all-zero, i.e. "never refreshed".
  */
 export const makeScopePrices = (entries: ScopeEntry[]): Buffer => {

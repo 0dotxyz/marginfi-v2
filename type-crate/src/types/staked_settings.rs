@@ -9,7 +9,7 @@ use crate::{
     constants::{discriminators, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP},
 };
 
-use super::{RiskTier, WrappedI80F48};
+use super::{OracleSetup, RiskTier, WrappedI80F48};
 use fixed_macro::types::I80F48;
 
 #[cfg(feature = "anchor")]
@@ -33,7 +33,8 @@ pub struct StakedSettings {
     pub key: Pubkey,
     /// Group for which these settings apply
     pub marginfi_group: Pubkey,
-    /// Generally, the Pyth push oracle for SOL
+    /// The SOL/USD base feed: the Pyth push oracle, or a Scope `OraclePrices` account when
+    /// `oracle_setup` is `StakedWithScope`.
     pub oracle: Pubkey,
 
     pub asset_weight_init: WrappedI80F48,
@@ -44,7 +45,13 @@ pub struct StakedSettings {
 
     pub oracle_max_age: u16,
     pub risk_tier: RiskTier,
-    _pad0: [u8; 5],
+    _pad0: u8,
+    /// Scope entry for the SOL/USD price in `oracle`; read only by `StakedWithScope`.
+    pub scope_entry_index: u16,
+    /// The staked banks' `OracleSetup` as u8: `StakedWithPythPush` or `StakedWithScope`. Zero
+    /// (accounts written before this field existed) means `StakedWithPythPush`.
+    pub oracle_setup: u8,
+    _pad1: u8,
 
     /// Desired bitmask for staked-bank transition flags. These bits are copied to `Bank.flags`
     /// when staked settings are propagated or when a new staked bank is created.
@@ -53,13 +60,18 @@ pub struct StakedSettings {
     ///   single-pool on-ramp account in NAV.
     pub flags: u64,
 
+    /// Scope entry for the time-weighted SOL/USD price in `oracle` (a `PythLazerEMA` or
+    /// `ScopeTwap*` slot of the base entry); 0 = none. Read only by
+    /// `StakedWithScope`, copied into `BankConfig.scope_smoothed_entry_index` on propagation.
+    pub scope_smoothed_entry_index: u16,
+
     /// The following values are irrelevant because staked collateral positions do not support
     /// borrowing.
     // * interest_config,
     // * liability_weight_init
     // * liability_weight_maint
     // * borrow_limit
-    _reserved1: [u8; 32],
+    _reserved1: [u8; 30],
     _reserved2: [u8; 64],
 }
 
@@ -101,6 +113,50 @@ impl StakedSettings {
         }
     }
 
+    /// `Some(entry_index)` when staked banks price SOL from a Scope entry, `None` for Pyth.
+    pub fn scope_base_feed(&self) -> Option<u16> {
+        (self.staked_oracle_setup() == OracleSetup::StakedWithScope)
+            .then_some(self.scope_entry_index)
+    }
+
+    /// The setup staked banks are propagated to.
+    pub fn staked_oracle_setup(&self) -> OracleSetup {
+        if self.oracle_setup == OracleSetup::StakedWithScope as u8 {
+            OracleSetup::StakedWithScope
+        } else {
+            OracleSetup::StakedWithPythPush
+        }
+    }
+
+    /// Points the staked banks at Pyth (`None`) or at a Scope entry (`Some(entry_index)`). Pyth
+    /// staked banks have no use for a Scope smoothed entry, so switching to Pyth clears it.
+    pub fn set_scope_base_feed(&mut self, entry_index: Option<u16>) {
+        match entry_index {
+            Some(index) => {
+                self.oracle_setup = OracleSetup::StakedWithScope as u8;
+                self.scope_entry_index = index;
+            }
+            None => {
+                self.oracle_setup = OracleSetup::StakedWithPythPush as u8;
+                self.scope_entry_index = 0;
+                self.set_scope_smoothed_entry(None);
+            }
+        }
+    }
+
+    /// `Some(entry_index)` when staked banks take their time-weighted SOL/USD price from a Scope
+    /// entry, `None` when they use the spot price for both price types. Only `StakedWithScope`
+    /// can carry one.
+    pub fn scope_smoothed_entry(&self) -> Option<u16> {
+        (self.staked_oracle_setup() == OracleSetup::StakedWithScope
+            && self.scope_smoothed_entry_index != 0)
+            .then_some(self.scope_smoothed_entry_index)
+    }
+
+    pub fn set_scope_smoothed_entry(&mut self, entry_index: Option<u16>) {
+        self.scope_smoothed_entry_index = entry_index.unwrap_or(0);
+    }
+
     // To be removed once SVSP update is rolled out (likely in 1.10)
     pub fn on_ramp_transition(&self) -> OnRampTransition {
         if self.flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0 {
@@ -125,9 +181,13 @@ impl Default for StakedSettings {
             total_asset_value_init_limit: 1_000_000,
             oracle_max_age: 10,
             risk_tier: RiskTier::Collateral,
-            _pad0: [0; 5],
+            _pad0: 0,
+            scope_entry_index: 0,
+            oracle_setup: OracleSetup::StakedWithPythPush as u8,
+            _pad1: 0,
             flags: 0,
-            _reserved1: [0; 32],
+            scope_smoothed_entry_index: 0,
+            _reserved1: [0; 30],
             _reserved2: [0; 64],
         }
     }

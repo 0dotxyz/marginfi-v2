@@ -10,6 +10,7 @@ import {
   addBank,
   configureBankIxs,
   configureBankOracle,
+  configureBankOracleScope,
   groupConfigure,
   groupInitialize,
   setFixedPrice,
@@ -53,14 +54,16 @@ import {
   ORACLE_SETUP_PT_FIXED,
   ORACLE_SETUP_PT_PYTH,
   ORACLE_SETUP_PYTH_PUSH,
+  ORACLE_SETUP_SCOPE_PT,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
+import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
 import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { toI80Scaled } from "../../utils/bn-utils";
+import { bnToBigIntSafe, toI80Scaled } from "../../utils/bn-utils";
 import { BN } from "@coral-xyz/anchor";
 import { createMintToInstruction } from "@solana/spl-token";
 import { assert } from "chai";
@@ -370,7 +373,7 @@ describe("PT-SOL internal oracle setup", () => {
             mint,
             account,
             globalProgramAdmin.wallet.publicKey,
-            BigInt(amount.toString()),
+            bnToBigIntSafe(amount),
           ),
         ),
         [globalProgramAdmin.wallet],
@@ -572,7 +575,7 @@ describe("PT-SOL internal oracle setup", () => {
             mint,
             account,
             globalProgramAdmin.wallet.publicKey,
-            BigInt(amount.toString()),
+            bnToBigIntSafe(amount),
           ),
         ),
         [globalProgramAdmin.wallet],
@@ -871,5 +874,167 @@ describe("PT-SOL internal oracle setup", () => {
     setVault(vault, makeVault(now + 100_000, 1_000));
     await setPthyusd(0.85, vault);
     assertI80F48Approx((await pulseHyusd(vault)).lastOraclePrice, 0.85);
+  });
+
+  // --- ScopePT: the same lerp as PTPyth over a Scope SOL/USD entry ---
+  const scopeFeed = Keypair.generate().publicKey;
+  /** Entry 13 = 150.0 (scope stores value / 10^exp). */
+  const SCOPE_ENTRY = { index: 13, value: 15_000_000_000n, exp: 8n };
+
+  const freshenScopeFeed = async () => {
+    const now = await getBankrunTime(bankrunContext);
+    setScopeFeed(
+      bankrunContext,
+      scopeFeed,
+      makeScopePrices([{ ...SCOPE_ENTRY, timestamp: now }]),
+    );
+  };
+
+  const setPtOnScope = async (
+    ptStartPrice: number | undefined,
+    vault: PublicKey,
+    entryIndex: number = SCOPE_ENTRY.index,
+  ) => {
+    await freshenScopeFeed();
+    const ix = await configureBankOracleScope(groupAdmin.mrgnProgram, {
+      bank: ptBank.publicKey,
+      type: ORACLE_SETUP_SCOPE_PT,
+      oracle: scopeFeed,
+      entryIndex,
+      ptStartPrice,
+      remaining: [vault],
+    });
+    return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(ix),
+    );
+  };
+
+  const pulseOnScope = async (vault: PublicKey) => {
+    await freshenScopeFeed();
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(
+        await pulseBankPrice(groupAdmin.mrgnProgram, {
+          bank: ptBank.publicKey,
+          remaining: [scopeFeed, vault],
+        }),
+      ),
+    );
+    return (await program.account.bank.fetch(ptBank.publicKey)).cache;
+  };
+
+  it("(admin) sets up ScopePT (Scope SOL entry x linear PT rate) - happy path", async () => {
+    await setPtOnScope(0.9, okVault);
+    const { config } = await program.account.bank.fetch(ptBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { scopePt: {} });
+    assertKeysEqual(config.oracleKeys[0], scopeFeed);
+    assertKeysEqual(config.oracleKeys[1], okVault);
+    assert.equal(config.scopeEntryIndex, SCOPE_ENTRY.index);
+    assertI80F48Approx(config.fixedPrice, 0.9);
+  });
+
+  it("(admin) tries ScopePT - fails without a start price", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setPtOnScope(undefined, okVault);
+      },
+      "InvalidPtStartPrice",
+      6138,
+    );
+  });
+
+  it("(admin) tries ScopePT - fails with a start price above par", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setPtOnScope(1.5, okVault);
+      },
+      "InvalidPtStartPrice",
+      6138,
+    );
+  });
+
+  it("(admin) tries ScopePT - fails against an unrefreshed entry", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setPtOnScope(0.9, okVault, SCOPE_ENTRY.index + 1);
+      },
+      "ScopeInvalidEntry",
+      6801,
+    );
+  });
+
+  it("(admin) tries ScopePT - fails when the vault's PT mint is not the bank mint", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setPtOnScope(0.9, REAL_VAULT);
+      },
+      "ExponentVaultValidationFailed",
+      6137,
+    );
+  });
+
+  it("prices a matured vault at the Scope entry", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(vault, makeVault(now - 10_000, 5_000));
+    await setPtOnScope(0.9, vault);
+
+    const cache = await pulseOnScope(vault);
+    assertI80F48Approx(cache.lastOraclePrice, 150);
+    assertI80F48Approx(cache.priceMultiplier, 1);
+  });
+
+  it("prices a not-yet-started vault at Scope entry * start price", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(vault, makeVault(now + 100_000, 1_000));
+    await setPtOnScope(0.85, vault);
+    assertI80F48Approx((await pulseOnScope(vault)).lastOraclePrice, 150 * 0.85);
+  });
+
+  it("refuses to price a Scope-based PT vault in emergency mode", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(
+      vault,
+      makeVault(now - 5_000, 10_000, {
+        syRate: 2n * SY_RATE_PRECISION,
+        allTimeHigh: 3n * SY_RATE_PRECISION,
+      }),
+    );
+    await setPtOnScope(0.9, vault);
+
+    await expectFailedTxWithError(
+      async () => {
+        await pulseOnScope(vault);
+      },
+      "ExponentVaultValidationFailed",
+      6137,
+    );
+  });
+
+  it("(admin) set_oracle_price refuses ScopePT - UseConfigureBankOracleScope", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        const ix = await setFixedPrice(groupAdmin.mrgnProgram, {
+          bank: ptBank.publicKey,
+          price: 0.9,
+          setup: ORACLE_SETUP_SCOPE_PT,
+          remaining: [scopeFeed, okVault],
+        });
+        await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+          new Transaction().add(ix),
+        );
+      },
+      "UseConfigureBankOracleScope",
+      6803,
+    );
+  });
+
+  it("(admin) set_oracle_price moves the PT bank back to Pyth - clears the Scope entry", async () => {
+    await setPtsol(0.9, okVault);
+    const { config } = await program.account.bank.fetch(ptBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { ptPyth: {} });
+    assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
+    assert.equal(config.scopeEntryIndex, 0);
   });
 });

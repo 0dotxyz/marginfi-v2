@@ -10,7 +10,7 @@ use crate::{assert_struct_align, assert_struct_size};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{OracleFeedFamily, RequirementType, WrappedI80F48};
+use super::{OracleFeedFamily, RequirementType, ScopePriceSelection, WrappedI80F48};
 
 pub const EMODE_ON: u64 = 1;
 
@@ -159,6 +159,9 @@ pub struct ReconciledSameAssetConfig {
     /// Start price shared by all liability banks; only PT setups' prices depend on it, so a
     /// collateral bank must match to count as the same asset (`0` for every other eligible setup).
     pub fixed_price: I80F48,
+    /// Scope spot and smoothed entries shared by all liability banks; part of the price
+    /// identity for Scope-fed banks (the default for every Pyth / Switchboard bank).
+    pub scope_selection: ScopePriceSelection,
     pub asset_weight: I80F48,
 }
 

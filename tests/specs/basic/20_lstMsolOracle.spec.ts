@@ -10,6 +10,7 @@ import { Marginfi } from "../../../target/types/marginfi";
 import {
   addBank,
   configureBankOracle,
+  configureBankOracleScope,
   groupInitialize,
 } from "../../utils/group-instructions";
 import { pulseBankPrice } from "../../utils/user-instructions";
@@ -31,8 +32,14 @@ import {
   ORACLE_SETUP_PYTH_LST,
   ORACLE_SETUP_PYTH_MSOL,
   ORACLE_SETUP_PYTH_PUSH,
+  ORACLE_SETUP_SCOPE_LST,
+  ORACLE_SETUP_SCOPE_MSOL,
+  ORACLE_SETUP_STAKED_WITH_PYTH_PUSH,
+  ORACLE_SETUP_STAKED_WITH_SCOPE,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
+import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
+import { getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 
@@ -272,6 +279,154 @@ describe("LST / mSOL internal oracle setups", () => {
       (baseSolPrice * addedLamports) / Number(poolTokenSupply);
     const after = await pulseCache([SANCTUM_SPL_POOL]);
     assertI80F48Approx(after.lastOraclePrice, before + expectedGain);
+  });
+
+  // --- Scope base feed: same LST / mSOL rate, SOL/USD from a Scope entry instead of Pyth ---
+  const scopeFeed = Keypair.generate().publicKey;
+  /** Entry 13 = 175.0, distinct from the Pyth SOL price so the source is visible. */
+  const SOL_ENTRY = { index: 13, value: 17_500_000_000n, exp: 8n };
+  const SCOPE_SOL_PRICE = 175;
+
+  const freshenScopeFeed = async () => {
+    const now = await getBankrunTime(bankrunContext);
+    setScopeFeed(
+      bankrunContext,
+      scopeFeed,
+      makeScopePrices([{ ...SOL_ENTRY, timestamp: now }]),
+    );
+  };
+
+  const setScopeOracle = async (type: number, rateAccount: PublicKey) => {
+    await freshenScopeFeed();
+    const ix = await configureBankOracleScope(groupAdmin.mrgnProgram, {
+      bank: lstBank.publicKey,
+      type,
+      oracle: scopeFeed,
+      entryIndex: SOL_ENTRY.index,
+      remaining: [rateAccount],
+    });
+    return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(ix),
+    );
+  };
+
+  const pulseScope = async (rateAccount: PublicKey) => {
+    await freshenScopeFeed();
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(
+        await pulseBankPrice(groupAdmin.mrgnProgram, {
+          bank: lstBank.publicKey,
+          remaining: [scopeFeed, rateAccount],
+        }),
+      ),
+    );
+    return (await program.account.bank.fetch(lstBank.publicKey)).cache;
+  };
+
+  it("(admin) configures ScopeLST (Scope SOL entry x pool rate) - happy path", async () => {
+    await setScopeOracle(ORACLE_SETUP_SCOPE_LST, SANCTUM_SPL_POOL);
+    const { config } = await program.account.bank.fetch(lstBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { scopeLst: {} });
+    assertKeysEqual(config.oracleKeys[0], scopeFeed);
+    assertKeysEqual(config.oracleKeys[1], SANCTUM_SPL_POOL);
+    assert.equal(config.scopeEntryIndex, SOL_ENTRY.index);
+  });
+
+  it("prices ScopeLST from the Scope entry times the pool rate", async () => {
+    const rate = await stakePoolRate(SANCTUM_SPL_POOL);
+    const cache = await pulseScope(SANCTUM_SPL_POOL);
+    assertI80F48Approx(cache.lastOraclePrice, SCOPE_SOL_PRICE * rate);
+    assertI80F48Approx(cache.priceMultiplier, 1);
+  });
+
+  it("(attacker) pulses the Scope-based LST bank with the Pyth feed - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await pulseCache([SANCTUM_SPL_POOL]);
+      },
+      "WrongOracleAccountKeys",
+      6052,
+    );
+  });
+
+  it("(admin) configures ScopeMSOL (Scope SOL entry x Marinade rate) - happy path", async () => {
+    await setScopeOracle(ORACLE_SETUP_SCOPE_MSOL, MSOL_STATE);
+    const { config } = await program.account.bank.fetch(lstBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { scopeMsol: {} });
+    assertKeysEqual(config.oracleKeys[1], MSOL_STATE);
+
+    const rate = await marinadeRate(MSOL_STATE);
+    const cache = await pulseScope(MSOL_STATE);
+    assertI80F48Approx(cache.lastOraclePrice, SCOPE_SOL_PRICE * rate);
+  });
+
+  it("(admin) tries ScopeLST with a non-stake-pool account - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_LST, Keypair.generate().publicKey);
+      },
+      "StakePoolValidationFailed",
+      6048,
+    );
+  });
+
+  it("(admin) tries ScopeMSOL with a stake pool - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_MSOL, SANCTUM_SPL_POOL);
+      },
+      "MarinadeStateValidationFailed",
+      6136,
+    );
+  });
+
+  it("(admin) tries Pyth-fed setups on the Scope ix - fails, InvalidOracleSetup", async () => {
+    for (const type of [ORACLE_SETUP_PYTH_PUSH, ORACLE_SETUP_PYTH_LST]) {
+      await expectFailedTxWithError(
+        async () => {
+          await setScopeOracle(type, SANCTUM_SPL_POOL);
+        },
+        "InvalidOracleSetup",
+        6025,
+      );
+    }
+  });
+
+  it("(admin) tries the staked setups on the Scope ix - fails, InvalidOracleSetup", async () => {
+    for (const type of [
+      ORACLE_SETUP_STAKED_WITH_PYTH_PUSH,
+      ORACLE_SETUP_STAKED_WITH_SCOPE,
+    ]) {
+      await expectFailedTxWithError(
+        async () => {
+          await setScopeOracle(type, SANCTUM_SPL_POOL);
+        },
+        "InvalidOracleSetup",
+        6025,
+      );
+    }
+  });
+
+  it("(admin) tries ScopeLST on the plain oracle ix - fails, UseConfigureBankOracleScope", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(ORACLE_SETUP_SCOPE_LST, [SANCTUM_SPL_POOL]);
+      },
+      "UseConfigureBankOracleScope",
+      6803,
+    );
+  });
+
+  it("(admin) switches the LST bank back to Pyth - clears the Scope entry", async () => {
+    await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
+    const { config } = await program.account.bank.fetch(lstBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { pythLst: {} });
+    assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
+    assert.equal(config.scopeEntryIndex, 0);
+
+    const rate = await stakePoolRate(SANCTUM_SPL_POOL);
+    const cache = await pulseCache([SANCTUM_SPL_POOL]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
   });
 
   it("(admin) tries to price PythLST with a wrong-owner pool - fails", async () => {

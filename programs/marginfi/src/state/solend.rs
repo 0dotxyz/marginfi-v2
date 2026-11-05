@@ -103,7 +103,7 @@ impl SolendConfigCompact {
             oracle_keys: keys,
             cb_window_max_up_bps: 0,
             cb_window_max_down_bps: 0,
-            _pad0: [0; 2],
+            scope_smoothed_entry_index: 0,
             borrow_limit: 0, // Can't ever borrow solend assets
             risk_tier: self.risk_tier,
             asset_tag: ASSET_TAG_SOLEND,

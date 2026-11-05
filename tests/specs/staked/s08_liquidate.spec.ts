@@ -231,6 +231,8 @@ describe("Liquidate user (including staked assets)", () => {
       totalAssetValueInitLimit: defaultSettings.totalAssetValueInitLimit,
       oracleMaxAge: defaultSettings.oracleMaxAge,
       riskTier: defaultSettings.riskTier,
+      baseFeed: null,
+      smoothedEntry: null,
     };
     let editTx = new Transaction().add(
       await editStakedSettings(groupAdmin.mrgnBankrunProgram, {

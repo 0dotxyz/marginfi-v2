@@ -20,7 +20,10 @@ pub fn lending_pool_backfill_staked_bank_validator_vote_account(
         MarginfiError::AssetTagMismatch
     );
     check!(
-        bank.config.oracle_setup == OracleSetup::StakedWithPythPush,
+        matches!(
+            bank.config.oracle_setup,
+            OracleSetup::StakedWithPythPush | OracleSetup::StakedWithScope
+        ),
         MarginfiError::StakePoolValidationFailed
     );
 

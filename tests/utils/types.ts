@@ -86,6 +86,14 @@ export const ORACLE_SETUP_PT_PYTH = 25;
 export const ORACLE_SETUP_PT_FIXED = 26;
 export const ORACLE_SETUP_SCOPE_KAMINO = 27;
 export const ORACLE_SETUP_SCOPE_JUPLEND = 28;
+export const ORACLE_SETUP_SCOPE_LST = 29;
+export const ORACLE_SETUP_SCOPE_MSOL = 30;
+export const ORACLE_SETUP_SCOPE_KAMINO_LST = 31;
+export const ORACLE_SETUP_SCOPE_PT = 32;
+export const ORACLE_SETUP_STAKED_WITH_SCOPE = 33;
+export const ORACLE_SETUP_SCOPE_KAMINO_MSOL = 34;
+export const ORACLE_SETUP_SCOPE_JUPLEND_MSOL = 35;
+export const ORACLE_SETUP_SCOPE_JUPLEND_LST = 36;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;
@@ -500,6 +508,10 @@ export interface StakedSettingsEdit {
 
   oracleMaxAge: number | null;
   riskTier: { collateral: {} } | { isolated: {} } | null;
+  /** Switch the SOL/USD base feed; `null` leaves it unchanged. */
+  baseFeed: { pyth: {} } | { scope: { entryIndex: number } } | null;
+  /** Set or disable the Scope smoothed entry; `null` leaves it unchanged. */
+  smoothedEntry: { disabled: {} } | { scope: { entryIndex: number } } | null;
 }
 
 export const MAX_EMODE_ENTRIES = 10;
