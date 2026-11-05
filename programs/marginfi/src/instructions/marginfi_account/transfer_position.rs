@@ -435,7 +435,7 @@ pub(super) fn check_health_and_refresh_premium<'info>(
     )?;
     health_cache.program_version = PROGRAM_VERSION;
     health_cache.set_engine_ok(true);
-    account.health_cache = health_cache;
+    account.set_health_cache(health_cache);
     if takes_on_debt {
         check!(
             !premium_scratch.refresh_unavailable(),
