@@ -1067,9 +1067,8 @@ export type LendingAccountTransferPositionArgs = {
   globalFeeWallet: PublicKey;
   transferAmount: BN;
   /**
-   * Observation set of the account taking on risk, as it stands after the move: the source's for
-   * a deposit, the destination's (including the transferred bank) for a debt. `[bank, oracles...]`
-   * per active balance.
+   * Observation set, after the move, of the account taking on risk: the source's for a deposit,
+   * the destination's (with the transferred bank) for a debt
    */
   remaining: PublicKey[];
 };

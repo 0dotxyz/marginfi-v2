@@ -2783,8 +2783,8 @@ impl MarginfiAccountFixture {
         destination_authority: Option<&Keypair>,
     ) -> anyhow::Result<(), BanksClientError> {
         let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
-        // The account taking on risk is health-checked, so its observation set is the remaining
-        // accounts. A destination gaining a debt slot includes `bank`.
+        // The remaining accounts are the observation set of the account taking on risk. A
+        // destination gaining a debt slot includes `bank`.
         let (observation, data) = match side {
             BalanceSide::Assets => (
                 self.load_observation_account_metas(vec![], vec![]).await,
