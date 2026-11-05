@@ -16,8 +16,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS,
-        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, JUPLEND_EMERGENCY, KAMINO_MARKET_EMERGENCY,
+        MAX_COSTLY_POSITIONS, ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, premium_liability_value, reconcile_emode_configs,
@@ -354,6 +354,7 @@ fn reconcile_emode_config_releasing_heap<'info>(
         false,
         CB_GATE_ZERO_WEIGHT_REQUIREMENT,
         same_asset_leverage,
+        None,
     )
     .reconcile();
     heap_restore(heap_checkpoint);
@@ -662,6 +663,18 @@ fn calc_weighted_asset_value_cached_standalone(
 
             let premium_price = price_with_confidence.price;
 
+            // Defense in depth: no current production path uses cached Initial health.
+            if matches!(requirement_type, RequirementType::Initial)
+                && match bank.config.asset_tag {
+                    ASSET_TAG_JUPLEND => bank.get_flag(JUPLEND_EMERGENCY),
+                    // The cached path cannot check the Kamino reserve's own emergency state.
+                    ASSET_TAG_KAMINO => bank.get_flag(KAMINO_MARKET_EMERGENCY),
+                    _ => false,
+                }
+            {
+                return Ok((I80F48::ZERO, lower_price, price_with_confidence.price));
+            }
+
             if matches!(requirement_type, RequirementType::Initial) {
                 if let Some(discount) = bank.maybe_get_asset_weight_init_discount(lower_price)? {
                     asset_weight = asset_weight
@@ -890,8 +903,9 @@ pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> MarginfiR
 /// yielding one at a time keeps peak stack usage manageable across the 16-position limit.
 ///
 /// When `same_asset_leverage` is `Some`, `next()` also tracks the shared liability mint and the
-/// running lowest liability-side weight; the post-iteration `reconcile()` folds those into the
-/// returned `ReconciledEmodeConfig`.
+/// running lowest liability-side weight; for initial health it also tracks the lowest maintenance
+/// liability weight so the synthesized initial weight can be capped at the maintenance weight.
+/// The post-iteration `reconcile()` folds those into the returned `ReconciledEmodeConfig`.
 struct EmodeConfigIterator<'a, 'info> {
     lending_account: &'a LendingAccount,
     remaining_ais: &'info [AccountInfo<'info>],
@@ -900,11 +914,13 @@ struct EmodeConfigIterator<'a, 'info> {
     banks_only: bool,
     requirement_type: RequirementType,
     same_asset_leverage: Option<I80F48>,
+    same_asset_maint_leverage: Option<I80F48>,
     shared_mint: Option<Pubkey>,
     shared_oracle_key: Option<Pubkey>,
     shared_feed_family: Option<OracleFeedFamily>,
     shared_fixed_price: Option<I80F48>,
     lowest_liab_weight: Option<I80F48>,
+    lowest_maint_liab_weight: Option<I80F48>,
     same_asset_invalid: bool,
 }
 
@@ -915,6 +931,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
         banks_only: bool,
         requirement_type: RequirementType,
         same_asset_leverage: Option<I80F48>,
+        same_asset_maint_leverage: Option<I80F48>,
     ) -> Self {
         Self {
             lending_account,
@@ -924,11 +941,13 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             banks_only,
             requirement_type,
             same_asset_leverage,
+            same_asset_maint_leverage,
             shared_mint: None,
             shared_oracle_key: None,
             shared_feed_family: None,
             shared_fixed_price: None,
             lowest_liab_weight: None,
+            lowest_maint_liab_weight: None,
             same_asset_invalid: false,
         }
     }
@@ -960,8 +979,15 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             reconciled.same_asset.oracle_key = oracle_key;
             reconciled.same_asset.feed_family = Some(feed_family);
             reconciled.same_asset.fixed_price = fixed_price;
-            reconciled.same_asset.asset_weight =
-                compute_same_asset_emode_weight(leverage, liab_weight);
+            let mut asset_weight = compute_same_asset_emode_weight(leverage, liab_weight);
+            if let Some(maint_leverage) = self.same_asset_maint_leverage {
+                // A missing maintenance minimum must not grant an initial same-asset boost.
+                let maint_liab_weight = self.lowest_maint_liab_weight.unwrap_or(I80F48::ZERO);
+                let maint_weight =
+                    compute_same_asset_emode_weight(maint_leverage, maint_liab_weight);
+                asset_weight = min(asset_weight, maint_weight);
+            }
+            reconciled.same_asset.asset_weight = asset_weight;
         }
         reconciled
     }
@@ -1012,6 +1038,16 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                         liab_weight,
                     ) {
                         self.same_asset_invalid = true;
+                    } else if self.same_asset_maint_leverage.is_some() {
+                        let maint_liab_weight = bank
+                            .config
+                            .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
+                        if self
+                            .lowest_maint_liab_weight
+                            .is_none_or(|lowest| maint_liab_weight < lowest)
+                        {
+                            self.lowest_maint_liab_weight = Some(maint_liab_weight);
+                        }
                     }
                 }
                 return Some(bank.emode.emode_config);
@@ -1173,6 +1209,10 @@ pub fn get_health_components<'info>(
     // =========================================================================
 
     let same_asset_leverage = same_asset_leverage_for_requirement(requirement_type, group);
+    // Initial health also tracks the lowest maintenance liability weight so the synthesized
+    // initial same-asset weight can be capped at the maintenance weight.
+    let same_asset_maint_leverage = matches!(requirement_type, RequirementType::Initial)
+        .then(|| u32_to_basis(group.same_asset_emode_maint_leverage));
     let emode_checkpoint = heap_pos();
     let reconciled_emode_config = EmodeConfigIterator::new(
         lending_account,
@@ -1180,6 +1220,7 @@ pub fn get_health_components<'info>(
         is_cached,
         requirement_type,
         same_asset_leverage,
+        same_asset_maint_leverage,
     )
     .reconcile();
     heap_restore(emode_checkpoint);
@@ -1430,6 +1471,7 @@ pub fn get_tagged_account_health_components<'info>(
         remaining_ais,
         false,
         RequirementType::Equity,
+        None,
         None,
     )
     .reconcile();
@@ -3483,6 +3525,128 @@ mod test {
         ));
     }
 
+    /// Exercise the real reconciliation iterator with bank accounts and active liabilities.
+    fn reconcile_test_liabilities(
+        banks: &[Bank],
+        group: &MarginfiGroup,
+        requirement: RequirementType,
+    ) -> ReconciledEmodeConfig {
+        let mut lending_account = LendingAccount::zeroed();
+        let keys: Vec<Pubkey> = banks.iter().map(|_| Pubkey::new_unique()).collect();
+        let mut lamports = vec![1; banks.len()];
+        // AccountLoader expects the payload to be aligned for zero-copy access.
+        let mut data = vec![vec![0u64; 1 + std::mem::size_of::<Bank>() / 8]; banks.len()];
+
+        for (i, bank) in banks.iter().enumerate() {
+            let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut data[i]);
+            bytes[..8].copy_from_slice(<Bank as anchor_lang::Discriminator>::DISCRIMINATOR);
+            bytes[8..].copy_from_slice(bytemuck::bytes_of(bank));
+            lending_account.balances[i].set_active(true);
+            lending_account.balances[i].bank_pk = keys[i];
+            lending_account.balances[i].liability_shares = I80F48::ONE.into();
+        }
+
+        let accounts: Vec<AccountInfo<'_>> = keys
+            .iter()
+            .zip(lamports.iter_mut())
+            .zip(data.iter_mut())
+            .map(|((key, lamports), data)| {
+                AccountInfo::new(
+                    key,
+                    false,
+                    false,
+                    lamports,
+                    bytemuck::cast_slice_mut(data),
+                    &crate::ID,
+                    false,
+                )
+            })
+            .collect();
+        let maint_leverage = matches!(requirement, RequirementType::Initial)
+            .then(|| u32_to_basis(group.same_asset_emode_maint_leverage));
+        EmodeConfigIterator::new(
+            &lending_account,
+            &accounts,
+            true,
+            requirement,
+            same_asset_leverage_for_requirement(requirement, group),
+            maint_leverage,
+        )
+        .reconcile()
+    }
+
+    fn same_asset_test_group(init: I80F48, maint: I80F48) -> MarginfiGroup {
+        MarginfiGroup {
+            same_asset_emode_init_leverage: basis_to_u32(init),
+            same_asset_emode_maint_leverage: basis_to_u32(maint),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn same_asset_initial_weight_is_capped_using_both_liability_minima() {
+        let mint = Pubkey::new_unique();
+        let oracle = Pubkey::new_unique();
+        let mut a = same_asset_eligible_bank(mint, oracle, I80F48!(1.2));
+        a.config.liability_weight_maint = I80F48!(1.1).into();
+        let mut b = same_asset_eligible_bank(mint, oracle, I80F48!(1.3));
+        b.config.liability_weight_maint = I80F48!(1.0).into();
+        let group = same_asset_test_group(I80F48!(2), I80F48!(2.1));
+
+        let initial = reconcile_test_liabilities(&[a, b], &group, RequirementType::Initial);
+        let maintenance = reconcile_test_liabilities(&[a, b], &group, RequirementType::Maintenance);
+        assert!(initial.same_asset.is_enabled());
+        assert!(maintenance.same_asset.is_enabled());
+        // The initial minimum is bank A (1.2), but the maintenance minimum is bank B (1.0).
+        // The uncapped initial weight is 0.6; maintenance is approximately 1 - 1 / 2.1.
+        assert!((initial.same_asset.asset_weight - I80F48!(0.52381)).abs() < I80F48!(0.00001));
+        assert_eq!(
+            initial.same_asset.asset_weight,
+            maintenance.same_asset.asset_weight
+        );
+        let reversed = reconcile_test_liabilities(&[b, a], &group, RequirementType::Initial);
+        assert_eq!(
+            initial.same_asset.asset_weight,
+            reversed.same_asset.asset_weight
+        );
+
+        // With 205 collateral and debts of 99 and 1, the previously uncapped initial weight
+        // would yield positive health (123 - 120.1). The cap rejects that position.
+        let initial_health = I80F48!(205) * initial.same_asset.asset_weight
+            - (I80F48!(99) * I80F48!(1.2) + I80F48!(1.3));
+        assert!(initial_health < I80F48::ZERO);
+    }
+
+    #[test]
+    fn same_asset_initial_weight_preserves_valid_configs_and_handles_disabled_maintenance() {
+        let mut bank =
+            same_asset_eligible_bank(Pubkey::new_unique(), Pubkey::new_unique(), I80F48!(1));
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.asset_weight_init = I80F48!(0.4).into();
+        let group = same_asset_test_group(I80F48!(2), I80F48!(3));
+        let initial = reconcile_test_liabilities(&[bank], &group, RequirementType::Initial);
+        let maintenance = reconcile_test_liabilities(&[bank], &group, RequirementType::Maintenance);
+        assert!((initial.same_asset.asset_weight - I80F48!(0.5)).abs() < I80F48!(0.00001));
+        assert!((maintenance.same_asset.asset_weight - I80F48!(0.666667)).abs() < I80F48!(0.00001));
+
+        // A one-sided legacy or invalid group must not grant an initial-only boost.
+        let disabled_maint = same_asset_test_group(I80F48!(2), I80F48!(1));
+        let initial =
+            reconcile_test_liabilities(&[bank], &disabled_maint, RequirementType::Initial);
+        assert_eq!(initial.same_asset.asset_weight, I80F48::ZERO);
+        assert_eq!(
+            bank.get_asset_weight(RequirementType::Initial, &initial),
+            I80F48!(0.4)
+        );
+
+        let mut ineligible = bank;
+        ineligible.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+        let initial =
+            reconcile_test_liabilities(&[bank, ineligible], &group, RequirementType::Initial);
+        assert!(!initial.same_asset.is_enabled());
+    }
+
     #[test]
     fn test_calc_asset_value() {
         assert_eq!(
@@ -3694,6 +3858,68 @@ mod test {
         assert_eq!(asset_value, I80F48::ZERO);
         assert_eq!(price, I80F48::ZERO);
         assert_eq!(premium_price, I80F48::ZERO);
+    }
+
+    #[test]
+    fn propagated_emergency_cached_health_preserves_maintenance_and_equity() {
+        let mut bank = Bank::zeroed();
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.asset_weight_init = I80F48!(0.8).into();
+        bank.config.asset_weight_maint = I80F48!(0.9).into();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt = I80F48::ONE.into();
+        bank.cache.liquidation_price_rt_confidence = I80F48!(0.01).into();
+        bank.cache.liquidation_price_twap = I80F48::ONE.into();
+        bank.cache.liquidation_price_twap_confidence = I80F48!(0.01).into();
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48::ONE.into();
+        let emode = ReconciledEmodeConfig::default();
+        let value = |bank: &Bank, requirement| {
+            calc_weighted_asset_value_cached_standalone(&balance, bank, requirement, &emode)
+                .unwrap()
+                .0
+        };
+        // Kamino's propagated flag covers the market, not the reserve's own emergency state.
+        for (asset_tag, emergency_flag, unrelated_flag) in [
+            (
+                ASSET_TAG_JUPLEND,
+                JUPLEND_EMERGENCY,
+                KAMINO_MARKET_EMERGENCY,
+            ),
+            (ASSET_TAG_KAMINO, KAMINO_MARKET_EMERGENCY, JUPLEND_EMERGENCY),
+        ] {
+            bank.config.asset_tag = asset_tag;
+            bank.flags = 0;
+            let maintenance = value(&bank, RequirementType::Maintenance);
+            let equity = value(&bank, RequirementType::Equity);
+            let initial = calc_weighted_asset_value_cached_standalone(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &emode,
+            )
+            .unwrap();
+            assert!(initial.0 > I80F48::ZERO);
+            assert!(initial.1 < initial.2);
+            assert_eq!(initial.2, I80F48::ONE);
+
+            bank.flags = unrelated_flag;
+            assert_eq!(value(&bank, RequirementType::Initial), initial.0);
+
+            bank.flags = emergency_flag;
+            let emergency = calc_weighted_asset_value_cached_standalone(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &emode,
+            )
+            .unwrap();
+            assert_eq!(emergency, (I80F48::ZERO, initial.1, initial.2));
+            assert_eq!(value(&bank, RequirementType::Maintenance), maintenance);
+            assert_eq!(value(&bank, RequirementType::Equity), equity);
+        }
     }
 
     #[test]

@@ -309,7 +309,7 @@ pub fn solend_withdraw<'info>(
             }
 
             health_cache.set_engine_ok(true);
-            marginfi_account.health_cache = health_cache;
+            marginfi_account.set_health_cache(health_cache);
         } else {
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,
             // that case the cache doesn't update and this does nothing.
