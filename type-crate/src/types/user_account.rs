@@ -302,6 +302,7 @@ impl LendingAccount {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BalanceSide {
     Assets,
     Liabilities,

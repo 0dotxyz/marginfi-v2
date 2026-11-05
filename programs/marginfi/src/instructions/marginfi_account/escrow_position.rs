@@ -100,9 +100,9 @@ pub fn lending_account_escrow_position<'info>(
         bank.get_asset_amount(source_shares)? >= amount,
         MarginfiError::PositionTransferInsufficientFunds
     );
-    let share_amount =
-        BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?
-            .transfer_out(amount)?;
+    let share_amount = bank.get_asset_shares(amount)?;
+    BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?
+        .transfer_shares(BalanceSide::Assets, -share_amount)?;
     bank.change_escrowed_asset_shares(share_amount)?;
     let escrow_shares = I80F48::from(escrow.asset_shares)
         .checked_add(share_amount)
@@ -238,21 +238,14 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
     )?;
 
     let amount = bank.get_asset_amount(escrow_shares)?;
-    let share_amount = if escrow_shares > I80F48::ZERO {
+    if escrow_shares > I80F48::ZERO {
         bank.change_escrowed_asset_shares(-escrow_shares)?;
-        let shares = BankAccountWrapper::find_or_create(
-            &bank_key,
-            &mut bank,
-            &mut destination.lending_account,
-        )?
-        .transfer_in(amount)?;
+        BankAccountWrapper::find_or_create(&bank_key, &mut bank, &mut destination.lending_account)?
+            .transfer_shares(BalanceSide::Assets, escrow_shares)?;
         destination.last_update = clock.unix_timestamp as u64;
         destination.lending_account.sort_balances();
         destination.sync_indexer_flags();
-        shares
-    } else {
-        I80F48::ZERO
-    };
+    }
     bank.update_bank_cache(&group)?;
 
     emit!(PositionEscrowReleasedEvent {
@@ -267,7 +260,7 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
         mint: bank.mint,
         returned,
         amount: amount.checked_to_num().ok_or_else(math_error!())?,
-        share_amount: share_amount.into(),
+        share_amount: escrow_shares.into(),
     });
 
     Ok(())

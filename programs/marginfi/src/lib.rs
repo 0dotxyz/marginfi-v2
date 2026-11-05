@@ -606,15 +606,29 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
-    /// (source authority) Move part of a position in one bank to another account. Without the
-    /// receiver's consent (shared authority or `destination_authority`) it only tops up a deposit
-    /// the receiver holds outside any order. A debt over-ask moves all of the debt.
-    pub fn lending_account_transfer_position<'info>(
+    /// (source authority) Move part of a deposit in one bank to another account that holds no debt
+    /// there. Without the receiver's consent (shared authority or `destination_authority`) it only
+    /// tops up a deposit the receiver holds outside any order.
+    pub fn lending_account_transfer_asset_position<'info>(
         ctx: Context<'info, LendingAccountTransferPosition<'info>>,
         transfer_amount: u64,
         destination_accounts: u8,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_transfer_position(
+        marginfi_account::lending_account_transfer_asset_position(
+            ctx,
+            transfer_amount,
+            destination_accounts,
+        )
+    }
+
+    /// (source authority, receiver's consent) Move part of a debt in one bank to another account
+    /// that holds no deposit there. An over-ask moves all of the debt.
+    pub fn lending_account_transfer_liability_position<'info>(
+        ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+        transfer_amount: u64,
+        destination_accounts: u8,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_transfer_liability_position(
             ctx,
             transfer_amount,
             destination_accounts,

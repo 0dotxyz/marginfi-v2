@@ -7,7 +7,9 @@ use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, prelude::*, ui_to_native};
 use marginfi::prelude::*;
 use marginfi::state::bank::BankImpl;
-use marginfi_type_crate::types::{Bank, BankConfigOpt, BankOperationalState, ACCOUNT_FROZEN};
+use marginfi_type_crate::types::{
+    BalanceSide, Bank, BankConfigOpt, BankOperationalState, ACCOUNT_FROZEN,
+};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -335,6 +337,84 @@ async fn test_position_transfer_destination_existing_balance() -> anyhow::Result
         I80F48::from_num(50.0) * I80F48::from_num(10u64.pow(sol_decimals))
     );
 
+    Ok(())
+}
+
+/// A deposit moves as exact shares: the destination gains what the source loses, and the bank's
+/// share total does not change, even when a share is not worth one token.
+#[tokio::test]
+async fn test_position_transfer_moves_exact_asset_shares() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    usdc_bank_f
+        .set_asset_share_value(I80F48::from_num(1.1))
+        .await;
+    let source_f = usdc_depositor(&test_f).await;
+    let (_receiver, dest_f) = user_with_usdc_deposit(&test_f).await;
+    let source_before = asset_shares(&source_f, usdc_bank_f).await;
+    let dest_before = asset_shares(&dest_f, usdc_bank_f).await;
+    let total_before: I80F48 = usdc_bank_f.load().await.total_asset_shares.into();
+
+    source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
+        .await?;
+
+    let moved = usdc_bank_f
+        .load()
+        .await
+        .get_asset_shares(I80F48::from_num(ui_to_native!(
+            100.0,
+            usdc_bank_f.mint.mint.decimals
+        )))?;
+    assert_eq!(
+        asset_shares(&source_f, usdc_bank_f).await,
+        source_before - moved
+    );
+    assert_eq!(
+        asset_shares(&dest_f, usdc_bank_f).await,
+        dest_before + moved
+    );
+    assert_eq!(
+        I80F48::from(usdc_bank_f.load().await.total_asset_shares),
+        total_before
+    );
+    Ok(())
+}
+
+/// A debt moves as exact shares: the destination takes on what the source sheds, and the bank's
+/// share total does not change, even when a share is not worth one token.
+#[tokio::test]
+async fn test_position_transfer_moves_exact_liability_shares() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    sol_bank_f
+        .set_liability_share_value(I80F48::from_num(1.1))
+        .await;
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = usdc_depositor(&test_f).await;
+    let source_before = liability_shares(&source_f, sol_bank_f).await;
+    let total_before: I80F48 = sol_bank_f.load().await.total_liability_shares.into();
+
+    source_f
+        .try_position_transfer(&dest_f, sol_bank_f, 10.0)
+        .await?;
+
+    let moved = sol_bank_f
+        .load()
+        .await
+        .get_liability_shares(I80F48::from_num(ui_to_native!(
+            10.0,
+            sol_bank_f.mint.mint.decimals
+        )))?;
+    assert_eq!(
+        liability_shares(&source_f, sol_bank_f).await,
+        source_before - moved
+    );
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, moved);
+    assert_eq!(
+        I80F48::from(sol_bank_f.load().await.total_liability_shares),
+        total_before
+    );
     Ok(())
 }
 
@@ -843,9 +923,12 @@ async fn test_position_transfer_collateral_into_debt_holder() -> anyhow::Result<
 
     assert!(
         res.is_err(),
-        "Transfer should fail when destination account has existing liabilities in the same bank (deposit-only constraint)"
+        "Transfer should fail when the destination holds a debt in the same bank"
     );
-    assert_custom_error!(res.unwrap_err(), MarginfiError::OperationDepositOnly);
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
 
     Ok(())
 }
@@ -924,14 +1007,11 @@ async fn test_position_transfer_with_accrued_interest() -> anyhow::Result<()> {
         .try_position_transfer_with_authority(&dest_account_f, usdc_bank_f, transfer_amount, &payer)
         .await?;
 
-    // The expected shares follow the bank's own burn-then-mint round trip.
     let bank_after_transfer = usdc_bank_f.load().await;
     let total_asset_shares_after: I80F48 = bank_after_transfer.total_asset_shares.into();
     let decimals = usdc_bank_f.mint.mint.decimals as u32;
     let transfer_native = I80F48::from_num(transfer_amount) * I80F48::from_num(10u64.pow(decimals));
-    let burned_shares = bank_after_transfer.get_asset_shares(transfer_native)?;
-    let minted_shares = bank_after_transfer
-        .get_asset_shares(bank_after_transfer.get_asset_amount(burned_shares)?)?;
+    let moved_shares = bank_after_transfer.get_asset_shares(transfer_native)?;
 
     let source_balance_after = source_account_f.load().await;
     let source_shares_after: I80F48 = source_balance_after
@@ -948,12 +1028,9 @@ async fn test_position_transfer_with_accrued_interest() -> anyhow::Result<()> {
         .asset_shares
         .into();
 
-    assert_eq!(source_shares_after, source_shares_before - burned_shares);
-    assert_eq!(dest_shares, minted_shares);
-    assert_eq!(
-        total_asset_shares_after,
-        total_asset_shares_before - burned_shares + minted_shares
-    );
+    assert_eq!(source_shares_after, source_shares_before - moved_shares);
+    assert_eq!(dest_shares, moved_shares);
+    assert_eq!(total_asset_shares_after, total_asset_shares_before);
 
     Ok(())
 }
@@ -1155,16 +1232,15 @@ async fn test_position_transfer_debt_between_own_accounts() -> anyhow::Result<()
     let bank = sol_bank_f.load().await;
     let decimals = sol_bank_f.mint.mint.decimals as u32;
     let transfer_native = I80F48::from_num(10.0) * I80F48::from_num(10u64.pow(decimals));
-    let burned_shares = bank.get_liability_shares(transfer_native)?;
-    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
+    let moved_shares = bank.get_liability_shares(transfer_native)?;
     assert_eq!(
         liability_shares(&source_f, sol_bank_f).await,
-        source_shares_before - burned_shares
+        source_shares_before - moved_shares
     );
-    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, moved_shares);
     assert_eq!(
         I80F48::from(bank.total_liability_shares),
-        total_shares_before - burned_shares + minted_shares
+        total_shares_before
     );
     Ok(())
 }
@@ -1208,10 +1284,91 @@ async fn test_position_transfer_debt_requires_receiver_consent() -> anyhow::Resu
         .await?;
     let bank = sol_bank_f.load().await;
     let decimals = sol_bank_f.mint.mint.decimals as u32;
-    let burned_shares =
+    let moved_shares =
         bank.get_liability_shares(I80F48::from_num(10.0) * I80F48::from_num(10u64.pow(decimals)))?;
-    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
-    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, moved_shares);
+    Ok(())
+}
+
+/// Each transfer moves only its own side: the asset transfer refuses a debt, and the liability
+/// transfer refuses a deposit.
+#[tokio::test]
+async fn test_position_transfer_rejects_the_other_side() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source_f = indebted_source(&test_f, 500.0).await;
+    let dest_f = usdc_depositor(&test_f).await;
+    let payer = test_f.payer_keypair();
+
+    let res = source_f
+        .try_position_transfer_on_side(BalanceSide::Assets, &dest_f, sol_bank_f, 10.0, &payer, None)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::NoAssetFound);
+    let res = source_f
+        .try_position_transfer_on_side(
+            BalanceSide::Liabilities,
+            &dest_f,
+            usdc_bank_f,
+            10.0,
+            &payer,
+            None,
+        )
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::NoLiabilityFound);
+    Ok(())
+}
+
+/// Collateral cannot land on a debt in the same bank, but the owner of both accounts gets the same
+/// result by repaying the debt, moving the collateral, then withdrawing what the repay used.
+#[tokio::test]
+async fn test_position_transfer_composes_a_move_onto_a_debt() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let decimals = usdc_bank_f.mint.mint.decimals;
+    let usdc = |ui: f64| I80F48::from_num(ui_to_native!(ui, decimals));
+    let lender_f = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    lender_f
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 5_000.0, None)
+        .await?;
+    let debtor_f = test_f.create_marginfi_account().await;
+    let debtor_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    debtor_f
+        .try_bank_deposit(debtor_sol.key, sol_bank_f, 100.0, None)
+        .await?;
+    let wallet_usdc = test_f.usdc_mint.create_token_account_and_mint_to(0).await;
+    debtor_f
+        .try_bank_borrow(wallet_usdc.key, usdc_bank_f, 100.0)
+        .await?;
+    let holder_f = usdc_depositor(&test_f).await;
+
+    let res = holder_f
+        .try_position_transfer(&debtor_f, usdc_bank_f, 300.0)
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
+
+    debtor_f
+        .try_bank_repay(wallet_usdc.key, usdc_bank_f, 0, Some(true))
+        .await?;
+    holder_f
+        .try_position_transfer(&debtor_f, usdc_bank_f, 300.0)
+        .await?;
+    debtor_f
+        .try_bank_withdraw(wallet_usdc.key, usdc_bank_f, 100.0, None)
+        .await?;
+
+    assert_eq!(liability_shares(&debtor_f, usdc_bank_f).await, I80F48::ZERO);
+    assert_eq!(asset_shares(&debtor_f, usdc_bank_f).await, usdc(200.0));
+    assert_eq!(asset_shares(&holder_f, usdc_bank_f).await, usdc(200.0));
+    assert_eq!(wallet_usdc.balance().await, ui_to_native!(100.0, decimals));
     Ok(())
 }
 
@@ -1229,7 +1386,10 @@ async fn test_position_transfer_debt_into_asset_holder() -> anyhow::Result<()> {
     let res = source_f
         .try_position_transfer(&dest_f, sol_bank_f, 10.0)
         .await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::OperationBorrowOnly);
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
     Ok(())
 }
 
@@ -1283,8 +1443,7 @@ async fn test_position_transfer_full_move_with_accrued_interest() -> anyhow::Res
         .await?;
 
     let bank = usdc_bank_f.load().await;
-    let burned_shares = bank.get_asset_shares(I80F48::from_num(transfer_native))?;
-    let minted_shares = bank.get_asset_shares(bank.get_asset_amount(burned_shares)?)?;
+    let moved_shares = bank.get_asset_shares(I80F48::from_num(transfer_native))?;
     let source_shares_after: I80F48 = source_account_f
         .load()
         .await
@@ -1301,8 +1460,8 @@ async fn test_position_transfer_full_move_with_accrued_interest() -> anyhow::Res
         .unwrap()
         .asset_shares
         .into();
-    assert_eq!(source_shares_after, source_shares_before - burned_shares);
-    assert_eq!(dest_shares, minted_shares);
+    assert_eq!(source_shares_after, source_shares_before - moved_shares);
+    assert_eq!(dest_shares, moved_shares);
     Ok(())
 }
 
@@ -1583,11 +1742,9 @@ async fn test_position_transfer_within_capped_banks() -> anyhow::Result<()> {
     );
     let sol_bank = sol_bank_f.load().await;
     let sol_decimals = sol_bank_f.mint.mint.decimals as u32;
-    let burned_shares = sol_bank
+    let moved_shares = sol_bank
         .get_liability_shares(I80F48::from_num(10.0) * I80F48::from_num(10u64.pow(sol_decimals)))?;
-    let minted_shares =
-        sol_bank.get_liability_shares(sol_bank.get_liability_amount(burned_shares)?)?;
-    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
+    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, moved_shares);
     Ok(())
 }
 
@@ -1612,15 +1769,11 @@ async fn test_position_transfer_debt_over_ask_moves_all() -> anyhow::Result<()> 
         .try_position_transfer(&dest_f, sol_bank_f, 100.0)
         .await?;
 
-    let bank = sol_bank_f.load().await;
-    let burned_shares =
-        bank.get_liability_shares(bank.get_liability_amount(source_shares_before)?)?;
-    let minted_shares = bank.get_liability_shares(bank.get_liability_amount(burned_shares)?)?;
+    assert_eq!(liability_shares(&source_f, sol_bank_f).await, I80F48::ZERO);
     assert_eq!(
-        liability_shares(&source_f, sol_bank_f).await,
-        source_shares_before - burned_shares
+        liability_shares(&dest_f, sol_bank_f).await,
+        source_shares_before
     );
-    assert_eq!(liability_shares(&dest_f, sol_bank_f).await, minted_shares);
     Ok(())
 }
 

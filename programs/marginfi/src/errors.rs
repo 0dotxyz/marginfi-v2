@@ -560,7 +560,9 @@ pub enum MarginfiError {
     PositionEscrowNotExpired, // 6905
     #[msg("Only an account with no debts may send a position escrow")]
     PositionEscrowSourceHasDebt, // 6906
-                                 // ************** END POSITION TRANSFER ERRORS
+    #[msg("The destination holds the opposite side of this position in the bank")]
+    PositionTransferDestinationHoldsOppositeSide, // 6907
+                                                  // ************** END POSITION TRANSFER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -860,6 +862,7 @@ impl From<u32> for MarginfiError {
             6904 => MarginfiError::PositionTransferConsentRequired,
             6905 => MarginfiError::PositionEscrowNotExpired,
             6906 => MarginfiError::PositionEscrowSourceHasDebt,
+            6907 => MarginfiError::PositionTransferDestinationHoldsOppositeSide,
 
             _ => MarginfiError::InternalLogicError,
         }

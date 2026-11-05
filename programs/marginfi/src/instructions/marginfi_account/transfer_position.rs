@@ -36,13 +36,47 @@ use marginfi_type_crate::{
     },
 };
 
-/// Moves `transfer_amount` of the source's position in `bank` to the destination, on the side it
-/// holds. Remaining accounts: the source's observation set, then the destination's.
-pub fn lending_account_transfer_position<'info>(
+/// Moves `transfer_amount` of the source's deposit in `bank` to the destination. The destination
+/// must hold no debt in the bank. Remaining accounts: the source's observation set, then the
+/// destination's.
+pub fn lending_account_transfer_asset_position<'info>(
     ctx: Context<'info, LendingAccountTransferPosition<'info>>,
     transfer_amount: u64,
     destination_accounts: u8,
 ) -> MarginfiResult {
+    transfer_position(
+        ctx,
+        transfer_amount,
+        destination_accounts,
+        BalanceSide::Assets,
+    )
+}
+
+/// Moves `transfer_amount` of the source's debt in `bank` to the destination, or all of it on an
+/// over-ask. The destination must hold no deposit in the bank. Remaining accounts: the source's
+/// observation set, then the destination's.
+pub fn lending_account_transfer_liability_position<'info>(
+    ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+    transfer_amount: u64,
+    destination_accounts: u8,
+) -> MarginfiResult {
+    transfer_position(
+        ctx,
+        transfer_amount,
+        destination_accounts,
+        BalanceSide::Liabilities,
+    )
+}
+
+/// Moves exact shares on `side` from the source to the destination. Bank share totals stay
+/// unchanged.
+fn transfer_position<'info>(
+    ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+    transfer_amount: u64,
+    destination_accounts: u8,
+    side: BalanceSide,
+) -> MarginfiResult {
+    let is_liability = side == BalanceSide::Liabilities;
     check!(
         ctx.accounts.source_marginfi_account.key()
             != ctx.accounts.destination_marginfi_account.key(),
@@ -67,11 +101,26 @@ pub fn lending_account_transfer_position<'info>(
         .lending_account
         .get_balance(&bank_key)
         .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
-    let (is_liability, source_shares): (bool, I80F48) = match source_balance.get_side() {
-        Some(BalanceSide::Liabilities) => (true, source_balance.liability_shares.into()),
-        Some(BalanceSide::Assets) => (false, source_balance.asset_shares.into()),
-        None => return err!(MarginfiError::NoAssetFound),
+    let source_shares: I80F48 = match (side, source_balance.get_side()) {
+        (BalanceSide::Assets, Some(BalanceSide::Assets)) => source_balance.asset_shares.into(),
+        (BalanceSide::Liabilities, Some(BalanceSide::Liabilities)) => {
+            source_balance.liability_shares.into()
+        }
+        (BalanceSide::Assets, _) => return err!(MarginfiError::NoAssetFound),
+        (BalanceSide::Liabilities, _) => return err!(MarginfiError::NoLiabilityFound),
     };
+    let opposite_side = if is_liability {
+        BalanceSide::Assets
+    } else {
+        BalanceSide::Liabilities
+    };
+    check!(
+        destination_account
+            .lending_account
+            .get_balance(&bank_key)
+            .is_none_or(|b| b.is_empty(opposite_side)),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
     if is_liability || !takes_unsolicited_deposit(&destination_account, &bank_key) {
         let receiver_consents = destination_account.authority == ctx.accounts.authority.key()
             || ctx
@@ -119,20 +168,25 @@ pub fn lending_account_transfer_position<'info>(
             bank_key,
         )?;
         // A debt move is capped at the debt itself, so an over-ask moves all of it as interest accrues.
-        let amount = if is_liability {
-            amount.min(bank.get_liability_amount(source_shares)?)
+        let (amount, share_amount) = if is_liability {
+            let debt = bank.get_liability_amount(source_shares)?;
+            if amount >= debt {
+                (debt, source_shares)
+            } else {
+                (amount, bank.get_liability_shares(amount)?)
+            }
         } else {
             check!(
                 bank.get_asset_amount(source_shares)? >= amount,
                 MarginfiError::PositionTransferInsufficientFunds
             );
-            amount
+            (amount, bank.get_asset_shares(amount)?)
         };
 
-        // Repaying the last of a debt writes its premium receivable off, so it is read first and moved
-        // with an emptied source.
+        // Emptying a debt writes its premium receivable off, so it is read first and moved with an
+        // emptied source.
         let mut carried_premium = I80F48::ZERO;
-        let share_amount = {
+        {
             let mut source_position = BankAccountWrapper::find(
                 &bank_key,
                 &mut bank,
@@ -141,39 +195,31 @@ pub fn lending_account_transfer_position<'info>(
             if is_liability {
                 source_position.claim_premium()?;
                 let receivable: I80F48 = source_position.balance.premium_outstanding.into();
-                let shares = source_position.repay(amount)?;
+                source_position.transfer_shares(side, -share_amount)?;
                 check_no_liability_dust(source_position.balance)?;
                 if source_position.balance.is_empty(BalanceSide::Liabilities) {
                     carried_premium = receivable;
                     // The emptied slot stays active, so it keeps no order tag.
                     source_position.balance.tag = 0;
                 }
-                shares
             } else {
-                source_position.transfer_out(amount)?
+                source_position.transfer_shares(side, -share_amount)?;
             }
-        };
-        let moved_amount = if is_liability {
-            bank.get_liability_amount(share_amount)?
-        } else {
-            bank.get_asset_amount(share_amount)?
-        };
+        }
         {
             let mut destination_position = BankAccountWrapper::find_or_create(
                 &bank_key,
                 &mut bank,
                 &mut destination_account.lending_account,
             )?;
+            destination_position.transfer_shares(side, share_amount)?;
             if is_liability {
-                destination_position.debt_transfer_in(moved_amount)?;
                 check_no_liability_dust(destination_position.balance)?;
                 destination_position.balance.premium_outstanding =
                     I80F48::from(destination_position.balance.premium_outstanding)
                         .checked_add(carried_premium)
                         .ok_or_else(math_error!())?
                         .into();
-            } else {
-                destination_position.transfer_in(moved_amount)?;
             }
         }
         if is_liability && bank.config.risk_tier == RiskTier::Isolated {

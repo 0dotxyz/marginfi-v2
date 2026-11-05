@@ -16,7 +16,8 @@ import {
   composeRemainingAccounts,
   depositIx,
   escrowPositionIx,
-  lendingAccountTransferPositionIx,
+  lendingAccountTransferAssetPositionIx,
+  lendingAccountTransferLiabilityPositionIx,
   returnPositionEscrowIx,
 } from "../../utils/user-instructions";
 import { editGlobalFeeState } from "../../utils/group-instructions";
@@ -114,7 +115,8 @@ describe("Position transfer", () => {
    * `signer` (the source authority unless given) signs and pays the fee; `consenting` signs to
    * accept debt or a new position.
    */
-  const transfer = async (
+  const sendTransfer = async (
+    ixFn: typeof lendingAccountTransferAssetPositionIx,
     source: MockUser,
     destination: MockUser,
     bank: PublicKey,
@@ -123,7 +125,7 @@ describe("Position transfer", () => {
     signer: MockUser = source,
   ) => {
     const tx = new Transaction().add(
-      await lendingAccountTransferPositionIx(bankrunProgram, {
+      await ixFn(bankrunProgram, {
         group,
         sourceMarginfiAccount: account(source),
         destinationMarginfiAccount: account(destination),
@@ -139,6 +141,42 @@ describe("Position transfer", () => {
     );
     return consenting ? send(tx, signer, consenting) : send(tx, signer);
   };
+
+  /** Moves part of `source`'s deposit in `bank` */
+  const transfer = (
+    source: MockUser,
+    destination: MockUser,
+    bank: PublicKey,
+    amount: BN,
+    consenting?: MockUser,
+    signer?: MockUser,
+  ) =>
+    sendTransfer(
+      lendingAccountTransferAssetPositionIx,
+      source,
+      destination,
+      bank,
+      amount,
+      consenting,
+      signer,
+    );
+
+  /** Moves part of `source`'s debt in `bank` */
+  const transferDebt = (
+    source: MockUser,
+    destination: MockUser,
+    bank: PublicKey,
+    amount: BN,
+    consenting?: MockUser,
+  ) =>
+    sendTransfer(
+      lendingAccountTransferLiabilityPositionIx,
+      source,
+      destination,
+      bank,
+      amount,
+      consenting,
+    );
 
   const balance = async (user: MockUser, bank: PublicKey) => {
     const acc = await bankrunProgram.account.marginfiAccount.fetch(account(user));
@@ -345,11 +383,11 @@ describe("Position transfer", () => {
     await deposit(users[2], collateralBank, new BN(100).mul(lst));
 
     const debtAmount = new BN(5).mul(lst);
-    const refused = await transfer(users[0], users[2], debtBank, debtAmount);
+    const refused = await transferDebt(users[0], users[2], debtBank, debtAmount);
     // PositionTransferConsentRequired
     assertBankrunTxFailed(refused, 6904);
 
-    const result = await transfer(users[0], users[2], debtBank, debtAmount, users[2]);
+    const result = await transferDebt(users[0], users[2], debtBank, debtAmount, users[2]);
     assert.isNull(result.result);
 
     // The clock has not moved since the borrow, so one liability share is one native unit.

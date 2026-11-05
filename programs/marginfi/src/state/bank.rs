@@ -423,9 +423,9 @@ impl BankImpl for Bank {
         Ok(())
     }
 
-    /// Changes both `total_asset_shares` and `total_escrowed_asset_shares` by `shares`.
+    /// Changes `total_escrowed_asset_shares` by `shares`. Escrowed shares stay in
+    /// `total_asset_shares`.
     fn change_escrowed_asset_shares(&mut self, shares: I80F48) -> MarginfiResult {
-        self.change_asset_shares(shares, true)?;
         self.total_escrowed_asset_shares = I80F48::from(self.total_escrowed_asset_shares)
             .checked_add(shares)
             .ok_or_else(math_error!())?

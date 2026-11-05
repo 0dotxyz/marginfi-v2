@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger, PositionEscrow,
-    RebalanceMove, WrappedI80F48,
+    BalanceSide, Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger,
+    PositionEscrow, RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -2741,9 +2741,41 @@ impl MarginfiAccountFixture {
         .await
     }
 
-    /// `destination_authority` signs to consent to receiving debt or a new position.
+    /// `destination_authority` signs to consent to receiving debt or a new position. Transfers the
+    /// side the source holds in `bank`.
     pub async fn try_position_transfer_with_authorities<T: Into<f64> + Copy>(
         &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        source_authority: &Keypair,
+        destination_authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let side = match self
+            .load()
+            .await
+            .lending_account
+            .get_balance(&bank.key)
+            .and_then(|b| b.get_side())
+        {
+            Some(BalanceSide::Liabilities) => BalanceSide::Liabilities,
+            _ => BalanceSide::Assets,
+        };
+        self.try_position_transfer_on_side(
+            side,
+            destination_account,
+            bank,
+            ui_amount,
+            source_authority,
+            destination_authority,
+        )
+        .await
+    }
+
+    /// Transfers `side` of the source's position in `bank`, whatever side it holds.
+    pub async fn try_position_transfer_on_side<T: Into<f64> + Copy>(
+        &self,
+        side: BalanceSide,
         destination_account: &MarginfiAccountFixture,
         bank: &BankFixture,
         ui_amount: T,
@@ -2775,14 +2807,25 @@ impl MarginfiAccountFixture {
         accounts.extend(source_obs);
         accounts.extend(destination_obs);
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountTransferPosition {
-                transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        let transfer_amount = ui_to_native!(ui_amount.into(), bank.mint.mint.decimals);
+        let data = match side {
+            BalanceSide::Assets => marginfi::instruction::LendingAccountTransferAssetPosition {
+                transfer_amount,
                 destination_accounts,
             }
             .data(),
+            BalanceSide::Liabilities => {
+                marginfi::instruction::LendingAccountTransferLiabilityPosition {
+                    transfer_amount,
+                    destination_accounts,
+                }
+                .data()
+            }
+        };
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data,
         };
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;

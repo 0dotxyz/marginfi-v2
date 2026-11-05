@@ -1073,42 +1073,56 @@ export type LendingAccountTransferPositionArgs = {
   destinationRemaining: PublicKey[];
 };
 
+const transferPositionAccounts = (args: LendingAccountTransferPositionArgs) => ({
+  group: args.group,
+  sourceMarginfiAccount: args.sourceMarginfiAccount,
+  destinationMarginfiAccount: args.destinationMarginfiAccount,
+  authority: args.authority,
+  destinationAuthority: args.destinationAuthority,
+  feePayer: args.feePayer,
+  bank: args.bank,
+  globalFeeWallet: args.globalFeeWallet,
+  // feeState = deriveGlobalFeeState(id)
+});
+
+const transferPositionRemaining = (args: LendingAccountTransferPositionArgs) =>
+  [...args.sourceRemaining, ...args.destinationRemaining].map(
+    (pubkey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false }),
+  );
+
 /**
- * Move part of a position to another account in the same bank. `destinationAuthority` signs to
- * consent to receiving debt or a new position; `feePayer` pays the flat fee.
+ * Move part of a deposit to another account that holds no debt in the bank.
+ * `destinationAuthority` signs to consent to a new position; `feePayer` pays the flat fee.
  */
-export const lendingAccountTransferPositionIx = (
+export const lendingAccountTransferAssetPositionIx = (
   program: Program<Marginfi>,
   args: LendingAccountTransferPositionArgs,
-) => {
-  const meta = (pubkey: PublicKey): AccountMeta => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  });
-  const ix = program.methods
-    .lendingAccountTransferPosition(
+) =>
+  program.methods
+    .lendingAccountTransferAssetPosition(
       args.transferAmount,
       args.destinationRemaining.length,
     )
-    .accounts({
-      group: args.group,
-      sourceMarginfiAccount: args.sourceMarginfiAccount,
-      destinationMarginfiAccount: args.destinationMarginfiAccount,
-      authority: args.authority,
-      destinationAuthority: args.destinationAuthority,
-      feePayer: args.feePayer,
-      bank: args.bank,
-      globalFeeWallet: args.globalFeeWallet,
-      // feeState = deriveGlobalFeeState(id)
-    })
-    .remainingAccounts(
-      [...args.sourceRemaining, ...args.destinationRemaining].map(meta),
-    )
+    .accounts(transferPositionAccounts(args))
+    .remainingAccounts(transferPositionRemaining(args))
     .instruction();
 
-  return ix;
-};
+/**
+ * Move part of a debt to another account that holds no deposit in the bank.
+ * `destinationAuthority` signs to consent; `feePayer` pays the flat fee.
+ */
+export const lendingAccountTransferLiabilityPositionIx = (
+  program: Program<Marginfi>,
+  args: LendingAccountTransferPositionArgs,
+) =>
+  program.methods
+    .lendingAccountTransferLiabilityPosition(
+      args.transferAmount,
+      args.destinationRemaining.length,
+    )
+    .accounts(transferPositionAccounts(args))
+    .remainingAccounts(transferPositionRemaining(args))
+    .instruction();
 
 export type EscrowPositionArgs = {
   group: PublicKey;
