@@ -265,6 +265,40 @@ async fn flashloan_fail_missing_fe_ix() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn flashloan_fail_short_end_fl_data() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let marginfi_account_f = test_f.create_marginfi_account().await;
+    let start_ix = marginfi_account_f
+        .make_lending_account_start_flashloan_ix(1)
+        .await;
+    let end_ix = marginfi_account_f
+        .make_lending_account_end_flashloan_ix(vec![], vec![])
+        .await;
+
+    for data_len in 0..end_ix.data.len() {
+        let mut short_end_ix = end_ix.clone();
+        short_end_ix.data.truncate(data_len);
+
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix.clone(), short_end_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx.banks_client.process_transaction(tx).await;
+
+        assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalFlashloan);
+    }
+
+    marginfi_account_f
+        .try_flashloan(vec![], vec![], vec![], None)
+        .await?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
     // Setup test executor with non-admin payer
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
