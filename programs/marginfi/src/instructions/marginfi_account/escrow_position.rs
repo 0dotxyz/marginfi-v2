@@ -117,20 +117,9 @@ pub fn lending_account_escrow_position<'info>(
     source_account.lending_account.sort_balances();
     source_account.sync_indexer_flags();
     bank.update_bank_cache(&group)?;
-    let bank_mint = bank.mint;
-    drop(bank);
-
-    let maybe_price = fetch_unbiased_price_for_bank_cache(
-        &bank_key,
-        &*ctx.accounts.bank.load()?,
-        &clock,
-        ctx.remaining_accounts,
-    )
-    .ok();
-    ctx.accounts
-        .bank
-        .load_mut()?
-        .update_cache_price(maybe_price)?;
+    let maybe_price =
+        fetch_unbiased_price_for_bank_cache(&bank_key, &bank, &clock, ctx.remaining_accounts).ok();
+    bank.update_cache_price(maybe_price)?;
 
     emit!(LendingAccountEscrowPositionEvent {
         header: AccountEventHeader {
@@ -144,7 +133,7 @@ pub fn lending_account_escrow_position<'info>(
         receiver_account,
         memo,
         bank: bank_key,
-        mint: bank_mint,
+        mint: bank.mint,
         amount: amount.checked_to_num().ok_or_else(math_error!())?,
         share_amount: share_amount.into(),
         escrow_shares: escrow_shares.into(),
@@ -161,31 +150,32 @@ pub fn lending_account_escrow_position<'info>(
 pub fn lending_account_claim_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
-    let escrow = ctx.accounts.position_escrow.load()?;
-    let destination = ctx.accounts.destination_marginfi_account.load()?;
+    {
+        let escrow = ctx.accounts.position_escrow.load()?;
+        let destination = ctx.accounts.destination_marginfi_account.load()?;
 
-    let owned_by_receiver = destination.authority == escrow.receiver_authority;
-    let receiver_signed = ctx
-        .accounts
-        .authority
-        .as_ref()
-        .is_some_and(|signer| signer.key() == escrow.receiver_authority);
-    let accepted = owned_by_receiver && receiver_signed;
-    let admin_accepted =
-        owned_by_receiver && destination.get_flag(ACCOUNT_FROZEN) && admin_signed(ctx.accounts)?;
-    let swept = owned_by_receiver && takes_unsolicited_deposit(&destination, &escrow.bank);
-    check!(
-        accepted || admin_accepted || swept,
-        MarginfiError::PositionTransferConsentRequired
-    );
-    check_can_receive(&destination, admin_accepted)?;
-    validate_bank_state(
-        &*ctx.accounts.bank.load()?,
-        InstructionKind::FailsIfPausedOrReduceState,
-        deposit_is_halt_safe(&destination, &escrow.bank),
-    )?;
-    drop(destination);
-    drop(escrow);
+        let owned_by_receiver = destination.authority == escrow.receiver_authority;
+        let receiver_signed = ctx
+            .accounts
+            .authority
+            .as_ref()
+            .is_some_and(|signer| signer.key() == escrow.receiver_authority);
+        let accepted = owned_by_receiver && receiver_signed;
+        let admin_accepted = owned_by_receiver
+            && destination.get_flag(ACCOUNT_FROZEN)
+            && admin_signed(ctx.accounts)?;
+        let swept = owned_by_receiver && takes_unsolicited_deposit(&destination, &escrow.bank);
+        check!(
+            accepted || admin_accepted || swept,
+            MarginfiError::PositionTransferConsentRequired
+        );
+        check_can_receive(&destination, admin_accepted)?;
+        validate_bank_state(
+            &*ctx.accounts.bank.load()?,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&destination, &escrow.bank),
+        )?;
+    }
 
     release_position_escrow(ctx, false)
 }
@@ -195,31 +185,31 @@ pub fn lending_account_claim_position_escrow(
 pub fn lending_account_return_position_escrow(
     ctx: Context<ReleasePositionEscrow>,
 ) -> MarginfiResult {
-    let escrow = ctx.accounts.position_escrow.load()?;
-    let destination_key = ctx.accounts.destination_marginfi_account.key();
-    let destination = ctx.accounts.destination_marginfi_account.load()?;
-    let signer = ctx.accounts.authority.as_ref().map(|s| s.key());
+    {
+        let escrow = ctx.accounts.position_escrow.load()?;
+        let destination_key = ctx.accounts.destination_marginfi_account.key();
+        let destination = ctx.accounts.destination_marginfi_account.load()?;
+        let signer = ctx.accounts.authority.as_ref().map(|s| s.key());
 
-    check!(
-        signer == Some(escrow.receiver_authority)
-            || Clock::get()?.unix_timestamp >= escrow.expires_at,
-        MarginfiError::PositionEscrowNotExpired
-    );
-    check!(
-        destination_key == escrow.source_account,
-        MarginfiError::Unauthorized
-    );
-    check!(
-        !destination.get_flag(ACCOUNT_FROZEN) || admin_signed(ctx.accounts)?,
-        MarginfiError::AccountFrozen
-    );
-    validate_bank_state(
-        &*ctx.accounts.bank.load()?,
-        InstructionKind::FailsInPausedState,
-        deposit_is_halt_safe(&destination, &escrow.bank),
-    )?;
-    drop(destination);
-    drop(escrow);
+        check!(
+            signer == Some(escrow.receiver_authority)
+                || Clock::get()?.unix_timestamp >= escrow.expires_at,
+            MarginfiError::PositionEscrowNotExpired
+        );
+        check!(
+            destination_key == escrow.source_account,
+            MarginfiError::Unauthorized
+        );
+        check!(
+            !destination.get_flag(ACCOUNT_FROZEN) || admin_signed(ctx.accounts)?,
+            MarginfiError::AccountFrozen
+        );
+        validate_bank_state(
+            &*ctx.accounts.bank.load()?,
+            InstructionKind::FailsInPausedState,
+            deposit_is_halt_safe(&destination, &escrow.bank),
+        )?;
+    }
 
     release_position_escrow(ctx, true)
 }

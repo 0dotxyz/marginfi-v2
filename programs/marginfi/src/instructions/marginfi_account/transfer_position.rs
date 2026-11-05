@@ -57,7 +57,6 @@ pub fn lending_account_transfer_position<'info>(
     let bank_key = ctx.accounts.bank.key();
     let mut source_account = ctx.accounts.source_marginfi_account.load_mut()?;
     let mut destination_account = ctx.accounts.destination_marginfi_account.load_mut()?;
-    let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
     check_position_flags(&source_account)?;
@@ -86,103 +85,115 @@ pub fn lending_account_transfer_position<'info>(
         );
     }
 
-    validate_asset_tags(&bank, &destination_account)?;
-    let halt_safe = !is_liability
-        && !source_account.lending_account.has_liabilities()
-        && deposit_is_halt_safe(&destination_account, &bank_key);
-    validate_bank_state(
-        &bank,
-        InstructionKind::FailsIfPausedOrReduceState,
-        halt_safe,
-    )?;
+    let (amount, share_amount, carried_premium, position_transfer_fee, bank_mint) = {
+        let mut bank = ctx.accounts.bank.load_mut()?;
 
-    let amount = I80F48::from_num(transfer_amount);
-    let position_transfer_fee = charge_position_transfer(
-        &*ctx.accounts.fee_state.load()?,
-        &group,
-        &bank_key,
-        &bank,
-        &clock,
-        ctx.remaining_accounts,
-        amount,
-        ctx.accounts.fee_payer.to_account_info(),
-        ctx.accounts.global_fee_wallet.to_account_info(),
-        &ctx.accounts.system_program,
-    )?;
-
-    bank.accrue_interest(
-        clock.unix_timestamp,
-        &group,
-        #[cfg(not(feature = "client"))]
-        bank_key,
-    )?;
-    // A debt move is capped at the debt itself, so an over-ask moves all of it as interest accrues.
-    let amount = if is_liability {
-        amount.min(bank.get_liability_amount(source_shares)?)
-    } else {
-        check!(
-            bank.get_asset_amount(source_shares)? >= amount,
-            MarginfiError::PositionTransferInsufficientFunds
-        );
-        amount
-    };
-
-    // Repaying the last of a debt writes its premium receivable off, so it is read first and moved
-    // with an emptied source.
-    let mut carried_premium = I80F48::ZERO;
-    let share_amount = {
-        let mut source_position =
-            BankAccountWrapper::find(&bank_key, &mut bank, &mut source_account.lending_account)?;
-        if is_liability {
-            source_position.claim_premium()?;
-            let receivable: I80F48 = source_position.balance.premium_outstanding.into();
-            let shares = source_position.repay(amount)?;
-            check_no_liability_dust(source_position.balance)?;
-            if source_position.balance.is_empty(BalanceSide::Liabilities) {
-                carried_premium = receivable;
-                // The emptied slot stays active, so it keeps no order tag.
-                source_position.balance.tag = 0;
-            }
-            shares
-        } else {
-            source_position.transfer_out(amount)?
-        }
-    };
-    let moved_amount = if is_liability {
-        bank.get_liability_amount(share_amount)?
-    } else {
-        bank.get_asset_amount(share_amount)?
-    };
-    {
-        let mut destination_position = BankAccountWrapper::find_or_create(
-            &bank_key,
-            &mut bank,
-            &mut destination_account.lending_account,
+        validate_asset_tags(&bank, &destination_account)?;
+        let halt_safe = !is_liability
+            && !source_account.lending_account.has_liabilities()
+            && deposit_is_halt_safe(&destination_account, &bank_key);
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            halt_safe,
         )?;
-        if is_liability {
-            destination_position.debt_transfer_in(moved_amount)?;
-            check_no_liability_dust(destination_position.balance)?;
-            destination_position.balance.premium_outstanding =
-                I80F48::from(destination_position.balance.premium_outstanding)
-                    .checked_add(carried_premium)
-                    .ok_or_else(math_error!())?
-                    .into();
-        } else {
-            destination_position.transfer_in(moved_amount)?;
-        }
-    }
-    if is_liability && bank.config.risk_tier == RiskTier::Isolated {
-        destination_account.indexer_flags.has_isolated = 1;
-    }
 
-    for account in [&mut *source_account, &mut *destination_account] {
-        account.last_update = clock.unix_timestamp as u64;
-        account.lending_account.sort_balances();
-        account.sync_indexer_flags();
-    }
-    bank.update_bank_cache(&group)?;
-    let bank_mint = bank.mint;
-    drop(bank);
+        let amount = I80F48::from_num(transfer_amount);
+        let position_transfer_fee = charge_position_transfer(
+            &*ctx.accounts.fee_state.load()?,
+            &group,
+            &bank_key,
+            &bank,
+            &clock,
+            ctx.remaining_accounts,
+            amount,
+            ctx.accounts.fee_payer.to_account_info(),
+            ctx.accounts.global_fee_wallet.to_account_info(),
+            &ctx.accounts.system_program,
+        )?;
+
+        bank.accrue_interest(
+            clock.unix_timestamp,
+            &group,
+            #[cfg(not(feature = "client"))]
+            bank_key,
+        )?;
+        // A debt move is capped at the debt itself, so an over-ask moves all of it as interest accrues.
+        let amount = if is_liability {
+            amount.min(bank.get_liability_amount(source_shares)?)
+        } else {
+            check!(
+                bank.get_asset_amount(source_shares)? >= amount,
+                MarginfiError::PositionTransferInsufficientFunds
+            );
+            amount
+        };
+
+        // Repaying the last of a debt writes its premium receivable off, so it is read first and moved
+        // with an emptied source.
+        let mut carried_premium = I80F48::ZERO;
+        let share_amount = {
+            let mut source_position = BankAccountWrapper::find(
+                &bank_key,
+                &mut bank,
+                &mut source_account.lending_account,
+            )?;
+            if is_liability {
+                source_position.claim_premium()?;
+                let receivable: I80F48 = source_position.balance.premium_outstanding.into();
+                let shares = source_position.repay(amount)?;
+                check_no_liability_dust(source_position.balance)?;
+                if source_position.balance.is_empty(BalanceSide::Liabilities) {
+                    carried_premium = receivable;
+                    // The emptied slot stays active, so it keeps no order tag.
+                    source_position.balance.tag = 0;
+                }
+                shares
+            } else {
+                source_position.transfer_out(amount)?
+            }
+        };
+        let moved_amount = if is_liability {
+            bank.get_liability_amount(share_amount)?
+        } else {
+            bank.get_asset_amount(share_amount)?
+        };
+        {
+            let mut destination_position = BankAccountWrapper::find_or_create(
+                &bank_key,
+                &mut bank,
+                &mut destination_account.lending_account,
+            )?;
+            if is_liability {
+                destination_position.debt_transfer_in(moved_amount)?;
+                check_no_liability_dust(destination_position.balance)?;
+                destination_position.balance.premium_outstanding =
+                    I80F48::from(destination_position.balance.premium_outstanding)
+                        .checked_add(carried_premium)
+                        .ok_or_else(math_error!())?
+                        .into();
+            } else {
+                destination_position.transfer_in(moved_amount)?;
+            }
+        }
+        if is_liability && bank.config.risk_tier == RiskTier::Isolated {
+            destination_account.indexer_flags.has_isolated = 1;
+        }
+
+        for account in [&mut *source_account, &mut *destination_account] {
+            account.last_update = clock.unix_timestamp as u64;
+            account.lending_account.sort_balances();
+            account.sync_indexer_flags();
+        }
+        bank.update_bank_cache(&group)?;
+        (
+            amount,
+            share_amount,
+            carried_premium,
+            position_transfer_fee,
+            bank.mint,
+        )
+    };
 
     let split = ctx
         .remaining_accounts
