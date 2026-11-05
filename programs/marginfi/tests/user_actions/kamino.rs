@@ -350,6 +350,78 @@ async fn kamino_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resul
     Ok(())
 }
 
+#[test_case(true; "zero weight permits withdrawal and records the halt")]
+#[test_case(false; "positive weight rejects the price jump")]
+#[tokio::test]
+async fn kamino_withdraw_gates_before_cache_update(zero_weight: bool) -> anyhow::Result<()> {
+    let setup =
+        TestFixture::setup_kamino_bank(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let test_f = &setup.test_f;
+    let now = test_f.get_clock().await.unix_timestamp;
+    for feed in [PYTH_SOL_FEED, PYTH_PYUSD_FEED, PYTH_USDC_FEED] {
+        test_f.set_pyth_oracle_timestamp(feed, now).await;
+    }
+    let (user, tokens) = setup.create_user_with_liquidity(500.0).await;
+    test_f
+        .run_kamino_deposit(&setup.bank_f, &user, tokens.key, 100_000_000)
+        .await?;
+    if zero_weight {
+        setup.bank_f.set_asset_weights_to_zero().await?;
+    }
+
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let healthy = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    user.try_bank_deposit(healthy.key, sol, 100, None).await?;
+    let pyusd = test_f.get_bank(&BankMint::PyUSD);
+    let lender = test_f.create_marginfi_account().await;
+    let supply = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    lender
+        .try_bank_deposit(supply.key, pyusd, 1_000, None)
+        .await?;
+    let debt = test_f.pyusd_mint.create_empty_token_account().await;
+    user.try_bank_borrow(debt.key, pyusd, 1).await?;
+
+    // Warm the integration cache through a withdrawal before enabling the breaker.
+    test_f
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, now)
+        .await;
+    test_f
+        .run_kamino_withdraw(&setup.bank_f, &user, tokens.key, 100_000, Some(false))
+        .await?;
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
+    assert!(!setup.bank_f.load().await.is_cb_halted(now));
+
+    let clock = test_f.get_clock().await;
+    test_f.set_clock(clock.slot + 100, now + 1).await;
+    for feed in [PYTH_SOL_FEED, PYTH_PYUSD_FEED] {
+        test_f.set_pyth_oracle_timestamp(feed, now + 1).await;
+    }
+    test_f
+        .set_pyth_oracle_price_native(PYTH_USDC_FEED, 3_000_000, 0, now + 1)
+        .await;
+    let result = test_f
+        .run_kamino_withdraw(&setup.bank_f, &user, tokens.key, 1_000_000, Some(false))
+        .await;
+    if zero_weight {
+        result?;
+        assert!(setup.bank_f.load().await.is_cb_halted(now + 1));
+        let halted = test_f
+            .run_kamino_withdraw(&setup.bank_f, &user, tokens.key, 2_000_000, Some(false))
+            .await;
+        assert_custom_error!(halted.unwrap_err(), MarginfiError::BankCircuitBreakerHalted);
+    } else {
+        assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+        assert!(!setup.bank_f.load().await.is_cb_halted(now + 1));
+    }
+    Ok(())
+}
+
 /// Kamino blocks its own instructions in emergency mode, but us lending against that collateral
 /// needs no CPI, so nothing upstream stops it. We stop valuing it for Initial margin, and keep
 /// Maintenance value so the position stays priced for repay and liquidation.

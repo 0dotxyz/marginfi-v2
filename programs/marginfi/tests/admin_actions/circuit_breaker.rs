@@ -1233,13 +1233,16 @@ async fn active_bank_keys_in_balance_order(account: &MarginfiAccountFixture) -> 
         .collect()
 }
 
-#[test_case(false; "existing e-mode liability")]
-#[test_case(true; "borrow introduces the boosting liability")]
+#[test_case(false, false; "existing e-mode liability")]
+#[test_case(true, false; "borrow introduces the boosting liability")]
+#[test_case(false, true; "isolated collateral with existing e-mode liability")]
+#[test_case(true, true; "isolated collateral with new e-mode liability")]
 #[tokio::test]
 async fn cb_gate_checks_emode_boosted_leg(
     borrow_opens_boosting_liability: bool,
+    isolated_collateral: bool,
 ) -> anyhow::Result<()> {
-    use marginfi_type_crate::types::EmodeEntry;
+    use marginfi_type_crate::types::{EmodeEntry, RiskTier};
     const EMODE_COLLATERAL_TAG: u16 = 91;
     const EMODE_LIABILITY_TAG: u16 = 92;
 
@@ -1290,6 +1293,17 @@ async fn cb_gate_checks_emode_boosted_leg(
         )
         .await?;
 
+    if isolated_collateral {
+        sol.update_config(
+            BankConfigOpt {
+                risk_tier: Some(RiskTier::Isolated),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    }
+
     let borrow_destination = test_f.pyusd_mint.create_empty_token_account().await;
     if !borrow_opens_boosting_liability {
         account
@@ -1298,18 +1312,34 @@ async fn cb_gate_checks_emode_boosted_leg(
     }
 
     arm_circuit_breaker(&test_f, sol, PYTH_SOL_FEED, 10_000_000_000).await?;
-    set_oracle_price_now(&test_f, PYTH_SOL_FEED, 30_000_000_000).await;
+    for (price, confidence, expected_error) in [
+        (30_000_000_000, 0, MarginfiError::CircuitBreakerPriceJump),
+        (
+            10_000_000_000,
+            CONFIDENCE_BREACHING_HEALTH_CAP_ONLY,
+            MarginfiError::OracleMaxConfidenceExceeded,
+        ),
+    ] {
+        let now = test_f.get_clock().await.unix_timestamp;
+        test_f
+            .set_pyth_oracle_price_native(PYTH_SOL_FEED, price, confidence, now)
+            .await;
 
-    let blocked = if borrow_opens_boosting_liability {
-        account
-            .try_bank_borrow(borrow_destination.key, pyusd, 1)
-            .await
-    } else {
-        account
-            .try_bank_withdraw(healthy_collateral_tokens.key, sol_eq, 1, None)
-            .await
-    };
-    assert_custom_error!(blocked.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+        let result = if borrow_opens_boosting_liability {
+            account
+                .try_bank_borrow(borrow_destination.key, pyusd, 1)
+                .await
+        } else {
+            account
+                .try_bank_withdraw(healthy_collateral_tokens.key, sol_eq, 1, None)
+                .await
+        };
+        if isolated_collateral {
+            result?;
+        } else {
+            assert_custom_error!(result.unwrap_err(), expected_error);
+        }
+    }
     Ok(())
 }
 

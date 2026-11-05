@@ -38,8 +38,8 @@ use marginfi_type_crate::{
     },
     types::{
         is_marginfi_asset_tag, BalanceSide, Bank, BankVaultType, HealthPriceMode, MarginfiAccount,
-        MarginfiGroup, OraclePriceType, PriceBias, RequirementType, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        MarginfiGroup, OraclePriceType, PriceBias, RequirementType, RiskTier,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -262,23 +262,32 @@ pub fn lending_account_liquidate<'info>(
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
         let asset_bank_remaining_accounts_len = get_remaining_accounts_per_bank(&asset_bank)? - 1;
 
-        // Seized collateral needs a CB check even at zero weight: the liquidatee gate above
-        // skips zero-weight asset legs. The liability bank needs no separate check here because
-        // that gate never skips liability legs.
+        // Supplement the account gate only when it may have skipped the seized collateral.
         if asset_bank.get_flag(CIRCUIT_BREAKER_ENABLED) && !cb_admin_liquidation {
-            let oracle_ais = ctx
-                .remaining_accounts
-                .get(..asset_bank_remaining_accounts_len)
-                .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
-            let (_, cache_price) =
-                OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
-                    &asset_bank,
-                    oracle_ais,
-                    &clock,
-                    OraclePriceType::RealTime,
-                    liquidatee_marginfi_account.prices_through_pt_emergency(),
-                )?;
-            asset_bank.cb_price_gate(cache_price.cb_observation()?)?;
+            let asset_already_checked = asset_bank.config.risk_tier == RiskTier::Collateral
+                && I80F48::from(asset_bank.config.asset_weight_maint) > I80F48::ZERO
+                && matches!(
+                    liquidatee_marginfi_account
+                        .lending_account
+                        .get_balance(&asset_bank_key)
+                        .and_then(|balance| balance.get_side()),
+                    Some(BalanceSide::Assets)
+                );
+            if !asset_already_checked {
+                let oracle_ais = ctx
+                    .remaining_accounts
+                    .get(..asset_bank_remaining_accounts_len)
+                    .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+                let (_, cache_price) =
+                    OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+                        &asset_bank,
+                        oracle_ais,
+                        &clock,
+                        OraclePriceType::RealTime,
+                        liquidatee_marginfi_account.prices_through_pt_emergency(),
+                    )?;
+                asset_bank.cb_price_gate(cache_price.cb_observation()?)?;
+            }
         }
 
         let asset_price: I80F48 = fetch_asset_price_for_bank_low_bias(

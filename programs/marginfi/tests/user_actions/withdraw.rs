@@ -787,13 +787,16 @@ async fn send(
         .await
 }
 
-#[test_case(false, true; "partial, confidence breach")]
-#[test_case(true, true; "full close, confidence breach")]
-#[test_case(false, false; "partial, stale (guard)")]
+#[test_case(false, true, 2; "partial, confidence breach")]
+#[test_case(true, true, 0; "full close, confidence breach")]
+#[test_case(false, false, 2; "partial, stale (guard)")]
+#[test_case(false, true, 10; "exact amount, confidence breach")]
+#[test_case(false, false, 10; "exact amount, stale")]
 #[tokio::test]
 async fn withdraw_zero_weight_asset_with_unusable_oracle(
     withdraw_all: bool,
     oracle_confidence_breach: bool,
+    withdraw_amount: u32,
 ) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let sol = test_f.get_bank(&BankMint::Sol);
@@ -822,6 +825,7 @@ async fn withdraw_zero_weight_asset_with_unusable_oracle(
     let debt_tokens = test_f.usdc_mint.create_empty_token_account().await;
     borrower.try_bank_borrow(debt_tokens.key, usdc, 1).await?;
     sol.set_asset_weights_to_zero().await?;
+    arm_circuit_breaker(&test_f, sol, PYTH_SOL_FEED, 10_000_000_000).await?;
     let now = test_f.get_clock().await.unix_timestamp;
     if oracle_confidence_breach {
         test_f
@@ -843,7 +847,7 @@ async fn withdraw_zero_weight_asset_with_unusable_oracle(
             .await?;
     } else {
         borrower
-            .try_bank_withdraw(zero_tokens.key, sol, 2, None)
+            .try_bank_withdraw(zero_tokens.key, sol, withdraw_amount, None)
             .await?;
     }
     let after = borrower.load().await;
@@ -852,10 +856,15 @@ async fn withdraw_zero_weight_asset_with_unusable_oracle(
         .get_balance(&sol.key)
         .map(|bal| I80F48::from(bal.asset_shares))
         .unwrap_or(I80F48::ZERO);
-    if withdraw_all {
+    if withdraw_all || withdraw_amount == 10 {
         assert_eq!(remaining, I80F48::ZERO);
     } else {
         assert!(remaining > I80F48::ZERO);
+    }
+    if !withdraw_all && withdraw_amount == 10 {
+        let balance = after.lending_account.get_balance(&sol.key).unwrap();
+        assert!(balance.is_active());
+        assert!(balance.get_side().is_none());
     }
     Ok(())
 }

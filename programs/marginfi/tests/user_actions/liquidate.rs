@@ -1549,19 +1549,26 @@ async fn setup_liquidatee_with_zero_weight_sol() -> anyhow::Result<(
     Ok((test_f, liquidator, liquidatee, liquidatee_fixed_tokens))
 }
 
-#[test_case(false; "zero weight, confidence breach")]
-#[test_case(true; "zero weight, stale feed")]
+#[test_case(false, false; "zero weight, confidence breach")]
+#[test_case(true, false; "zero weight, stale feed")]
+#[test_case(false, true; "zero weight, CB price jump")]
 #[tokio::test]
 async fn liquidate_zero_weight_asset_with_unusable_oracle_blocks_only_that_leg(
     oracle_is_stale: bool,
+    oracle_price_jump: bool,
 ) -> anyhow::Result<()> {
     let (test_f, liquidator, liquidatee, _) = setup_liquidatee_with_zero_weight_sol().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let fixed_bank = test_f.get_bank(&BankMint::Fixed);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
+    if oracle_price_jump {
+        arm_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    }
     let now = test_f.get_clock().await.unix_timestamp;
-    if oracle_is_stale {
+    if oracle_price_jump {
+        set_oracle_price_now(&test_f, PYTH_SOL_FEED, 30_000_000_000).await;
+    } else if oracle_is_stale {
         test_f
             .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now - 3_600)
             .await;
@@ -1581,12 +1588,28 @@ async fn liquidate_zero_weight_asset_with_unusable_oracle_blocks_only_that_leg(
         .await;
     assert_custom_error!(
         seize_zero_weight_result.unwrap_err(),
-        if oracle_is_stale {
+        if oracle_price_jump {
+            MarginfiError::CircuitBreakerPriceJump
+        } else if oracle_is_stale {
             MarginfiError::PythPushStalePrice
         } else {
             MarginfiError::OracleMaxConfidenceExceeded
         }
     );
+
+    if oracle_price_jump {
+        sol_bank
+            .set_asset_weights(I80F48!(0.01), I80F48!(0.01))
+            .await?;
+        let positive_weight = liquidator
+            .try_liquidate(&liquidatee, sol_bank, 1, usdc_bank)
+            .await;
+        assert_custom_error!(
+            positive_weight.unwrap_err(),
+            MarginfiError::CircuitBreakerPriceJump
+        );
+        sol_bank.set_asset_weights_to_zero().await?;
+    }
 
     liquidator
         .try_liquidate(&liquidatee, fixed_bank, 1, usdc_bank)

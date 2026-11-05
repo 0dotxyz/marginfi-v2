@@ -271,6 +271,11 @@ pub fn kamino_withdraw<'info>(
             true,
         )?;
 
+        // Gate before the cache update can trip a halt on zero-weight collateral.
+        if marginfi_account.lending_account.has_liabilities() {
+            run_cb_price_gate_skip_zero_weight(&marginfi_account, &group, ctx.remaining_accounts)?;
+        }
+
         {
             let bank_loader = &ctx.accounts.bank;
             let mut bank = bank_loader.load_mut()?;
@@ -287,12 +292,6 @@ pub fn kamino_withdraw<'info>(
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
-
-        // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live price
-        // has jumped past the breach threshold; a liability-free withdraw skips it.
-        if marginfi_account.lending_account.has_liabilities() {
-            run_cb_price_gate_skip_zero_weight(&marginfi_account, &group, ctx.remaining_accounts)?;
-        }
     } else {
         // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
         // that case the cache doesn't update and this does nothing.
