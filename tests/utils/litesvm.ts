@@ -1,14 +1,13 @@
-import { Wallet } from "@coral-xyz/anchor";
-import { utils } from "@coral-xyz/anchor";
+import { AnchorProvider, utils, Wallet } from "@coral-xyz/anchor";
 import {
   AccountInfo,
+  Connection,
   Keypair,
   PublicKey,
   SendTransactionError,
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { LiteSVMProvider as AnchorLiteSVMProvider } from "anchor-litesvm";
 import { address, getTransactionDecoder, lamports } from "@solana/kit";
 import {
   Clock,
@@ -44,7 +43,7 @@ export type LiteSVMTransactionResultWithMeta = {
 export type BanksTransactionMeta = LiteSVMTransactionMeta;
 export type BanksTransactionResultWithMeta = LiteSVMTransactionResultWithMeta;
 
-// The Anchor provider uses web3.js objects, while recent LiteSVM releases use
+// The specs and Anchor use web3.js objects, while recent LiteSVM releases use
 // Solana Kit. Keep that conversion at the test-runtime boundary.
 class LiteSVM {
   private readonly inner = new KitLiteSVM();
@@ -308,26 +307,109 @@ export class ProgramTestContext {
   }
 }
 
-export class BankrunProvider extends AnchorLiteSVMProvider {
+/**
+ * The subset of web3.js `Connection` that Anchor's provider / account clients and the specs call.
+ * Missing accounts read as `null`, like a real RPC. Transactions execute synchronously, so
+ * `sendRawTransaction` throws on failure (with the program logs attached) and `confirmTransaction`
+ * is a no-op.
+ */
+export class LiteSVMConnection {
+  constructor(private readonly svm: LiteSVM) {}
+
+  private context() {
+    return { slot: Number(this.svm.getClock().slot) };
+  }
+
+  async getAccountInfo(
+    publicKey: PublicKey,
+    _commitment?: unknown
+  ): Promise<AccountInfo<Buffer> | null> {
+    return asBufferAccount(this.svm.getAccount(publicKey));
+  }
+
+  async getAccountInfoAndContext(publicKey: PublicKey, _commitment?: unknown) {
+    return {
+      context: this.context(),
+      value: await this.getAccountInfo(publicKey),
+    };
+  }
+
+  async getMultipleAccountsInfo(
+    publicKeys: PublicKey[],
+    _commitment?: unknown
+  ): Promise<(AccountInfo<Buffer> | null)[]> {
+    return publicKeys.map((key) => asBufferAccount(this.svm.getAccount(key)));
+  }
+
+  async getMultipleAccountsInfoAndContext(
+    publicKeys: PublicKey[],
+    _commitment?: unknown
+  ) {
+    return {
+      context: this.context(),
+      value: await this.getMultipleAccountsInfo(publicKeys),
+    };
+  }
+
+  async getMinimumBalanceForRentExemption(
+    dataLength: number,
+    _commitment?: unknown
+  ): Promise<number> {
+    return Number(this.svm.getRent().minimumBalance(BigInt(dataLength)));
+  }
+
+  async getBalance(
+    publicKey: PublicKey,
+    _commitment?: unknown
+  ): Promise<number> {
+    return Number(this.svm.getBalance(publicKey) ?? 0n);
+  }
+
+  async getSlot(_commitment?: unknown): Promise<number> {
+    return this.context().slot;
+  }
+
+  async getLatestBlockhash(_commitment?: unknown) {
+    return { blockhash: this.svm.latestBlockhash(), lastValidBlockHeight: 0 };
+  }
+
+  async sendRawTransaction(
+    rawTransaction: Buffer | Uint8Array | number[],
+    _options?: unknown
+  ): Promise<string> {
+    const raw = Buffer.from(rawTransaction);
+    // Versioned transactions set the high bit of the first byte.
+    const tx =
+      (raw[0] & 0x80) !== 0
+        ? VersionedTransaction.deserialize(raw)
+        : Transaction.from(raw);
+    const result = this.svm.sendTransaction(tx);
+    if (result instanceof FailedTransactionMetadata) {
+      throwFailedTransaction(result, tx);
+    }
+    return txSignature(tx);
+  }
+
+  async confirmTransaction(_strategy: unknown, _commitment?: unknown) {
+    return { context: this.context(), value: { err: null } };
+  }
+
+  // SPL single-pool (staked collateral) helpers ask for this; mainnet's minimum is 1 SOL.
+  async getStakeMinimumDelegation(_config?: unknown) {
+    return { context: this.context(), value: 1_000_000_000 };
+  }
+}
+
+/** A real `AnchorProvider` whose connection is the LiteSVM instance. */
+export class BankrunProvider extends AnchorProvider {
   readonly context: ProgramTestContext;
 
   constructor(context: ProgramTestContext) {
-    // The provider checks against its own older LiteSVM's error class, so
-    // translate failures before they reach it.
-    const client = Object.create(context.svm) as LiteSVM;
-    client.sendTransaction = (tx) => {
-      const result = context.svm.sendTransaction(tx);
-      if (result instanceof FailedTransactionMetadata)
-        throwFailedTransaction(result, tx);
-      return result;
-    };
-    client.simulateTransaction = (tx) => {
-      const result = context.svm.simulateTransaction(tx);
-      if (result instanceof FailedTransactionMetadata)
-        throwFailedTransaction(result, tx);
-      return result;
-    };
-    super(client as never, new Wallet(context.payer));
+    super(
+      new LiteSVMConnection(context.svm) as unknown as Connection,
+      new Wallet(context.payer),
+      {}
+    );
     this.context = context;
   }
 }
