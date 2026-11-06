@@ -441,3 +441,27 @@ async fn kamino_market_emergency_mode_zeroes_init_value_only() -> anyhow::Result
 
     Ok(())
 }
+
+#[tokio::test]
+async fn kamino_deposit_rejects_receivership() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, token) = setup.create_user_with_liquidity(10.0).await;
+    let mut account = user.load().await;
+    account.account_flags |= marginfi_type_crate::types::ACCOUNT_IN_RECEIVERSHIP;
+    user.set_account(&account).await?;
+
+    let result = setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, token.key, 1_000_000)
+        .await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::AccountDisabled);
+    assert!(setup.load_user_accounted_collateral(&user).await.is_none());
+
+    account.account_flags = 0;
+    user.set_account(&account).await?;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, token.key, 1_000_000)
+        .await?;
+    Ok(())
+}

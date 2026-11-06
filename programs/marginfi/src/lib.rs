@@ -1148,6 +1148,12 @@ pub mod marginfi {
         kamino::lending_pool_add_bank_kamino(ctx, bank_config, bank_seed)
     }
 
+    /// (permissionless) Refresh a JupLend bank's global, token and Earn-position emergency state.
+    /// Changes at Fluid take effect in health checks only after this instruction is called.
+    pub fn propagate_juplend_emergency(ctx: Context<PropagateJuplendEmergency>) -> MarginfiResult {
+        juplend::propagate_juplend_emergency(ctx)
+    }
+
     /// (permissionless) Copy the emergency flag of a Kamino lending market onto a bank in that
     /// market. While set, the bank backs no new borrowing, exactly as a bank on a reserve in
     /// emergency mode does. Clearing the flag works the same way, once Kamino resumes the market.

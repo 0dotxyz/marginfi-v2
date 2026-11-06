@@ -15,6 +15,7 @@ import {
   bankRunProvider,
   banksClient,
   ecosystem,
+  globalProgramAdmin,
   groupAdmin,
   oracles,
   users,
@@ -30,6 +31,7 @@ import {
   addBank,
   configureBank,
   configureBankIxs,
+  editGlobalFeeState,
 } from "../../utils/group-instructions";
 import {
   borrowIx,
@@ -46,7 +48,10 @@ import {
   tagLiquidationRecordIx,
   withdrawIx,
 } from "../../utils/user-instructions";
-import { deriveLiquidationRecord } from "../../utils/pdas";
+import {
+  deriveGlobalFeeState,
+  deriveLiquidationRecord,
+} from "../../utils/pdas";
 import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
 import {
   defaultBankConfig,
@@ -78,6 +83,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
   let collateralBank: PublicKey;
   let liquidateeAccount: PublicKey;
   let liquidationRecord: PublicKey;
+  let originalLiquidationMaxFee: ReturnType<typeof bigNumberToWrappedI80F48>;
   /** [[bank, oracle]] groups for the liquidatee's two balances */
   let balanceGroups: PublicKey[][] = [];
 
@@ -134,6 +140,21 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
 
   before(async () => {
     program = bankrunProgram;
+    const [feeStateKey] = deriveGlobalFeeState(program.programId);
+    originalLiquidationMaxFee = (
+      await program.account.feeState.fetch(feeStateKey)
+    ).liquidationMaxFee;
+    // The shared fixture uses a 50% base. Use 5% here to exercise growth to the 25% ceiling.
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+          admin: globalProgramAdmin.wallet.publicKey,
+          liquidationMaxFee: bigNumberToWrappedI80F48(0.05),
+        })
+      ),
+      [globalProgramAdmin.wallet]
+    );
     const setup = await genericMultiBankTestSetup(
       1,
       USER_ACCOUNT_THROWAWAY,
@@ -186,6 +207,19 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
       [collateralBank, oracles.tokenAOracle.publicKey],
       [debtBank, oracles.pythPullLst.publicKey],
     ];
+  });
+
+  after(async () => {
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+          admin: globalProgramAdmin.wallet.publicKey,
+          liquidationMaxFee: originalLiquidationMaxFee,
+        })
+      ),
+      [globalProgramAdmin.wallet]
+    );
   });
 
   it("(user 1) provides liquidity, (user 0) borrows against collateral", async () => {
@@ -305,10 +339,10 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     assert.equal(await fetchTag(), tagBefore);
   });
 
-  it("(user 1) liquidates at a ~37% premium after the tag matures; clock restarts", async () => {
+  it("(user 1) liquidates at a ~19% premium after the tag matures; clock restarts", async () => {
     const liquidator = users[1];
 
-    // Warp one week ahead so the tag matures (premium cap grows to 100%)
+    // Warp one week ahead so the tag matures (premium cap grows to 25%)
     let clock = await banksClient.getClock();
     const targetUnix = clock.unixTimestamp + BigInt(ONE_WEEK_IN_SECONDS);
     bankrunContext.setClock(
@@ -348,12 +382,11 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
       liquidator.lstAlphaAccount
     );
 
-    // Seize 0.6 token A ($6) against a 0.024 lst repayment ($4.20), a ~37% premium after
-    // confidence bias, far above the 5% base cap but within the matured 100% cap
-    const withdrawAmount = new BN(0.6 * 10 ** ecosystem.tokenADecimals);
+    // Seize 0.52 token A ($5.20) against a 0.024 lst repayment ($4.20), a ~19% premium after
+    // confidence bias, above the 5% base cap but within the matured 25% cap
+    const withdrawAmount = new BN(0.52 * 10 ** ecosystem.tokenADecimals);
     const repayAmount = new BN(0.024 * 10 ** ecosystem.lstAlphaDecimals);
-    await processBankrunTransaction(
-      bankrunContext,
+    const liquidationTx = async (amount: BN) =>
       new Transaction().add(
         ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
         await startLiquidationIx(liquidator.mrgnBankrunProgram, {
@@ -365,7 +398,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
           marginfiAccount: liquidateeAccount,
           bank: collateralBank,
           tokenAccount: liquidator.tokenAAccount,
-          amount: withdrawAmount,
+          amount,
           remaining: composeRemainingAccounts(balanceGroups),
         }),
         await repayIx(liquidator.mrgnBankrunProgram, {
@@ -378,7 +411,22 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
           marginfiAccount: liquidateeAccount,
           remaining: composeRemainingAccountsMetaBanksOnly(balanceGroups),
         })
-      ),
+      );
+
+    // The former ~37% premium exceeds the new ceiling even after the tag matures.
+    const tagBefore = await fetchTag();
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      await liquidationTx(new BN(0.6 * 10 ** ecosystem.tokenADecimals)),
+      [liquidator.wallet],
+      true
+    );
+    assertBankrunTxFailed(result, 6090); // LiquidationPremiumTooHigh
+    assert.equal(await fetchTag(), tagBefore);
+
+    await processBankrunTransaction(
+      bankrunContext,
+      await liquidationTx(withdrawAmount),
       [liquidator.wallet]
     );
 
@@ -397,7 +445,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     );
     assert.equal(lstBalanceBefore - lstBalanceAfter, repayAmount.toNumber());
 
-    // Erasing $3.60 of the ~$6.75 deficit clears the 25% bar; the account is still unhealthy
+    // Erasing $3.68 of the ~$6.75 deficit clears the 25% bar; the account is still unhealthy
     const now = await getBankrunTime(bankrunContext);
     assert.equal(await fetchTag(), now);
     const record = await fetchRecord();
@@ -457,7 +505,7 @@ describe("m06: Tag liquidation record (liquidation premium grows over time)", ()
     ]);
     const liquidateeAccounts = composeRemainingAccounts(balanceGroups);
     await advanceClock(600);
-    // Seize 0.2 token A ($2); the ~$1.90 repaid erases ~$1.70 of the ~$3.15 deficit, above the
+    // Seize 0.2 token A ($2); the ~$1.90 repaid erases ~$1.70 of the ~$3.1 deficit, above the
     // 25% bar, and leaves the account unhealthy
     const tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 800_000 }),
