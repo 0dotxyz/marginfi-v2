@@ -35,6 +35,7 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
+use marinade_mocks::state::MinimalMarinadeState;
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
@@ -1125,8 +1126,7 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power =
-                    kamino_borrow_power(bank, &reserve) && !state.is_paused();
+                price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1140,7 +1140,11 @@ impl OraclePriceFeedAdapter {
                 apply_i80f48_multiplier(&mut price_feed, kamino_rate)?;
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any Kamino emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: kamino_rate,
                 })
@@ -1166,7 +1170,6 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !state.is_paused();
 
                 // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1180,7 +1183,11 @@ impl OraclePriceFeedAdapter {
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any JupLend emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: juplend_rate,
                 })
@@ -2393,6 +2400,11 @@ pub struct PythPushOraclePriceFeed {
 }
 
 impl PythPushOraclePriceFeed {
+    /// Disable has_borrow_power if the Marinade state is paused, otherwise no-op.
+    fn restrict_marinade_borrow_power(&mut self, state: &MinimalMarinadeState) {
+        self.has_borrow_power &= !state.is_paused();
+    }
+
     /// Load a Pyth Price feed.
     ///
     /// Security assumptions:
@@ -2839,6 +2851,35 @@ mod tests {
         let cached = I80F48::from_num(6_028_935_980u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
         assert!((rate - cached).abs() / cached < I80F48::from_num(0.00001));
         assert!(rate > I80F48::from_num(1.40) && rate < I80F48::from_num(1.41));
+    }
+
+    #[test]
+    fn marinade_pause_preserves_existing_borrow_power_restrictions() {
+        use bytemuck::Zeroable;
+
+        for venue_allows_borrow in [false, true] {
+            for paused in [false, true] {
+                let mut state = MinimalMarinadeState::zeroed();
+                state.paused = u8::from(paused);
+                let price = || price_update::Price {
+                    price: 100,
+                    conf: 2,
+                    exponent: 0,
+                    publish_time: 42,
+                };
+                let mut feed = PythPushOraclePriceFeed {
+                    price: Box::new(price()),
+                    ema_price: Box::new(price()),
+                    has_borrow_power: venue_allows_borrow,
+                };
+
+                feed.restrict_marinade_borrow_power(&state);
+
+                assert_eq!(feed.has_borrow_power(), venue_allows_borrow && !paused);
+                assert_eq!(feed.price.price, 100);
+                assert_eq!(feed.ema_price.price, 100);
+            }
+        }
     }
 
     #[test]
