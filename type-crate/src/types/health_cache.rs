@@ -11,6 +11,25 @@ pub const HEALTHY: u32 = 1;
 pub const ENGINE_OK: u32 = 2;
 pub const ORACLE_OK: u32 = 4;
 pub const EMODE_BOOSTED: u32 = 8;
+pub const LIQUIDATION_START: u32 = 16;
+pub const DELEVERAGE_START: u32 = 32;
+const RECEIVERSHIP_START_MASK: u32 = LIQUIDATION_START | DELEVERAGE_START;
+
+/// The operation that produced the health cache at the start of receivership.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReceivershipCacheOrigin {
+    Liquidation,
+    Deleverage,
+}
+
+impl ReceivershipCacheOrigin {
+    fn flag(self) -> u32 {
+        match self {
+            Self::Liquidation => LIQUIDATION_START,
+            Self::Deleverage => DELEVERAGE_START,
+        }
+    }
+}
 
 assert_struct_size!(HealthCache, 304);
 assert_struct_align!(HealthCache, 8);
@@ -73,7 +92,9 @@ pub struct HealthCache {
     ///   ignore oracle issues if health is still satisfactory with some balance zeroed out).
     /// * EMODE BOOSTED = 8 - If set, an emode or same-asset entry weights every collateral balance
     ///   above its own bank's maintenance weight. Only written by maintenance passes.
-    /// * 16, 32, 64, 128, etc - reserved for future use
+    /// * LIQUIDATION START = 16 - Cache was computed at the start of a liquidation.
+    /// * DELEVERAGE START = 32 - Cache was computed at the start of a deleverage.
+    /// * 64, 128, etc - reserved for future use
     pub flags: u32,
     /// If the engine errored, look here for the error code. If the engine returns ok, you may also
     /// check here to see if the risk engine rejected this tx (3009).
@@ -101,6 +122,22 @@ pub struct HealthCache {
 }
 
 impl HealthCache {
+    /// Clear receivership provenance when a cache is written by any other operation.
+    pub fn clear_receivership_origin(&mut self) {
+        self.flags &= !RECEIVERSHIP_START_MASK;
+    }
+
+    /// Mark a freshly computed receivership-start cache with exactly one origin.
+    pub fn set_receivership_origin(&mut self, origin: ReceivershipCacheOrigin) {
+        self.clear_receivership_origin();
+        self.flags |= origin.flag();
+    }
+
+    /// Require an exact origin, rejecting both missing and conflicting markers.
+    pub fn has_receivership_origin(&self, origin: ReceivershipCacheOrigin) -> bool {
+        self.flags & RECEIVERSHIP_START_MASK == origin.flag()
+    }
+
     /// True if account is healthy (cannot be liquidated)
     pub fn is_healthy(&self) -> bool {
         self.flags & HEALTHY != 0

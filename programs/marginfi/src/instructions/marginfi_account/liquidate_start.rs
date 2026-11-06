@@ -23,9 +23,9 @@ use marginfi_type_crate::{
     constants::ix_discriminators,
     types::{
         HealthCache, HealthPriceMode, LiquidationPriceCache, LiquidationRecord, MarginfiAccount,
-        MarginfiGroup, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        MarginfiGroup, ReceivershipCacheOrigin, RequirementType, ACCOUNT_DISABLED,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -60,7 +60,7 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        false,
+        ReceivershipCacheOrigin::Liquidation,
     )?;
 
     let sysvar = &ctx.accounts.instruction_sysvar;
@@ -91,7 +91,7 @@ pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> M
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        true,
+        ReceivershipCacheOrigin::Deleverage,
     )?;
 
     let sysvar = &ctx.accounts.instruction_sysvar;
@@ -109,7 +109,7 @@ pub fn start_receivership<'info>(
     group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
-    ignore_healthy: bool,
+    origin: ReceivershipCacheOrigin,
 ) -> MarginfiResult {
     // Note: the receiver can use the health cache state after this ix concludes to plan their
     // liquidation/deleverage strategy.
@@ -124,7 +124,8 @@ pub fn start_receivership<'info>(
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
         },
-        ignore_healthy,
+        // Risk-admin deleverage can unwind healthy accounts; permissionless liquidation cannot.
+        matches!(origin, ReceivershipCacheOrigin::Deleverage),
     )?;
 
     // Use heap-efficient equity calculation
@@ -141,7 +142,7 @@ pub fn start_receivership<'info>(
     )?;
 
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
-    marginfi_account.health_cache = health_cache;
+    marginfi_account.set_receivership_start_health_cache(health_cache, origin);
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     marginfi_account.indexer_flags.has_ever_been_liquidated = 1;
 
