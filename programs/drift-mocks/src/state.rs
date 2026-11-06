@@ -140,8 +140,7 @@ pub struct MinimalSpotMarket {
     pub _padding10: [u64; 5],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, AnchorSerialize, AnchorDeserialize)]
-#[borsh(use_discriminant = true)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
 pub enum UserStatus {
     Active = 0,
@@ -151,9 +150,6 @@ pub enum UserStatus {
     AdvancedLp = 0b00001000,
     ProtectedMakerOrders = 0b00010000,
 }
-
-unsafe impl Zeroable for UserStatus {}
-unsafe impl Pod for UserStatus {}
 
 assert_struct_size!(MinimalUser, 4368);
 assert_struct_align!(MinimalUser, 8);
@@ -184,8 +180,8 @@ pub struct MinimalUser {
     /// Sub account id for this user account
     pub sub_account_id: u16,
 
-    // Status and flags
-    pub status: UserStatus,
+    /// Drift stores status flags as a byte, including combinations of flags.
+    pub status: u8,
 
     // Final padding to reach exactly 4376 bytes (including discriminator)
     pub _padding8: [u8; 27],
@@ -193,10 +189,8 @@ pub struct MinimalUser {
 
 impl MinimalUser {
     pub fn is_being_liquidated(&self) -> bool {
-        matches!(
-            self.status,
-            UserStatus::BeingLiquidated | UserStatus::Bankrupt
-        )
+        self.status == UserStatus::BeingLiquidated as u8
+            || self.status == UserStatus::Bankrupt as u8
     }
 }
 
@@ -690,6 +684,28 @@ mod capacity_tests {
         let mut active = market(0, 0);
         active.status = 1;
         assert_eq!(active.remaining_deposit_capacity(), Some(u64::MAX));
+    }
+}
+
+#[cfg(test)]
+mod user_status_tests {
+    use super::*;
+
+    #[test]
+    fn liquidation_status_preserves_drift_status_bytes() {
+        let mut user = MinimalUser::zeroed();
+        for (status, liquidating) in [
+            (0, false),
+            (1, true),
+            (2, true),
+            (4, false),
+            (8, false),
+            (16, false),
+            (3, false),
+        ] {
+            user.status = status;
+            assert_eq!(user.is_being_liquidated(), liquidating, "status {status}");
+        }
     }
 }
 

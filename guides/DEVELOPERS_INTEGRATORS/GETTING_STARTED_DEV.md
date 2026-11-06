@@ -2,99 +2,109 @@
 
 New developer getting started working on the mrgnv2 program side? Read on.
 
-## Things to Install (May 2026)
+## Dependencies
 
-- Rust toolchain - 1.90.0 (`rust-toolchain.toml`)
-- Node - 24.15.0
-- Yarn - 4.14.1 (via Corepack)
-- Anchor CLI - 1.0.2 (`Anchor.toml`)
-- Agave/Solana CLI - 3.1.13 (`Anchor.toml`)
-- cargo-nextest - 0.9.81
-- cargo-fuzz - 0.12.0
+Install the following versions used by the workspace and CI:
 
-Rust/Solana/Anchor setup:
+- Rust **1.95.0**, including `rustfmt` and `clippy` (`rust-toolchain.toml` also requests `rust-analyzer`).
+- Anchor CLI **1.2.2** and Agave/Solana CLI **4.1.2** (`Anchor.toml`).
+- Node **24.15.0** and Yarn **4.14.1** (via Corepack).
+- `cargo-nextest` **0.9.81** for Rust integration tests.
+- `cargo-fuzz` **0.13.1** and Python 3 for the optional fuzz suite; see its [README](../../programs/marginfi/fuzz/README.md) for the required nightly toolchain.
 
-```
-rustup toolchain install 1.90.0
+On Ubuntu, the build also needs `build-essential`, `pkg-config`, and `libudev-dev`, as in CI.
 
-# Install the pinned Agave/Solana CLI version.
-sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.13/install)"
+Install Rust before Anchor so AVM's compilation uses the required compiler:
+
+```sh
+rustup toolchain install 1.95.0 --component rustfmt --component clippy --component rust-analyzer
+
+# Install the Agave/Solana CLI version configured in Anchor.toml.
+sh -c "$(curl -sSfL https://release.anza.xyz/v4.1.2/install)"
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
-# Install Anchor through AVM, then pin the workspace Anchor CLI version.
-cargo install avm --git https://github.com/solana-foundation/anchor --locked
-avm install 1.0.2
-avm use 1.0.2
+# Install Anchor through AVM. Set the toolchain explicitly when running AVM
+# outside the workspace, where rust-toolchain.toml does not apply.
+RUSTUP_TOOLCHAIN=1.95.0 cargo install avm --git https://github.com/solana-foundation/anchor --locked
+RUSTUP_TOOLCHAIN=1.95.0 avm install 1.2.2
+avm use 1.2.2
 
-cargo install cargo-nextest --version "0.9.81" --locked
-cargo install cargo-fuzz --version "0.12.0" --locked
+RUSTUP_TOOLCHAIN=1.95.0 cargo install cargo-nextest --version 0.9.81 --locked
+# Optional: only needed for fuzzing.
+RUSTUP_TOOLCHAIN=1.95.0 cargo install cargo-fuzz --version 0.13.1 --locked
 ```
 
-Node/Yarn setup (recommended):
+`rust-toolchain.toml` selects Rust 1.95.0 inside this repository; it does not change your global default. Anchor may initialize the Solana version specified in `Anchor.toml` for a build even if your active `solana --version` differs. The Solana CLI/toolchain version is separate from the versions of the individual Solana Rust crates resolved in `Cargo.lock`.
 
-```
+Anchor's provider is configured to use `~/.config/solana/id.json`. If you don't already have that keypair, create one with `solana-keygen new`; keep any existing keypair rather than overwriting it.
+
+Install Node 24.15.0 and Corepack, then enable Yarn and install the JavaScript dependencies:
+
+```sh
 corepack enable
 corepack prepare yarn@4.14.1 --activate
-node -v
-yarn -v
+yarn install --immutable
 ```
+
+Check your setup from the repository root:
+
+```sh
+rustc --version
+anchor --version
+solana --version
+node --version
+yarn --version
+cargo nextest --version
+```
+
+The Rust program uses Anchor 1.2.2, while the JavaScript client dependencies in `package.json` use Anchor 0.32.1. Use the versions in the manifests and lockfiles rather than trying to make their version numbers match. Switchboard pull feed fixtures are still used by the tests, but the Rust workspace no longer requires the Switchboard SDK.
 
 # Running tests
 
-## For Rust unit tests:
+The two integration test stacks require separate sBPF v3 program builds: Rust tests use the mainnet program ID, while TypeScript tests use the localnet program ID. Keep their artifacts separate:
 
-```
-cargo test --lib
-```
-
-## For the TS test suite:
-
-```
-anchor build
-anchor build -p marginfi -- --no-default-features --features custom-heap
-anchor test --skip-build
+```text
+target/sbf/deploy/   Rust-test binaries, including mainnet-ID marginfi
+target/sbf/          mainnet marginfi SBF build cache
+target/sbf/mocks-cache/  standalone mock SBF build cache
+target/host/         Rust host test build cache
+target/deploy/       localnet binaries used by TypeScript tests
+target/idl/          generated IDLs used by TypeScript tests
 ```
 
-Note: you may need to build the other programs (mock, liquidity incentive, etc) if you have never
-run `anchor build` before.
+## Rust unit tests
 
-Note: you need to `yarn install --immutable` before your first run
-
-Segmentation fault? Just try again. That happens sometimes, generally on the first run of the day.
-Sometimes it happens on the CI pipeline as well, just kick it again it that occurs.
-
-Each letter prefix is referred to as a "suite" and is broadly end-to-end. The localnet tests
-run through LiteSVM will create a fairly substantial CPU load. Completetion varies
-substantially by hardware. If you your workflow is too slow, go to this portion of `Anchor.toml` and
-comment out the top line, comment in the suite you actually want to run:
-
-```
-[scripts]
-test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
-
-# Staked collateral tests only
-# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/s*.spec.ts --exit --require tests/rootHooks.ts"
-
-# Pyth pull tests only
-# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/p*.spec.ts --exit --require tests/rootHooks.ts"
-
-# Edmode tests only
-# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/e*.spec.ts --exit --require tests/rootHooks.ts"
+```sh
+cargo test -p marginfi --no-default-features --features custom-heap --lib
 ```
 
-Note: You cannot run individual tests, most of the tests in a suite must run in order, where the
-number after the prefix determines their run order through the magic of filenames.
+## TypeScript tests (LiteSVM)
 
-## For the Anchor test suite:
+```sh
+# Run once, and again after changing the corresponding programs.
+anchor build -p mocks --arch v3 --ignore-keys
+anchor build -p test_transfer_hook --arch v3 --no-idl
+anchor build -p marginfi --arch v3 -- --no-default-features --features custom-heap
 
+anchor run basic-tests
+# Or run all suites:
+anchor run all-tests
 ```
-anchor build --no-idl
+
+The marginfi build generates the localnet `target/deploy/marginfi.so`, `target/idl/marginfi.json`, and TypeScript types. Other named suites, including `limits-tests`, `kamino-tests`, and `juplend-tests`, are listed in `Anchor.toml`. Individual specs can have ordering or setup dependencies within their suite.
+
+## Rust integration tests
+
+```sh
+# Build mainnet binaries to target/sbf/deploy/.
+./scripts/build-workspace.sh
+
+# Run all packages, or select marginfi.
 ./scripts/test-program.sh all
+# ./scripts/test-program.sh marginfi
 ```
-Note: we recommend running `anchor clean` before using `anchor build --no-idl` if you ran
-`anchor build` before for the TS test suite.
 
-This is much slower than the remix test command, but stable on any system.
+The script builds the standalone mocks and marginfi in separate SBF caches to avoid rebuilding them when their feature sets differ. The first test run also compiles host binaries into `target/host/`; later runs can reuse that cache.
 
 ## Customize Your Rust testing experience:
 
@@ -161,10 +171,7 @@ Update Node
 
 ## All the tests are failing in Rust and/or TS
 
-Make sure you build the correct version, Rust requires the mainnet version (default features), TS
-wants localnet (no features). Also note that Rust localnet builds to a different target folder (e.g.
-`./scripts/build-workspace.sh` builds to target/sbf, `anchor build` goes to target/), see `Rust
-tests panic with` for more details.
+Make sure the correct program ID is baked into each build. Rust integration tests load the mainnet build from `target/sbf/deploy/`, while TypeScript tests load the localnet build from `target/deploy/`. A mismatch can produce `DeclaredProgramIdMismatch` (Anchor error `0x1004`). Rebuild the affected stack using the commands above; don't point Rust tests at the localnet artifact.
 
 ## Program not deployed errors, when build seemingly worked otherwise
 
@@ -218,18 +225,18 @@ Usually manifests as something like:
 
 ```
 Starting LiteSVM setup...
-thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-.../solana-program-test-3.1.12/src/lib.rs:...:
+thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-.../solana-program-test-4.1.2/src/lib.rs:...:
 Program file data not available <SOME GARBAGE>
 ```
 
-Run `lsof -i :8899` to find the validator and then `kill -9 VALIDATOR_PID
+Run `lsof -i :8899` to find a process using the validator port, then stop it if it is no longer needed.
 
 ## Rust tests panic with `Program file data not available for marginfi (...)`
 
 Usually manifests as:
 
 ```
-thread '...' panicked at .../solana-program-test-3.1.12/src/lib.rs:...:
+thread '...' panicked at .../solana-program-test-4.1.2/src/lib.rs:...:
 Program file data not available for marginfi (MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA)
 ```
 
@@ -243,36 +250,14 @@ ls -la target/deploy/marginfi.so
 ls -la target/sbf/deploy/marginfi.so
 ```
 
-Fix options:
+Rebuild the mainnet artifacts, then rerun the Rust tests:
 
-Actual fix:
-
-```
+```sh
 ./scripts/build-workspace.sh
-```
-
-Quick fix to just run tests:
-
-```
-export SBF_OUT_DIR="$PWD/target/deploy"
-cargo nextest run --package marginfi --features mainnet-beta
-```
-
-This will run tests without building the full workspace.
-
-Or edit `scripts/test-program-remix.sh` line 93 so `SBF_OUT_DIR` uses
-`target/deploy` (not `target/sbf/deploy`), then rerun the remix command:
-
-```
 ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8
 ```
 
-If artifacts are stale/corrupt:
-
-```
-anchor clean
-anchor build -p marginfi -- --no-default-features --features mainnet-beta,custom-heap
-```
+If TypeScript tests report missing programs, build the localnet artifacts using the TypeScript build commands above. If account resolution fails with `Unresolved accounts`, regenerate the marginfi IDL with the localnet `anchor build -p marginfi` command.
 
 # Common Footguns
 
