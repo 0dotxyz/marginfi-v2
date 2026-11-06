@@ -1134,7 +1134,6 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
-                price_feed.has_borrow_power = !state.is_paused();
 
                 // Bake the mSOL/SOL rate into the price -> feed now represents mSOL/USD.
                 apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
@@ -1147,7 +1146,10 @@ impl OraclePriceFeedAdapter {
                 };
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: I80F48::ONE,
                 })
