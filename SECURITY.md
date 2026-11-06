@@ -571,3 +571,116 @@ is very small (0.01%), but here the insurance fee brings it up to 2.51%.
 In some edge cases, classic liquidation can enable the liquidator to repay while leaving a small
 amount of liability dust in their own account. This is extremely difficult to do on purpose, since
 the repay amount is not known at call time. It is also not scalable since it requires a valid liquidation target to achieve. Such dust may be settled into bad debt at account closure, but is typically so nominal it does not even reach 1 token-atom.
+
+### Interest and/or Emissions Deposits Exceed The Deposit Cap
+
+Consider a USDC bank with a deposit cap of 1000 USDC. Lenders max out the cap, then 100 interest
+accrues or someone donates 100 in emissions to the pool. It is now worth 1100 dollars, which one
+might argue technically exceeds the cap.
+
+This behavior is intentional. The deposit cap controls regular deposits; however, there are other
+ways to bypass the cap (e.g. interest accrual). In our risk model, emissions donations are
+considered a form of donated accrued interest. Both can increase depositors’ borrowing power, but
+the contribution is distributed pro rata to all shareholders. A lender who wants to retain most of
+the added value of accured interest or donated emissions would therefore need to hold most of the
+bank’s shares.
+
+Additionally, total_asset_value_init_limit prevents a bank from exceeding a certain USD value,
+typically the administrator strives to set this to roughly what the USD value would be at the
+deposit cap plus some buffer. In the above scenario, the total_asset_value_init_limit would be
+roughly 1000 dollars, so the user deposits would be discounted by approximately 10% for initial
+borrowing purposes.
+
+### Integrator Withdraw Limits Can Affect Liquidity Available
+
+In various circumstances, integration positions can become illiquid. These might include high
+utilization, withdraw cap limitations, etc. This is consistent with the integration’s risk model.
+For example, a Kamino withdrawal cap limits redemption liquidity but is not itself treated as an
+emergency or evidence that the collateral has lost value, so it should not automatically remove
+initial borrowing power. The zero-case is fairly obvious, but checking whether a Kamino reserve
+supports enough withdrawals for some given deposit is non-trivial. For example if a user goes to
+deposit 1000 and Kamino's cap is 100, it's unclear if we should allow that action, part of it, or
+none of it. A deposit of 1000 with a cap of 2000 seems fine in isolation, but if the bank already
+holds 5000, it's again unclear if we should allow it. This can lead to edge cases where a user can
+make a deposit they cannot subsequently immediately withdraw.
+
+It is incumbent on the administrator to ensure that banks with consistently-unavailable liquidity
+have appropriate weights, curves, and other risk settings.
+
+### Fees Can Push Utilizations Above Free Capital
+
+Let A be depositor assets, L be borrower liabilities, F be outstanding fees, and V be vault tokens.
+The identity is:
+
+```
+V = A − L + F
+therefore A − L = V − F
+```
+
+Some may argue we should e.g. allow users to withdraw or borrow against tokens that are recorded as
+being owed to fee recipients, which changes the priority treatment of fees. By our design, fees are
+earmarked, but we do not treat fees as if they were already withdrawn (with some exceptions).
+Consider for example a scenario where A = 110, L = 109, F < 1, and V = 1, then subsequently L grows
+due to interest, such that A = 110, L = 110.2, F = 1.2, and V = 1. Here the free capital can no
+longer cover fees. Somebody repays 1 token, leading to A = 110, L = 109.2, F = 1.2, and V = 2. The
+repayment "fixed" the "fee debt" issue, and we expect that 0.8 borrowing power will be enabled in
+that scenario (rather than 1) due to the "fee debt" being settled first.
+
+It is true that if nobody *ever* repays then the fees will become bad debt, but here no net-new bad
+debt was issued, since all fees in excess of the actual vault capacity are paper-only until realized
+(i.e., no new credit was issued). The same is essentially true if borrowers do not repay and their
+debt climbs above 100% utilization from accrual alone. Here, liquidators will eventually repay the
+debt and prevent the creation of bad debt.
+
+### Solana Clock Regression Leads to Panics
+
+We unwrap a u64 when accruing interest, causing all instructions to panic if there were a realized
+negative difference.  We cannot rewind the clock and "refund" interest; therefore, financial
+transactions are generally invalid until the clock catches up to, at least, the state when interest
+last accrued. This is by design, and is not considered a frozen state or a denial of service.
+
+### Rebalance Keepers May be Short some Dust
+
+Keepers can be short up to 3 * move_count * max_multiplier units per execution, which lets them
+steal a small amount of dust each execution in some edge cases. For USDC this is currently about
+0.000024 per execution (reporters may be tempted to point out BTC satoshis are more valuable,
+however there is no serious potential for rebalance orders on BTC at this time). Because moving
+funds is subject to some rounding issues, we tolerate this behavior for the time being and will
+simply reduce the multiplier over time to as Keepers grow more sophisticated.
+
+### Outages Due to Integration "Emergency Mode" Equivalents
+
+Various integrations (Kamino, Exponent, etc) have "emergency mode": we do not claim to cover every
+integration's emergency mode fully. Any bug related to emergency mode from a third-party that leads
+to some asset being unavailable or still-eligible for borrowing power even when the source cannot
+move it due to the emergency configuration will be at most INFO/LOW. Bugs that lead to a loss of
+funds otherwise remain open for bounties at higher levels, e.g. if emergency mode caused an asset
+actually worth ten dollars to be worth a hundred, that could be HIGH/CRITICAL. If emergency mode
+caused an asset worth ten dollars to continue to be worth ten dollars in borrowing power even though
+its actual status is unknown, that would be INFO/LOW. Likewise if the oracle cannot crank due to
+emergency mode, rendering that asset generally unavailable. In this case, we would set the bank to a
+Fixed price to restore service.
+
+### Rebalance Can Deny Tips When the Source Rate Spikes
+
+In some instances, the user withdrawing their position causes the rate to spike at the source bank.
+See `rebalance_allows_a_move_that_spikes_the_drained_source` for example. Here, the user would not
+have realized the spiked rate: they would realize the lower rate they were currently getting.
+However, because we determine the tip based on the published yield of source/destination banks, the
+keeper might fail to realize a tip as a result. This is a design trade-off we were obligated to
+make: taking a snapshot before the move would open the process to temporary rate manipulation, so
+that design is likely infeasible. Comparing against post-withdraw source might also reject some
+economically viable moves.
+
+### Rebalance Ignores Rate Limits
+
+Rebalance Orders are an exception to rate limits because they are net-neutral to protocol outflow.
+During rebalances, we can guarantee the funds do not leave our platform; therefore rebalance is
+permitted to ignore rate limits. This does generate some odd edge cases where a bank whose limit is
+otherwise hit can be exited through a rebalance Order, but this is because we lack the ability to
+create flow limits on groups of banks (e.g., all USDC banks). That behavior is tolerated. See also
+the doc on `should_skip_rate_limit`:
+```
+/// Rebalance is an internal same-mint move (withdraw from one bank, deposit into another), so it
+/// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
+```
