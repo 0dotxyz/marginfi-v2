@@ -311,7 +311,7 @@ export class ProgramTestContext {
  * The subset of web3.js `Connection` that Anchor's provider / account clients and the specs call.
  * Missing accounts read as `null`, like a real RPC. Transactions execute synchronously, so
  * `sendRawTransaction` throws on failure (with the program logs attached) and `confirmTransaction`
- * is a no-op.
+ * is a no-op. Anchor provider simulation is unsupported; use BanksClient for LiteSVM simulation.
  */
 export class LiteSVMConnection {
   constructor(private readonly svm: LiteSVM) {}
@@ -378,11 +378,9 @@ export class LiteSVMConnection {
     _options?: unknown
   ): Promise<string> {
     const raw = Buffer.from(rawTransaction);
-    // Versioned transactions set the high bit of the first byte.
-    const tx =
-      (raw[0] & 0x80) !== 0
-        ? VersionedTransaction.deserialize(raw)
-        : Transaction.from(raw);
+    // The version marker is in the message, after the compact signature count and signatures.
+    // VersionedTransaction.deserialize handles both legacy and versioned messages.
+    const tx = VersionedTransaction.deserialize(raw);
     const result = this.svm.sendTransaction(tx);
     if (result instanceof FailedTransactionMetadata) {
       throwFailedTransaction(result, tx);
@@ -392,6 +390,18 @@ export class LiteSVMConnection {
 
   async confirmTransaction(_strategy: unknown, _commitment?: unknown) {
     return { context: this.context(), value: { err: null } };
+  }
+
+  // Anchor uses simulateTransaction for v0 transactions and _rpcRequest for legacy ones.
+  async simulateTransaction(): Promise<never> {
+    throw new Error(
+      "Anchor provider simulation is not supported; use BanksClient.simulateTransaction"
+    );
+  }
+
+  async _rpcRequest(method: string): Promise<never> {
+    if (method === "simulateTransaction") return this.simulateTransaction();
+    throw new Error(`LiteSVM connection does not support RPC method: ${method}`);
   }
 
   // SPL single-pool (staked collateral) helpers ask for this; mainnet's minimum is 1 SOL.
