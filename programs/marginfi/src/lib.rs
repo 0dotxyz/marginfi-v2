@@ -950,7 +950,8 @@ pub mod marginfi {
     }
 
     /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
-    /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
+    /// health improved and seized assets are within fee limits, and that all debt is repaid when
+    /// the account's equity is no more than the fee on that debt. Charges a flat SOL fee.
     pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
         marginfi_account::end_liquidation(ctx)
     }

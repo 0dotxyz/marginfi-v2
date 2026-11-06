@@ -1,9 +1,8 @@
 use fixed::types::I80F48;
 
 use crate::constants::{
-    LIQUIDATION_HEALTH_GAIN_MARGIN, LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMIUM_SECS,
-    LIQUIDATION_TAG_MAX_PREMIUM, LIQUIDATION_TAG_RESET_DEFICIT_FRACTION,
-    LIQUIDATION_TAG_RESET_REPAID_FRACTION,
+    LIQUIDATION_TAG_DELAY_SECS, LIQUIDATION_TAG_FULL_PREMIUM_SECS, LIQUIDATION_TAG_MAX_PREMIUM,
+    LIQUIDATION_TAG_RESET_DEFICIT_FRACTION, LIQUIDATION_TAG_RESET_REPAID_FRACTION,
 };
 
 /// Maximum premium a liquidator may earn, accounting for the record's tag: `base_premium` until
@@ -54,19 +53,11 @@ pub fn tag_after_liquidation(
     tagged_at
 }
 
-/// Whether a liquidation paying `premium` raises maintenance health by more than rounding. Each
-/// dollar repaid lowers the requirement by `liabs_maint / liabs_equity`. Each of the `1 + premium`
-/// dollars seized for it lowers weighted collateral by `assets_maint / assets_equity`. An account
-/// with no collateral cannot pay a premium, so it never fits.
-pub fn premium_fits_leverage(
-    assets_maint: I80F48,
-    liabs_maint: I80F48,
-    assets_equity: I80F48,
-    liabs_equity: I80F48,
-    premium: I80F48,
-) -> bool {
-    (I80F48::ONE + premium + LIQUIDATION_HEALTH_GAIN_MARGIN) * assets_maint * liabs_equity
-        < liabs_maint * assets_equity
+/// Whether the account's equity is more than `premium` on all of its debt.
+/// A liquidation within the premium cap lowers equity by at most `premium` times what it repays, so
+/// such an account keeps some equity for as long as it has debt.
+pub fn premium_fits_equity(assets_equity: I80F48, liabs_equity: I80F48, premium: I80F48) -> bool {
+    assets_equity - liabs_equity > liabs_equity * premium
 }
 
 #[cfg(test)]
@@ -235,54 +226,30 @@ mod tests {
         );
     }
 
-    const ASSETS: I80F48 = I80F48!(1040);
-
     #[test]
-    fn premium_fits_ordinary_leverage() {
-        // Collateral at a 0.9 maintenance weight against debt at 1.05
-        assert!(premium_fits_leverage(
-            I80F48!(936),
-            I80F48!(1050),
-            ASSETS,
-            LIABS,
-            BASE
-        ));
+    fn premium_fits_ample_equity() {
+        // $60 of equity against the 5% premium on $1,000 of debt ($50)
+        assert!(premium_fits_equity(I80F48!(1060), LIABS, BASE));
     }
 
     #[test]
-    fn premium_must_beat_the_weight_spread_by_the_margin() {
-        // Collateral at full weight against debt at 1.05: a 5% premium leaves health unchanged
-        assert!(!premium_fits_leverage(
-            ASSETS,
-            I80F48!(1050),
-            ASSETS,
-            LIABS,
-            BASE
-        ));
-        assert!(!premium_fits_leverage(
-            ASSETS,
-            I80F48!(1050.05),
-            ASSETS,
-            LIABS,
-            BASE
-        ));
-        assert!(premium_fits_leverage(
-            ASSETS,
-            I80F48!(1050.2),
-            ASSETS,
-            LIABS,
-            BASE
-        ));
+    fn premium_must_stay_below_the_equity() {
+        // The 5% premium on $1,000 of debt is $50
+        assert!(!premium_fits_equity(I80F48!(1049.99), LIABS, BASE));
+        assert!(!premium_fits_equity(I80F48!(1050), LIABS, BASE));
+        assert!(premium_fits_equity(I80F48!(1050.01), LIABS, BASE));
     }
 
     #[test]
-    fn premium_never_fits_without_collateral() {
-        assert!(!premium_fits_leverage(
-            I80F48::ZERO,
-            I80F48!(1050),
-            I80F48::ZERO,
-            LIABS,
-            BASE
-        ));
+    fn premium_never_fits_in_bad_debt() {
+        assert!(!premium_fits_equity(I80F48!(990), LIABS, BASE));
+        assert!(!premium_fits_equity(I80F48::ZERO, LIABS, BASE));
+    }
+
+    #[test]
+    fn premium_fits_equity_does_not_overflow_near_the_ceiling() {
+        let liabs = I80F48::MAX / I80F48!(2);
+        assert!(premium_fits_equity(I80F48::MAX, liabs, BASE));
+        assert!(!premium_fits_equity(liabs * I80F48!(1.04), liabs, BASE));
     }
 }

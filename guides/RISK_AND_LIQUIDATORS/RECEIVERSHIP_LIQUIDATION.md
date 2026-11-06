@@ -65,11 +65,15 @@ profitable route between A and B, simply abort the entire tx.
 - The liquidator cannot profit more than percentage configured by the global fee admin (default
   10%), see `FeeState.liquidation_max_fee` for the current max profit.
 
-- Some accounts are leveraged so highly that a liquidation paying the configured max fee cannot
-  raise their health. The liquidator of such an account must repay all of its debt. A partial
-  liquidation fails with `LiquidationCloseoutRequired`. If the account owes more than it holds, the
-  liquidator pays the difference, so liquidators that don't want that loss can skip it. Collateral
-  left after the debt is repaid stays with the user.
+- If an account's equity (collateral minus debt, both at equity value) is no more than the max fee
+  on all of its debt, the liquidator must repay all of that debt. A partial liquidation fails with
+  `LiquidationCloseoutRequired`. For example, at a 10% max fee, $108 of collateral against $100 of
+  debt leaves $8 of equity, under the $10 fee on the full $100, so the liquidator must repay all
+  $100. Partial liquidations of such an account would use up its equity before its debt, leaving
+  debt with nothing behind it. The max fee here is the one allowed right now, including any growth
+  from a liquidation tag. Every account in bad debt falls in this group: the liquidator pays the
+  difference, so liquidators that don't want that loss can skip it. Collateral left after the debt
+  is repaid stays with the user.
 
 - The liquidator pays a nominal fee in lamports to use this service. This is automatically billed to
   the global fee wallet at End. See `FeeState.liquidation_flat_sol_fee` to see the fee in lamps.

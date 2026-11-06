@@ -726,7 +726,8 @@ describe("jlr08: JupLend same-asset emode", () => {
         withdrawAll: false,
         remainingAccounts: composeRemainingAccounts(sameAssetRemaining),
       }),
-      // At 98x the configured max fee cannot raise health, so the liquidator must repay all debt
+      // At 98x the equity is under the configured max fee on the debt, so
+      // the liquidator must repay all of it
       await repayIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         bank: regularTokenABank,

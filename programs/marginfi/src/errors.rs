@@ -293,7 +293,7 @@ pub enum MarginfiError {
     InvalidFastBankOperationalState, // 6143
     #[msg("Governance bank configuration may only transition a bank to Operational")]
     InvalidGovernanceBankOperationalState, // 6144
-    #[msg("Liquidation must repay all debt when the premium cannot raise the account's health")]
+    #[msg("Liquidation must repay all debt when equity is no more than the premium on that debt")]
     LiquidationCloseoutRequired, // 6145
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)

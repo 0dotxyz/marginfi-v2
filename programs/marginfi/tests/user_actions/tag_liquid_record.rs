@@ -1002,67 +1002,81 @@ async fn tag_allowed_while_frozen() -> anyhow::Result<()> {
     Ok(())
 }
 
-// The health check bounds the loss by the premium taken, so a premium grown past what a 0.95
-// maintenance weight would fund is still reachable.
+// Tag growth raises the allowed premium on all of the account's debt. A partial liquidation goes
+// through while that premium stays under the equity, and must close the account out once it passes.
 #[tokio::test]
-async fn tag_grown_premium_is_reachable_at_high_leverage() -> anyhow::Result<()> {
-    // $20 of SOL against $19.50 of USDC debt, weighted at a 20x maintenance leverage
+async fn tag_growth_triggers_closeout() -> anyhow::Result<()> {
+    // $20 of SOL against $17.85 of USDC debt: $2.15 of equity, 12% of the debt
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
-        setup_liquidatee_with(19.5, I80F48!(0.94), I80F48!(0.95)).await?;
-
+        setup_liquidatee_with(17.85, I80F48!(0.5), I80F48!(0.5)).await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
     set_timestamp(&test_f, T0).await;
     refresh_oracles(&test_f).await;
-
-    // Untagged the cap is the 5% minimum, so seizing $0.684 for $0.60 is refused
-    let res = run_receivership_liquidation(
-        &test_f,
-        &liquidatee,
-        record_pk,
-        &liquidator_usdc_acc,
-        0.0684,
-        0.6,
-    )
-    .await;
-    assert_custom_error!(
-        res.map(|_| ()).unwrap_err(),
-        MarginfiError::LiquidationPremiumTooHigh
-    );
-
     send_tag(&test_f, &liquidatee, 0).await?;
-    assert_eq!(load_tag(&liquidatee).await, T0);
 
-    // Halfway through the growth window the cap is 15%
-    let growth_window = LIQUIDATION_TAG_FULL_PREMIUM_SECS - LIQUIDATION_TAG_DELAY_SECS;
-    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + growth_window / 2).await;
-    refresh_oracles(&test_f).await;
-    // Accrue the warped interval's interest now so the accrual jump doesn't land between the
-    // liquidation's pre/post health snapshots
-    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
-    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
-
-    // The same 14% premium now goes through, paid out of the account's remaining equity
+    // Within the delay the cap is the 5% base ($0.89 on all of the debt), so a partial liquidation
+    // of $1.04 seized for $1.00 repaid goes through
     run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
         &liquidator_usdc_acc,
-        0.0684,
-        0.6,
+        0.104,
+        1.0,
     )
     .await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
 
+    // One day into growth the cap is about 7.9%, about $1.33 on the debt left and still under the
+    // $2.10 of equity, so the same partial goes through
+    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_DELAY_SECS + 24 * 60 * 60).await;
+    refresh_oracles(&test_f).await;
+    // Accrue the warped interval's interest now so the accrual jump doesn't land between the
+    // liquidation's pre/post health snapshots
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+    run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.104,
+        1.0,
+    )
+    .await?;
+    assert_eq!(load_tag(&liquidatee).await, T0);
+
+    // Once matured the cap is 25%, about $4 on the debt left and over the $2 of equity, so the same
+    // partial must now close the account out
+    set_timestamp(&test_f, T0 + LIQUIDATION_TAG_FULL_PREMIUM_SECS).await;
+    refresh_oracles(&test_f).await;
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+    let res = run_receivership_liquidation(
+        &test_f,
+        &liquidatee,
+        record_pk,
+        &liquidator_usdc_acc,
+        0.104,
+        1.0,
+    )
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationCloseoutRequired
+    );
     Ok(())
 }
 
 // Emode collateral holds the premium at the configured base no matter how long the tag has run.
 #[tokio::test]
 async fn tag_growth_does_not_apply_to_emode_collateral() -> anyhow::Result<()> {
-    // SOL's own weight is 0.5; the emode entry lifts it to 0.94, still short of the $19.50 debt
+    // SOL's own weight is 0.5; the emode entry lifts it to 0.94, still short of the $18.90 debt.
+    // The $1.10 of equity stays above the 5% base premium on that debt ($0.95).
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, _liquidatee_authority) =
-        setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
+        setup_liquidatee_with(18.9, I80F48!(0.5), I80F48!(0.5)).await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     configure_usdc_emode_for(&test_f, sol_bank).await?;
@@ -1150,8 +1164,9 @@ async fn tag_growth_does_not_apply_once_in_bad_debt() -> anyhow::Result<()> {
         MarginfiError::LiquidationPremiumTooHigh
     );
 
-    // The base 5% still clears: $1.04 seized against $1.00 repaid
-    run_receivership_liquidation(
+    // $1.04 seized against $1.00 repaid fits the base 5%, but an account in bad debt must be closed
+    // out
+    let res = run_receivership_liquidation(
         &test_f,
         &liquidatee,
         record_pk,
@@ -1159,8 +1174,11 @@ async fn tag_growth_does_not_apply_once_in_bad_debt() -> anyhow::Result<()> {
         0.104,
         1.0,
     )
-    .await?;
-
+    .await;
+    assert_custom_error!(
+        res.map(|_| ()).unwrap_err(),
+        MarginfiError::LiquidationCloseoutRequired
+    );
     Ok(())
 }
 
@@ -1257,8 +1275,10 @@ async fn configure_usdc_emode_for(
 /// unboosted collateral leaves the grown cap in force.
 #[tokio::test]
 async fn dust_emode_deposit_does_not_hold_premium() -> anyhow::Result<()> {
+    // $20 of SOL against $15 of debt: the $5 of equity covers even the matured 25% premium on it
+    // ($3.75)
     let (test_f, liquidatee, _liquidator, record_pk, liquidator_usdc_acc, liquidatee_authority) =
-        setup_liquidatee_with(19.5, I80F48!(0.5), I80F48!(0.5)).await?;
+        setup_liquidatee_with(15.0, I80F48!(0.5), I80F48!(0.5)).await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let sol_eq_bank = test_f.get_bank(&BankMint::SolEquivalent);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);

@@ -6,7 +6,7 @@ use crate::{
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
     state::{
-        liquidation_record::{premium_fits_leverage, tag_adjusted_premium, tag_after_liquidation},
+        liquidation_record::{premium_fits_equity, tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
             clear_liquidation_price_cache_locks, get_health_components, LendingAccountImpl,
@@ -45,11 +45,11 @@ fn validate_receivership_cache(
 /// small flat sol fee to the global fee wallet.
 /// * Fails if the account lost more health than the value the liquidator took out of it
 /// * Fails if a solvent account would be left in bad debt
-/// * Fails if the account keeps any debt when a liquidation at the base premium cannot raise its
-///   health, even if the account is in bad debt
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed). A tag grows that allowance over time, except on emode-boosted
 ///   collateral or an account already in bad debt, which hold it at the configured base.
+/// * Fails if the account keeps any debt when its equity is no more than that allowance on all of
+///   its debt. This includes every account in bad debt.
 pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
@@ -68,20 +68,20 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let pre_liabs_equity: I80F48 = liq_record.cache.liability_value_equity.into();
     let in_bad_debt = pre_assets_equity < pre_liabs_equity;
 
-    let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
-    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
-    let must_close_out = !premium_fits_leverage(
-        liq_record.cache.asset_value_maint.into(),
-        liq_record.cache.liability_value_maint.into(),
-        pre_assets_equity,
-        pre_liabs_equity,
-        base_premium,
-    );
-
     // Read before `end_receivership` updates them. The cache provenance check above guarantees
     // the e-mode bit still comes from the start; receivership legs suspend the tag clear.
     let tagged_at = marginfi_account.liquidation_tagged_at;
     let emode_boosted = marginfi_account.health_cache.is_emode_boosted();
+
+    let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
+    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
+    let premium = if emode_boosted || in_bad_debt {
+        base_premium
+    } else {
+        tag_adjusted_premium(base_premium, tagged_at, Clock::get()?.unix_timestamp)
+    };
+    let must_close_out = !premium_fits_equity(pre_assets_equity, pre_liabs_equity, premium);
+
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
@@ -91,22 +91,17 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         below_closeout_threshold || must_close_out,
         true,
     )?;
-    check!(
-        !must_close_out || !marginfi_account.lending_account.has_liabilities(),
-        MarginfiError::LiquidationCloseoutRequired
-    );
 
-    let premium = if emode_boosted || in_bad_debt {
-        base_premium
-    } else {
-        tag_adjusted_premium(base_premium, tagged_at, Clock::get()?.unix_timestamp)
-    };
     let max_fee: I80F48 = I80F48!(1) + premium;
 
     // Ensure seized asset‐value ≤ N% of repaid liability‐value, where N = 100% + the bonus fee
     check!(
         seized <= repaid * max_fee,
         MarginfiError::LiquidationPremiumTooHigh
+    );
+    check!(
+        !must_close_out || !marginfi_account.lending_account.has_liabilities(),
+        MarginfiError::LiquidationCloseoutRequired
     );
 
     let liquidation_flat_sol_fee = fee_state.liquidation_flat_sol_fee;
