@@ -35,7 +35,7 @@ use kamino_mocks::{
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    Bank, BankVaultType, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
 };
 
 /// Deposit into a Kamino pool through a marginfi account
@@ -156,7 +156,7 @@ pub struct KaminoDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
-            !acc.get_flag(ACCOUNT_DISABLED)
+            !acc.get_flag(ACCOUNT_DISABLED | ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
