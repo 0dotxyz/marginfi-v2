@@ -10,7 +10,7 @@ use anchor_lang::{
 };
 use fixed::types::I80F48;
 use marginfi::state::price::{OraclePriceFeedAdapter, PriceAdapter};
-use marginfi::state::rate::NativeRateModel;
+use marginfi::state::rate::{yield_index_of, NativeRateModel};
 use marginfi_type_crate::bank_authority_seed;
 use marginfi_type_crate::constants::{
     BANK_RATE_READINGS, INTEREST_MAX_WINDOW_SECONDS, SECONDS_PER_YEAR,
@@ -199,6 +199,31 @@ impl BankFixture {
         funding_account: Pubkey,
         mint: Pubkey,
     ) -> Result<(), BanksClientError> {
+        let data = marginfi::instruction::LendingPoolEmissionsDeposit { amount }.data();
+        self.try_emissions_deposit_ix(data, funding_account, mint)
+            .await
+    }
+
+    pub async fn try_emissions_deposit_streamed(
+        &self,
+        amount: u64,
+        seconds: u64,
+        funding_account: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
+        let data =
+            marginfi::instruction::LendingPoolEmissionsDepositStreamed { amount, seconds }.data();
+        self.try_emissions_deposit_ix(data, funding_account, bank.mint)
+            .await
+    }
+
+    /// Sends an emissions deposit instruction carrying `data` from the payer's `funding_account`.
+    async fn try_emissions_deposit_ix(
+        &self,
+        data: Vec<u8>,
+        funding_account: Pubkey,
+        mint: Pubkey,
+    ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
 
         let ix = Instruction {
@@ -213,7 +238,7 @@ impl BankFixture {
                 token_program: self.get_token_program(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolEmissionsDeposit { amount }.data(),
+            data,
         };
 
         let tx = {
@@ -551,10 +576,18 @@ impl BankFixture {
     /// right now.
     pub async fn seed_native_rate_history(&self) {
         let bank = self.load().await;
-        let apr = NativeRateModel::new(&bank).unwrap().rate_at(0).unwrap();
+        let now = {
+            let ctx = self.ctx.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+            clock.unix_timestamp
+        };
+        let apr = NativeRateModel::new(&bank, now)
+            .unwrap()
+            .rate_at(0)
+            .unwrap();
+        let index = yield_index_of(&bank, I80F48::ONE, now).unwrap();
         let age = i64::from(INTEREST_MAX_WINDOW_SECONDS);
-        self.seed_rate_history(bank.asset_share_value.into(), apr, age)
-            .await;
+        self.seed_rate_history(index, apr, age).await;
     }
 }
 

@@ -347,7 +347,7 @@ fn read_order_rates<'info>(
                 supply_apr = Some(realized_supply_apr(
                     &bank,
                     window,
-                    yield_index_of(&bank, multiplier)?,
+                    yield_index_of(&bank, multiplier, clock.unix_timestamp)?,
                     clock.unix_timestamp,
                 )?);
             }

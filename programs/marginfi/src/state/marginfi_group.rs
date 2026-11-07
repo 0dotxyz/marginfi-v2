@@ -381,8 +381,8 @@ mod tests {
     /// `premium_activated_at` take its remaining 16 bytes. The liquidation-fee fields own the
     /// former `_padding_0` after `borrowing_position_count`, while `bank_seed` and the rest of
     /// the circuit-breaker block stay at their 0.1.10 positions.
-    /// The rate readings and the reserve are appended past `premium_activated_at`, so every offset
-    /// here is unchanged and the struct lands exactly on the resized account length.
+    /// The rate readings, emissions fields and reserve are appended past `premium_activated_at`,
+    /// so every offset here is unchanged and the struct fills the resized account exactly.
     #[test]
     fn bank_premium_field_layout() {
         assert_eq!(size_of::<Bank>(), 3904);
@@ -396,8 +396,14 @@ mod tests {
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
         assert_eq!(offset_of!(Bank, rate_readings), Bank::V1_LEN);
-        assert_eq!(offset_of!(Bank, _reserved0), 2264);
-        assert_eq!(offset_of!(Bank, _reserved1), 3864);
+        assert_eq!(offset_of!(Bank, emissions_spread_pending), 2264);
+        assert_eq!(offset_of!(Bank, emissions_spread_rate), 2280);
+        assert_eq!(offset_of!(Bank, emissions_spread_base), 2296);
+        assert_eq!(offset_of!(Bank, emissions_spread_updated_at), 2312);
+        assert_eq!(offset_of!(Bank, emissions_stream_pending), 2320);
+        assert_eq!(offset_of!(Bank, emissions_stream_seconds), 2336);
+        assert_eq!(offset_of!(Bank, _reserved0), 2344);
+        assert_eq!(offset_of!(Bank, _reserved1), 3880);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

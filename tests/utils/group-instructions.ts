@@ -656,6 +656,27 @@ export const lendingPoolEmissionsDeposit = (
   return ix;
 };
 
+export type EmissionsDepositStreamedArgs = EmissionsDepositArgs & {
+  seconds: BN;
+};
+
+export const lendingPoolEmissionsDepositStreamed = (
+  program: Program<Marginfi>,
+  args: EmissionsDepositStreamedArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolEmissionsDepositStreamed(args.amount, args.seconds)
+    .accounts({
+      bank: args.bank,
+      depositor: args.depositor,
+      emissionsFundingAccount: args.fundingAccount,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
+  return ix;
+};
+
 // ************* Below this line, not yet included in package ****************
 
 export type InitGlobalFeeStateArgs = {

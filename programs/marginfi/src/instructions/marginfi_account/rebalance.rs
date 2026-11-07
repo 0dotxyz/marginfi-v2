@@ -816,7 +816,7 @@ pub fn start_rebalance<'info>(
         let model = if is_integration_asset_tag(bank.config.asset_tag) {
             None
         } else {
-            Some(NativeRateModel::new(&bank)?)
+            Some(NativeRateModel::new(&bank, clock.unix_timestamp)?)
         };
         let rate = match &model {
             Some(model) => model.rate_at(0)?,
@@ -837,7 +837,7 @@ pub fn start_rebalance<'info>(
             realized[i] = realized_supply_apr(
                 &bank,
                 window,
-                yield_index_of(&bank, multiplier)?,
+                yield_index_of(&bank, multiplier, clock.unix_timestamp)?,
                 clock.unix_timestamp,
             )?;
         }
@@ -1139,7 +1139,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
             max_multiplier = max_multiplier.max(multiplier);
             post_underlying.push(bank_underlying(&account, &parsed.key, &bank, multiplier)?);
-            yield_indices.push(yield_index_of(&bank, multiplier)?);
+            yield_indices.push(yield_index_of(&bank, multiplier, clock.unix_timestamp)?);
         }
 
         // Every move must not have inverted its rate advantage (the destination still beats the source
@@ -1438,7 +1438,7 @@ pub fn settle_rebalance_tip<'info>(
         accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
         let bank = parsed.loader.load()?;
         let multiplier = venue_multiplier(&bank, parsed.oracles, &clock)?;
-        current_indices.push(yield_index_of(&bank, multiplier)?);
+        current_indices.push(yield_index_of(&bank, multiplier, clock.unix_timestamp)?);
     }
 
     // A move realized its intended improvement iff the destination's index grew strictly more than
