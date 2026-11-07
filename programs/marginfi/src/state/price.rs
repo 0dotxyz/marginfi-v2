@@ -35,6 +35,7 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
+use marinade_mocks::state::MinimalMarinadeState;
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
@@ -1145,7 +1146,10 @@ impl OraclePriceFeedAdapter {
                 };
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -1185,7 +1189,11 @@ impl OraclePriceFeedAdapter {
                 apply_i80f48_multiplier(&mut price_feed, kamino_rate)?;
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any Kamino emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: kamino_rate,
                 })
@@ -1226,7 +1234,11 @@ impl OraclePriceFeedAdapter {
                 price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any JupLend emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: juplend_rate,
                 })
@@ -2446,6 +2458,11 @@ pub struct PythPushOraclePriceFeed {
 }
 
 impl PythPushOraclePriceFeed {
+    /// Disable has_borrow_power if the Marinade state is paused, otherwise no-op.
+    fn restrict_marinade_borrow_power(&mut self, state: &MinimalMarinadeState) {
+        self.has_borrow_power &= !state.is_paused();
+    }
+
     /// Load a Pyth Price feed.
     ///
     /// Security assumptions:
@@ -2895,10 +2912,41 @@ mod tests {
     }
 
     #[test]
+    fn marinade_pause_preserves_existing_borrow_power_restrictions() {
+        use bytemuck::Zeroable;
+
+        for venue_allows_borrow in [false, true] {
+            for paused in [false, true] {
+                let mut state = MinimalMarinadeState::zeroed();
+                state.paused = u8::from(paused);
+                let price = || price_update::Price {
+                    price: 100,
+                    conf: 2,
+                    exponent: 0,
+                    publish_time: 42,
+                };
+                let mut feed = PythPushOraclePriceFeed {
+                    price: Box::new(price()),
+                    ema_price: Box::new(price()),
+                    has_borrow_power: venue_allows_borrow,
+                };
+
+                feed.restrict_marinade_borrow_power(&state);
+
+                assert_eq!(feed.has_borrow_power(), venue_allows_borrow && !paused);
+                assert_eq!(feed.price.price, 100);
+                assert_eq!(feed.ema_price.price, 100);
+            }
+        }
+    }
+
+    #[test]
     fn marinade_state_field_offsets_round_trip() {
-        // Round-trip the balance offsets (validated against the live account) to prove the padding.
-        let mut raw = [0u8; core::mem::size_of::<MinimalMarinadeState>()];
-        assert_eq!(raw.len(), 568);
+        use bytemuck::Zeroable;
+        // Round-trip the field offsets (validated against the live account) to prove the padding.
+        let mut s = MinimalMarinadeState::zeroed();
+        let raw = bytemuck::bytes_of_mut(&mut s);
+        assert_eq!(raw.len(), 608);
         raw[218..226].copy_from_slice(&11u64.to_le_bytes()); // delayed_unstake_cooling_down
         raw[368..376].copy_from_slice(&22u64.to_le_bytes()); // total_active_balance
         raw[488..496].copy_from_slice(&33u64.to_le_bytes()); // available_reserve_balance
@@ -2906,9 +2954,10 @@ mod tests {
         raw[504..512].copy_from_slice(&55u64.to_le_bytes()); // msol_price
         raw[520..528].copy_from_slice(&66u64.to_le_bytes()); // circulating_ticket_balance
         raw[560..568].copy_from_slice(&77u64.to_le_bytes()); // emergency_cooling_down
-        let s: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
+        raw[600] = 1; // paused
         assert_eq!(s.msol_price(), 55);
         assert_eq!(s.msol_supply(), 44);
+        assert!(s.is_paused());
         // total_virtual_staked = active(22) + delayed(11) + emergency(77) + reserve(33) - tickets(66)
         assert_eq!(s.total_virtual_staked_lamports(), Some(77));
     }
