@@ -50,11 +50,12 @@ use crate::{
     },
     math_error,
     prelude::*,
+    state::marginfi_account::run_cb_price_gate_skip_zero_weight,
     state::{
         bank::BankImpl,
         marginfi_account::{
             calc_value, check_account_maint_health, get_remaining_accounts_per_bank,
-            run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -1148,9 +1149,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
         // health once here over the post-move balance set. The bar is MAINTENANCE, so a move may
         // reduce initial-weighted collateral as long as the account stays non-liquidatable.
+        let group = ctx.accounts.group.load()?;
         check_rebalance_health_and_refresh_premium(
             &mut account,
-            &*ctx.accounts.group.load()?,
+            &group,
             health_obs,
             &mut health_cache,
             clock.unix_timestamp as u64,
@@ -1163,7 +1165,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // breach threshold. A liability-free rebalance is price-independent (conservation is token
         // principal), so it skips the gate, matching the withdraw leg.
         if account.lending_account.has_liabilities() {
-            run_cb_price_gate(&account, health_obs)?;
+            run_cb_price_gate_skip_zero_weight(&account, &group, health_obs)?;
         }
 
         record.verify_others_unchanged(&account)?;

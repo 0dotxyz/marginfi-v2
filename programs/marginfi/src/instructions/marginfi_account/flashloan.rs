@@ -7,8 +7,8 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_account_init_health_and_clear_tag, run_cb_price_gate, LendingAccountImpl,
-        MarginfiAccountImpl,
+        check_account_init_health_and_clear_tag, run_cb_price_gate_skip_zero_weight,
+        LendingAccountImpl, MarginfiAccountImpl,
     },
     state::premium::{MarginfiAccountPremiumImpl, PremiumScratch},
 };
@@ -151,7 +151,7 @@ pub fn lending_account_end_flashloan<'info>(
     )?;
 
     if marginfi_account.lending_account.has_liabilities() {
-        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        run_cb_price_gate_skip_zero_weight(&marginfi_account, &group, ctx.remaining_accounts)?;
     }
 
     Ok(())

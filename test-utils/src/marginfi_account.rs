@@ -2709,3 +2709,25 @@ impl MarginfiAccountFixture {
             .await
     }
 }
+
+pub fn replace_oracle_account_after_bank(
+    ix: &mut Instruction,
+    bank_key: Pubkey,
+    expected_oracle_key: Pubkey,
+    replacement_oracle_key: Pubkey,
+) {
+    let index = ix
+        .accounts
+        .iter()
+        .rposition(|m| m.pubkey == bank_key)
+        .expect("bank not in remaining accounts");
+
+    let oracle = ix
+        .accounts
+        .get_mut(index + 1)
+        .expect("missing oracle account after bank");
+
+    assert_eq!(oracle.pubkey, expected_oracle_key);
+
+    oracle.pubkey = replacement_oracle_key;
+}

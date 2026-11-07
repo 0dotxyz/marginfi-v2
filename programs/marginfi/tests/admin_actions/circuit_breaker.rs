@@ -1,3 +1,5 @@
+use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
@@ -8,51 +10,7 @@ use solana_program_test::{BanksClientError, *};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
-
-/// Warms `bank`'s price cache, enables the circuit breaker on it, then trips it into an active
-/// halt by pulsing a large oracle spike — driving the halt entirely through real instructions.
-/// Afterward `feed` is restored to `base_native` and every standard feed is refreshed to the
-/// post-trip clock, so callers can exercise a halted but otherwise healthy bank.
-async fn enable_cb_and_trip_halt(
-    test_f: &TestFixture,
-    bank: &BankFixture,
-    feed: Pubkey,
-    base_native: i64,
-) -> anyhow::Result<()> {
-    let warm_time: i64 = 100;
-    let warm_slot: u64 = 1_000;
-    test_f
-        .set_pyth_oracle_price_native(feed, base_native, 0, warm_time)
-        .await;
-    test_f.set_clock(warm_slot, warm_time).await;
-    test_f
-        .marginfi_group
-        .try_pulse_bank_price_cache(bank)
-        .await?;
-
-    bank.update_config(standard_cb_config(), None).await?;
-
-    // A single +100% spike trips a halt on the first breaching pulse.
-    let trip_time = warm_time + 1;
-    test_f.set_clock(warm_slot + 10, trip_time).await;
-    test_f
-        .set_pyth_oracle_price_native(feed, base_native.saturating_mul(2), 0, trip_time)
-        .await;
-    test_f
-        .marginfi_group
-        .try_pulse_bank_price_cache(bank)
-        .await?;
-
-    // Restore the feed so callers don't trip the inline price gate, and refresh the standard
-    // feeds so post-trip borrows/withdraws see fresh oracles.
-    test_f
-        .set_pyth_oracle_price_native(feed, base_native, 0, trip_time)
-        .await;
-    for refreshed in [PYTH_SOL_FEED, PYTH_USDC_FEED, PYTH_PYUSD_FEED] {
-        test_f.set_pyth_oracle_timestamp(refreshed, trip_time).await;
-    }
-    Ok(())
-}
+use test_case::test_case;
 
 async fn enable_cb_and_trip_tier3_storm(
     test_f: &TestFixture,
@@ -137,7 +95,7 @@ async fn cb_halt_blocks_borrow_on_halted_bank() -> anyhow::Result<()> {
     let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
 
     // Trip the SOL bank (the bank being borrowed from) into a real halt.
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
 
     let result = borrower
         .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
@@ -175,7 +133,7 @@ async fn cb_halt_blocks_risk_withdraw_on_halted_bank() -> anyhow::Result<()> {
         .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
         .await?;
 
-    enable_cb_and_trip_halt(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
 
     let result = borrower
         .try_bank_withdraw(borrower_usdc_acc.key, usdc_bank, 100, None)
@@ -200,7 +158,7 @@ async fn cb_halt_allows_riskless_withdraw_on_halted_bank() -> anyhow::Result<()>
         .try_bank_deposit(token_acc.key, usdc_bank, 500, None)
         .await?;
 
-    enable_cb_and_trip_halt(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
 
     depositor
         .try_bank_withdraw(token_acc.key, usdc_bank, 100, None)
@@ -237,7 +195,7 @@ async fn cb_halt_allows_repay_on_halted_bank() -> anyhow::Result<()> {
         .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
         .await?;
 
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
 
     // Repay must succeed under halt.
     borrower
@@ -273,7 +231,7 @@ async fn cb_halt_allows_deposit_only_with_existing_balance() -> anyhow::Result<(
         .create_token_account_and_mint_to(1_000)
         .await;
 
-    enable_cb_and_trip_halt(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
 
     existing
         .try_bank_deposit(existing_acc.key, usdc_bank, 500, None)
@@ -289,8 +247,12 @@ async fn cb_halt_allows_deposit_only_with_existing_balance() -> anyhow::Result<(
 /// Direct liquidation must become admin/risk-admin-only when the liquidatee has any active halted
 /// bank in their portfolio, even if the liquidation itself settles through a different,
 /// non-halted asset/liability pair. The admins must still own the liquidator account.
+#[test_case(true; "zero weight")]
+#[test_case(false; "positive weight")]
 #[tokio::test]
-async fn cb_halt_on_other_balance_blocks_non_admin_direct_liquidation() -> anyhow::Result<()> {
+async fn cb_halt_on_other_balance_blocks_non_admin_direct_liquidation(
+    halted_leg_is_zero_weight: bool,
+) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -324,8 +286,12 @@ async fn cb_halt_on_other_balance_blocks_non_admin_direct_liquidation() -> anyho
         .try_bank_borrow(liquidatee_sol_acc.key, sol_bank, 50)
         .await?;
 
+    if halted_leg_is_zero_weight {
+        pyusd_bank.set_asset_weights_to_zero().await?;
+    }
+
     // Trip a real halt on the unrelated PyUSD leg.
-    enable_cb_and_trip_halt(&test_f, pyusd_bank, PYTH_PYUSD_FEED, 1_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, pyusd_bank, PYTH_PYUSD_FEED, 1_000_000).await?;
 
     // Make the account unhealthy through the SOL debt leg.
     test_f
@@ -401,7 +367,7 @@ async fn clear_circuit_breaker_restores_borrow_and_withdraw() -> anyhow::Result<
         .await?;
     let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
 
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
 
     // Pre-clear: borrow blocked.
     let pre_clear = borrower
@@ -756,7 +722,7 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
 
     // Halt (tier 3: span [101, 14_501]), then consume the pre-halt accrual tail with a deposit
     // (halt-safe for an existing balance, and calls accrue_interest) shortly into the halt.
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
     test_f.set_clock(1_200, 200).await;
     let tail_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
     lp.try_bank_deposit(tail_lp_sol.key, sol_bank, 1, None)
@@ -818,7 +784,7 @@ async fn cb_disable_mid_halt_consumes_interest_freeze() -> anyhow::Result<()> {
 
     // Halt SOL (tier 3: span [101, 14_501]), then consume the pre-halt accrual tail with a
     // deposit shortly into the halt so only frozen time remains ahead.
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
     test_f.set_clock(1_200, 200).await;
     let tail_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
     lp.try_bank_deposit(tail_lp_sol.key, sol_bank, 1, None)
@@ -993,7 +959,7 @@ async fn clear_circuit_breaker_accepts_either_authority() -> anyhow::Result<()> 
     // Halt, then clear with admin (not risk_admin). In this fixture both are payer, so we
     // exercise the admin branch by passing payer to both calls — the semantic is that the path
     // accepts an authority that equals admin OR risk_admin, not strictly risk_admin.
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
     let admin = test_f.payer().clone();
     let clear_ix = sol_bank.make_clear_circuit_breaker_ix(admin, false).await;
     {
@@ -1044,7 +1010,7 @@ async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()>
         .await?;
 
     // Trip a real tier-3 halt on the SOL bank: records [101, 14501], last_update = 101.
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, base_native).await?;
+    arm_and_trip_circuit_breaker(&test_f, sol_bank, PYTH_SOL_FEED, base_native).await?;
     let tripped = sol_bank.load().await;
     assert_eq!(tripped.cb_tier, 3);
     assert_eq!(tripped.cb_halt_started_at, 101);
@@ -1095,5 +1061,555 @@ async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()>
     assert_eq!(accrued.cb_frozen_seconds_pending, 0);
     assert_eq!(accrued.last_update, resume_time);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn cb_halted_zero_weight_collateral_still_blocks_borrow() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
+
+    let lp = test_f.create_marginfi_account().await;
+    let lp_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    lp.try_bank_deposit(lp_sol_acc.key, sol_bank, 10, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_usdc_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_usdc_acc.key, usdc_bank, 1_000, None)
+        .await?;
+
+    let borrower_pyusd_acc = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_pyusd_acc.key, pyusd_bank, 100, None)
+        .await?;
+
+    let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+
+    pyusd_bank.set_asset_weights_to_zero().await?;
+
+    arm_and_trip_circuit_breaker(&test_f, pyusd_bank, PYTH_PYUSD_FEED, 1_000_000).await?;
+
+    let blocked = borrower
+        .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
+        .await;
+    assert_custom_error!(
+        blocked.unwrap_err(),
+        MarginfiError::BankCircuitBreakerHalted
+    );
+
+    Ok(())
+}
+
+#[test_case(true; "zero-weight leg first: skip -> check")]
+#[test_case(false; "zero-weight leg last: check -> skip")]
+#[tokio::test]
+async fn cb_gate_skips_zero_weight_leg_regardless_of_balance_order(
+    zero_weight_leg_first: bool,
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let pyusd = test_f.get_bank(&BankMint::PyUSD);
+    let sol_eq = test_f.get_bank(&BankMint::SolEquivalent);
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(2_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc, 2_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let healthy = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    let sol_tokens = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let pyusd_tokens = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    borrower
+        .try_bank_deposit(healthy.key, sol_eq, 100, None)
+        .await?;
+    borrower
+        .try_bank_deposit(sol_tokens.key, sol, 1, None)
+        .await?;
+    borrower
+        .try_bank_deposit(pyusd_tokens.key, pyusd, 10, None)
+        .await?;
+
+    let legs = active_bank_keys_in_balance_order(&borrower).await;
+    let sol_first = legs.iter().position(|k| *k == sol.key).unwrap()
+        < legs.iter().position(|k| *k == pyusd.key).unwrap();
+
+    let sol_leg = (sol, PYTH_SOL_FEED, 10_000_000_000_i64);
+    let pyusd_leg = (pyusd, PYTH_PYUSD_FEED, 1_000_000_i64);
+
+    let (zero_weight_leg, positive_weight_leg) = if sol_first == zero_weight_leg_first {
+        (sol_leg, pyusd_leg)
+    } else {
+        (pyusd_leg, sol_leg)
+    };
+    let (zero_weight_bank, zero_weight_feed, zero_weight_base) = zero_weight_leg;
+    let (positive_bank, positive_feed, positive_base) = positive_weight_leg;
+
+    zero_weight_bank.set_asset_weights_to_zero().await?;
+    arm_circuit_breakers(
+        &test_f,
+        &[
+            (zero_weight_bank, zero_weight_feed, zero_weight_base),
+            (positive_bank, positive_feed, positive_base),
+        ],
+    )
+    .await?;
+
+    let now = test_f.get_clock().await.unix_timestamp;
+    test_f
+        .set_pyth_oracle_price_native(positive_feed, positive_base * 3, 0, now)
+        .await;
+
+    let debt = test_f.usdc_mint.create_empty_token_account().await;
+    let blocked_borrow = borrower.try_bank_borrow(debt.key, usdc, 1).await;
+    assert_custom_error!(
+        blocked_borrow.unwrap_err(),
+        MarginfiError::CircuitBreakerPriceJump
+    );
+
+    test_f
+        .set_pyth_oracle_price_native(positive_feed, positive_base, 0, now)
+        .await;
+    test_f
+        .set_pyth_oracle_price_native(zero_weight_feed, zero_weight_base * 3, 0, now)
+        .await;
+    borrower.try_bank_borrow(debt.key, usdc, 1).await?;
+
+    test_f
+        .set_pyth_oracle_price_native(zero_weight_feed, zero_weight_base, 0, now)
+        .await;
+    test_f
+        .set_pyth_oracle_price_native(positive_feed, positive_base * 3, 0, now)
+        .await;
+    let blocked_withdraw = borrower
+        .try_bank_withdraw(healthy.key, sol_eq, 1, None)
+        .await;
+    assert_custom_error!(
+        blocked_withdraw.unwrap_err(),
+        MarginfiError::CircuitBreakerPriceJump
+    );
+
+    test_f
+        .set_pyth_oracle_price_native(positive_feed, positive_base, 0, now)
+        .await;
+    test_f
+        .set_pyth_oracle_price_native(zero_weight_feed, zero_weight_base * 3, 0, now)
+        .await;
+    borrower
+        .try_bank_withdraw(healthy.key, sol_eq, 1, None)
+        .await?;
+    Ok(())
+}
+
+async fn active_bank_keys_in_balance_order(account: &MarginfiAccountFixture) -> Vec<Pubkey> {
+    account
+        .load()
+        .await
+        .lending_account
+        .get_active_balances_iter()
+        .map(|b| b.bank_pk)
+        .collect()
+}
+
+#[test_case(false, false; "existing e-mode liability")]
+#[test_case(true, false; "borrow introduces the boosting liability")]
+#[test_case(false, true; "isolated collateral with existing e-mode liability")]
+#[test_case(true, true; "isolated collateral with new e-mode liability")]
+#[tokio::test]
+async fn cb_gate_checks_emode_boosted_leg(
+    borrow_opens_boosting_liability: bool,
+    isolated_collateral: bool,
+) -> anyhow::Result<()> {
+    use marginfi_type_crate::types::{EmodeEntry, RiskTier};
+    const EMODE_COLLATERAL_TAG: u16 = 91;
+    const EMODE_LIABILITY_TAG: u16 = 92;
+
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let pyusd = test_f.get_bank(&BankMint::PyUSD);
+    let sol_eq = test_f.get_bank(&BankMint::SolEquivalent);
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_tokens = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(2_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_tokens.key, pyusd, 2_000, None)
+        .await?;
+
+    let account = test_f.create_marginfi_account().await;
+    let healthy_collateral_tokens = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    let cb_collateral_tokens = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    account
+        .try_bank_deposit(healthy_collateral_tokens.key, sol_eq, 100, None)
+        .await?;
+    account
+        .try_bank_deposit(cb_collateral_tokens.key, sol, 100, None)
+        .await?;
+    sol.set_asset_weights_to_zero().await?;
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(sol, EMODE_COLLATERAL_TAG, &[])
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            pyusd,
+            EMODE_LIABILITY_TAG,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: EMODE_COLLATERAL_TAG,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+
+    if isolated_collateral {
+        sol.update_config(
+            BankConfigOpt {
+                risk_tier: Some(RiskTier::Isolated),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    }
+
+    let borrow_destination = test_f.pyusd_mint.create_empty_token_account().await;
+    if !borrow_opens_boosting_liability {
+        account
+            .try_bank_borrow(borrow_destination.key, pyusd, 1)
+            .await?;
+    }
+
+    arm_circuit_breaker(&test_f, sol, PYTH_SOL_FEED, 10_000_000_000).await?;
+    for (price, confidence, expected_error) in [
+        (30_000_000_000, 0, MarginfiError::CircuitBreakerPriceJump),
+        (
+            10_000_000_000,
+            CONFIDENCE_BREACHING_HEALTH_CAP_ONLY,
+            MarginfiError::OracleMaxConfidenceExceeded,
+        ),
+    ] {
+        let now = test_f.get_clock().await.unix_timestamp;
+        test_f
+            .set_pyth_oracle_price_native(PYTH_SOL_FEED, price, confidence, now)
+            .await;
+
+        let result = if borrow_opens_boosting_liability {
+            account
+                .try_bank_borrow(borrow_destination.key, pyusd, 1)
+                .await
+        } else {
+            account
+                .try_bank_withdraw(healthy_collateral_tokens.key, sol_eq, 1, None)
+                .await
+        };
+        if isolated_collateral {
+            result?;
+        } else {
+            assert_custom_error!(result.unwrap_err(), expected_error);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cb_gate_still_checks_leg_with_zero_init_and_positive_maint_weight() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let sol_eq = test_f.get_bank(&BankMint::SolEquivalent);
+    let lender = test_f.create_marginfi_account().await;
+    let supply = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(2_000)
+        .await;
+    lender
+        .try_bank_deposit(supply.key, usdc, 2_000, None)
+        .await?;
+    let borrower = test_f.create_marginfi_account().await;
+    let healthy = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(100)
+        .await;
+    let affected = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    borrower
+        .try_bank_deposit(healthy.key, sol_eq, 100, None)
+        .await?;
+    borrower
+        .try_bank_deposit(affected.key, sol, 1, None)
+        .await?;
+    let debt = test_f.usdc_mint.create_empty_token_account().await;
+    borrower.try_bank_borrow(debt.key, usdc, 1).await?;
+    sol.set_asset_weights(I80F48::ZERO, I80F48!(0.5)).await?;
+    arm_circuit_breaker(&test_f, sol, PYTH_SOL_FEED, 10_000_000_000).await?;
+    set_oracle_price_now(&test_f, PYTH_SOL_FEED, 30_000_000_000).await;
+    let res = borrower
+        .try_bank_withdraw(healthy.key, sol_eq, 1, None)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cb_gate_cursor_advances_per_bank_stride_past_fixed_oracle_bank() -> anyhow::Result<()> {
+    for _attempt in 0..16 {
+        let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+        let usdc = test_f.get_bank(&BankMint::Usdc);
+        let sol = test_f.get_bank(&BankMint::Sol);
+        let pyusd = test_f.get_bank(&BankMint::PyUSD);
+        let fixed = test_f.get_bank(&BankMint::Fixed);
+
+        let lender = test_f.create_marginfi_account().await;
+        let lender_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+        lender
+            .try_bank_deposit(lender_sol.key, sol, 10, None)
+            .await?;
+
+        let borrower = test_f.create_marginfi_account().await;
+        let usdc_tokens = test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(1_000)
+            .await;
+        let pyusd_tokens = test_f
+            .pyusd_mint
+            .create_token_account_and_mint_to(100)
+            .await;
+        let fixed_tokens = test_f.fixed_mint.create_token_account_and_mint_to(20).await;
+        borrower
+            .try_bank_deposit(usdc_tokens.key, usdc, 1_000, None)
+            .await?;
+        borrower
+            .try_bank_deposit(fixed_tokens.key, fixed, 10, None)
+            .await?;
+        borrower
+            .try_bank_deposit(pyusd_tokens.key, pyusd, 100, None)
+            .await?;
+
+        let legs = active_bank_keys_in_balance_order(&borrower).await;
+        let fixed_index = legs.iter().position(|k| *k == fixed.key).unwrap();
+        let pyusd_index = legs.iter().position(|k| *k == pyusd.key).unwrap();
+        if fixed_index > pyusd_index {
+            continue;
+        }
+
+        arm_circuit_breaker(&test_f, pyusd, PYTH_PYUSD_FEED, 1_000_000).await?;
+        set_oracle_price_now(&test_f, PYTH_PYUSD_FEED, 2_000_000).await;
+
+        let borrowed = test_f.sol_mint.create_empty_token_account().await;
+        let blocked = borrower.try_bank_borrow(borrowed.key, sol, 1).await;
+        assert_custom_error!(blocked.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+        return Ok(());
+    }
+    anyhow::bail!("the Fixed leg never preceded the PyUSD leg in 16 fixtures")
+}
+
+fn max_balance_collateral_mints() -> Vec<(BankMint, f64)> {
+    vec![
+        (BankMint::Sol, 5.0),
+        (BankMint::SolEquivalent, 5.0),
+        (BankMint::PyUSD, 5.0),
+        (BankMint::Fixed, 5.0),
+        (BankMint::FixedLow, 10_000.0),
+        (BankMint::SolEquivalent1, 5.0),
+        (BankMint::SolEquivalent2, 5.0),
+        (BankMint::SolEquivalent3, 5.0),
+        (BankMint::SolEquivalent4, 5.0),
+        (BankMint::SolEquivalent5, 5.0),
+        (BankMint::SolEquivalent6, 5.0),
+        (BankMint::SolEquivalent7, 5.0),
+        (BankMint::SolEquivalent8, 5.0),
+        (BankMint::SolEquivalent9, 5.0),
+        (BankMint::SolSwbPull, 5.0),
+    ]
+}
+
+async fn measure_compute_units(
+    test_f: &TestFixture,
+    ix: solana_sdk::instruction::Instruction,
+    also_execute: bool,
+) -> anyhow::Result<u64> {
+    use solana_compute_budget_interface::ComputeBudgetInstruction;
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+            ix,
+        ],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    let simulated = ctx.banks_client.simulate_transaction(tx.clone()).await?;
+    anyhow::ensure!(
+        matches!(simulated.result, Some(Ok(()))),
+        "simulation failed: {:?}",
+        simulated.result
+    );
+    let units = simulated
+        .simulation_details
+        .expect("simulation units")
+        .units_consumed;
+    if also_execute {
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+    Ok(units)
+}
+
+#[tokio::test]
+async fn cb_gate_withdraw_keeps_cu_headroom_at_max_balances() -> anyhow::Result<()> {
+    const MAX_BALANCES: usize = 16;
+    const TX_COMPUTE_UNIT_LIMIT: u64 = 1_400_000;
+    const MIN_CU_HEADROOM_PERCENT: u64 = 15;
+
+    assert_eq!(max_balance_collateral_mints().len() + 1, MAX_BALANCES);
+    let settings = TestSettings {
+        banks: std::iter::once(TestBankSetting {
+            mint: BankMint::Usdc,
+            config: None,
+        })
+        .chain(
+            max_balance_collateral_mints()
+                .into_iter()
+                .map(|(mint, _)| TestBankSetting { mint, config: None }),
+        )
+        .collect(),
+        protocol_fees: false,
+    };
+    let test_f = TestFixture::new(Some(settings)).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+
+    let all_mints = std::iter::once(BankMint::Usdc).chain(
+        max_balance_collateral_mints()
+            .into_iter()
+            .map(|(mint, _)| mint),
+    );
+    for mint in all_mints {
+        test_f
+            .get_bank(&mint)
+            .update_config(
+                BankConfigOpt {
+                    oracle_max_age: Some(u16::MAX),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+    }
+
+    let lender = test_f.create_marginfi_account().await;
+    let supply = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    lender
+        .try_bank_deposit(supply.key, usdc, 1_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let collateral = max_balance_collateral_mints();
+    let mut destination = None;
+    for (i, (mint, amount)) in collateral.iter().enumerate() {
+        let bank = test_f.get_bank(mint);
+        let token = bank
+            .mint
+            .create_token_account_and_mint_to(amount * 2.0)
+            .await;
+        borrower
+            .try_bank_deposit(token.key, bank, *amount, None)
+            .await?;
+        if i == 0 {
+            let debt = test_f.usdc_mint.create_empty_token_account().await;
+            borrower.try_bank_borrow(debt.key, usdc, 1).await?;
+        }
+        if i == 1 {
+            destination = Some(token.key);
+        }
+    }
+    let destination = destination.expect("second collateral leg");
+    let withdraw_bank = test_f.get_bank(&collateral[1].0);
+    assert_eq!(
+        borrower
+            .load()
+            .await
+            .lending_account
+            .get_active_balances_iter()
+            .count(),
+        MAX_BALANCES
+    );
+
+    let baseline_units = measure_compute_units(
+        &test_f,
+        borrower
+            .make_bank_withdraw_ix(destination, withdraw_bank, 0.1, None)
+            .await,
+        false,
+    )
+    .await?;
+
+    let sol = test_f.get_bank(&BankMint::Sol);
+    let pyusd = test_f.get_bank(&BankMint::PyUSD);
+    arm_circuit_breakers(
+        &test_f,
+        &[
+            (sol, PYTH_SOL_FEED, 10_000_000_000),
+            (pyusd, PYTH_PYUSD_FEED, 1_000_000),
+        ],
+    )
+    .await?;
+    let units_with_cb = measure_compute_units(
+        &test_f,
+        borrower
+            .make_bank_withdraw_ix(destination, withdraw_bank, 0.1, None)
+            .await,
+        true,
+    )
+    .await?;
+
+    println!(
+        "16-position withdraw: baseline {baseline_units} CU, two armed CB legs {units_with_cb} CU (+{})",
+        units_with_cb.saturating_sub(baseline_units)
+    );
+    assert!(
+        units_with_cb > baseline_units,
+        "the inline CB gate added no work: it did not run"
+    );
+    let max_allowed_units = TX_COMPUTE_UNIT_LIMIT * (100 - MIN_CU_HEADROOM_PERCENT) / 100;
+    assert!(
+        units_with_cb <= max_allowed_units,
+        "{units_with_cb} CU leaves < {MIN_CU_HEADROOM_PERCENT}% headroom under {TX_COMPUTE_UNIT_LIMIT}"
+    );
     Ok(())
 }

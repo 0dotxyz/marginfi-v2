@@ -8,8 +8,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health_and_clear_tag,
-            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate_skip_zero_weight, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -232,7 +232,7 @@ pub fn lending_account_borrow<'info>(
     );
 
     // Revert if any involved bank's oracle price has jumped past the breach threshold.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    run_cb_price_gate_skip_zero_weight(&marginfi_account, &group, ctx.remaining_accounts)?;
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-borrow collateral mix. Ratchet on incomplete is unreachable today (the gate
