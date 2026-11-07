@@ -1,7 +1,9 @@
 #[cfg(not(feature = "client"))]
 use crate::events::{GroupEventHeader, LendingPoolBankAccrueInterestEvent};
 use crate::{
-    check, debug,
+    check,
+    constants::MIN_EMISSIONS_SHARE_SUPPLY,
+    debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -14,7 +16,10 @@ use crate::{
             InterestRateStateChanges,
         },
         price::OraclePriceWithMultiplier,
-        rate::{debt_index_of, yield_index_of},
+        rate::{
+            debt_index_of, emissions_spread_rate_at, emissions_stream_rate, pending_emissions,
+            pending_emissions_growth, yield_index_of,
+        },
     },
     utils::is_integration_asset_tag,
 };
@@ -30,8 +35,9 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
-        DEFAULT_LIQUIDATION_FEE, FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
-        PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
+        DEFAULT_LIQUIDATION_FEE, EMISSIONS_SPREAD_SECONDS, FREEZE_SETTINGS, GROUP_FLAGS,
+        MAX_LIQUIDATION_FEE_U32, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
         u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
@@ -215,6 +221,14 @@ pub trait BankImpl {
     ) -> MarginfiResult<()>;
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
     fn take_rate_reading(&mut self, multiplier: I80F48, now: i64) -> MarginfiResult;
+    fn spread_emissions(
+        &mut self,
+        amount: u64,
+        share_value_before: I80F48,
+        now: i64,
+    ) -> MarginfiResult;
+    fn stream_emissions(&mut self, amount: u64, seconds: u64) -> MarginfiResult;
+    fn pay_streamed_emissions(&mut self, seconds: u64) -> MarginfiResult;
     fn update_cache_price(
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
@@ -252,6 +266,7 @@ pub trait BankImpl {
         signer_seeds: &[&[&[u8]]],
         remaining_accounts: &[AccountInfo<'info>],
     ) -> MarginfiResult;
+    fn pay_depositors(&mut self, amount: I80F48) -> MarginfiResult;
     fn socialize_loss(&mut self, loss_amount: I80F48) -> MarginfiResult<bool>;
     fn get_flag(&self, flag: u64) -> bool;
     fn update_flag(&mut self, value: bool, flag: u64);
@@ -712,6 +727,7 @@ impl BankImpl for Bank {
         if time_delta == 0 {
             return Ok(());
         }
+        self.pay_streamed_emissions(time_delta)?;
 
         let total_assets = self.get_asset_amount(self.total_asset_shares.into())?;
         let total_liabilities = self.get_liability_amount(self.total_liability_shares.into())?;
@@ -850,13 +866,93 @@ impl BankImpl for Bank {
     /// Takes a rate reading at `now` from the bank's indices under the venue `multiplier`. An
     /// index past the encodable range goes unrecorded.
     fn take_rate_reading(&mut self, multiplier: I80F48, now: i64) -> MarginfiResult {
+        if !self.rate_reading_due(now) {
+            return Ok(());
+        }
         if let Some(reading) = RateReading::new(
-            yield_index_of(self, multiplier)?,
+            yield_index_of(self, multiplier, now)?,
             debt_index_of(self, multiplier)?,
             now,
         ) {
             self.record_rate_reading(reading);
         }
+        Ok(())
+    }
+
+    /// Spreads an emissions deposit of `amount`, which lifted `asset_share_value` from
+    /// `share_value_before`, over `EMISSIONS_SPREAD_SECONDS`, never slowing what is still pending.
+    fn spread_emissions(
+        &mut self,
+        amount: u64,
+        share_value_before: I80F48,
+        now: i64,
+    ) -> MarginfiResult {
+        let share_value = I80F48::from(self.asset_share_value);
+        if share_value_before <= I80F48::ZERO || share_value <= share_value_before {
+            return Ok(());
+        }
+        // The pending growth rises with the share value: the deposit leaves the yield index put.
+        let growth_to_count = share_value
+            .checked_div(share_value_before)
+            .and_then(|growth| growth.checked_mul(pending_emissions_growth(self, now)))
+            .and_then(|growth| growth.checked_sub(I80F48::ONE))
+            .ok_or_else(math_error!())?;
+        if growth_to_count <= I80F48::ZERO {
+            return Ok(());
+        }
+        let tokens = pending_emissions(self, now)
+            .checked_add(I80F48::from_num(amount))
+            .ok_or_else(math_error!())?;
+        let rate = tokens
+            .checked_div(I80F48::from_num(EMISSIONS_SPREAD_SECONDS))
+            .ok_or_else(math_error!())?
+            .max(emissions_spread_rate_at(self, now));
+        self.emissions_spread_base = tokens
+            .checked_div(growth_to_count)
+            .ok_or_else(math_error!())?
+            .into();
+        self.emissions_spread_pending = tokens.into();
+        self.emissions_spread_rate = rate.into();
+        self.emissions_spread_updated_at = now;
+        Ok(())
+    }
+
+    /// Adds `amount` (non-zero) to the emissions stream, to be paid over `seconds`. The stream's
+    /// seconds left become the average of its own and `seconds`, weighted by the amounts.
+    fn stream_emissions(&mut self, amount: u64, seconds: u64) -> MarginfiResult {
+        let amount = I80F48::from_num(amount);
+        let total = I80F48::from(self.emissions_stream_pending)
+            .checked_add(amount)
+            .ok_or_else(math_error!())?;
+        let left = I80F48::from_num(self.emissions_stream_seconds);
+        self.emissions_stream_seconds = I80F48::from_num(seconds)
+            .checked_sub(left)
+            .and_then(|gap| gap.checked_mul(amount.checked_div(total)?))
+            .and_then(|shift| shift.checked_add(left)?.checked_round()?.checked_to_num())
+            .ok_or_else(math_error!())?;
+        self.emissions_stream_pending = total.into();
+        Ok(())
+    }
+
+    /// Pays depositors `seconds` of the emissions stream through `asset_share_value`. The stream
+    /// pauses while the share supply is under `MIN_EMISSIONS_SHARE_SUPPLY`.
+    fn pay_streamed_emissions(&mut self, seconds: u64) -> MarginfiResult {
+        let left = self.emissions_stream_seconds;
+        if left == 0 || I80F48::from(self.total_asset_shares) < MIN_EMISSIONS_SHARE_SUPPLY {
+            return Ok(());
+        }
+        let pending = I80F48::from(self.emissions_stream_pending);
+        let paid = if seconds >= left {
+            pending
+        } else {
+            emissions_stream_rate(self)?
+                .checked_mul(I80F48::from_num(seconds))
+                .ok_or_else(math_error!())?
+                .min(pending)
+        };
+        self.pay_depositors(paid)?;
+        self.emissions_stream_pending = (pending - paid).into();
+        self.emissions_stream_seconds = left.saturating_sub(seconds);
         Ok(())
     }
 
@@ -1366,6 +1462,18 @@ impl BankImpl for Bank {
     /// In cases where assets < liabilities, the asset share value will be set to zero, but cannot
     /// go negative. Effectively, depositors forfeit their entire deposit AND all earned interest in
     /// this case.
+    /// Raises `asset_share_value` so the current shares hold `amount` more native units.
+    fn pay_depositors(&mut self, amount: I80F48) -> MarginfiResult {
+        let shares = I80F48::from(self.total_asset_shares);
+        self.asset_share_value = self
+            .get_asset_amount(shares)?
+            .checked_add(amount)
+            .and_then(|total| total.checked_div(shares))
+            .ok_or_else(math_error!())?
+            .into();
+        Ok(())
+    }
+
     fn socialize_loss(&mut self, loss_amount: I80F48) -> MarginfiResult<bool> {
         let mut kill_bank = false;
         let total_asset_shares: I80F48 = self.total_asset_shares.into();
@@ -2602,5 +2710,196 @@ mod cb_tests {
         let frozen = b.cb_frozen_seconds_pending + b.cb_frozen_seconds(b.last_update, now);
         assert_eq!(frozen, 3_600);
         assert_eq!((now - b.last_update) as u64 - frozen, 900);
+    }
+}
+
+/// `stream_emissions` adds deposits to a native bank's emissions stream and
+/// `pay_streamed_emissions` pays it into `asset_share_value`. Every figure is exact in I80F48.
+#[cfg(test)]
+mod emissions_stream {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::{
+        EMISSIONS_STREAM_MAX_SECONDS, EMISSIONS_STREAM_MIN_SECONDS,
+    };
+
+    const MIN: I80F48 = MIN_EMISSIONS_SHARE_SUPPLY;
+
+    /// A bank of `shares` at a share value of 1, streaming `pending` over `seconds`.
+    fn streaming_bank(shares: I80F48, pending: u64, seconds: u64) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = shares.into();
+        bank.emissions_stream_pending = I80F48::from_num(pending).into();
+        bank.emissions_stream_seconds = seconds;
+        bank
+    }
+
+    fn pending(bank: &Bank) -> I80F48 {
+        bank.emissions_stream_pending.into()
+    }
+
+    #[test]
+    fn each_second_pays_the_pending_over_the_seconds_left() {
+        let mut bank = streaming_bank(MIN, 1_024_000, 1_024);
+        bank.pay_streamed_emissions(512).unwrap();
+
+        // 512_000 over 2^20 shares.
+        assert_eq!(
+            I80F48::from(bank.asset_share_value),
+            I80F48::from_num(1.48828125)
+        );
+        assert_eq!(pending(&bank), I80F48::from_num(512_000));
+        assert_eq!(bank.emissions_stream_seconds, 512);
+    }
+
+    /// At a share value of 1.25, paying 256 of 1,024 seconds moves 786,432 from the stream into
+    /// the bank's 3,932,160 tokens: 4,718,592 over 3,145,728 shares is a share value of 1.5.
+    #[test]
+    fn the_share_value_becomes_the_new_total_tokens_over_the_shares() {
+        let shares = MIN * 3;
+        let mut bank = streaming_bank(shares, 3_145_728, 1_024);
+        bank.asset_share_value = I80F48::from_num(1.25).into();
+        bank.pay_streamed_emissions(256).unwrap();
+
+        assert_eq!(pending(&bank), I80F48::from_num(2_359_296));
+        assert_eq!(
+            bank.get_asset_amount(shares).unwrap(),
+            I80F48::from_num(4_718_592)
+        );
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(1.5));
+    }
+
+    /// The last second pays what the rounding of the earlier seconds left, and a span past the end
+    /// pays nothing more.
+    #[test]
+    fn the_last_second_pays_what_is_left_and_the_stream_ends() {
+        let mut bank = streaming_bank(MIN, 1_000, 3);
+        bank.pay_streamed_emissions(1).unwrap();
+        let first = I80F48::from_num(1_000) / I80F48::from_num(3);
+        assert_eq!(pending(&bank), I80F48::from_num(1_000) - first);
+
+        bank.pay_streamed_emissions(5).unwrap();
+        assert_eq!(
+            I80F48::from(bank.asset_share_value),
+            I80F48::ONE + first / MIN + (I80F48::from_num(1_000) - first) / MIN
+        );
+        assert_eq!(pending(&bank), I80F48::ZERO);
+        assert_eq!(bank.emissions_stream_seconds, 0);
+
+        let ended = bank;
+        bank.pay_streamed_emissions(10).unwrap();
+        assert_eq!(bank, ended);
+    }
+
+    /// The supply floor holds the stream: just under it nothing is paid and no second is spent, on
+    /// it the second is paid.
+    #[test]
+    fn the_stream_pauses_under_the_minimum_share_supply() {
+        let mut bank = streaming_bank(MIN - I80F48::DELTA, 5_120, 10);
+        let before = bank;
+        bank.pay_streamed_emissions(1).unwrap();
+        assert_eq!(bank, before);
+
+        bank.total_asset_shares = MIN.into();
+        bank.pay_streamed_emissions(1).unwrap();
+        assert_eq!(pending(&bank), I80F48::from_num(4_608));
+        assert_eq!(bank.emissions_stream_seconds, 9);
+    }
+
+    /// The largest pending over the longest period and the smallest paying supply: all but the
+    /// last second, then a span past the end, pay without overflowing.
+    #[test]
+    fn the_largest_stream_cannot_overflow() {
+        let max = EMISSIONS_STREAM_MAX_SECONDS;
+        let mut bank = streaming_bank(MIN, u64::MAX, max);
+        bank.pay_streamed_emissions(max - 1).unwrap();
+        let paid = I80F48::from_num(u64::MAX) / I80F48::from_num(max) * I80F48::from_num(max - 1);
+        assert_eq!(pending(&bank), I80F48::from_num(u64::MAX) - paid);
+
+        bank.pay_streamed_emissions(u64::MAX).unwrap();
+        assert_eq!(pending(&bank), I80F48::ZERO);
+        assert_eq!(
+            I80F48::from(bank.asset_share_value),
+            I80F48::ONE + paid / MIN + (I80F48::from_num(u64::MAX) - paid) / MIN
+        );
+    }
+
+    /// Accrual pays the stream on a bank with no borrows, over the seconds it accrues interest for:
+    /// a halt's frozen seconds pay nothing and stay on the stream.
+    #[test]
+    fn accrual_pays_the_unfrozen_seconds_with_no_borrows() {
+        let mut bank = streaming_bank(MIN, 100_000, 100);
+        bank.last_update = 1_000;
+        bank.cb_frozen_seconds_pending = 40;
+        bank.accrue_interest(
+            1_100,
+            &MarginfiGroup::zeroed(),
+            #[cfg(not(feature = "client"))]
+            Pubkey::default(),
+        )
+        .unwrap();
+
+        assert_eq!(pending(&bank), I80F48::from_num(40_000));
+        assert_eq!(bank.emissions_stream_seconds, 40);
+        assert_eq!(
+            I80F48::from(bank.asset_share_value),
+            I80F48::ONE + I80F48::from_num(60_000) / MIN
+        );
+    }
+
+    #[test]
+    fn a_deposit_into_an_ended_stream_takes_its_own_period() {
+        let mut bank = streaming_bank(MIN, 0, 0);
+        bank.stream_emissions(1_000, 100_000).unwrap();
+        assert_eq!(pending(&bank), I80F48::from_num(1_000));
+        assert_eq!(bank.emissions_stream_seconds, 100_000);
+    }
+
+    /// 3,000 with 100,000 seconds left plus 1,000 over 500,000 seconds: the 1,000 is a quarter of
+    /// the stream, so it moves the seconds left a quarter of the way to 500,000.
+    #[test]
+    fn a_deposit_moves_the_seconds_left_by_its_share_of_the_stream() {
+        let mut bank = streaming_bank(MIN, 3_000, 100_000);
+        bank.stream_emissions(1_000, 500_000).unwrap();
+        assert_eq!(pending(&bank), I80F48::from_num(4_000));
+        assert_eq!(bank.emissions_stream_seconds, 200_000);
+    }
+
+    /// One native unit over the shortest or the longest period, added to a week's stream of 1,000
+    /// tokens (9 decimals), moves the seconds left by under half a second, so they stay put.
+    #[test]
+    fn the_smallest_deposit_cannot_speed_up_or_slow_down_a_stream() {
+        for seconds in [EMISSIONS_STREAM_MIN_SECONDS, EMISSIONS_STREAM_MAX_SECONDS] {
+            let mut bank = streaming_bank(MIN, 1_000_000_000_000, 604_800);
+            bank.stream_emissions(1, seconds).unwrap();
+            assert_eq!(pending(&bank), I80F48::from_num(1_000_000_000_001u64));
+            assert_eq!(bank.emissions_stream_seconds, 604_800);
+        }
+    }
+
+    /// Halving a week's stream with a deposit over the shortest period takes 1.4 times what is
+    /// pending: 7,000,000 over a day added to 5,000,000 with a week left leaves half a week.
+    #[test]
+    fn halving_a_stream_takes_more_than_it_holds() {
+        let mut bank = streaming_bank(MIN, 5_000_000, 604_800);
+        bank.stream_emissions(7_000_000, EMISSIONS_STREAM_MIN_SECONDS)
+            .unwrap();
+        assert_eq!(pending(&bank), I80F48::from_num(12_000_000));
+        assert_eq!(bank.emissions_stream_seconds, 302_400);
+    }
+
+    /// The largest deposits over the longest period cannot overflow. Two equal halves average their
+    /// seconds left, and a half second rounds up.
+    #[test]
+    fn the_largest_deposits_cannot_overflow() {
+        let max = EMISSIONS_STREAM_MAX_SECONDS;
+        for (left, merged) in [(max, max), (1, max / 2 + 1)] {
+            let mut bank = streaming_bank(MIN, u64::MAX, left);
+            bank.stream_emissions(u64::MAX, max).unwrap();
+            assert_eq!(pending(&bank), I80F48::from_num(u64::MAX) * 2);
+            assert_eq!(bank.emissions_stream_seconds, merged);
+        }
     }
 }

@@ -17,7 +17,7 @@ assert_struct_align!(RateReading, 8);
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
 pub struct RateReading {
     /// `asset_share_value` times the venue exchange multiplier, as I80F48 bits with the low
-    /// `INDEX_DROPPED_BITS` removed.
+    /// `INDEX_DROPPED_BITS` removed. Emissions enter it over `EMISSIONS_SPREAD_SECONDS`.
     pub asset_index: u64,
     /// `liability_share_value` times the venue exchange multiplier, encoded like `asset_index`.
     pub debt_index: u64,

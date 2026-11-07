@@ -19,20 +19,25 @@ import {
 import {
   CLOSE_ENABLED_FLAG,
   defaultBankConfig,
+  EMISSIONS_STREAM_MIN_SECONDS,
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
-import { addBankWithSeed } from "../../utils/group-instructions";
+import {
+  addBankWithSeed,
+  lendingPoolEmissionsDepositStreamed,
+} from "../../utils/group-instructions";
 import {
   composeRemainingAccounts,
   depositIx,
   withdrawIx,
 } from "../../utils/user-instructions";
-import { deriveBankWithSeed } from "../../utils/pdas";
+import { deriveBankWithSeed, deriveLiquidityVault } from "../../utils/pdas";
 import { assert } from "chai";
 import { assertBNEqual, expectFailedTxWithError } from "../../utils/genericTests";
 import { closeBank } from "../../utils/group-instructions";
 import { USER_ACCOUNT } from "../../utils/mocks";
 import { dumpAccBalances } from "../../utils/tools";
+import { nativeToI80Scaled, toI80Scaled } from "../../utils/bn-utils";
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -40,16 +45,15 @@ let provider: BankrunProvider;
 describe("Close bank", () => {
   let bankKey: PublicKey;
   const seed = new BN(987613);
+  const oneTokenA = new BN(1 * 10 ** ecosystem.tokenADecimals);
 
-  before(async () => {
-    provider = bankRunProvider;
-    program = bankrunProgram;
-    const config = defaultBankConfig();
-    [bankKey] = deriveBankWithSeed(
+  /** Adds a Token A bank under `bankSeed`, priced by the Token A oracle, and returns its key. */
+  const addTokenABank = async (bankSeed: BN) => {
+    const [bank] = deriveBankWithSeed(
       program.programId,
       marginfiGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      bankSeed
     );
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -57,8 +61,8 @@ describe("Close bank", () => {
           marginfiGroup: marginfiGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          config: config,
-          seed: seed,
+          config: defaultBankConfig(),
+          seed: bankSeed,
         }),
         await program.methods
           .lendingPoolConfigureBankOracle(
@@ -67,7 +71,7 @@ describe("Close bank", () => {
           )
           .accountsPartial({
             group: marginfiGroup.publicKey,
-            bank: bankKey,
+            bank,
             governanceAdmin: groupAdmin.wallet.publicKey,
           })
           .remainingAccounts([
@@ -80,36 +84,54 @@ describe("Close bank", () => {
           .instruction()
       )
     );
+    return bank;
+  };
 
-    const bank = await program.account.bank.fetch(bankKey);
-    assertBNEqual(bank.bankSeed, seed);
-  });
-
-  it("bank cannot close with open positions", async () => {
-    const userAcc = users[0].accounts.get(USER_ACCOUNT);
-    const amount = new BN(1 * 10 ** ecosystem.tokenADecimals);
+  const depositInto = async (bank: PublicKey) => {
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await depositIx(users[0].mrgnProgram, {
-          marginfiAccount: userAcc,
-          bank: bankKey,
+          marginfiAccount: users[0].accounts.get(USER_ACCOUNT),
+          bank,
           tokenAccount: users[0].tokenAAccount,
-          amount: amount,
+          amount: oneTokenA,
           depositUpToLimit: false,
         })
       )
     );
+  };
 
-    const bankAfterDeposit = await program.account.bank.fetch(bankKey);
-    assert.equal(bankAfterDeposit.lendingPositionCount, 1);
+  const withdrawAllFrom = async (bank: PublicKey) => {
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccounts(
+      [
+        [bank, oracles.tokenAOracle.publicKey],
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      ].filter((group) => !group[0].equals(bank))
+    );
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await withdrawIx(users[0].mrgnProgram, {
+          marginfiAccount: users[0].accounts.get(USER_ACCOUNT),
+          bank,
+          tokenAccount: users[0].tokenAAccount,
+          remaining,
+          amount: new BN(0),
+          withdrawAll: true,
+        })
+      )
+    );
+  };
 
+  const expectCloseToFail = async (bank: PublicKey) => {
     await expectFailedTxWithError(
       async () => {
         await groupAdmin.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
             await closeBank(groupAdmin.mrgnProgram, {
               marginfiGroup: marginfiGroup.publicKey,
-              bank: bankKey,
+              bank,
               admin: groupAdmin.wallet.publicKey,
             })
           )
@@ -118,6 +140,24 @@ describe("Close bank", () => {
       "BankCannotClose",
       6081
     );
+  };
+
+  before(async () => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+    bankKey = await addTokenABank(seed);
+
+    const bank = await program.account.bank.fetch(bankKey);
+    assertBNEqual(bank.bankSeed, seed);
+  });
+
+  it("bank cannot close with open positions", async () => {
+    await depositInto(bankKey);
+
+    const bankAfterDeposit = await program.account.bank.fetch(bankKey);
+    assert.equal(bankAfterDeposit.lendingPositionCount, 1);
+
+    await expectCloseToFail(bankKey);
   });
 
   it("bank can be closed after the last user withdraws", async () => {
@@ -127,26 +167,7 @@ describe("Close bank", () => {
     );
     dumpAccBalances(acc);
 
-    // For withdrawAll, include all active balances, including the closing bank.
-    const remaining = composeRemainingAccounts(
-      [
-        [bankKey, oracles.tokenAOracle.publicKey],
-        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(bankKey))
-    );
-    await users[0].mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await withdrawIx(users[0].mrgnProgram, {
-          marginfiAccount: userAcc,
-          bank: bankKey,
-          tokenAccount: users[0].tokenAAccount,
-          remaining,
-          amount: new BN(0),
-          withdrawAll: true,
-        })
-      )
-    );
+    await withdrawAllFrom(bankKey);
 
     const bankAfterWithdraw = await program.account.bank.fetch(bankKey);
     assert.equal(bankAfterWithdraw.lendingPositionCount, 0);
@@ -170,6 +191,39 @@ describe("Close bank", () => {
 
     const info = await provider.connection.getAccountInfo(bankKey);
     assert.isNull(info);
+  });
+
+  it("bank cannot close with emissions left to pay", async () => {
+    const streamingBank = await addTokenABank(seed.addn(1));
+    await depositInto(streamingBank);
+    const [liquidityVault] = deriveLiquidityVault(
+      program.programId,
+      streamingBank
+    );
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await lendingPoolEmissionsDepositStreamed(users[0].mrgnProgram, {
+          bank: streamingBank,
+          mint: ecosystem.tokenAMint.publicKey,
+          fundingAccount: users[0].tokenAAccount,
+          depositor: users[0].wallet.publicKey,
+          liquidityVault,
+          amount: oneTokenA,
+          seconds: new BN(EMISSIONS_STREAM_MIN_SECONDS),
+        })
+      )
+    );
+
+    // Withdrawn in the same second, the stream has paid nothing and has no one left to pay.
+    await withdrawAllFrom(streamingBank);
+    const bank = await program.account.bank.fetch(streamingBank);
+    assert.equal(bank.lendingPositionCount, 0);
+    assert.equal(toI80Scaled(bank.totalAssetShares), 0n);
+    assert.equal(
+      toI80Scaled(bank.emissionsStreamPending),
+      nativeToI80Scaled(oneTokenA)
+    );
+    await expectCloseToFail(streamingBank);
   });
 
   // Uses a real mainnet fixture: the legacy staked bank Hco1P3dGRXz3ZGFvMkbDgghZQy47Tp7vp7koSYRvP6nm

@@ -8,8 +8,8 @@ use anchor_lang::{system_program, InstructionData, ToAccountMetas};
 use drift_mocks::drift::client as drift;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
-use juplend_mocks::state::{Lending, TokenReserve};
-use kamino_mocks::state::{CurvePoint, MinimalReserve};
+use juplend_mocks::state::{Lending, LendingRewardsRateModel, TokenReserve};
+use kamino_mocks::state::{CurvePoint, MinimalLendingMarket, MinimalReserve};
 use marginfi::state::rate::{venue_multiplier, yield_index_of};
 use marginfi_type_crate::pdas::{
     derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
@@ -20,6 +20,7 @@ use marginfi_type_crate::{
     pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
     types::{InterestTriggerConfig, OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_sdk::sysvar;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -492,6 +493,35 @@ impl RebalanceFixture {
         Ok(())
     }
 
+    /// Deposit `ui` USDC of same-mint emissions into `bank`.
+    pub async fn drop_emissions(&self, bank: &BankFixture, ui: f64) -> anyhow::Result<()> {
+        let funding = self
+            .test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(ui)
+            .await;
+        bank.try_emissions_deposit((ui * 1_000_000.0) as u64, funding.key)
+            .await?;
+        Ok(())
+    }
+
+    /// Stream `amount` native USDC units of same-mint emissions into `bank` over `seconds`.
+    pub async fn stream_emissions(
+        &self,
+        bank: &BankFixture,
+        amount: u64,
+        seconds: u64,
+    ) -> anyhow::Result<()> {
+        let funding = self
+            .test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(amount as f64 / 1_000_000.0)
+            .await;
+        bank.try_emissions_deposit_streamed(amount, seconds, funding.key)
+            .await?;
+        Ok(())
+    }
+
     /// Add a second same-mint USDC SOURCE bank at 0% utilization (rate 0), give the user a `deposit`
     /// position in it, and extend the order allowlist to `[src, dst, src2]`. For consolidation (N->1)
     /// tests: the user then holds value in two low-rate sources to sweep into the higher-rate `dst`.
@@ -629,6 +659,19 @@ impl RebalanceFixture {
         dst: Pubkey,
         others: &[Pubkey],
     ) -> Vec<Instruction> {
+        self.build_sandwich_moving(src, dst, others, DEPOSIT_USDC)
+            .await
+    }
+
+    /// [`Self::build_sandwich_among`] for a source position worth `position_ui` USDC, such as one
+    /// emissions have grown past the deposit: all of it is withdrawn, declared and deposited.
+    pub async fn build_sandwich_moving(
+        &self,
+        src: Pubkey,
+        dst: Pubkey,
+        others: &[Pubkey],
+        position_ui: f64,
+    ) -> Vec<Instruction> {
         let execution_seq = self.user.load().await.rebalance_execution_seq;
         let record_pda = record_pda_at(self.user.key, execution_seq);
         let ref_banks: Vec<RebalanceBankMeta> = [src, dst]
@@ -636,7 +679,7 @@ impl RebalanceFixture {
             .chain(others)
             .map(|bank| self.bank_meta(*bank))
             .collect();
-        let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
+        let moves = vec![rebalance_move(0, 1, position_ui)];
         let start_ix = self
             .user
             .make_rebalance_start_ix(
@@ -654,7 +697,7 @@ impl RebalanceFixture {
             .make_withdraw_ix_with_authority(
                 self.keeper_usdc,
                 &self.src_bank_f,
-                DEPOSIT_USDC,
+                position_ui,
                 Some(true),
                 self.keeper.pubkey(),
             )
@@ -664,7 +707,7 @@ impl RebalanceFixture {
             .make_deposit_ix_with_authority(
                 self.keeper_usdc,
                 &self.dst_bank_f,
-                DEPOSIT_USDC,
+                position_ui,
                 None,
                 self.keeper.pubkey(),
             )
@@ -849,6 +892,26 @@ impl RebalanceFixture {
                 None,
                 None,
                 Some(tip),
+            )
+            .await;
+        self.process_as_payer(&[ix]).await
+    }
+
+    pub async fn set_min_improvement(
+        &self,
+        min_improvement: I80F48,
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                None,
+                Some(WrappedI80F48::from(min_improvement)),
+                None,
+                None,
+                None,
             )
             .await;
         self.process_as_payer(&[ix]).await
@@ -1140,6 +1203,213 @@ impl MultiVenueFixture {
             .set_account(&key, &AccountSharedData::from(acct));
     }
 
+    /// Turns on Kamino reserve rewards at the market's `max_apr_bps` ceiling, minting the reward
+    /// pot into the supply vault where klend's `topup_reserve_rewards` puts it.
+    pub async fn set_kamino_reserve_rewards(&self, max_apr_bps: u16) {
+        let pot: u64 = 1_000_000 * 10u64.pow(u32::from(self.mint.mint.decimals));
+        let reserve_key = self.kamino_bank.load().await.integration_acc_1;
+        let mut reserve_ai = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
+        let reserve = bytemuck::from_bytes_mut::<MinimalReserve>(&mut reserve_ai.data[8..]);
+        reserve.config.rewards_amount_per_accrual_unit = pot;
+        reserve.rewards_amount_available = pot;
+        let (market_key, vault) = (reserve.lending_market, reserve.supply_vault);
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&reserve_key, &AccountSharedData::from(reserve_ai));
+
+        let mut market_ai = self.test_f.try_load(&market_key).await.unwrap().unwrap();
+        let size = std::mem::size_of::<MinimalLendingMarket>();
+        bytemuck::from_bytes_mut::<MinimalLendingMarket>(&mut market_ai.data[8..8 + size])
+            .reserve_rewards_max_apr_bps = max_apr_bps;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&market_key, &AccountSharedData::from(market_ai));
+
+        let decimals = self.mint.mint.decimals;
+        self.mint
+            .clone()
+            .mint_to(&vault, pot as f64 / 10f64.powi(decimals as i32))
+            .await;
+    }
+
+    /// Starts a year-long JupLend rewards phase paying `yearly_reward` native units to fToken holders.
+    pub async fn set_juplend_rewards(&self, yearly_reward: u64) {
+        let lending_key = self.juplend_bank.load().await.integration_acc_1;
+        let lending =
+            load_and_deserialize::<Lending>(self.test_f.context.clone(), &lending_key).await;
+        let now = self.test_f.get_clock().await.unix_timestamp as u64;
+        let key = lending.rewards_rate_model;
+        let mut acct = self.test_f.try_load(&key).await.unwrap().unwrap();
+        let size = std::mem::size_of::<LendingRewardsRateModel>();
+        let model =
+            bytemuck::from_bytes_mut::<LendingRewardsRateModel>(&mut acct.data[8..8 + size]);
+        model.start_tvl = 0;
+        model.start_time = now;
+        model.duration = 31_536_000;
+        model.yearly_reward = yearly_reward;
+        self.test_f
+            .context
+            .borrow_mut()
+            .set_account(&key, &AccountSharedData::from(acct));
+    }
+
+    /// The keeper sandwich moving the user's whole Drift position into JupLend.
+    pub async fn drift_to_juplend_sandwich(
+        &self,
+        order_pda: Pubkey,
+        record_pda: Pubkey,
+    ) -> Vec<Instruction> {
+        let (src, dst) = (self.drift_bank.key, self.juplend_bank.key);
+        let drift_crank = self
+            .user
+            .make_drift_update_spot_market_cumulative_interest_ix(&self.drift_bank)
+            .await;
+        let juplend_reserve = derive_juplend_token_reserve(&self.mint.key).0;
+        let ref_banks = vec![
+            RebalanceBankMeta::new(src, self.drift_slice().await),
+            RebalanceBankMeta::with_reserve(dst, juplend_reserve, self.juplend_slice().await)
+                .with_rewards(self.juplend_rewards().await),
+        ];
+        let start_ix = self
+            .user
+            .make_rebalance_start_ix(
+                ref_banks.clone(),
+                vec![self.whole_venue_move()],
+                0,
+                order_pda,
+                record_pda,
+                self.keeper.pubkey(),
+                self.keeper.pubkey(),
+            )
+            .await;
+        let withdraw_ix = self
+            .user
+            .make_drift_withdraw_ix_with_authority(
+                self.keeper_token,
+                &self.drift_bank,
+                VENUE_DEPOSIT_NATIVE,
+                Some(true),
+                self.keeper.pubkey(),
+                None,
+            )
+            .await;
+        // The venue withdraw rounds down, delivering one native unit less than requested.
+        let deposit_ix = self
+            .user
+            .make_juplend_deposit_ix_with_authority(
+                self.keeper_token,
+                &self.juplend_bank,
+                VENUE_DEPOSIT_NATIVE - 1,
+                self.keeper.pubkey(),
+            )
+            .await;
+        let end_ix = self
+            .user
+            .make_rebalance_end_ix(
+                ref_banks,
+                vec![src],
+                order_pda,
+                record_pda,
+                self.keeper.pubkey(),
+            )
+            .await;
+        vec![
+            ComputeBudgetInstruction::set_compute_unit_limit(2_000_000),
+            drift_crank,
+            start_ix,
+            withdraw_ix,
+            deposit_ix,
+            end_ix,
+        ]
+    }
+
+    /// The keeper sandwich moving the user's whole Drift position into Kamino.
+    pub async fn drift_to_kamino_sandwich(
+        &self,
+        order_pda: Pubkey,
+        record_pda: Pubkey,
+    ) -> Vec<Instruction> {
+        let (src, dst) = (self.drift_bank.key, self.kamino_bank.key);
+        let ref_banks = vec![
+            RebalanceBankMeta::new(src, self.drift_slice().await),
+            RebalanceBankMeta::new(dst, self.kamino_slice().await)
+                .with_rewards(self.kamino_rewards().await),
+        ];
+        let start_ix = self
+            .user
+            .make_rebalance_start_ix(
+                ref_banks.clone(),
+                vec![self.whole_venue_move()],
+                0,
+                order_pda,
+                record_pda,
+                self.keeper.pubkey(),
+                self.keeper.pubkey(),
+            )
+            .await;
+        let withdraw_ix = self
+            .user
+            .make_drift_withdraw_ix_with_authority(
+                self.keeper_token,
+                &self.drift_bank,
+                VENUE_DEPOSIT_NATIVE,
+                Some(true),
+                self.keeper.pubkey(),
+                None,
+            )
+            .await;
+        // The venue withdraw rounds down, delivering one native unit less than requested.
+        let deposit_ix = self
+            .user
+            .make_kamino_deposit_ix_with_authority(
+                self.keeper_token,
+                &self.kamino_bank,
+                VENUE_DEPOSIT_NATIVE - 1,
+                self.keeper.pubkey(),
+            )
+            .await;
+        let end_ix = self
+            .user
+            .make_rebalance_end_ix(
+                ref_banks,
+                vec![src],
+                order_pda,
+                record_pda,
+                self.keeper.pubkey(),
+            )
+            .await;
+        vec![
+            ComputeBudgetInstruction::set_compute_unit_limit(2_000_000),
+            self.user
+                .make_drift_update_spot_market_cumulative_interest_ix(&self.drift_bank)
+                .await,
+            self.user
+                .make_kamino_refresh_reserve_ix(&self.kamino_bank)
+                .await,
+            self.user
+                .make_kamino_refresh_obligation_ix(&self.kamino_bank)
+                .await,
+            start_ix,
+            withdraw_ix,
+            deposit_ix,
+            // The deposit leg marks the reserve stale; end reads it after this refresh.
+            self.user
+                .make_kamino_refresh_reserve_ix(&self.kamino_bank)
+                .await,
+            self.user
+                .make_kamino_refresh_obligation_ix(&self.kamino_bank)
+                .await,
+            end_ix,
+        ]
+    }
+
+    /// The one move a two-venue sandwich declares: the whole venue deposit, from bank 0 to bank 1.
+    fn whole_venue_move(&self) -> RebalanceMove {
+        rebalance_move(0, 1, VENUE_DEPOSIT_NATIVE as f64 / 1_000_000.0)
+    }
+
     /// Places the rebalance order on mint `M`, allowing both venue banks. Returns the order/record PDAs.
     pub async fn place_order(
         &self,
@@ -1221,7 +1491,10 @@ impl MultiVenueFixture {
                 .collect(),
         );
         let multiplier = venue_multiplier(&state, ais, &clock).unwrap();
-        (bank_f, yield_index_of(&state, multiplier).unwrap())
+        (
+            bank_f,
+            yield_index_of(&state, multiplier, clock.unix_timestamp).unwrap(),
+        )
     }
 
     /// Reads the user's asset shares in `bank` (zero if no active balance).

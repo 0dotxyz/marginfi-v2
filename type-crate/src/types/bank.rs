@@ -256,8 +256,24 @@ pub struct Bank {
     /// first. Orders measure realized rates from it.
     pub rate_readings: [RateReading; BANK_RATE_READINGS],
 
-    pub _reserved0: [[u64; 8]; 25],
-    pub _reserved1: [u64; 5],
+    /// Native units of deposited emissions not yet spread into the bank's supply rate and yield
+    /// index, as of `emissions_spread_updated_at`. See `EMISSIONS_SPREAD_SECONDS`.
+    pub emissions_spread_pending: WrappedI80F48,
+    /// Native units of `emissions_spread_pending` spread per second.
+    pub emissions_spread_rate: WrappedI80F48,
+    /// Deposits, in native units, that the pending emissions are a share of: the yield index
+    /// divides `asset_share_value` by one plus that share.
+    pub emissions_spread_base: WrappedI80F48,
+    /// Unix seconds the emissions spread was last written.
+    pub emissions_spread_updated_at: i64,
+    /// Native units deposited by `lending_pool_emissions_deposit_streamed`, held in the liquidity
+    /// vault but not yet added to `asset_share_value`.
+    pub emissions_stream_pending: WrappedI80F48,
+    /// Seconds of accrual left to pay `emissions_stream_pending` over.
+    pub emissions_stream_seconds: u64,
+
+    pub _reserved0: [[u64; 8]; 24],
+    pub _reserved1: [u64; 3],
 }
 
 impl Bank {
@@ -363,18 +379,19 @@ impl Bank {
             .max_by_key(|r| r.timestamp)
     }
 
-    /// Store `reading` over the oldest slot, unless the newest reading is under
-    /// `BANK_RATE_READING_SPACING_SECONDS` old.
+    /// Whether a reading taken at `now` would be stored: `now` is set and the newest reading is at
+    /// least `BANK_RATE_READING_SPACING_SECONDS` old.
+    pub fn rate_reading_due(&self, now: i64) -> bool {
+        now > 0
+            && self.newest_rate_reading().is_none_or(|newest| {
+                now.saturating_sub(newest.timestamp) >= BANK_RATE_READING_SPACING_SECONDS
+            })
+    }
+
+    /// Store `reading` over the oldest slot, unless it is not [`Self::rate_reading_due`].
     pub fn record_rate_reading(&mut self, reading: RateReading) {
-        if reading.timestamp <= 0 {
+        if !self.rate_reading_due(reading.timestamp) {
             return;
-        }
-        if let Some(newest) = self.newest_rate_reading() {
-            if reading.timestamp.saturating_sub(newest.timestamp)
-                < BANK_RATE_READING_SPACING_SECONDS
-            {
-                return;
-            }
         }
         if let Some(oldest) = self.rate_readings.iter_mut().min_by_key(|r| r.timestamp) {
             *oldest = reading;

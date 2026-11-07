@@ -8,13 +8,16 @@ use crate::state::bank::BankImpl;
 use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::MarginfiResult;
-use crate::{check, math_error, utils};
+use crate::{check, utils};
 use anchor_lang::prelude::*;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
+    constants::{
+        CIRCUIT_BREAKER_ENABLED, EMISSIONS_STREAM_MAX_SECONDS, EMISSIONS_STREAM_MIN_SECONDS,
+        FREEZE_SETTINGS,
+    },
     types::{
         is_marginfi_asset_tag, Bank, BankConfigFast, BankConfigGov, BankConfigOpt,
         BankOperationalState, MarginfiGroup,
@@ -209,7 +212,7 @@ pub struct LendingPoolConfigureBankGov<'info> {
 }
 
 /// Permissionlessly deposit same-mint emissions directly into the bank liquidity vault,
-/// increasing depositor value through asset share value.
+/// increasing depositor value through asset share value, all at once.
 pub fn lending_pool_emissions_deposit(
     ctx: Context<LendingPoolEmissionsDeposit>,
     amount: u64,
@@ -222,14 +225,73 @@ pub fn lending_pool_emissions_deposit(
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
+    receive_emissions(ctx.accounts, &mut bank, &group, amount, &clock)?;
+
+    let share_value_before = I80F48::from(bank.asset_share_value);
+    bank.pay_depositors(I80F48::from_num(amount))?;
+    bank.spread_emissions(amount, share_value_before, clock.unix_timestamp)?;
+
+    bank.update_bank_cache(&group)?;
+
+    msg!(
+        "Deposited {} same-bank emissions into liquidity vault",
+        amount
+    );
+
+    Ok(())
+}
+
+/// Permissionlessly deposit same-mint emissions into the bank liquidity vault. They are added to
+/// asset share value only as accrual pays them out over the next `seconds`.
+pub fn lending_pool_emissions_deposit_streamed(
+    ctx: Context<LendingPoolEmissionsDeposit>,
+    amount: u64,
+    seconds: u64,
+) -> MarginfiResult {
+    check!(
+        (EMISSIONS_STREAM_MIN_SECONDS..=EMISSIONS_STREAM_MAX_SECONDS).contains(&seconds),
+        MarginfiError::EmissionsUpdateError,
+        "Emissions stream period is out of range"
+    );
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let clock = Clock::get()?;
+    let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
+
+    receive_emissions(ctx.accounts, &mut bank, &group, amount, &clock)?;
+    bank.stream_emissions(amount, seconds)?;
+
+    bank.update_bank_cache(&group)?;
+
+    msg!(
+        "Deposited {} same-bank emissions to stream over {} seconds",
+        amount,
+        seconds
+    );
+
+    Ok(())
+}
+
+/// Checks `bank` can take same-mint emissions, accrues it, and moves `amount` from the funding
+/// account into the liquidity vault.
+fn receive_emissions(
+    accounts: &LendingPoolEmissionsDeposit,
+    bank: &mut Bank,
+    group: &MarginfiGroup,
+    amount: u64,
+    clock: &Clock,
+) -> MarginfiResult {
     utils::validate_bank_state(
-        &bank,
+        bank,
         utils::InstructionKind::FailsIfPausedOrReduceState,
         true,
     )?;
 
     // Reject mints with non-zero transfer fees or active transfer hooks.
-    let mint_ai = ctx.accounts.mint.to_account_info();
+    let mint_ai = accounts.mint.to_account_info();
     check!(
         !utils::nonzero_fee(mint_ai.clone(), clock.epoch)?,
         MarginfiError::InvalidTransfer
@@ -241,52 +303,32 @@ pub fn lending_pool_emissions_deposit(
 
     // Emissions raise the share value by `amount / total_asset_shares`, so a floor on the supply
     // bounds how far any caller can move it. See `MIN_EMISSIONS_SHARE_SUPPLY`.
-    let total_asset_shares = I80F48::from(bank.total_asset_shares);
     check!(
-        total_asset_shares >= MIN_EMISSIONS_SHARE_SUPPLY,
+        I80F48::from(bank.total_asset_shares) >= MIN_EMISSIONS_SHARE_SUPPLY,
         MarginfiError::EmissionsUpdateError,
         "Bank share supply is too small to accept emissions"
     );
 
     bank.accrue_interest(
         clock.unix_timestamp,
-        &group,
+        group,
         #[cfg(not(feature = "client"))]
-        ctx.accounts.bank.key(),
+        accounts.bank.key(),
     )?;
 
     transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.key(),
+            accounts.token_program.key(),
             TransferChecked {
-                from: ctx.accounts.emissions_funding_account.to_account_info(),
-                to: ctx.accounts.liquidity_vault.to_account_info(),
-                authority: ctx.accounts.depositor.to_account_info(),
-                mint: ctx.accounts.mint.to_account_info(),
+                from: accounts.emissions_funding_account.to_account_info(),
+                to: accounts.liquidity_vault.to_account_info(),
+                authority: accounts.depositor.to_account_info(),
+                mint: accounts.mint.to_account_info(),
             },
         ),
         amount,
-        ctx.accounts.mint.decimals,
-    )?;
-
-    let total_assets = bank.get_asset_amount(total_asset_shares)?;
-    let updated_total_assets = total_assets
-        .checked_add(I80F48::from_num(amount))
-        .ok_or_else(math_error!())?;
-
-    bank.asset_share_value = updated_total_assets
-        .checked_div(total_asset_shares)
-        .ok_or_else(math_error!())?
-        .into();
-
-    bank.update_bank_cache(&group)?;
-
-    msg!(
-        "Deposited {} same-bank emissions into liquidity vault",
-        amount
-    );
-
-    Ok(())
+        accounts.mint.decimals,
+    )
 }
 
 #[derive(Accounts)]

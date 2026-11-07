@@ -47,7 +47,9 @@ pub fn lending_pool_close_bank(
         MarginfiError::BankCannotClose
     );
     check!(
-        I80F48::from(bank.emissions_remaining).is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
+        I80F48::from(bank.emissions_remaining).is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD)
+            && I80F48::from(bank.emissions_stream_pending)
+                .is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
         MarginfiError::BankCannotClose
     );
 
