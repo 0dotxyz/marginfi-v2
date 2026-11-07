@@ -6,7 +6,10 @@ use crate::{
     constants::{NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl,
+        staked_settings::StakedSettingsImpl,
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -14,8 +17,8 @@ use anchor_spl::token_interface::*;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_STAKED, BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
+        ASSET_TAG_STAKED, BANK_SEED_KNOWN, CIRCUIT_BREAKER_ENABLED, FEE_VAULT_AUTHORITY_SEED,
+        FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PYTH_PUSH_MIGRATED_DEPRECATED,
         STAKED_ORACLE_FLAGS,
     },
@@ -104,6 +107,11 @@ fn write_staked_bank(
     );
     bank.flags |= BANK_SEED_KNOWN;
     bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
+    if settings.flags & CIRCUIT_BREAKER_ENABLED != 0 {
+        settings.apply_circuit_breaker_config(&mut bank.config)?;
+        // A new bank has no cached price; its first price observation seeds the references.
+        bank.flags |= CIRCUIT_BREAKER_ENABLED;
+    }
     if is_t22 {
         bank.flags |= IS_T22;
     }
