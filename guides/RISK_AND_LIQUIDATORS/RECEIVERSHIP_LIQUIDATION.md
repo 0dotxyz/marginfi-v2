@@ -73,7 +73,9 @@ profitable route between A and B, simply abort the entire tx.
   debt with nothing behind it. The max fee here is the one allowed right now, including any growth
   from a liquidation tag. Every account in bad debt falls in this group: the liquidator pays the
   difference, so liquidators that don't want that loss can skip it. Collateral left after the debt
-  is repaid stays with the user.
+  is repaid stays with the user. This includes debt in a paused bank: a liquidation may repay a
+  paused bank only in this case. Debt in a bankrupt bank, which can't be repaid, and debt priced at
+  zero may stay, as long as the collateral left covers all the debt left.
 
 - The liquidator pays a nominal fee in lamports to use this service. This is automatically billed to
   the global fee wallet at End. See `FeeState.liquidation_flat_sol_fee` to see the fee in lamps.

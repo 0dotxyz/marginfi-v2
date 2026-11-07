@@ -9,8 +9,8 @@ use crate::{
         liquidation_record::{premium_fits_equity, tag_adjusted_premium, tag_after_liquidation},
         marginfi_account::{
             check_pre_liquidation_condition_and_get_account_health,
-            clear_liquidation_price_cache_locks, get_health_components, LendingAccountImpl,
-            MarginfiAccountImpl,
+            clear_liquidation_price_cache_locks, get_health_components, has_repayable_liabilities,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
     },
@@ -25,7 +25,7 @@ use marginfi_type_crate::{
         FeeState, HealthCache, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
         ReceivershipCacheOrigin, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION, ACCOUNT_REPAID_PAUSED_BANK,
     },
 };
 
@@ -49,7 +49,9 @@ fn validate_receivership_cache(
 ///   liabs that they were allowed). A tag grows that allowance over time, except on emode-boosted
 ///   collateral or an account already in bad debt, which hold it at the configured base.
 /// * Fails if the account keeps any debt when its equity is no more than that allowance on all of
-///   its debt. This includes every account in bad debt.
+///   its debt. This includes every account in bad debt. Debt in a bankrupt bank, or priced at
+///   zero, may stay while the collateral left covers all the debt left.
+/// * Fails if debt in a paused bank was repaid outside such a closeout
 pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
@@ -81,13 +83,17 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         tag_adjusted_premium(base_premium, tagged_at, Clock::get()?.unix_timestamp)
     };
     let must_close_out = !premium_fits_equity(pre_assets_equity, pre_liabs_equity, premium);
+    check!(
+        must_close_out || !marginfi_account.get_flag(ACCOUNT_REPAID_PAUSED_BANK),
+        MarginfiError::BankPaused,
+        "only a closeout may repay debt in a paused bank"
+    );
 
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        // A closed-out account has no debt, so any collateral left makes it healthy
         below_closeout_threshold || must_close_out,
         true,
     )?;
@@ -99,10 +105,21 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         seized <= repaid * max_fee,
         MarginfiError::LiquidationPremiumTooHigh
     );
-    check!(
-        !must_close_out || !marginfi_account.lending_account.has_liabilities(),
-        MarginfiError::LiquidationCloseoutRequired
-    );
+    if must_close_out && marginfi_account.lending_account.has_liabilities() {
+        check!(
+            !has_repayable_liabilities(&marginfi_account, ctx.remaining_accounts)?,
+            MarginfiError::LiquidationCloseoutRequired
+        );
+        let post_assets_equity = pre_assets_equity - seized;
+        let post_liabs_equity = pre_liabs_equity - repaid;
+        check!(
+            post_assets_equity >= post_liabs_equity,
+            MarginfiError::LiquidationCloseoutRequired,
+            "collateral left does not cover the debt left: {} < {}",
+            post_assets_equity,
+            post_liabs_equity
+        );
+    }
 
     let liquidation_flat_sol_fee = fee_state.liquidation_flat_sol_fee;
     if liquidation_flat_sol_fee > 0 {
@@ -248,7 +265,7 @@ pub fn end_receivership<'info>(
 
     // clear receivership
     marginfi_account.unset_flag(
-        ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION | ACCOUNT_REPAID_PAUSED_BANK,
         false,
     );
     liq_record.liquidation_receiver = Pubkey::default();
