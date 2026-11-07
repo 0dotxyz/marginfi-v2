@@ -64,6 +64,25 @@ jobs:
         include-anchor: "false"
     - run: cargo test --lib
 
+  sdk-standalone:
+    name: Anchor-free Rust SDK
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/base-setup/
+      with:
+        include-anchor: "false"
+    - name: Test the non-Anchor feature configuration
+      run: cargo test -p marginfi-type-crate --no-default-features --features ix_builders,pdas,mainnet-beta
+    - name: Check the detached native CPI program
+      run: cargo check --manifest-path programs/native-cpi-example/Cargo.toml --locked
+    - name: Verify Anchor is absent from the native dependency graph
+      run: |
+        if cargo tree --manifest-path programs/native-cpi-example/Cargo.toml --locked -e normal -i anchor-lang; then
+          echo "Anchor unexpectedly present in native CPI dependencies"
+          exit 1
+        fi
+
   # Shared Anchor build — runs in parallel with lint / test-unit /
   # trident-build. Produces:
   #
@@ -168,6 +187,26 @@ jobs:
       run: cargo install cargo-nextest --version "0.9.81" --locked
       shell: bash
     - run: ./scripts/test-program.sh all
+
+  sdk-parity:
+    name: Rust SDK parity
+    runs-on: ubuntu-24.04
+    needs: [ anchor-build ]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/base-setup/
+    - uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: target
+    - name: Verify builders match the fresh IDL
+      run: |
+        python3 scripts/generate-ix-builders.py
+        git diff --exit-code -- type-crate/src/ix_builders
+    - name: Compare builders and argument encoding with Anchor
+      run: cargo test -p marginfi --features sdk-test --test ix_parity --test sdk_arg_encoding
+    - name: Test native CPI against the mainnet-ID SBF program
+      run: SBF_OUT_DIR="$PWD/target/sbf/deploy" cargo test -p marginfi --features sdk-test --test native_sdk_cpi
 
   fuzz-libfuzzer:
     name: Fuzz (libfuzzer)

@@ -17,6 +17,7 @@ custom-heap = []
 default = ["mainnet-beta", "custom-heap"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "pyth-solana-receiver-sdk/idl-build"]
 test-bpf = ["test", "debug"]
+sdk-test = ["marginfi-type-crate/ix_builders"]
 test = []
 client = ["solana-program"]
 debug = []
@@ -90,3 +91,15 @@ tokio = { version = "1", features = ["macros"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[[test]]
+name = "ix_parity"
+required-features = ["sdk-test"]
+
+[[test]]
+name = "sdk_arg_encoding"
+required-features = ["sdk-test"]
+
+[[test]]
+name = "native_sdk_cpi"
+required-features = ["sdk-test"]

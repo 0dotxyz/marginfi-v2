@@ -60,6 +60,8 @@ use anchor_lang::system_program;
 use solana_program::clock::Clock;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
+pub const NATIVE_CPI_EXAMPLE_ID: Pubkey = pubkey!("NatCP1EXampLe111111111111111111111111111111");
+
 #[derive(Default, Debug, Clone)]
 pub struct TestSettings {
     pub banks: Vec<TestBankSetting>,
@@ -770,6 +772,12 @@ impl TestFixture {
         #[cfg(feature = "transfer-hook")]
         program.add_program("test_transfer_hook", TEST_HOOK_ID, None);
         program.add_program("mocks", mocks::ID, None);
+        if std::env::var_os("SBF_OUT_DIR")
+            .map(|dir| PathBuf::from(dir).join("native_cpi_example.so").exists())
+            .unwrap_or(false)
+        {
+            program.add_program("native_cpi_example", NATIVE_CPI_EXAMPLE_ID, None);
+        }
 
         program.prefer_bpf(false);
         let requires_real_kamino_program = add_integration_programs;

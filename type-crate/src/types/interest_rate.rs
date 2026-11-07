@@ -62,6 +62,10 @@ pub struct InterestRateConfig {
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Clone, Copy, Default, Zeroable, Pod, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct RatePoint {
@@ -147,6 +151,10 @@ pub fn u32_to_basis(value: u32) -> I80F48 {
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct InterestRateConfigOpt {
     pub insurance_fee_fixed_apr: Option<WrappedI80F48>,
@@ -171,6 +179,10 @@ pub struct InterestRateConfigOpt {
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct InterestRateConfigCompact {
     // Fees

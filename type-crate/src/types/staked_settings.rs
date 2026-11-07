@@ -132,3 +132,53 @@ impl Default for StakedSettings {
         }
     }
 }
+
+/// Defaults applied to every staked collateral bank created under a group.
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
+#[derive(Default)]
+pub struct StakedSettingsConfig {
+    pub oracle: Pubkey,
+
+    pub asset_weight_init: WrappedI80F48,
+    pub asset_weight_maint: WrappedI80F48,
+
+    pub deposit_limit: u64,
+    pub total_asset_value_init_limit: u64,
+
+    pub oracle_max_age: u16,
+    /// WARN: You almost certainly want "Collateral", using Isolated risk tier makes the asset
+    /// worthless as collateral, and is generally useful only when creating a staked collateral pool
+    /// for rewards purposes only.
+    pub risk_tier: RiskTier,
+}
+
+/// Optional overrides for an existing group's staked collateral defaults.
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(
+    all(not(feature = "anchor"), feature = "ix_builders"),
+    derive(borsh::BorshDeserialize, borsh::BorshSerialize)
+)]
+#[derive(Default)]
+pub struct StakedSettingsEditConfig {
+    pub oracle: Option<Pubkey>,
+
+    pub asset_weight_init: Option<WrappedI80F48>,
+    pub asset_weight_maint: Option<WrappedI80F48>,
+
+    pub deposit_limit: Option<u64>,
+    pub total_asset_value_init_limit: Option<u64>,
+
+    pub oracle_max_age: Option<u16>,
+    /// WARN: You almost certainly want "Collateral", using Isolated risk tier makes the asset
+    /// worthless as collateral, making all outstanding accounts eligible to be liquidated, and is
+    /// generally useful only when creating a staked collateral pool for rewards purposes only.
+    pub risk_tier: Option<RiskTier>,
+    // Note: we may want to make `oracleMaxConfidence` editable at some point, so it doesn't use the
+    // default max. Since staked collateral banks only trade SOL, which only uses the ever-popular
+    // SOL oracle, this is unlikely to ever come up. If SOL confidence is poor, we are in dire
+    // straights!
+}

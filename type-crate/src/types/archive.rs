@@ -53,9 +53,9 @@ impl ArchiveMeta {
         let record_count = u64::from_le_bytes(account_data.get(8..16)?.try_into().ok()?);
         let authority_bytes: [u8; 32] = account_data.get(16..48)?.try_into().ok()?;
 
-        #[cfg(feature = "anchor")]
+        #[cfg(any(feature = "anchor", feature = "ix_builders", feature = "pdas"))]
         let authority = Pubkey::new_from_array(authority_bytes);
-        #[cfg(not(feature = "anchor"))]
+        #[cfg(not(any(feature = "anchor", feature = "ix_builders", feature = "pdas")))]
         let authority = Pubkey::new(authority_bytes);
 
         Some(Self {
