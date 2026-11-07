@@ -9,7 +9,7 @@ use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{
         centi_to_u32, BankConfigOpt, EmodeEntry, LiquidationRecord, MarginfiAccount, OrderTrigger,
-        WrappedI80F48,
+        WrappedI80F48, DELEVERAGE_START, LIQUIDATION_START,
     },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -437,6 +437,11 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
         native!(0.229, "SOL", f64)
     );
     assert_eq!(load_tag(&liquidatee).await, midpoint);
+    // The 0.1.13 post-liquidation timestamp and the 0.1.12a cache provenance
+    // must both survive the merge: the finished cache is fresh and no longer a start cache.
+    let post_cache = liquidatee.load().await.health_cache;
+    assert_eq!(post_cache.timestamp, midpoint);
+    assert_eq!(post_cache.flags & (LIQUIDATION_START | DELEVERAGE_START), 0);
 
     // Mature the restarted tag, then advance past maturity to check the ceiling holds.
     set_timestamp(

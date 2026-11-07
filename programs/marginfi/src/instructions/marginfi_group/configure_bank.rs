@@ -5,7 +5,9 @@ use crate::events::{
 use crate::ix_utils;
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
-use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
+use crate::state::emode::{
+    check_same_asset_fee, check_same_asset_weight_ordering, EmodeSettingsImpl,
+};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
@@ -135,20 +137,36 @@ fn configure_bank(
             )?;
         }
 
+        let previous_liability_weight_init: I80F48 = bank.config.liability_weight_init.into();
+        let previous_liability_weight_maint: I80F48 = bank.config.liability_weight_maint.into();
+
         // Settings are not frozen, everything updates
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        let total_liquidation_fee = bank.total_liquidation_fee();
-        bank.emode.validate_entries_with_liability_weights(
-            &bank.config,
-            total_liquidation_fee,
-            group.emode_max_init_leverage,
-            group.emode_max_maint_leverage,
-        )?;
-        if bank_config.liquidation_liquidator_fee.is_some()
-            || bank_config.liquidation_insurance_fee.is_some()
+        let fees_changed = bank_config.liquidation_liquidator_fee.is_some()
+            || bank_config.liquidation_insurance_fee.is_some();
+        // `configure_gov` can lower the group caps below stored entries without re-checking banks.
+        if fees_changed
+            || bank_config.liability_weight_init.is_some()
+            || bank_config.liability_weight_maint.is_some()
         {
+            let total_liquidation_fee = bank.total_liquidation_fee();
+            bank.emode.validate_entries_with_liability_weights(
+                &bank.config,
+                total_liquidation_fee,
+                group.emode_max_init_leverage,
+                group.emode_max_maint_leverage,
+            )?;
+        }
+        // Lower initial or higher maintenance liability weights cannot worsen an already inverted
+        // same-asset-emode ordering, even if they do not fix the inversion.
+        if I80F48::from(bank.config.liability_weight_init) > previous_liability_weight_init
+            || I80F48::from(bank.config.liability_weight_maint) < previous_liability_weight_maint
+        {
+            check_same_asset_weight_ordering(bank, group)?;
+        }
+        if fees_changed {
             check_same_asset_fee(bank, group)?;
         }
 

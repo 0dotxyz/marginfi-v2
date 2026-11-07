@@ -598,3 +598,94 @@ jobs:
         FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
         FUZZ_FLOWS_PER_ITER: '100'
       run: trident fuzz run ${{ matrix.test.target }} -e invariants
+
+  # ────────────────────────────────────────────────────────────────────
+  # Crucible fuzz harness (fuzz/crucible) — stateful invariant fuzzing on
+  # FuzzCorp. Same `if:` guard as trident. Builds marginfi with debug info
+  # (FuzzCorp maps coverage to source lines; debug info changes codegen,
+  # so this cannot reuse anchor-build's .so), reuses anchor-build's IDL,
+  # compiles the harness, smoke-runs it and assembles the bundle. That is
+  # the whole check for PRs into a release branch. Release PRs into main
+  # also upload the bundle; every feature merged into the release branch
+  # updates that PR, so each merge gets a fuzz campaign.
+  # ────────────────────────────────────────────────────────────────────
+
+  fuzz-crucible:
+    name: Fuzz (crucible)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    needs: [ anchor-build ]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-common/
+    - uses: ./.github/actions/setup-solana-cli/
+    - name: Download anchor-build artifact (IDL)
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: anchor-build
+    # llvm: dwarfdump for the coverage check in build-bundle.sh.
+    # Rust stable: the harness's own toolchain (fuzz/crucible/rust-toolchain.toml).
+    - name: Install llvm and Rust stable
+      run: |
+        sudo apt-get update && sudo apt-get install -y llvm
+        rustup toolchain install stable --profile minimal
+    # A PR can only reuse caches saved by its own earlier runs (or by its
+    # base branch, which has none). Feature PRs are short-lived, so saving
+    # ~1 GB per PR would only evict caches the other jobs rely on; the
+    # release PR is long-lived and updated on every merge, so there the
+    # caches pay off. Keyed on the lockfiles: cargo recompiles the
+    # first-party crates anyway (the checkout is newer than the cache) and
+    # reuses only the dependencies.
+    - name: Cache program build (release PR only)
+      if: github.base_ref == 'main'
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/fuzz/release
+          target/fuzz/sbpf-solana-solana
+        key: crucible-sbf-${{ runner.os }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Cargo.lock') }}
+    - name: Cache harness build (release PR only)
+      if: github.base_ref == 'main'
+      uses: actions/cache@v4
+      with:
+        path: fuzz/crucible/target
+        key: crucible-harness-${{ runner.os }}-${{ hashFiles('fuzz/crucible/Cargo.lock') }}
+    - name: Build program and fixtures, stage the IDL
+      run: ./fuzz/crucible/prepare.sh anchor-build/idl/marginfi.json
+    - name: Build harness
+      working-directory: fuzz/crucible
+      run: cargo build --release --locked --features invariant_test
+    # A harness that dies in setup() still builds and uploads, then fails on
+    # every worker. It must still be fuzzing when the timeout kills it (124).
+    - name: Smoke-run harness (60s)
+      working-directory: fuzz/crucible
+      run: |
+        rc=0
+        FUZZ_DEBUG=1 SCOUT_CHECK_RUN=ci-smoke timeout 60 ./target/release/invariant_test \
+          > /tmp/smoke.log 2>&1 || rc=$?
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::harness exited $rc before the 60s smoke window ended"
+          tail -200 /tmp/smoke.log
+          exit 1
+        fi
+    - name: Assemble bundle
+      working-directory: fuzz/crucible
+      env:
+        # github.sha is the synthetic merge commit on a PR; record the PR head.
+        FUZZ_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: ./build-bundle.sh
+    - name: Upload bundle to FuzzCorp
+      if: github.base_ref == 'main'
+      uses: asymmetric-research/fuzz-upload-action@d81375ddc1887ddf574713845dcfada9d3968edc  # v2.1.0
+      with:
+        upload_type: bundle
+        upload_path: fuzz/crucible/bundle
+      env:
+        FUZZ_ORGANIZATION: ${{ vars.FUZZ_ORGANIZATION || 'project-0' }}
+        FUZZ_PROJECT: ${{ vars.FUZZ_PROJECT || 'marginfi' }}
+        FUZZ_API_KEY: ${{ secrets.FUZZ_API_KEY }}
