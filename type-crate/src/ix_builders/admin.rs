@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::{StakedSettingsConfig, StakedSettingsEditConfig, WrappedI80F48};
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -17,9 +18,9 @@ pub struct ConfigGroupFee {
     pub instruction_sysvar: Pubkey,
 }
 impl ConfigGroupFee {
-    pub const DISCRIMINATOR: [u8; 8] = [231, 205, 66, 242, 220, 87, 145, 38];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::CONFIG_GROUP_FEE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -38,13 +39,13 @@ impl ToAccountMetas for ConfigGroupFee {
 /// group admin to sign: the global fee state admin can turn program fees on or off for any
 /// group
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn config_group_fee(accounts: &ConfigGroupFee, enable_program_fee: bool) -> Instruction {
     config_group_fee_with_program_id(crate::ID, accounts, enable_program_fee)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn config_group_fee_with_program_id(
     program_id: Pubkey,
@@ -71,9 +72,9 @@ pub struct ConfigureBankRateLimits {
     pub instruction_sysvar: Pubkey,
 }
 impl ConfigureBankRateLimits {
-    pub const DISCRIMINATOR: [u8; 8] = [175, 84, 85, 221, 206, 220, 110, 174];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::CONFIGURE_BANK_RATE_LIMITS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -92,7 +93,7 @@ impl ToAccountMetas for ConfigureBankRateLimits {
 /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
 /// Set to 0 to disable. Hourly and daily windows are independent.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_bank_rate_limits(
     accounts: &ConfigureBankRateLimits,
@@ -107,7 +108,7 @@ pub fn configure_bank_rate_limits(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_bank_rate_limits_with_program_id(
     program_id: Pubkey,
@@ -137,9 +138,10 @@ pub struct ConfigureDeleverageWithdrawalLimit {
     pub instruction_sysvar: Pubkey,
 }
 impl ConfigureDeleverageWithdrawalLimit {
-    pub const DISCRIMINATOR: [u8; 8] = [28, 132, 205, 158, 67, 77, 177, 63];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::CONFIGURE_DELEVERAGE_WITHDRAWAL_LIMIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -155,7 +157,7 @@ impl ToAccountMetas for ConfigureDeleverageWithdrawalLimit {
 }
 /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_deleverage_withdrawal_limit(
     accounts: &ConfigureDeleverageWithdrawalLimit,
@@ -164,7 +166,7 @@ pub fn configure_deleverage_withdrawal_limit(
     configure_deleverage_withdrawal_limit_with_program_id(crate::ID, accounts, limit)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_deleverage_withdrawal_limit_with_program_id(
     program_id: Pubkey,
@@ -190,9 +192,9 @@ pub struct ConfigureGroupRateLimits {
     pub instruction_sysvar: Pubkey,
 }
 impl ConfigureGroupRateLimits {
-    pub const DISCRIMINATOR: [u8; 8] = [111, 47, 213, 142, 158, 51, 226, 102];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::CONFIGURE_GROUP_RATE_LIMITS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -210,7 +212,7 @@ impl ToAccountMetas for ConfigureGroupRateLimits {
 /// Rate limits track aggregate net outflow in USD.
 /// Example: $10M = 10_000_000. Set to 0 to disable.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_group_rate_limits(
     accounts: &ConfigureGroupRateLimits,
@@ -225,7 +227,7 @@ pub fn configure_group_rate_limits(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_group_rate_limits_with_program_id(
     program_id: Pubkey,
@@ -256,9 +258,9 @@ pub struct DisableStakedOracles {
     pub instruction_sysvar: Pubkey,
 }
 impl DisableStakedOracles {
-    pub const DISCRIMINATOR: [u8; 8] = [43, 90, 152, 55, 66, 101, 232, 200];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::DISABLE_STAKED_ORACLES;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -278,13 +280,13 @@ impl ToAccountMetas for DisableStakedOracles {
 /// To be used during the rollout of the SVSP upgrade.
 /// To be removed once SVSP update is rolled out (likely in 1.10)
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn disable_staked_oracles(accounts: &DisableStakedOracles) -> Instruction {
     disable_staked_oracles_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn disable_staked_oracles_with_program_id(
     program_id: Pubkey,
@@ -307,9 +309,9 @@ pub struct EditFeeStatePremium {
     pub instruction_sysvar: Pubkey,
 }
 impl EditFeeStatePremium {
-    pub const DISCRIMINATOR: [u8; 8] = [159, 148, 85, 109, 94, 212, 93, 233];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::EDIT_FEE_STATE_PREMIUM;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.global_fee_admin, true),
@@ -325,7 +327,7 @@ impl ToAccountMetas for EditFeeStatePremium {
 }
 /// (global fee admin only) Adjust the variable-borrow premium wallet on the fee state.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_fee_state_premium(
     accounts: &EditFeeStatePremium,
@@ -334,7 +336,7 @@ pub fn edit_fee_state_premium(
     edit_fee_state_premium_with_program_id(crate::ID, accounts, premium_wallet)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_fee_state_premium_with_program_id(
     program_id: Pubkey,
@@ -361,9 +363,9 @@ pub struct EditGlobalFeeState {
     pub instruction_sysvar: Pubkey,
 }
 impl EditGlobalFeeState {
-    pub const DISCRIMINATOR: [u8; 8] = [52, 62, 35, 129, 93, 69, 165, 202];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::EDIT_GLOBAL_FEE_STATE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.global_fee_admin, true),
@@ -379,7 +381,7 @@ impl ToAccountMetas for EditGlobalFeeState {
 }
 /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_global_fee_state(
     accounts: &EditGlobalFeeState,
@@ -412,7 +414,7 @@ pub fn edit_global_fee_state(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_global_fee_state_with_program_id(
     program_id: Pubkey,
@@ -479,9 +481,9 @@ pub struct EditStakedSettings {
     pub instruction_sysvar: Pubkey,
 }
 impl EditStakedSettings {
-    pub const DISCRIMINATOR: [u8; 8] = [11, 108, 215, 87, 240, 9, 66, 241];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::EDIT_STAKED_SETTINGS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_group, false),
@@ -498,7 +500,7 @@ impl ToAccountMetas for EditStakedSettings {
 }
 /// (slow governance_admin only) Edit the staked collateral settings for the group.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_staked_settings(
     accounts: &EditStakedSettings,
@@ -507,7 +509,7 @@ pub fn edit_staked_settings(
     edit_staked_settings_with_program_id(crate::ID, accounts, settings)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn edit_staked_settings_with_program_id(
     program_id: Pubkey,
@@ -534,9 +536,9 @@ pub struct EnableStakedOracleOnramp {
     pub instruction_sysvar: Pubkey,
 }
 impl EnableStakedOracleOnramp {
-    pub const DISCRIMINATOR: [u8; 8] = [114, 248, 244, 6, 74, 212, 222, 230];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::ENABLE_STAKED_ORACLE_ONRAMP;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -557,13 +559,13 @@ impl ToAccountMetas for EnableStakedOracleOnramp {
 /// This flips a per-group config flag so that every staked oracle uses the canonical single-pool NAV
 /// formula.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn enable_staked_oracle_onramp(accounts: &EnableStakedOracleOnramp) -> Instruction {
     enable_staked_oracle_onramp_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn enable_staked_oracle_onramp_with_program_id(
     program_id: Pubkey,
@@ -586,9 +588,9 @@ pub struct InitGlobalFeeState {
     pub system_program: Pubkey,
 }
 impl InitGlobalFeeState {
-    pub const DISCRIMINATOR: [u8; 8] = [82, 48, 247, 59, 220, 109, 231, 44];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::INIT_GLOBAL_FEE_STATE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.payer, true),
@@ -605,7 +607,7 @@ impl ToAccountMetas for InitGlobalFeeState {
 /// (Runs once per program) Configures the fee state account, where the global admin sets fees
 /// that are assessed to the protocol
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn init_global_fee_state(
     accounts: &InitGlobalFeeState,
@@ -634,7 +636,7 @@ pub fn init_global_fee_state(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn init_global_fee_state_with_program_id(
     program_id: Pubkey,
@@ -696,9 +698,9 @@ pub struct InitStakedSettings {
     pub instruction_sysvar: Pubkey,
 }
 impl InitStakedSettings {
-    pub const DISCRIMINATOR: [u8; 8] = [52, 35, 149, 44, 69, 86, 69, 80];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::INIT_STAKED_SETTINGS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_group, false),
@@ -720,7 +722,7 @@ impl ToAccountMetas for InitStakedSettings {
 /// `add_pool_permissionless`. Running this ix effectively opts the group into the staked
 /// collateral feature.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn init_staked_settings(
     accounts: &InitStakedSettings,
@@ -729,7 +731,7 @@ pub fn init_staked_settings(
     init_staked_settings_with_program_id(crate::ID, accounts, settings)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn init_staked_settings_with_program_id(
     program_id: Pubkey,
@@ -757,9 +759,9 @@ pub struct PanicPause {
     pub instruction_sysvar: Pubkey,
 }
 impl PanicPause {
-    pub const DISCRIMINATOR: [u8; 8] = [76, 164, 123, 25, 4, 43, 79, 165];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PANIC_PAUSE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.pause_authority, true),
@@ -776,13 +778,13 @@ impl ToAccountMetas for PanicPause {
 /// (global_fee_admin or pause_delegate_admin only) Pause the protocol. Auto-expires after 6
 /// hours. Limited to 3 pauses per day and 4 consecutive pauses.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_pause(accounts: &PanicPause) -> Instruction {
     panic_pause_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_pause_with_program_id(program_id: Pubkey, accounts: &PanicPause) -> Instruction {
     let data = PanicPause::DISCRIMINATOR.to_vec();
@@ -802,9 +804,9 @@ pub struct PanicUnpause {
     pub instruction_sysvar: Pubkey,
 }
 impl PanicUnpause {
-    pub const DISCRIMINATOR: [u8; 8] = [236, 107, 194, 242, 99, 51, 121, 128];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PANIC_UNPAUSE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.global_fee_admin, true),
@@ -820,13 +822,13 @@ impl ToAccountMetas for PanicUnpause {
 }
 /// (global_fee_admin only) Unpause the protocol before auto-expiry.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_unpause(accounts: &PanicUnpause) -> Instruction {
     panic_unpause_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_unpause_with_program_id(program_id: Pubkey, accounts: &PanicUnpause) -> Instruction {
     let data = PanicUnpause::DISCRIMINATOR.to_vec();
@@ -843,9 +845,9 @@ pub struct PanicUnpausePermissionless {
     pub fee_state: Pubkey,
 }
 impl PanicUnpausePermissionless {
-    pub const DISCRIMINATOR: [u8; 8] = [245, 139, 50, 159, 213, 62, 91, 248];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PANIC_UNPAUSE_PERMISSIONLESS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![AccountMeta::new(self.fee_state, false)]
     }
@@ -857,13 +859,13 @@ impl ToAccountMetas for PanicUnpausePermissionless {
 }
 /// (permissionless) Unpause the protocol when pause time has expired
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_unpause_permissionless(accounts: &PanicUnpausePermissionless) -> Instruction {
     panic_unpause_permissionless_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn panic_unpause_permissionless_with_program_id(
     program_id: Pubkey,
@@ -885,9 +887,9 @@ pub struct PropagateFeeState {
     pub marginfi_group: Pubkey,
 }
 impl PropagateFeeState {
-    pub const DISCRIMINATOR: [u8; 8] = [64, 3, 166, 194, 129, 21, 101, 155];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PROPAGATE_FEE_STATE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.fee_state, false),
@@ -902,13 +904,13 @@ impl ToAccountMetas for PropagateFeeState {
 }
 /// (Permissionless) Force any group to adopt the current FeeState settings
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_fee_state(accounts: &PropagateFeeState) -> Instruction {
     propagate_fee_state_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_fee_state_with_program_id(
     program_id: Pubkey,
@@ -930,9 +932,9 @@ pub struct PropagateStakedSettings {
     pub bank: Pubkey,
 }
 impl PropagateStakedSettings {
-    pub const DISCRIMINATOR: [u8; 8] = [210, 30, 152, 69, 130, 99, 222, 170];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PROPAGATE_STAKED_SETTINGS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_group, false),
@@ -948,13 +950,15 @@ impl ToAccountMetas for PropagateStakedSettings {
 }
 /// (permissionless) Propagate updated staked settings to a staked collateral bank.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// When the settings change the oracle, the new oracle is the only remaining account.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_staked_settings(accounts: &PropagateStakedSettings) -> Instruction {
     propagate_staked_settings_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_staked_settings_with_program_id(
     program_id: Pubkey,
@@ -978,9 +982,9 @@ pub struct PurgeDeleverageBalance {
     pub instruction_sysvar: Pubkey,
 }
 impl PurgeDeleverageBalance {
-    pub const DISCRIMINATOR: [u8; 8] = [132, 187, 25, 149, 181, 59, 253, 136];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::PURGE_DELEVERAGE_BALANCE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1002,13 +1006,13 @@ impl ToAccountMetas for PurgeDeleverageBalance {
 /// abandoned lending positions in a now-worthless bank so it can be closed via
 /// `lending_pool_close_bank`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn purge_deleverage_balance(accounts: &PurgeDeleverageBalance) -> Instruction {
     purge_deleverage_balance_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn purge_deleverage_balance_with_program_id(
     program_id: Pubkey,
@@ -1033,9 +1037,9 @@ pub struct ResizeGlobalFeeState {
     pub system_program: Pubkey,
 }
 impl ResizeGlobalFeeState {
-    pub const DISCRIMINATOR: [u8; 8] = [141, 111, 97, 79, 111, 143, 77, 159];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::RESIZE_GLOBAL_FEE_STATE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.fee_state, false),
@@ -1052,13 +1056,13 @@ impl ToAccountMetas for ResizeGlobalFeeState {
 /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
 /// added rent.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn resize_global_fee_state(accounts: &ResizeGlobalFeeState) -> Instruction {
     resize_global_fee_state_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn resize_global_fee_state_with_program_id(
     program_id: Pubkey,
@@ -1084,9 +1088,9 @@ pub struct SuperAdminDeposit {
     pub instruction_sysvar: Pubkey,
 }
 impl SuperAdminDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [241, 189, 199, 17, 207, 225, 64, 75];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::SUPER_ADMIN_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1107,13 +1111,15 @@ impl ToAccountMetas for SuperAdminDeposit {
 /// (primary admin only) Deposit directly into a bank liquidity vault and raise
 /// `asset_share_value` proportionally. No marginfi account is involved.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn super_admin_deposit(accounts: &SuperAdminDeposit, amount: u64) -> Instruction {
     super_admin_deposit_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn super_admin_deposit_with_program_id(
     program_id: Pubkey,
@@ -1144,9 +1150,9 @@ pub struct SuperAdminWithdraw {
     pub instruction_sysvar: Pubkey,
 }
 impl SuperAdminWithdraw {
-    pub const DISCRIMINATOR: [u8; 8] = [202, 67, 85, 126, 104, 138, 79, 197];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::SUPER_ADMIN_WITHDRAW;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1168,13 +1174,15 @@ impl ToAccountMetas for SuperAdminWithdraw {
 /// (primary admin only) Withdraw directly from a bank liquidity vault and lower
 /// `asset_share_value` proportionally. No marginfi account is involved.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn super_admin_withdraw(accounts: &SuperAdminWithdraw, amount: u64) -> Instruction {
     super_admin_withdraw_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn super_admin_withdraw_with_program_id(
     program_id: Pubkey,
@@ -1200,9 +1208,9 @@ pub struct UpdateDeleverageWithdrawals {
     pub instruction_sysvar: Pubkey,
 }
 impl UpdateDeleverageWithdrawals {
-    pub const DISCRIMINATOR: [u8; 8] = [56, 3, 181, 118, 27, 247, 207, 227];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::UPDATE_DELEVERAGE_WITHDRAWALS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -1220,7 +1228,7 @@ impl ToAccountMetas for UpdateDeleverageWithdrawals {
 /// aggregated data. The delegate flow admin aggregates
 /// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at intervals.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn update_deleverage_withdrawals(
     accounts: &UpdateDeleverageWithdrawals,
@@ -1239,7 +1247,7 @@ pub fn update_deleverage_withdrawals(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn update_deleverage_withdrawals_with_program_id(
     program_id: Pubkey,
@@ -1277,9 +1285,9 @@ pub struct UpdateGroupRateLimiter {
     pub instruction_sysvar: Pubkey,
 }
 impl UpdateGroupRateLimiter {
-    pub const DISCRIMINATOR: [u8; 8] = [23, 78, 60, 139, 187, 44, 129, 37];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::UPDATE_GROUP_RATE_LIMITER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -1298,7 +1306,7 @@ impl ToAccountMetas for UpdateGroupRateLimiter {
 /// `RateLimitFlowEvent` events off-chain, converts to USD, and calls this instruction at
 /// intervals to update group rate limiter state.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn update_group_rate_limiter(
     accounts: &UpdateGroupRateLimiter,
@@ -1319,7 +1327,7 @@ pub fn update_group_rate_limiter(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn update_group_rate_limiter_with_program_id(
     program_id: Pubkey,

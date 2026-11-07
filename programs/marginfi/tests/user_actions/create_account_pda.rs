@@ -1,10 +1,8 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::test::TestFixture;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::MarginfiAccount;
 use solana_program_test::tokio;
-use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{signature::Keypair, signer::Signer, transaction::Transaction};
 use solana_system_interface::program as system_program;
 
 #[tokio::test]
@@ -24,24 +22,18 @@ async fn marginfi_account_create_pda_success() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let accounts = marginfi::accounts::MarginfiAccountInitializePda {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_pda,
-        authority,
-        fee_payer: authority,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let init_marginfi_account_pda_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let init_marginfi_account_pda_ix = ix_builders::account::marginfi_account_initialize_pda(
+        &ix_builders::account::MarginfiAccountInitializePda {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_pda,
+            authority,
+            fee_payer: authority,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let tx = Transaction::new_signed_with_payer(
         &[init_marginfi_account_pda_ix],
@@ -93,24 +85,18 @@ async fn marginfi_account_create_pda_with_third_party_id_success() -> anyhow::Re
         &marginfi::ID,
     );
 
-    let accounts = marginfi::accounts::MarginfiAccountInitializePda {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_pda,
-        authority: authority,
-        fee_payer: authority,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let init_marginfi_account_pda_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let init_marginfi_account_pda_ix = ix_builders::account::marginfi_account_initialize_pda(
+        &ix_builders::account::MarginfiAccountInitializePda {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_pda,
+            authority,
+            fee_payer: authority,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let tx = Transaction::new_signed_with_payer(
         &[init_marginfi_account_pda_ix],
@@ -155,24 +141,18 @@ async fn marginfi_account_create_pda_multiple_accounts_same_authority() -> anyho
             &marginfi::ID,
         );
 
-        let accounts = marginfi::accounts::MarginfiAccountInitializePda {
-            marginfi_group: test_f.marginfi_group.key,
-            marginfi_account: marginfi_account_pda,
-            authority: authority,
-            fee_payer: authority,
-            instructions_sysvar: solana_instructions_sysvar::id(),
-            system_program: system_program::id(),
-        };
-
-        let init_marginfi_account_pda_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: accounts.to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountInitializePda {
-                account_index,
-                third_party_id,
-            }
-            .data(),
-        };
+        let init_marginfi_account_pda_ix = ix_builders::account::marginfi_account_initialize_pda(
+            &ix_builders::account::MarginfiAccountInitializePda {
+                marginfi_group: test_f.marginfi_group.key,
+                marginfi_account: marginfi_account_pda,
+                authority,
+                fee_payer: authority,
+                instructions_sysvar: solana_instructions_sysvar::id(),
+                system_program: system_program::id(),
+            },
+            account_index,
+            third_party_id,
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[init_marginfi_account_pda_ix],
@@ -237,24 +217,18 @@ async fn marginfi_account_create_pda_different_authorities() -> anyhow::Result<(
     assert_ne!(marginfi_account_pda1, marginfi_account_pda2);
 
     // Create account for authority1
-    let accounts1 = marginfi::accounts::MarginfiAccountInitializePda {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_pda1,
-        authority: authority1,
-        fee_payer: authority1,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let init_ix1 = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts1.to_account_metas(None),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let init_ix1 = ix_builders::account::marginfi_account_initialize_pda(
+        &ix_builders::account::MarginfiAccountInitializePda {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_pda1,
+            authority: authority1,
+            fee_payer: authority1,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let tx1 = Transaction::new_signed_with_payer(
         &[init_ix1],
@@ -274,24 +248,18 @@ async fn marginfi_account_create_pda_different_authorities() -> anyhow::Result<(
     assert!(res1.is_ok());
 
     // Create account for authority2 (using same payer for simplicity)
-    let accounts2 = marginfi::accounts::MarginfiAccountInitializePda {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_pda2,
-        authority: authority2,
-        fee_payer: test_f.payer(),
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let init_ix2 = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts2.to_account_metas(None),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let init_ix2 = ix_builders::account::marginfi_account_initialize_pda(
+        &ix_builders::account::MarginfiAccountInitializePda {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_pda2,
+            authority: authority2,
+            fee_payer: test_f.payer(),
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let tx2 = Transaction::new_signed_with_payer(
         &[init_ix2],
@@ -330,24 +298,18 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let accounts = marginfi::accounts::MarginfiAccountInitializePda {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_pda,
-        authority: authority,
-        fee_payer: authority,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let init_marginfi_account_pda_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let init_marginfi_account_pda_ix = ix_builders::account::marginfi_account_initialize_pda(
+        &ix_builders::account::MarginfiAccountInitializePda {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_pda,
+            authority,
+            fee_payer: authority,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     // First transaction should succeed
     let tx1 = Transaction::new_signed_with_payer(

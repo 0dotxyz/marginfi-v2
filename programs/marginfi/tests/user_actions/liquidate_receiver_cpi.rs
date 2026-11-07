@@ -3,11 +3,8 @@ use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::errors::MarginfiError;
 use marginfi_type_crate::{
-    constants::{
-        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDATION_RECORD_SEED,
-        LIQUIDITY_VAULT_SEED,
-    },
-    types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
+    constants::LIQUIDATION_RECORD_SEED,
+    types::{BankConfigOpt, BankVaultType, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
@@ -291,31 +288,17 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
         )
         .await;
 
-    let bank_pk = usdc_bank.key;
-    let (liquidity_vault, _) = Pubkey::find_program_address(
-        &[LIQUIDITY_VAULT_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-    let (insurance_vault, _) = Pubkey::find_program_address(
-        &[INSURANCE_VAULT_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-    let (insurance_vault_authority, _) = Pubkey::find_program_address(
-        &[INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-
     // Note: bankruptcy is restricted at the top level, but we can call it by CPI, because
     // bankruptcy itself doesn't ban CPI calls.
     let payer = test_f.payer();
     let cpi_accounts = mocks::accounts::HandleBankruptcyViaCpi {
         group: test_f.marginfi_group.key,
         signer: payer,
-        bank: bank_pk,
+        bank: usdc_bank.key,
         marginfi_account: attacker_acc.key,
-        liquidity_vault,
-        insurance_vault,
-        insurance_vault_authority,
+        liquidity_vault: usdc_bank.get_vault(BankVaultType::Liquidity).0,
+        insurance_vault: usdc_bank.get_vault(BankVaultType::Insurance).0,
+        insurance_vault_authority: usdc_bank.get_vault_authority(BankVaultType::Insurance).0,
         token_program: anchor_spl::token::ID,
         marginfi_program: marginfi::ID,
     };

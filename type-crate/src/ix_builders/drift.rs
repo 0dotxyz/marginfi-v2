@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::DriftConfigCompact;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -38,9 +39,9 @@ pub struct DriftClaimBadDebt {
     pub system_program: Pubkey,
 }
 impl DriftClaimBadDebt {
-    pub const DISCRIMINATOR: [u8; 8] = [163, 67, 144, 231, 119, 20, 220, 33];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::DRIFT_CLAIM_BAD_DEBT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.payer, true),
@@ -72,7 +73,7 @@ impl ToAccountMetas for DriftClaimBadDebt {
 /// The merkle claimant is the bank's liquidity_vault_authority PDA, and claimed tokens are
 /// swept to the global fee wallet's canonical ATA.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_claim_bad_debt(
     accounts: &DriftClaimBadDebt,
@@ -82,7 +83,7 @@ pub fn drift_claim_bad_debt(
     drift_claim_bad_debt_with_program_id(crate::ID, accounts, amount, proof)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_claim_bad_debt_with_program_id(
     program_id: Pubkey,
@@ -136,9 +137,9 @@ pub struct DriftDeposit {
     pub system_program: Pubkey,
 }
 impl DriftDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [252, 63, 250, 201, 98, 55, 130, 12];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::DRIFT_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -172,13 +173,13 @@ impl ToAccountMetas for DriftDeposit {
 /// (user) Deposit into a Drift spot market through a marginfi account
 /// * amount - in the underlying token (e.g., USDC), in native decimals
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_deposit(accounts: &DriftDeposit, amount: u64) -> Instruction {
     drift_deposit_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_deposit_with_program_id(
     program_id: Pubkey,
@@ -225,9 +226,9 @@ pub struct DriftHarvestReward {
     pub token_program: Pubkey,
 }
 impl DriftHarvestReward {
-    pub const DISCRIMINATOR: [u8; 8] = [167, 161, 240, 194, 138, 54, 87, 189];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::DRIFT_HARVEST_REWARD;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.bank, false),
@@ -256,13 +257,15 @@ impl ToAccountMetas for DriftHarvestReward {
 /// Rewards are always sent to the global fee wallet's canonical ATA.
 /// The harvest spot market must be different from the bank's main drift spot market.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts are forwarded to Drift's withdraw: oracle accounts, then the spot markets (writable), then the reward mint for Token-2022.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_harvest_reward(accounts: &DriftHarvestReward) -> Instruction {
     drift_harvest_reward_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_harvest_reward_with_program_id(
     program_id: Pubkey,
@@ -307,9 +310,9 @@ pub struct DriftInitUser {
     pub system_program: Pubkey,
 }
 impl DriftInitUser {
-    pub const DISCRIMINATOR: [u8; 8] = [29, 18, 236, 190, 29, 254, 114, 169];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::DRIFT_INIT_USER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.fee_payer, true),
@@ -344,13 +347,13 @@ impl ToAccountMetas for DriftInitUser {
 /// Requires a minimum deposit to ensure the account remains active
 /// * amount - minimum deposit amount (at least 10 units) in native decimals
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_init_user(accounts: &DriftInitUser, amount: u64) -> Instruction {
     drift_init_user_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_init_user_with_program_id(
     program_id: Pubkey,
@@ -414,9 +417,9 @@ pub struct DriftWithdraw {
     pub system_program: Pubkey,
 }
 impl DriftWithdraw {
-    pub const DISCRIMINATOR: [u8; 8] = [86, 59, 186, 123, 183, 181, 234, 137];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::DRIFT_WITHDRAW;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -478,7 +481,9 @@ impl ToAccountMetas for DriftWithdraw {
 /// `remaining_accounts`
 /// * withdraw_all - if true, withdraws entire position
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_withdraw(
     accounts: &DriftWithdraw,
@@ -488,7 +493,7 @@ pub fn drift_withdraw(
     drift_withdraw_with_program_id(crate::ID, accounts, amount, withdraw_all)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn drift_withdraw_with_program_id(
     program_id: Pubkey,
@@ -544,9 +549,9 @@ pub struct LendingPoolAddBankDrift {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBankDrift {
-    pub const DISCRIMINATOR: [u8; 8] = [62, 63, 49, 48, 76, 55, 108, 155];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::LENDING_POOL_ADD_BANK_DRIFT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -576,7 +581,9 @@ impl ToAccountMetas for LendingPoolAddBankDrift {
 }
 /// (governance_admin only) Add a Drift bank to the group.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the oracle, then the spot market.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_drift(
     accounts: &LendingPoolAddBankDrift,
@@ -586,7 +593,7 @@ pub fn lending_pool_add_bank_drift(
     lending_pool_add_bank_drift_with_program_id(crate::ID, accounts, bank_config, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_drift_with_program_id(
     program_id: Pubkey,

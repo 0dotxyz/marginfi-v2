@@ -1,10 +1,9 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::assert_custom_error;
 use fixtures::prelude::*;
 use marginfi::prelude::*;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::MarginfiGroup;
 use solana_program_test::*;
-use solana_sdk::instruction::Instruction;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::{clock::Clock, transaction::Transaction};
 
@@ -57,16 +56,14 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_deleverage_withdraw
         .await?;
 
     {
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::ConfigureDeleverageWithdrawalLimit {
+        let ix = ix_builders::admin::configure_deleverage_withdrawal_limit(
+            &ix_builders::admin::ConfigureDeleverageWithdrawalLimit {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: limit_admin.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::ConfigureDeleverageWithdrawalLimit { limit: 100 }.data(),
-        };
+            },
+            100,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -88,22 +85,17 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_deleverage_withdraw
     let (event_start_slot, update_seq) =
         next_deleverage_withdraw_limit_update_params(&test_f).await;
     {
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: flow_admin.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 40,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            40,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -196,22 +188,17 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
     {
         let (event_start_slot, update_seq) =
             next_deleverage_withdraw_limit_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 0,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            0,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -233,22 +220,17 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
     {
         let (event_start_slot, update_seq) =
             next_deleverage_withdraw_limit_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 1,
-                update_seq,
-                event_start_slot: event_start_slot.saturating_add(1),
-                event_end_slot: event_start_slot,
-            }
-            .data(),
-        };
+            },
+            1,
+            update_seq,
+            event_start_slot.saturating_add(1),
+            event_start_slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -270,22 +252,17 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
     {
         let (event_start_slot, update_seq) =
             next_deleverage_withdraw_limit_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 1,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot.saturating_add(1),
-            }
-            .data(),
-        };
+            },
+            1,
+            update_seq,
+            event_start_slot,
+            slot.saturating_add(1),
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -307,22 +284,17 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
     {
         let (event_start_slot, update_seq) =
             next_deleverage_withdraw_limit_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 1,
-                update_seq: update_seq.saturating_add(1),
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            1,
+            update_seq.saturating_add(1),
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -357,22 +329,17 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             ctx.banks_client.process_transaction(tx).await?;
         }
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+        let ix = ix_builders::admin::update_deleverage_withdrawals(
+            &ix_builders::admin::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: attacker.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawals {
-                outflow_usd: 1,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            1,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],

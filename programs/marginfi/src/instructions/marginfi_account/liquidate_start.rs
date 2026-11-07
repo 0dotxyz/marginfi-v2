@@ -67,8 +67,8 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
     validate_instructions(
         sysvar,
         ctx.program_id,
-        &ix_discriminators::START_LIQUIDATION,
-        &ix_discriminators::END_LIQUIDATION,
+        &ix_discriminators::native::START_LIQUIDATION,
+        &ix_discriminators::native::END_LIQUIDATION,
     )
 }
 
@@ -98,8 +98,8 @@ pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> M
     validate_instructions(
         sysvar,
         ctx.program_id,
-        &ix_discriminators::START_DELEVERAGE,
-        &ix_discriminators::END_DELEVERAGE,
+        &ix_discriminators::native::START_DELEVERAGE,
+        &ix_discriminators::native::END_DELEVERAGE,
     )
 }
 
@@ -190,7 +190,10 @@ pub fn validate_instructions(
                 kamino_mocks::kamino_lending::ID,
                 kamino::RefreshObligation::DISCRIMINATOR,
             ),
-            (id_crate::ID, &ix_discriminators::INIT_LIQUIDATION_RECORD),
+            (
+                id_crate::ID,
+                &ix_discriminators::native::INIT_LIQUIDATION_RECORD,
+            ),
             (
                 drift_mocks::drift::ID,
                 drift::UpdateSpotMarketCumulativeInterest::DISCRIMINATOR,
@@ -211,12 +214,12 @@ pub fn validate_instructions(
         &[
             start_ix,
             end_ix,
-            &ix_discriminators::INIT_LIQUIDATION_RECORD,
-            &ix_discriminators::LENDING_ACCOUNT_WITHDRAW,
-            &ix_discriminators::LENDING_ACCOUNT_REPAY,
-            &ix_discriminators::KAMINO_WITHDRAW,
-            &ix_discriminators::DRIFT_WITHDRAW,
-            &ix_discriminators::JUPLEND_WITHDRAW,
+            &ix_discriminators::native::INIT_LIQUIDATION_RECORD,
+            &ix_discriminators::native::LENDING_ACCOUNT_WITHDRAW,
+            &ix_discriminators::native::LENDING_ACCOUNT_REPAY,
+            &ix_discriminators::integration::KAMINO_WITHDRAW,
+            &ix_discriminators::integration::DRIFT_WITHDRAW,
+            &ix_discriminators::integration::JUPLEND_WITHDRAW,
         ],
     )?;
     validate_not_cpi_by_stack_height()?;

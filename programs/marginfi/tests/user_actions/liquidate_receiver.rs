@@ -1,4 +1,3 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use bytemuck::from_bytes_mut;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
@@ -8,6 +7,7 @@ use marginfi::state::bank::BankImpl;
 use marginfi::{constants::LIQUIDATION_FLAT_FEE_DEFAULT, prelude::*};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
+    ix_builders,
     types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -716,20 +716,15 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
     // flow accounting path.
     {
         let ctx = test_f.context.borrow_mut();
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::ConfigureGroupRateLimits {
+        let ix = ix_builders::admin::configure_group_rate_limits(
+            &ix_builders::admin::ConfigureGroupRateLimits {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::ConfigureGroupRateLimits {
-                hourly_max_outflow_usd: Some(1_000_000),
-                daily_max_outflow_usd: None,
-            }
-            .data(),
-        };
+            },
+            Some(1_000_000),
+            None,
+        );
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&ctx.payer.pubkey()),
@@ -2319,17 +2314,14 @@ async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
 
     // Build a close_balance ix targeting the liquidator's own account on usdc_bank
     let liquidator_account = liquidator.load().await;
-    let close_balance_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingAccountCloseBalance {
+    let close_balance_ix = ix_builders::lending::lending_account_close_balance(
+        &ix_builders::lending::LendingAccountCloseBalance {
             group: liquidator_account.group,
             marginfi_account: liquidator.key,
             authority: payer,
             bank: usdc_bank.key,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountCloseBalance.data(),
-    };
+        },
+    );
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(

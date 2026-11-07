@@ -229,18 +229,18 @@ pub fn validate_rebalance_instructions(
         anchor_spl::token_2022::ID,
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
-    validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
+    validate_ix_last(&ixes, &id_crate::ID, &ixd::native::END_REBALANCE)?;
 
     // On every native and venue leg, `marginfi_account` is meta index 1 and `bank` is meta index 3.
     const MOVE_LEG_DISCRIMS: [[u8; 8]; 8] = [
-        ixd::LENDING_ACCOUNT_WITHDRAW,
-        ixd::LENDING_ACCOUNT_DEPOSIT,
-        ixd::KAMINO_WITHDRAW,
-        ixd::KAMINO_DEPOSIT,
-        ixd::DRIFT_WITHDRAW,
-        ixd::DRIFT_DEPOSIT,
-        ixd::JUPLEND_WITHDRAW,
-        ixd::JUPLEND_DEPOSIT,
+        ixd::native::LENDING_ACCOUNT_WITHDRAW,
+        ixd::native::LENDING_ACCOUNT_DEPOSIT,
+        ixd::integration::KAMINO_WITHDRAW,
+        ixd::integration::KAMINO_DEPOSIT,
+        ixd::integration::DRIFT_WITHDRAW,
+        ixd::integration::DRIFT_DEPOSIT,
+        ixd::integration::JUPLEND_WITHDRAW,
+        ixd::integration::JUPLEND_DEPOSIT,
     ];
     for ix in ixes.iter() {
         if ix.program_id != id_crate::ID || ix.data.len() < 8 {
@@ -271,27 +271,27 @@ pub fn validate_rebalance_instructions(
             .count()
     };
     check!(
-        count_marginfi_ix(&ixd::START_REBALANCE) == 1,
+        count_marginfi_ix(&ixd::native::START_REBALANCE) == 1,
         MarginfiError::RebalanceMalformedSandwich
     );
     check!(
-        count_marginfi_ix(&ixd::END_REBALANCE) == 1,
+        count_marginfi_ix(&ixd::native::END_REBALANCE) == 1,
         MarginfiError::RebalanceMalformedSandwich
     );
     validate_ixes_exclusive(
         &ixes,
         &id_crate::ID,
         &[
-            &ixd::START_REBALANCE,
-            &ixd::END_REBALANCE,
-            &ixd::LENDING_ACCOUNT_WITHDRAW,
-            &ixd::LENDING_ACCOUNT_DEPOSIT,
-            &ixd::KAMINO_WITHDRAW,
-            &ixd::KAMINO_DEPOSIT,
-            &ixd::DRIFT_WITHDRAW,
-            &ixd::DRIFT_DEPOSIT,
-            &ixd::JUPLEND_WITHDRAW,
-            &ixd::JUPLEND_DEPOSIT,
+            &ixd::native::START_REBALANCE,
+            &ixd::native::END_REBALANCE,
+            &ixd::native::LENDING_ACCOUNT_WITHDRAW,
+            &ixd::native::LENDING_ACCOUNT_DEPOSIT,
+            &ixd::integration::KAMINO_WITHDRAW,
+            &ixd::integration::KAMINO_DEPOSIT,
+            &ixd::integration::DRIFT_WITHDRAW,
+            &ixd::integration::DRIFT_DEPOSIT,
+            &ixd::integration::JUPLEND_WITHDRAW,
+            &ixd::integration::JUPLEND_DEPOSIT,
         ],
     )?;
     // Venue programs may appear ONLY as their refresh/crank ixs (which recompute at current
@@ -301,14 +301,14 @@ pub fn validate_rebalance_instructions(
         &ixes,
         &KAMINO_PROGRAM_ID,
         &[
-            &ixd::KAMINO_REFRESH_RESERVE,
-            &ixd::KAMINO_REFRESH_OBLIGATION,
+            &ixd::integration::KAMINO_REFRESH_RESERVE,
+            &ixd::integration::KAMINO_REFRESH_OBLIGATION,
         ],
     )?;
     validate_ixes_exclusive(
         &ixes,
         &DRIFT_PROGRAM_ID,
-        &[&ixd::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST],
+        &[&ixd::integration::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST],
     )?;
     // The supply-rate gate reads the JupLend `TokenReserve`, which is refreshed by the LIQUIDITY
     // program's `update_exchange_price`; the LENDING program's `update_rate` refreshes the separate
@@ -316,12 +316,12 @@ pub fn validate_rebalance_instructions(
     validate_ixes_exclusive(
         &ixes,
         &JUPLEND_LIQUIDITY_PROGRAM_ID,
-        &[&ixd::JUPLEND_UPDATE_EXCHANGE_PRICE],
+        &[&ixd::integration::JUPLEND_UPDATE_EXCHANGE_PRICE],
     )?;
     validate_ixes_exclusive(
         &ixes,
         &JUPLEND_LENDING_PROGRAM_ID,
-        &[&ixd::JUPLEND_UPDATE_RATE],
+        &[&ixd::integration::JUPLEND_UPDATE_RATE],
     )?;
     validate_not_cpi_by_stack_height()
 }
@@ -449,55 +449,55 @@ mod tests {
     #[test]
     fn check_instruction_hash_generated() {
         let got_init = InitLiquidationRecord::get_hash();
-        let want_init = ix_discriminators::INIT_LIQUIDATION_RECORD;
+        let want_init = ix_discriminators::native::INIT_LIQUIDATION_RECORD;
         assert_eq!(got_init, want_init);
 
         let got_start = StartLiquidation::get_hash();
-        let want_start = ix_discriminators::START_LIQUIDATION;
+        let want_start = ix_discriminators::native::START_LIQUIDATION;
         assert_eq!(got_start, want_start);
 
         let got_end = EndLiquidation::get_hash();
-        let want_end = ix_discriminators::END_LIQUIDATION;
+        let want_end = ix_discriminators::native::END_LIQUIDATION;
         assert_eq!(got_end, want_end);
 
         let got_withdraw = LendingAccountWithdraw::get_hash();
-        let want_withdraw = ix_discriminators::LENDING_ACCOUNT_WITHDRAW;
+        let want_withdraw = ix_discriminators::native::LENDING_ACCOUNT_WITHDRAW;
         assert_eq!(got_withdraw, want_withdraw);
 
         let got_repay = LendingAccountRepay::get_hash();
-        let want_repay = ix_discriminators::LENDING_ACCOUNT_REPAY;
+        let want_repay = ix_discriminators::native::LENDING_ACCOUNT_REPAY;
         assert_eq!(got_repay, want_repay);
 
         let got_flash = LendingAccountStartFlashloan::get_hash();
-        let want_flash = ix_discriminators::START_FLASHLOAN;
+        let want_flash = ix_discriminators::native::START_FLASHLOAN;
         assert_eq!(got_flash, want_flash);
 
         let got_flash = LendingAccountEndFlashloan::get_hash();
-        let want_flash = ix_discriminators::END_FLASHLOAN;
+        let want_flash = ix_discriminators::native::END_FLASHLOAN;
         assert_eq!(got_flash, want_flash);
 
         let got_start = StartDeleverage::get_hash();
-        let want_start = ix_discriminators::START_DELEVERAGE;
+        let want_start = ix_discriminators::native::START_DELEVERAGE;
         assert_eq!(got_start, want_start);
 
         let got_end = EndDeleverage::get_hash();
-        let want_end = ix_discriminators::END_DELEVERAGE;
+        let want_end = ix_discriminators::native::END_DELEVERAGE;
         assert_eq!(got_end, want_end);
 
         let got_drift = DriftWithdraw::get_hash();
-        let want_drift = ix_discriminators::DRIFT_WITHDRAW;
+        let want_drift = ix_discriminators::integration::DRIFT_WITHDRAW;
         assert_eq!(got_drift, want_drift);
 
         let got_kamino = KaminoWithdraw::get_hash();
-        let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
+        let want_kamino = ix_discriminators::integration::KAMINO_WITHDRAW;
         assert_eq!(got_kamino, want_kamino);
 
         let got_start_exec = StartExecuteOrder::get_hash();
-        let want_start_exec = ix_discriminators::START_EXECUTE_ORDER;
+        let want_start_exec = ix_discriminators::native::START_EXECUTE_ORDER;
         assert_eq!(got_start_exec, want_start_exec);
 
         let got_end_exec = EndExecuteOrder::get_hash();
-        let want_end_exec = ix_discriminators::END_EXECUTE_ORDER;
+        let want_end_exec = ix_discriminators::native::END_EXECUTE_ORDER;
         assert_eq!(got_end_exec, want_end_exec);
     }
 
@@ -506,23 +506,23 @@ mod tests {
         // The foreign venue crank discriminators must equal the standard anchor derivation.
         assert_eq!(
             get_discrim_hash("global", "refresh_reserve"),
-            ix_discriminators::KAMINO_REFRESH_RESERVE
+            ix_discriminators::integration::KAMINO_REFRESH_RESERVE
         );
         assert_eq!(
             get_discrim_hash("global", "refresh_obligation"),
-            ix_discriminators::KAMINO_REFRESH_OBLIGATION
+            ix_discriminators::integration::KAMINO_REFRESH_OBLIGATION
         );
         assert_eq!(
             get_discrim_hash("global", "update_spot_market_cumulative_interest"),
-            ix_discriminators::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST
+            ix_discriminators::integration::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST
         );
         assert_eq!(
             get_discrim_hash("global", "update_rate"),
-            ix_discriminators::JUPLEND_UPDATE_RATE
+            ix_discriminators::integration::JUPLEND_UPDATE_RATE
         );
         assert_eq!(
             get_discrim_hash("global", "update_exchange_price"),
-            ix_discriminators::JUPLEND_UPDATE_EXCHANGE_PRICE
+            ix_discriminators::integration::JUPLEND_UPDATE_EXCHANGE_PRICE
         );
     }
 
@@ -534,12 +534,14 @@ mod tests {
             data: discrim.to_vec(),
         };
         let cranks: &[&[u8]] = &[
-            &ix_discriminators::KAMINO_REFRESH_RESERVE,
-            &ix_discriminators::KAMINO_REFRESH_OBLIGATION,
+            &ix_discriminators::integration::KAMINO_REFRESH_RESERVE,
+            &ix_discriminators::integration::KAMINO_REFRESH_OBLIGATION,
         ];
         // A refresh crank is permitted...
         assert!(validate_ixes_exclusive(
-            &[kamino_ix(ix_discriminators::KAMINO_REFRESH_RESERVE)],
+            &[kamino_ix(
+                ix_discriminators::integration::KAMINO_REFRESH_RESERVE
+            )],
             &KAMINO_PROGRAM_ID,
             cranks,
         )
@@ -547,8 +549,8 @@ mod tests {
         // ...but a rate-manipulating Kamino deposit is rejected.
         assert!(validate_ixes_exclusive(
             &[
-                kamino_ix(ix_discriminators::KAMINO_REFRESH_RESERVE),
-                kamino_ix(ix_discriminators::KAMINO_DEPOSIT),
+                kamino_ix(ix_discriminators::integration::KAMINO_REFRESH_RESERVE),
+                kamino_ix(ix_discriminators::integration::KAMINO_DEPOSIT),
             ],
             &KAMINO_PROGRAM_ID,
             cranks,
@@ -637,98 +639,102 @@ mod tests {
         check(
             &idl_ixs,
             "marginfi_account_init_liq_record",
-            ix_discriminators::INIT_LIQUIDATION_RECORD,
+            ix_discriminators::native::INIT_LIQUIDATION_RECORD,
         );
         check(
             &idl_ixs,
             "start_liquidation",
-            ix_discriminators::START_LIQUIDATION,
+            ix_discriminators::native::START_LIQUIDATION,
         );
         check(
             &idl_ixs,
             "end_liquidation",
-            ix_discriminators::END_LIQUIDATION,
+            ix_discriminators::native::END_LIQUIDATION,
         );
         check(
             &idl_ixs,
             "marginfi_account_start_execute_order",
-            ix_discriminators::START_EXECUTE_ORDER,
+            ix_discriminators::native::START_EXECUTE_ORDER,
         );
         check(
             &idl_ixs,
             "marginfi_account_end_execute_order",
-            ix_discriminators::END_EXECUTE_ORDER,
+            ix_discriminators::native::END_EXECUTE_ORDER,
         );
         check(
             &idl_ixs,
             "lending_account_withdraw",
-            ix_discriminators::LENDING_ACCOUNT_WITHDRAW,
+            ix_discriminators::native::LENDING_ACCOUNT_WITHDRAW,
         );
         check(
             &idl_ixs,
             "lending_account_repay",
-            ix_discriminators::LENDING_ACCOUNT_REPAY,
+            ix_discriminators::native::LENDING_ACCOUNT_REPAY,
         );
         check(
             &idl_ixs,
             "kamino_withdraw",
-            ix_discriminators::KAMINO_WITHDRAW,
+            ix_discriminators::integration::KAMINO_WITHDRAW,
         );
         check(
             &idl_ixs,
             "drift_withdraw",
-            ix_discriminators::DRIFT_WITHDRAW,
+            ix_discriminators::integration::DRIFT_WITHDRAW,
         );
         check(
             &idl_ixs,
             "juplend_withdraw",
-            ix_discriminators::JUPLEND_WITHDRAW,
+            ix_discriminators::integration::JUPLEND_WITHDRAW,
         );
         check(
             &idl_ixs,
             "lending_account_start_flashloan",
-            ix_discriminators::START_FLASHLOAN,
+            ix_discriminators::native::START_FLASHLOAN,
         );
         check(
             &idl_ixs,
             "lending_account_end_flashloan",
-            ix_discriminators::END_FLASHLOAN,
+            ix_discriminators::native::END_FLASHLOAN,
         );
         check(
             &idl_ixs,
             "start_deleverage",
-            ix_discriminators::START_DELEVERAGE,
+            ix_discriminators::native::START_DELEVERAGE,
         );
         check(
             &idl_ixs,
             "end_deleverage",
-            ix_discriminators::END_DELEVERAGE,
+            ix_discriminators::native::END_DELEVERAGE,
         );
         check(
             &idl_ixs,
             "marginfi_account_start_rebalance",
-            ix_discriminators::START_REBALANCE,
+            ix_discriminators::native::START_REBALANCE,
         );
         check(
             &idl_ixs,
             "marginfi_account_end_rebalance",
-            ix_discriminators::END_REBALANCE,
+            ix_discriminators::native::END_REBALANCE,
         );
         check(
             &idl_ixs,
             "lending_account_deposit",
-            ix_discriminators::LENDING_ACCOUNT_DEPOSIT,
+            ix_discriminators::native::LENDING_ACCOUNT_DEPOSIT,
         );
         check(
             &idl_ixs,
             "kamino_deposit",
-            ix_discriminators::KAMINO_DEPOSIT,
+            ix_discriminators::integration::KAMINO_DEPOSIT,
         );
-        check(&idl_ixs, "drift_deposit", ix_discriminators::DRIFT_DEPOSIT);
+        check(
+            &idl_ixs,
+            "drift_deposit",
+            ix_discriminators::integration::DRIFT_DEPOSIT,
+        );
         check(
             &idl_ixs,
             "juplend_deposit",
-            ix_discriminators::JUPLEND_DEPOSIT,
+            ix_discriminators::integration::JUPLEND_DEPOSIT,
         );
     }
 }

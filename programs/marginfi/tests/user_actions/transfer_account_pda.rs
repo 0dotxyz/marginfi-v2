@@ -1,12 +1,10 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::assert_custom_error;
 use fixtures::test::TestFixture;
 use marginfi::{prelude::MarginfiError, state::marginfi_account::MarginfiAccountImpl};
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_DISABLED};
 use solana_program_test::tokio;
-use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{signature::Keypair, signer::Signer, transaction::Transaction};
 use solana_system_interface::program as system_program;
 
 #[tokio::test]
@@ -20,19 +18,15 @@ async fn transfer_to_new_account_pda_success() -> anyhow::Result<()> {
     let new_authority = new_authority_keypair.pubkey();
 
     // Create the old account using keypair method
-    let create_old_account_accounts = marginfi::accounts::MarginfiAccountInitialize {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: old_marginfi_account_key.pubkey(),
-        authority: old_authority,
-        fee_payer: old_authority,
-        system_program: system_program::id(),
-    };
-
-    let create_old_account_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: create_old_account_accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitialize {}.data(),
-    };
+    let create_old_account_ix = ix_builders::account::marginfi_account_initialize(
+        &ix_builders::account::MarginfiAccountInitialize {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: old_marginfi_account_key.pubkey(),
+            authority: old_authority,
+            fee_payer: old_authority,
+            system_program: system_program::id(),
+        },
+    );
 
     let create_tx = Transaction::new_signed_with_payer(
         &[create_old_account_ix],
@@ -66,28 +60,22 @@ async fn transfer_to_new_account_pda_success() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let transfer_accounts = marginfi::accounts::TransferToNewAccountPda {
-        group: test_f.marginfi_group.key,
-        old_marginfi_account: old_marginfi_account_key.pubkey(),
-        new_marginfi_account: new_marginfi_account_pda,
-        authority: old_authority,
-        fee_payer: old_authority,
-        new_authority,
-        global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        fee_state: test_f.marginfi_group.fee_state,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let transfer_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: transfer_accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccountPda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let transfer_ix = ix_builders::account::transfer_to_new_account_pda(
+        &ix_builders::account::TransferToNewAccountPda {
+            group: test_f.marginfi_group.key,
+            old_marginfi_account: old_marginfi_account_key.pubkey(),
+            new_marginfi_account: new_marginfi_account_pda,
+            authority: old_authority,
+            fee_payer: old_authority,
+            new_authority,
+            global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let transfer_tx = Transaction::new_signed_with_payer(
         &[transfer_ix],
@@ -137,19 +125,15 @@ async fn transfer_to_new_account_pda_with_third_party_id() -> anyhow::Result<()>
     let new_authority = new_authority_keypair.pubkey();
 
     // Create the old account using keypair method
-    let create_old_account_accounts = marginfi::accounts::MarginfiAccountInitialize {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: old_marginfi_account_key.pubkey(),
-        authority: old_authority,
-        fee_payer: old_authority,
-        system_program: system_program::id(),
-    };
-
-    let create_old_account_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: create_old_account_accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitialize {}.data(),
-    };
+    let create_old_account_ix = ix_builders::account::marginfi_account_initialize(
+        &ix_builders::account::MarginfiAccountInitialize {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: old_marginfi_account_key.pubkey(),
+            authority: old_authority,
+            fee_payer: old_authority,
+            system_program: system_program::id(),
+        },
+    );
 
     let create_tx = Transaction::new_signed_with_payer(
         &[create_old_account_ix],
@@ -179,28 +163,22 @@ async fn transfer_to_new_account_pda_with_third_party_id() -> anyhow::Result<()>
         &marginfi::ID,
     );
 
-    let transfer_accounts = marginfi::accounts::TransferToNewAccountPda {
-        group: test_f.marginfi_group.key,
-        old_marginfi_account: old_marginfi_account_key.pubkey(),
-        new_marginfi_account: new_marginfi_account_pda,
-        authority: old_authority,
-        fee_payer: old_authority,
-        new_authority,
-        global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        fee_state: test_f.marginfi_group.fee_state,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let transfer_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: transfer_accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccountPda {
-            account_index,
-            third_party_id,
-        }
-        .data(),
-    };
+    let transfer_ix = ix_builders::account::transfer_to_new_account_pda(
+        &ix_builders::account::TransferToNewAccountPda {
+            group: test_f.marginfi_group.key,
+            old_marginfi_account: old_marginfi_account_key.pubkey(),
+            new_marginfi_account: new_marginfi_account_pda,
+            authority: old_authority,
+            fee_payer: old_authority,
+            new_authority,
+            global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index,
+        third_party_id,
+    );
 
     let transfer_tx = Transaction::new_signed_with_payer(
         &[transfer_ix],
@@ -245,19 +223,15 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
     // Note: new authorities will be funded through the test fixture payer
 
     // Create the old account
-    let create_old_account_accounts = marginfi::accounts::MarginfiAccountInitialize {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: old_marginfi_account_key.pubkey(),
-        authority: old_authority,
-        fee_payer: old_authority,
-        system_program: system_program::id(),
-    };
-
-    let create_old_account_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: create_old_account_accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitialize {}.data(),
-    };
+    let create_old_account_ix = ix_builders::account::marginfi_account_initialize(
+        &ix_builders::account::MarginfiAccountInitialize {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: old_marginfi_account_key.pubkey(),
+            authority: old_authority,
+            fee_payer: old_authority,
+            system_program: system_program::id(),
+        },
+    );
 
     let create_tx = Transaction::new_signed_with_payer(
         &[create_old_account_ix],
@@ -285,28 +259,22 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let transfer_accounts1 = marginfi::accounts::TransferToNewAccountPda {
-        group: test_f.marginfi_group.key,
-        old_marginfi_account: old_marginfi_account_key.pubkey(),
-        new_marginfi_account: new_marginfi_account_pda1,
-        authority: old_authority,
-        fee_payer: old_authority,
-        new_authority: new_authority1,
-        global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        fee_state: test_f.marginfi_group.fee_state,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let transfer_ix1 = Instruction {
-        program_id: marginfi::ID,
-        accounts: transfer_accounts1.to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccountPda {
-            account_index: account_index1,
-            third_party_id: None,
-        }
-        .data(),
-    };
+    let transfer_ix1 = ix_builders::account::transfer_to_new_account_pda(
+        &ix_builders::account::TransferToNewAccountPda {
+            group: test_f.marginfi_group.key,
+            old_marginfi_account: old_marginfi_account_key.pubkey(),
+            new_marginfi_account: new_marginfi_account_pda1,
+            authority: old_authority,
+            fee_payer: old_authority,
+            new_authority: new_authority1,
+            global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index1,
+        None,
+    );
 
     let transfer_tx1 = Transaction::new_signed_with_payer(
         &[transfer_ix1],
@@ -334,28 +302,22 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let transfer_accounts2 = marginfi::accounts::TransferToNewAccountPda {
-        group: test_f.marginfi_group.key,
-        old_marginfi_account: old_marginfi_account_key.pubkey(),
-        new_marginfi_account: new_marginfi_account_pda2,
-        authority: old_authority,
-        fee_payer: old_authority,
-        new_authority: new_authority2,
-        global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        fee_state: test_f.marginfi_group.fee_state,
-        instructions_sysvar: solana_instructions_sysvar::id(),
-        system_program: system_program::id(),
-    };
-
-    let transfer_ix2 = Instruction {
-        program_id: marginfi::ID,
-        accounts: transfer_accounts2.to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccountPda {
-            account_index: account_index2,
-            third_party_id: None,
-        }
-        .data(),
-    };
+    let transfer_ix2 = ix_builders::account::transfer_to_new_account_pda(
+        &ix_builders::account::TransferToNewAccountPda {
+            group: test_f.marginfi_group.key,
+            old_marginfi_account: old_marginfi_account_key.pubkey(),
+            new_marginfi_account: new_marginfi_account_pda2,
+            authority: old_authority,
+            fee_payer: old_authority,
+            new_authority: new_authority2,
+            global_fee_wallet: test_f.marginfi_group.fee_wallet,
+            fee_state: test_f.marginfi_group.fee_state,
+            instructions_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::id(),
+        },
+        account_index2,
+        None,
+    );
 
     let transfer_tx2 = Transaction::new_signed_with_payer(
         &[transfer_ix2],
@@ -395,9 +357,8 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
         &marginfi::ID,
     );
 
-    let transfer_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::TransferToNewAccountPda {
+    let transfer_ix = ix_builders::account::transfer_to_new_account_pda(
+        &ix_builders::account::TransferToNewAccountPda {
             group: test_f.marginfi_group.key,
             old_marginfi_account: old_account_f.key,
             new_marginfi_account: new_marginfi_account_pda,
@@ -408,14 +369,10 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
             fee_state: test_f.marginfi_group.fee_state,
             instructions_sysvar: solana_instructions_sysvar::id(),
             system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::TransferToNewAccountPda {
-            account_index: 0,
-            third_party_id: None,
-        }
-        .data(),
-    };
+        },
+        0,
+        None,
+    );
 
     let transfer_tx = Transaction::new_signed_with_payer(
         &[transfer_ix],

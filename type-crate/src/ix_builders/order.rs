@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::OrderTrigger;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -18,9 +19,9 @@ pub struct MarginfiAccountCloseOrder {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountCloseOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [212, 223, 79, 182, 172, 183, 205, 237];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_CLOSE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -39,13 +40,13 @@ impl ToAccountMetas for MarginfiAccountCloseOrder {
 }
 /// (user) Close an existing Order, returning rent to the user
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_order(accounts: &MarginfiAccountCloseOrder) -> Instruction {
     marginfi_account_close_order_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_order_with_program_id(
     program_id: Pubkey,
@@ -74,9 +75,9 @@ pub struct MarginfiAccountEndExecuteOrder {
     pub fee_state: Pubkey,
 }
 impl MarginfiAccountEndExecuteOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [115, 42, 20, 93, 121, 84, 178, 83];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::END_EXECUTE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -104,7 +105,9 @@ impl ToAccountMetas for MarginfiAccountEndExecuteOrder {
 /// * CPI is forbidden
 /// * Returns rent for ephemeral accounts created during `StartExecuteOrder`
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_end_execute_order(
     accounts: &MarginfiAccountEndExecuteOrder,
@@ -112,7 +115,7 @@ pub fn marginfi_account_end_execute_order(
     marginfi_account_end_execute_order_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_end_execute_order_with_program_id(
     program_id: Pubkey,
@@ -136,9 +139,10 @@ pub struct MarginfiAccountKeeperCloseOrder {
     pub order: Pubkey,
 }
 impl MarginfiAccountKeeperCloseOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [128, 114, 71, 46, 194, 71, 186, 106];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_KEEPER_CLOSE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -156,7 +160,7 @@ impl ToAccountMetas for MarginfiAccountKeeperCloseOrder {
 /// longer has the associated positions, or the user has executed
 /// `marginfi_account_set_keeper_close_flags`. Keeper keeps the rent.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_keeper_close_order(
     accounts: &MarginfiAccountKeeperCloseOrder,
@@ -164,7 +168,7 @@ pub fn marginfi_account_keeper_close_order(
     marginfi_account_keeper_close_order_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_keeper_close_order_with_program_id(
     program_id: Pubkey,
@@ -191,9 +195,9 @@ pub struct MarginfiAccountPlaceOrder {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountPlaceOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [244, 112, 75, 138, 143, 108, 7, 186];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_PLACE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -218,7 +222,7 @@ impl ToAccountMetas for MarginfiAccountPlaceOrder {
 /// * trigger - the type of order (stop loss, take profit, or both), and the threshold at which
 /// to trigger the order, in dollars
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_place_order(
     accounts: &MarginfiAccountPlaceOrder,
@@ -228,7 +232,7 @@ pub fn marginfi_account_place_order(
     marginfi_account_place_order_with_program_id(crate::ID, accounts, bank_keys, trigger)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_place_order_with_program_id(
     program_id: Pubkey,
@@ -258,9 +262,10 @@ pub struct MarginfiAccountSetKeeperCloseFlags {
     pub authority: Pubkey,
 }
 impl MarginfiAccountSetKeeperCloseFlags {
-    pub const DISCRIMINATOR: [u8; 8] = [82, 163, 165, 222, 212, 255, 33, 210];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_SET_KEEPER_CLOSE_FLAGS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -278,7 +283,7 @@ impl ToAccountMetas for MarginfiAccountSetKeeperCloseFlags {
 /// `marginfi_account_keeper_close_order` on associated Orders. Typically, use
 /// `marginfi_account_close_order` instead if trying to close an Order.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_set_keeper_close_flags(
     accounts: &MarginfiAccountSetKeeperCloseFlags,
@@ -287,7 +292,7 @@ pub fn marginfi_account_set_keeper_close_flags(
     marginfi_account_set_keeper_close_flags_with_program_id(crate::ID, accounts, bank_keys_opt)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_set_keeper_close_flags_with_program_id(
     program_id: Pubkey,
@@ -323,9 +328,9 @@ pub struct MarginfiAccountStartExecuteOrder {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountStartExecuteOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [1, 70, 140, 134, 183, 29, 208, 224];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::START_EXECUTE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -354,7 +359,9 @@ impl ToAccountMetas for MarginfiAccountStartExecuteOrder {
 /// * Costs a small amount of rent, which is returned at the end of the tx, make sure you have
 /// enough SOL to start the tx.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_start_execute_order(
     accounts: &MarginfiAccountStartExecuteOrder,
@@ -362,7 +369,7 @@ pub fn marginfi_account_start_execute_order(
     marginfi_account_start_execute_order_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_start_execute_order_with_program_id(
     program_id: Pubkey,

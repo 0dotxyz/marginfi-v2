@@ -53,6 +53,14 @@ jobs:
         include-anchor: "false"
     - run: cargo fmt -- --check
     - run: ./scripts/lint.sh
+    - name: Verify tests build marginfi instructions with the SDK
+      run: |
+        if git ls-files -z -- 'programs/marginfi/tests/*.rs' 'test-utils/*.rs' ':!programs/marginfi/tests/ix_parity.rs' \
+          | xargs -0 perl -0777 -ne 'print "$ARGV\n" if /\bmarginfi::(?:instruction|accounts)\b|\buse\s+marginfi::\{[^;]*\b(?:instruction|accounts)\b/' \
+          | grep .; then
+          echo "These files build marginfi instructions without marginfi_type_crate::ix_builders"
+          exit 1
+        fi
 
   test-unit:
     name: Rust Unit Tests

@@ -1,6 +1,7 @@
-use anchor_lang::{prelude::*, solana_program::instruction::Instruction, InstructionData};
+use anchor_lang::{prelude::*, solana_program::instruction::Instruction};
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::errors::MarginfiError;
+use marginfi_type_crate::ix_builders;
 use solana_program_test::*;
 use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction};
 use solana_system_interface::instruction::{advance_nonce_account, create_nonce_account};
@@ -50,21 +51,16 @@ async fn create_nonce(
 }
 
 fn configure_bank_premium_ix(test_f: &TestFixture, admin: Pubkey) -> Instruction {
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingPoolConfigureBankPremium {
+    ix_builders::pool::lending_pool_configure_bank_premium(
+        &ix_builders::pool::LendingPoolConfigureBankPremium {
             group: test_f.marginfi_group.key,
             admin,
             bank: test_f.get_bank(&BankMint::Usdc).key,
             instruction_sysvar: solana_instructions_sysvar::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolConfigureBankPremium {
-            premium_tag: 1,
-            active: true,
-        }
-        .data(),
-    }
+        },
+        1,
+        true,
+    )
 }
 
 fn set_governance_admin_ix(
@@ -72,19 +68,14 @@ fn set_governance_admin_ix(
     signer: Pubkey,
     new_governance_admin: Pubkey,
 ) -> Instruction {
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::SetGovernanceAdmin {
+    ix_builders::pool::marginfi_group_set_governance_admin(
+        &ix_builders::pool::MarginfiGroupSetGovernanceAdmin {
             marginfi_group: test_f.marginfi_group.key,
             signer,
             instruction_sysvar: solana_instructions_sysvar::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiGroupSetGovernanceAdmin {
-            new_governance_admin,
-        }
-        .data(),
-    }
+        },
+        new_governance_admin,
+    )
 }
 
 #[tokio::test]
