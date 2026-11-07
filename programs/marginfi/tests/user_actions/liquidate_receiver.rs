@@ -3337,10 +3337,9 @@ async fn liquidate_receiver_paused_debt_repay_requires_closeout() -> anyhow::Res
 
     // The closeout line is $20.475 of SOL, 5% over the $19.50 of debt. Repaying both debts fails at
     // $20.4752 of SOL and passes at $20.4748.
-    for (sol_price, withdraw_sol, closeout) in [
-        (10_237_600_000, 1.95, false),
-        (10_237_400_000, 1.9, true),
-    ] {
+    for (sol_price, withdraw_sol, closeout) in
+        [(10_237_600_000, 1.95, false), (10_237_400_000, 1.9, true)]
+    {
         test_f
             .set_pyth_oracle_price_native(PYTH_SOL_FEED, sol_price, 0, 0)
             .await;
