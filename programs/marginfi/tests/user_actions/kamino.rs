@@ -1,4 +1,3 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token::error::TokenError;
 use fixed::types::I80F48;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
@@ -7,10 +6,9 @@ use marginfi::{
     assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
 };
 use marginfi_type_crate::constants::KAMINO_MARKET_EMERGENCY;
+use marginfi_type_crate::ix_builders;
 use solana_program_test::*;
-use solana_sdk::{
-    clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{clock::Clock, signer::Signer, transaction::Transaction};
 use test_case::test_case;
 
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
@@ -157,21 +155,16 @@ async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Re
     // is the payer (default test settings).
     let hourly_limit = 1_000_000_000_000u64;
     let admin = setup.test_f.payer_keypair();
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::ConfigureBankRateLimits {
+    let ix = ix_builders::admin::configure_bank_rate_limits(
+        &ix_builders::admin::ConfigureBankRateLimits {
             group: setup.test_f.marginfi_group.key,
             admin: admin.pubkey(),
             bank: setup.bank_f.key,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::ConfigureBankRateLimits {
-            hourly_max_outflow: Some(hourly_limit),
-            daily_max_outflow: None,
-        }
-        .data(),
-    };
+        },
+        Some(hourly_limit),
+        None,
+    );
     {
         let ctx = setup.test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(

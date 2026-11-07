@@ -1,4 +1,3 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token_2022;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
@@ -19,6 +18,7 @@ use marginfi_type_crate::{
         IS_T22, METADATA_SEED, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
+    ix_builders,
     types::{
         centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
         BankMetadata, BankOperationalState, BankVaultType, EmodeEntry, InterestRateConfigOpt,
@@ -47,17 +47,12 @@ fn derive_bank_metadata(bank: Pubkey) -> Pubkey {
 }
 
 fn make_init_bank_metadata_ix(bank: Pubkey, fee_payer: Pubkey, metadata: Pubkey) -> Instruction {
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::InitBankMetadata {
-            bank,
-            fee_payer,
-            metadata,
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata {}.data(),
-    }
+    ix_builders::pool::init_bank_metadata(&ix_builders::pool::InitBankMetadata {
+        bank,
+        fee_payer,
+        metadata,
+        system_program: system_program::id(),
+    })
 }
 
 fn make_write_bank_metadata_ix(
@@ -68,22 +63,17 @@ fn make_write_bank_metadata_ix(
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Instruction {
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::WriteBankMetadata {
+    ix_builders::pool::write_bank_metadata(
+        &ix_builders::pool::WriteBankMetadata {
             group,
             bank,
             metadata_admin,
             metadata,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::WriteBankMetadata {
-            ticker,
-            description,
-        }
-        .data(),
-    }
+        },
+        ticker,
+        description,
+    )
 }
 
 #[tokio::test]
@@ -698,21 +688,16 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
 
     {
         let ctx = test_f.context.borrow_mut();
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
+        let ix = ix_builders::pool::lending_pool_set_oracle_price(
+            &ix_builders::pool::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 governance_admin: ctx.payer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetOraclePrice {
-                price: price_wrapped,
-                setup: OracleSetup::Fixed as u8,
-            }
-            .data(),
-        };
+            },
+            price_wrapped,
+            OracleSetup::Fixed as u8,
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -989,21 +974,16 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
 
     {
         let ctx = test_f.context.borrow();
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
+        let ix = ix_builders::pool::lending_pool_set_oracle_price(
+            &ix_builders::pool::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 governance_admin: ctx.payer.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
                 bank: bank_f.key,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetOraclePrice {
-                price: new_price_wrapped,
-                setup: OracleSetup::Fixed as u8,
-            }
-            .data(),
-        };
+            },
+            new_price_wrapped,
+            OracleSetup::Fixed as u8,
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],

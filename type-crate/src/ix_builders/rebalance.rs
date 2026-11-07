@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::{RebalanceMove, WrappedI80F48};
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -19,9 +20,10 @@ pub struct MarginfiAccountCloseRebalanceOrder {
     pub rebalance_order: Pubkey,
 }
 impl MarginfiAccountCloseRebalanceOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [218, 239, 199, 221, 92, 158, 134, 62];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_CLOSE_REBALANCE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -43,7 +45,7 @@ impl ToAccountMetas for MarginfiAccountCloseRebalanceOrder {
 /// may permissionlessly close a stale order once the account was closed or it no longer holds a
 /// position in any allowed venue. Rent goes to `fee_recipient`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_rebalance_order(
     accounts: &MarginfiAccountCloseRebalanceOrder,
@@ -51,7 +53,7 @@ pub fn marginfi_account_close_rebalance_order(
     marginfi_account_close_rebalance_order_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_rebalance_order_with_program_id(
     program_id: Pubkey,
@@ -77,9 +79,9 @@ pub struct MarginfiAccountEndRebalance {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountEndRebalance {
-    pub const DISCRIMINATOR: [u8; 8] = [47, 225, 163, 216, 213, 214, 225, 155];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::END_REBALANCE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -101,13 +103,15 @@ impl ToAccountMetas for MarginfiAccountEndRebalance {
 /// conservation, untouched balances, and health; the order persists. The keeper tip is escrowed
 /// into the record and paid later via `settle_rebalance_tip`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the same bank blocks as `marginfi_account_start_rebalance`, in the same order, then each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_end_rebalance(accounts: &MarginfiAccountEndRebalance) -> Instruction {
     marginfi_account_end_rebalance_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_end_rebalance_with_program_id(
     program_id: Pubkey,
@@ -133,9 +137,10 @@ pub struct MarginfiAccountPlaceRebalanceOrder {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountPlaceRebalanceOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [161, 48, 11, 214, 229, 132, 192, 149];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_PLACE_REBALANCE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -156,7 +161,7 @@ impl ToAccountMetas for MarginfiAccountPlaceRebalanceOrder {
 /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield
 /// bank among `allowed_banks`. Persists until cancelled.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_place_rebalance_order(
     accounts: &MarginfiAccountPlaceRebalanceOrder,
@@ -177,7 +182,7 @@ pub fn marginfi_account_place_rebalance_order(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_place_rebalance_order_with_program_id(
     program_id: Pubkey,
@@ -226,9 +231,10 @@ pub struct MarginfiAccountSettleRebalanceTip {
     pub caller: Pubkey,
 }
 impl MarginfiAccountSettleRebalanceTip {
-    pub const DISCRIMINATOR: [u8; 8] = [198, 13, 185, 127, 7, 105, 88, 182];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_SETTLE_REBALANCE_TIP;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -250,7 +256,9 @@ impl ToAccountMetas for MarginfiAccountSettleRebalanceTip {
 /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
 /// record, returning its rent to the recorded keeper.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the same bank blocks as `marginfi_account_start_rebalance`, in the same order, without the reward accounts.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_settle_rebalance_tip(
     accounts: &MarginfiAccountSettleRebalanceTip,
@@ -258,7 +266,7 @@ pub fn marginfi_account_settle_rebalance_tip(
     marginfi_account_settle_rebalance_tip_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_settle_rebalance_tip_with_program_id(
     program_id: Pubkey,
@@ -285,9 +293,9 @@ pub struct MarginfiAccountStartRebalance {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountStartRebalance {
-    pub const DISCRIMINATOR: [u8; 8] = [251, 122, 91, 161, 219, 98, 5, 236];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::START_REBALANCE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -311,7 +319,9 @@ impl ToAccountMetas for MarginfiAccountStartRebalance {
 /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
 /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: one block per bank in the order's allowlist; `moves` refer to blocks by index. Each block is the bank, then JupLend's `TokenReserve` for JupLend banks, then the venue's reward accounts, then the bank's oracle and integration accounts.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_start_rebalance(
     accounts: &MarginfiAccountStartRebalance,
@@ -321,7 +331,7 @@ pub fn marginfi_account_start_rebalance(
     marginfi_account_start_rebalance_with_program_id(crate::ID, accounts, moves, execution_seq)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_start_rebalance_with_program_id(
     program_id: Pubkey,
@@ -352,9 +362,10 @@ pub struct MarginfiAccountTopUpRebalanceFeePool {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountTopUpRebalanceFeePool {
-    pub const DISCRIMINATOR: [u8; 8] = [83, 123, 125, 204, 200, 119, 247, 91];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_TOP_UP_REBALANCE_FEE_POOL;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_account, false),
@@ -371,7 +382,7 @@ impl ToAccountMetas for MarginfiAccountTopUpRebalanceFeePool {
 }
 /// (permissionless) Fund an account's rebalance fee pool with SOL, used to pay keeper tips.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_top_up_rebalance_fee_pool(
     accounts: &MarginfiAccountTopUpRebalanceFeePool,
@@ -380,7 +391,7 @@ pub fn marginfi_account_top_up_rebalance_fee_pool(
     marginfi_account_top_up_rebalance_fee_pool_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_top_up_rebalance_fee_pool_with_program_id(
     program_id: Pubkey,
@@ -406,9 +417,10 @@ pub struct MarginfiAccountUpdateRebalanceOrder {
     pub rebalance_order: Pubkey,
 }
 impl MarginfiAccountUpdateRebalanceOrder {
-    pub const DISCRIMINATOR: [u8; 8] = [175, 230, 251, 122, 168, 128, 207, 142];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_UPDATE_REBALANCE_ORDER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_account, false),
@@ -425,7 +437,7 @@ impl ToAccountMetas for MarginfiAccountUpdateRebalanceOrder {
 /// (user) Update an existing auto-rebalance order's allowlist and/or policy in place; `None`
 /// fields are left unchanged.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_update_rebalance_order(
     accounts: &MarginfiAccountUpdateRebalanceOrder,
@@ -446,7 +458,7 @@ pub fn marginfi_account_update_rebalance_order(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_update_rebalance_order_with_program_id(
     program_id: Pubkey,
@@ -490,9 +502,10 @@ pub struct MarginfiAccountWithdrawRebalanceFeePool {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountWithdrawRebalanceFeePool {
-    pub const DISCRIMINATOR: [u8; 8] = [121, 157, 246, 242, 240, 63, 254, 16];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_WITHDRAW_REBALANCE_FEE_POOL;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_account, false),
@@ -510,7 +523,7 @@ impl ToAccountMetas for MarginfiAccountWithdrawRebalanceFeePool {
 }
 /// (user) Withdraw SOL from an account's rebalance fee pool back to the authority.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_withdraw_rebalance_fee_pool(
     accounts: &MarginfiAccountWithdrawRebalanceFeePool,
@@ -519,7 +532,7 @@ pub fn marginfi_account_withdraw_rebalance_fee_pool(
     marginfi_account_withdraw_rebalance_fee_pool_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_withdraw_rebalance_fee_pool_with_program_id(
     program_id: Pubkey,

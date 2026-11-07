@@ -14,7 +14,7 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
-    constants::ix_discriminators::END_FLASHLOAN,
+    constants::ix_discriminators::native::END_FLASHLOAN,
     types::{
         MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,

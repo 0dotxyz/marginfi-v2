@@ -6,11 +6,10 @@ use crate::{
 use anchor_lang::{
     prelude::{AccountMeta, Pubkey},
     solana_program::{account_info::IntoAccountInfo, clock::Clock, instruction::Instruction},
-    InstructionData, ToAccountMetas,
 };
 use fixed::types::I80F48;
 use marginfi::state::price::{OraclePriceFeedAdapter, PriceAdapter};
-use marginfi_type_crate::bank_authority_seed;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
 use marginfi_type_crate::types::{
     Bank, BankConfigOpt, BankVaultType, OraclePriceType, OracleSetup,
@@ -105,60 +104,44 @@ impl BankFixture {
         let (fast, gov) = config.split();
 
         if !fast.is_empty() {
-            let accounts = marginfi::accounts::LendingPoolConfigureBank {
-                group,
-                admin,
-                bank: self.key,
-                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true));
-
-            instructions.push(Instruction {
-                program_id: marginfi::ID,
-                accounts,
-                data: marginfi::instruction::LendingPoolConfigureBank {
-                    bank_config_opt: fast,
-                }
-                .data(),
-            });
+            instructions.push(ix_builders::pool::lending_pool_configure_bank(
+                &ix_builders::pool::LendingPoolConfigureBank {
+                    group,
+                    admin,
+                    bank: self.key,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                },
+                fast,
+            ));
         }
 
         if !gov.is_empty() {
-            let accounts = marginfi::accounts::LendingPoolConfigureBankGov {
-                group,
-                governance_admin: admin,
-                bank: self.key,
-                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true));
-
-            instructions.push(Instruction {
-                program_id: marginfi::ID,
-                accounts,
-                data: marginfi::instruction::LendingPoolConfigureBankGov {
-                    bank_config_opt: gov,
-                }
-                .data(),
-            });
+            instructions.push(ix_builders::pool::lending_pool_configure_bank_gov(
+                &ix_builders::pool::LendingPoolConfigureBankGov {
+                    group,
+                    governance_admin: admin,
+                    bank: self.key,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                },
+                gov,
+            ));
         }
 
         if let Some((setup, oracle)) = oracle_update {
-            let mut oracle_accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
-                group: self.load().await.group,
-                governance_admin: self.ctx.borrow().payer.pubkey(),
-                bank: self.key,
-                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true));
+            let mut oracle_ix = ix_builders::pool::lending_pool_configure_bank_oracle(
+                &ix_builders::pool::LendingPoolConfigureBankOracle {
+                    group: self.load().await.group,
+                    governance_admin: self.ctx.borrow().payer.pubkey(),
+                    bank: self.key,
+                    instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+                },
+                setup,
+                oracle,
+            );
 
-            oracle_accounts.push(AccountMeta::new_readonly(oracle, false));
-
-            let oracle_ix = Instruction {
-                program_id: marginfi::ID,
-                accounts: oracle_accounts,
-                data: marginfi::instruction::LendingPoolConfigureBankOracle { setup, oracle }
-                    .data(),
-            };
+            oracle_ix
+                .accounts
+                .push(AccountMeta::new_readonly(oracle, false));
 
             instructions.push(oracle_ix);
         }
@@ -197,9 +180,8 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolEmissionsDeposit {
+        let ix = ix_builders::pool::lending_pool_emissions_deposit(
+            &ix_builders::pool::LendingPoolEmissionsDeposit {
                 group: bank.group,
                 bank: self.key,
                 mint,
@@ -207,10 +189,9 @@ impl BankFixture {
                 depositor: self.ctx.borrow().payer.pubkey(),
                 liquidity_vault: bank.liquidity_vault,
                 token_program: self.get_token_program(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolEmissionsDeposit { amount }.data(),
-        };
+            },
+            amount,
+        );
 
         let tx = {
             let ctx = self.ctx.borrow_mut();
@@ -240,31 +221,24 @@ impl BankFixture {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
         let signer_pk = ctx.payer.pubkey();
-        let (fee_vault_authority, _) = Pubkey::find_program_address(
-            bank_authority_seed!(BankVaultType::Fee, self.key),
-            &marginfi::ID,
+
+        let mut ix = ix_builders::pool::lending_pool_withdraw_fees(
+            &ix_builders::pool::LendingPoolWithdrawFees {
+                group: bank.group,
+                token_program: receiving_account.token_program,
+                bank: self.key,
+                admin: signer_pk,
+                fee_vault: bank.fee_vault,
+                fee_vault_authority: self.get_vault_authority(BankVaultType::Fee).0,
+                dst_token_account: receiving_account.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+            amount,
         );
-
-        let mut accounts = marginfi::accounts::LendingPoolWithdrawFees {
-            group: bank.group,
-            token_program: receiving_account.token_program,
-            bank: self.key,
-            admin: signer_pk,
-            fee_vault: bank.fee_vault,
-            fee_vault_authority,
-            dst_token_account: receiving_account.key,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(self.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(self.mint.key, false));
         }
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolWithdrawFees { amount }.data(),
-        };
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -285,29 +259,22 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let (fee_vault_authority, _) = Pubkey::find_program_address(
-            bank_authority_seed!(BankVaultType::Fee, self.key),
-            &marginfi::ID,
+
+        let mut ix = ix_builders::pool::lending_pool_withdraw_fees_permissionless(
+            &ix_builders::pool::LendingPoolWithdrawFeesPermissionless {
+                group: bank.group,
+                token_program: receiving_account.token_program,
+                bank: self.key,
+                fee_vault: bank.fee_vault,
+                fee_vault_authority: self.get_vault_authority(BankVaultType::Fee).0,
+                fees_destination_account: receiving_account.key,
+            },
+            amount,
         );
-
-        let mut accounts = marginfi::accounts::LendingPoolWithdrawFeesPermissionless {
-            group: bank.group,
-            token_program: receiving_account.token_program,
-            bank: self.key,
-            fee_vault: bank.fee_vault,
-            fee_vault_authority,
-            fees_destination_account: receiving_account.key,
-        }
-        .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(self.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(self.mint.key, false));
         }
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolWithdrawFeesPermissionless { amount }.data(),
-        };
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -331,23 +298,19 @@ impl BankFixture {
         let ctx = self.ctx.borrow_mut();
         let signer_pk = ctx.payer.pubkey();
 
-        let mut accounts = marginfi::accounts::LendingPoolUpdateFeesDestinationAccount {
-            group: bank.group,
-            bank: self.key,
-            admin: signer_pk,
-            destination_account: destination_account.key,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true));
+        let mut ix = ix_builders::pool::lending_pool_update_fees_destination_account(
+            &ix_builders::pool::LendingPoolUpdateFeesDestinationAccount {
+                group: bank.group,
+                bank: self.key,
+                admin: signer_pk,
+                destination_account: destination_account.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+        );
         if self.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(self.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(self.mint.key, false));
         }
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolUpdateFeesDestinationAccount.data(),
-        };
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -369,31 +332,24 @@ impl BankFixture {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
         let signer_pk = ctx.payer.pubkey();
-        let (insurance_vault_authority, _) = Pubkey::find_program_address(
-            bank_authority_seed!(BankVaultType::Insurance, self.key),
-            &marginfi::ID,
+
+        let mut ix = ix_builders::pool::lending_pool_withdraw_insurance(
+            &ix_builders::pool::LendingPoolWithdrawInsurance {
+                group: bank.group,
+                token_program: receiving_account.token_program,
+                bank: self.key,
+                admin: signer_pk,
+                insurance_vault: bank.insurance_vault,
+                insurance_vault_authority: self.get_vault_authority(BankVaultType::Insurance).0,
+                dst_token_account: receiving_account.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+            amount,
         );
-
-        let mut accounts = marginfi::accounts::LendingPoolWithdrawInsurance {
-            group: bank.group,
-            token_program: receiving_account.token_program,
-            bank: self.key,
-            admin: signer_pk,
-            insurance_vault: bank.insurance_vault,
-            insurance_vault_authority,
-            dst_token_account: receiving_account.key,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true));
         if self.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(self.mint.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(self.mint.key, false));
         }
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolWithdrawInsurance { amount }.data(),
-        };
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -468,18 +424,15 @@ impl BankFixture {
         reseed_reference: bool,
     ) -> Instruction {
         let bank = self.load().await;
-        let accounts = marginfi::accounts::LendingPoolClearCircuitBreaker {
-            group: bank.group,
-            authority,
-            bank: self.key,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true));
-        Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolClearCircuitBreaker { reseed_reference }.data(),
-        }
+        ix_builders::pool::lending_pool_clear_circuit_breaker(
+            &ix_builders::pool::LendingPoolClearCircuitBreaker {
+                group: bank.group,
+                authority,
+                bank: self.key,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+            reseed_reference,
+        )
     }
 
     pub async fn set_asset_share_value(&self, value: I80F48) {

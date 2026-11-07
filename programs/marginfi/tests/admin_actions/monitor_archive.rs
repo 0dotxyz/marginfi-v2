@@ -2,15 +2,15 @@ use anchor_lang::solana_program::{
     account_info::AccountInfo,
     instruction::{AccountMeta, Instruction},
 };
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::{
     errors::MarginfiError,
-    instructions::marginfi_group::{
-        SnapshotUpdateInput, MAX_ACCOUNT_DATA_LEN, MONITOR_INDEX_MAP_LEN,
-    },
+    instructions::marginfi_group::{MAX_ACCOUNT_DATA_LEN, MONITOR_INDEX_MAP_LEN},
 };
-use marginfi_type_crate::types::{ArchiveMeta, ArchiveRecord, MintSnapshotRecords};
+use marginfi_type_crate::{
+    ix_builders,
+    types::{ArchiveMeta, ArchiveRecord, MintSnapshotRecords, SnapshotUpdateInput},
+};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
@@ -45,15 +45,13 @@ async fn create_and_init_archive(
         &marginfi::ID,
     );
 
-    let init_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::MonitorArchiveInitialize {
+    let init_ix = ix_builders::archive::monitor_archive_initialize(
+        &ix_builders::archive::MonitorArchiveInitialize {
             payer,
             archive: archive.pubkey(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MonitorArchiveInitialize { snapshot_manager }.data(),
-    };
+        },
+        snapshot_manager,
+    );
 
     let tx = Transaction::new_signed_with_payer(
         &[create_ix, init_ix],
@@ -78,18 +76,16 @@ fn upsert_batch_ix(
     mints: &[Pubkey],
     updates: Vec<SnapshotUpdateInput>,
 ) -> Instruction {
-    let mut accounts = marginfi::accounts::MonitorArchiveUpsertBatch {
-        snapshot_manager,
-        archive,
-    }
-    .to_account_metas(Some(true));
-    accounts.extend(mints.iter().map(|m| AccountMeta::new_readonly(*m, false)));
-
-    Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::MonitorArchiveUpsertBatch { updates }.data(),
-    }
+    let mut ix = ix_builders::archive::monitor_archive_upsert_batch(
+        &ix_builders::archive::MonitorArchiveUpsertBatch {
+            snapshot_manager,
+            archive,
+        },
+        updates,
+    );
+    ix.accounts
+        .extend(mints.iter().map(|m| AccountMeta::new_readonly(*m, false)));
+    ix
 }
 
 async fn archive_data(test_f: &TestFixture, archive: Pubkey) -> Vec<u8> {
@@ -140,15 +136,13 @@ async fn monitor_archive_initialize_twice_fails() -> anyhow::Result<()> {
     let payer = test_f.payer();
     let blockhash = test_f.get_latest_blockhash().await;
 
-    let init_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::MonitorArchiveInitialize {
+    let init_ix = ix_builders::archive::monitor_archive_initialize(
+        &ix_builders::archive::MonitorArchiveInitialize {
             payer,
             archive: archive.pubkey(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MonitorArchiveInitialize { snapshot_manager }.data(),
-    };
+        },
+        snapshot_manager,
+    );
     let tx = Transaction::new_signed_with_payer(
         &[init_ix],
         Some(&payer),

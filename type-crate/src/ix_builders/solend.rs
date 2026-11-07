@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::SolendConfigCompact;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -40,9 +41,9 @@ pub struct LendingPoolAddBankSolend {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBankSolend {
-    pub const DISCRIMINATOR: [u8; 8] = [81, 233, 203, 199, 47, 226, 0, 68];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::LENDING_POOL_ADD_BANK_SOLEND;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -71,7 +72,9 @@ impl ToAccountMetas for LendingPoolAddBankSolend {
 }
 /// (slow governance_admin) Add a Solend bank to the marginfi group
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the oracle, then the reserve.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_solend(
     accounts: &LendingPoolAddBankSolend,
@@ -81,7 +84,7 @@ pub fn lending_pool_add_bank_solend(
     lending_pool_add_bank_solend_with_program_id(crate::ID, accounts, bank_config, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_solend_with_program_id(
     program_id: Pubkey,
@@ -141,9 +144,9 @@ pub struct SolendDeposit {
     pub token_program: Pubkey,
 }
 impl SolendDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [56, 127, 176, 148, 12, 25, 3, 24];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::SOLEND_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -177,13 +180,13 @@ impl ToAccountMetas for SolendDeposit {
 /// (user) Deposit into a Solend reserve through a marginfi account
 /// * amount - in the underlying token (e.g., USDC), in native decimals
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_deposit(accounts: &SolendDeposit, amount: u64) -> Instruction {
     solend_deposit_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_deposit_with_program_id(
     program_id: Pubkey,
@@ -239,9 +242,9 @@ pub struct SolendInitObligation {
     pub system_program: Pubkey,
 }
 impl SolendInitObligation {
-    pub const DISCRIMINATOR: [u8; 8] = [81, 96, 123, 149, 218, 116, 235, 196];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::SOLEND_INIT_OBLIGATION;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.fee_payer, true),
@@ -276,13 +279,13 @@ impl ToAccountMetas for SolendInitObligation {
 /// Requires a minimum deposit to ensure the obligation remains active
 /// * amount - minimum deposit amount (at least 10 units) in native decimals
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_init_obligation(accounts: &SolendInitObligation, amount: u64) -> Instruction {
     solend_init_obligation_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_init_obligation_with_program_id(
     program_id: Pubkey,
@@ -334,9 +337,9 @@ pub struct SolendWithdraw {
     pub token_program: Pubkey,
 }
 impl SolendWithdraw {
-    pub const DISCRIMINATOR: [u8; 8] = [238, 144, 170, 199, 21, 72, 155, 36];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::SOLEND_WITHDRAW;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -371,7 +374,9 @@ impl ToAccountMetas for SolendWithdraw {
 /// `remaining_accounts`
 /// * withdraw_all - withdraw entire position if true
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_withdraw(
     accounts: &SolendWithdraw,
@@ -381,7 +386,7 @@ pub fn solend_withdraw(
     solend_withdraw_with_program_id(crate::ID, accounts, amount, withdraw_all)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_withdraw_with_program_id(
     program_id: Pubkey,

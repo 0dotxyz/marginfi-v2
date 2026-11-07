@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
-use marginfi_type_crate::types::BankConfigOpt;
+use marginfi_type_crate::pdas::bank_observation_keys;
+use marginfi_type_crate::types::{Bank, BankConfigOpt};
 use pyth_solana_receiver_sdk::{
     price_update::{FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel},
     PYTH_PUSH_ORACLE_ID,
@@ -46,20 +46,17 @@ pub async fn load_and_deserialize<T: AccountDeserialize>(
     T::try_deserialize(&mut ai.data.as_slice()).unwrap()
 }
 
+/// The bank's oracle and integration accounts from `pdas::bank_observation_keys`, as read-only metas.
+pub fn bank_observation_metas(bank: &Bank) -> Vec<AccountMeta> {
+    bank_observation_keys(bank)
+        .into_iter()
+        .map(|key| AccountMeta::new_readonly(key, false))
+        .collect()
+}
+
 pub async fn latest_blockhash(ctx: &Rc<RefCell<ProgramTestContext>>) -> Hash {
     let banks_client = ctx.borrow().banks_client.clone();
     banks_client.get_latest_blockhash().await.unwrap()
-}
-
-pub fn make_ix<T>(accounts: T, ix_data: Vec<u8>) -> Instruction
-where
-    T: ToAccountMetas,
-{
-    Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: ix_data,
-    }
 }
 
 pub fn create_pyth_push_oracle_account_from_bytes(data: Vec<u8>) -> Account {

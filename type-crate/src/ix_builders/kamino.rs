@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::KaminoConfigCompact;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -46,9 +47,9 @@ pub struct KaminoDeposit {
     pub instruction_sysvar_account: Pubkey,
 }
 impl KaminoDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [237, 8, 188, 187, 115, 99, 49, 85];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::KAMINO_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -91,7 +92,7 @@ impl ToAccountMetas for KaminoDeposit {
 /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
 /// USDC desired), in native decimals.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_deposit(
     accounts: &KaminoDeposit,
@@ -101,7 +102,7 @@ pub fn kamino_deposit(
     kamino_deposit_with_program_id(crate::ID, accounts, amount, refresh_reserve)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_deposit_with_program_id(
     program_id: Pubkey,
@@ -147,9 +148,9 @@ pub struct KaminoHarvestReward {
     pub token_program: Pubkey,
 }
 impl KaminoHarvestReward {
-    pub const DISCRIMINATOR: [u8; 8] = [163, 202, 248, 141, 106, 20, 116, 5];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::KAMINO_HARVEST_REWARD;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.bank, false),
@@ -183,13 +184,13 @@ impl ToAccountMetas for KaminoHarvestReward {
 ///
 /// * `reward_index` — index of the reward token in the Kamino Farm's reward list
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_harvest_reward(accounts: &KaminoHarvestReward, reward_index: u64) -> Instruction {
     kamino_harvest_reward_with_program_id(crate::ID, accounts, reward_index)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_harvest_reward_with_program_id(
     program_id: Pubkey,
@@ -255,9 +256,9 @@ pub struct KaminoInitObligation {
     pub system_program: Pubkey,
 }
 impl KaminoInitObligation {
-    pub const DISCRIMINATOR: [u8; 8] = [253, 177, 160, 225, 70, 156, 217, 109];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::KAMINO_INIT_OBLIGATION;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.fee_payer, true),
@@ -302,13 +303,13 @@ impl ToAccountMetas for KaminoInitObligation {
 /// forever. Generally, try to make this the equivalent of around $1, in case Kamino ever
 /// rounds small balances down to zero.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_init_obligation(accounts: &KaminoInitObligation, amount: u64) -> Instruction {
     kamino_init_obligation_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_init_obligation_with_program_id(
     program_id: Pubkey,
@@ -368,9 +369,9 @@ pub struct KaminoWithdraw {
     pub instruction_sysvar_account: Pubkey,
 }
 impl KaminoWithdraw {
-    pub const DISCRIMINATOR: [u8; 8] = [199, 101, 41, 45, 213, 98, 224, 200];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::KAMINO_WITHDRAW;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -418,13 +419,15 @@ impl ToAccountMetas for KaminoWithdraw {
 /// - bit 0 (`0x01`): withdraw all
 /// - bit 1 (`0x02`): refresh reserve via batch refresh
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_withdraw(accounts: &KaminoWithdraw, amount: u64, flags: Option<u8>) -> Instruction {
     kamino_withdraw_with_program_id(crate::ID, accounts, amount, flags)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn kamino_withdraw_with_program_id(
     program_id: Pubkey,
@@ -482,9 +485,9 @@ pub struct LendingPoolAddBankKamino {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBankKamino {
-    pub const DISCRIMINATOR: [u8; 8] = [118, 53, 16, 243, 255, 245, 149, 241];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::LENDING_POOL_ADD_BANK_KAMINO;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -514,7 +517,7 @@ impl ToAccountMetas for LendingPoolAddBankKamino {
 /// (governance_admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining
 /// accounts 0 and 1 respectively.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_kamino(
     accounts: &LendingPoolAddBankKamino,
@@ -524,7 +527,7 @@ pub fn lending_pool_add_bank_kamino(
     lending_pool_add_bank_kamino_with_program_id(crate::ID, accounts, bank_config, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_kamino_with_program_id(
     program_id: Pubkey,
@@ -556,9 +559,10 @@ pub struct PropagateKaminoMarketEmergency {
     pub bank: Pubkey,
 }
 impl PropagateKaminoMarketEmergency {
-    pub const DISCRIMINATOR: [u8; 8] = [252, 182, 246, 73, 108, 118, 102, 142];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::integration::PROPAGATE_KAMINO_MARKET_EMERGENCY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.reserve, false),
@@ -576,13 +580,13 @@ impl ToAccountMetas for PropagateKaminoMarketEmergency {
 /// market. While set, the bank backs no new borrowing, exactly as a bank on a reserve in
 /// emergency mode does. Clearing the flag works the same way, once Kamino resumes the market.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_kamino_market_emergency(accounts: &PropagateKaminoMarketEmergency) -> Instruction {
     propagate_kamino_market_emergency_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_kamino_market_emergency_with_program_id(
     program_id: Pubkey,

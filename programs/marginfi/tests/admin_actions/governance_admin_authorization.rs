@@ -1,6 +1,5 @@
 use fixtures::assert_custom_error;
 use fixtures::prelude::*;
-use marginfi::instruction::MarginfiGroupConfigureGov;
 use marginfi::prelude::MarginfiError;
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::{constants::TOKENLESS_REPAYMENTS_ALLOWED, types::BankConfigOpt};
@@ -71,15 +70,13 @@ async fn governance_actions_require_governance_admin() -> anyhow::Result<()> {
         .marginfi_group
         .try_group_configure_gov_with_signer(
             &test_f.payer_keypair(),
-            MarginfiGroupConfigureGov {
-                new_admin: None,
-                new_emode_admin: Some(solana_sdk::pubkey::Pubkey::new_unique()),
-                new_risk_admin: Some(solana_sdk::pubkey::Pubkey::new_unique()),
-                emode_max_init_leverage: None,
-                emode_max_maint_leverage: None,
-                same_asset_emode_init_leverage: None,
-                same_asset_emode_maint_leverage: None,
-            },
+            None,
+            Some(solana_sdk::pubkey::Pubkey::new_unique()),
+            Some(solana_sdk::pubkey::Pubkey::new_unique()),
+            None,
+            None,
+            None,
+            None,
         )
         .await;
     assert_custom_error!(fast_result.unwrap_err(), MarginfiError::Unauthorized);
@@ -90,15 +87,13 @@ async fn governance_actions_require_governance_admin() -> anyhow::Result<()> {
         .marginfi_group
         .try_group_configure_gov_with_signer(
             &new_governance_admin,
-            MarginfiGroupConfigureGov {
-                new_admin: None,
-                new_emode_admin: Some(new_emode_admin.pubkey()),
-                new_risk_admin: Some(new_risk_admin),
-                emode_max_init_leverage: None,
-                emode_max_maint_leverage: None,
-                same_asset_emode_init_leverage: None,
-                same_asset_emode_maint_leverage: None,
-            },
+            None,
+            Some(new_emode_admin.pubkey()),
+            Some(new_risk_admin),
+            None,
+            None,
+            None,
+            None,
         )
         .await?;
     let group_after_config = test_f.marginfi_group.load().await;

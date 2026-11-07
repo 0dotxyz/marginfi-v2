@@ -1,7 +1,7 @@
 //! Anchor-independent marginfi instruction builders.
 //!
 //! Builders serialize fixed accounts and arguments for the current program interface.
-//! Append remaining accounts required by the instruction and its oracle or integration setup.
+//! Remaining accounts depend on the instruction and its oracle or integration setup, and are not included.
 
 pub mod account;
 pub mod admin;

@@ -1,7 +1,7 @@
-use anchor_lang::solana_program::{instruction::Instruction, system_program};
-use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_lang::solana_program::system_program;
 use fixtures::prelude::*;
 use marginfi_type_crate::constants::FEE_STATE_SEED;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::MarginfiGroup;
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -17,18 +17,14 @@ async fn marginfi_group_create_success() -> anyhow::Result<()> {
     let (fee_state_key, _bump) =
         Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], &marginfi::ID);
 
-    let accounts = marginfi::accounts::MarginfiGroupInitialize {
+    let accounts = ix_builders::pool::MarginfiGroupInitialize {
         marginfi_group: marginfi_group_key.pubkey(),
         admin: test_f.payer(),
         fee_state: fee_state_key,
         system_program: system_program::id(),
         instruction_sysvar: solana_sdk::sysvar::instructions::ID,
     };
-    let init_marginfi_group_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiGroupInitialize {}.data(),
-    };
+    let init_marginfi_group_ix = ix_builders::pool::marginfi_group_initialize(&accounts);
     let tx = Transaction::new_signed_with_payer(
         &[init_marginfi_group_ix],
         Some(&test_f.payer().clone()),
