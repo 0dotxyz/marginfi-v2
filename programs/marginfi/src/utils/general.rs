@@ -322,6 +322,18 @@ pub fn validate_bank_state(
     Ok(())
 }
 
+/// Validate the bank takes repays. A liquidation may also repay debt in a paused bank. Returns true
+/// if the bank is paused.
+pub fn validate_repay_bank_state(bank: &Bank, in_liquidation: bool) -> MarginfiResult<bool> {
+    let kind = if in_liquidation {
+        InstructionKind::Unrestricted
+    } else {
+        InstructionKind::FailsInPausedState
+    };
+    validate_bank_state(bank, kind, true)?;
+    Ok(bank.cb_effective_operational_state() == BankOperationalState::Paused)
+}
+
 pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
     let as_i80: I80F48 = n.into();
     let as_f64: f64 = as_i80.to_num();
