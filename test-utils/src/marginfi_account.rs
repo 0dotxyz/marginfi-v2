@@ -1,6 +1,6 @@
 use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
-use crate::utils::find_order_pda;
+use crate::utils::{find_order_pda, find_position_escrow_pda};
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use drift_mocks::drift::client as drift;
@@ -16,8 +16,8 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger, RebalanceMove,
-    WrappedI80F48,
+    BalanceSide, Bank, BankVaultType, FeeState, MarginfiAccount, Order, OrderTrigger,
+    PositionEscrow, RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -2707,5 +2707,297 @@ impl MarginfiAccountFixture {
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
+    }
+
+    pub async fn try_position_transfer<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authority(
+            destination_account,
+            bank,
+            ui_amount,
+            &self.ctx.borrow().payer.insecure_clone(),
+        )
+        .await
+    }
+
+    pub async fn try_position_transfer_with_authority<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        self.try_position_transfer_with_authorities(
+            destination_account,
+            bank,
+            ui_amount,
+            authority,
+            None,
+        )
+        .await
+    }
+
+    /// `destination_authority` signs to consent to receiving debt or a new position. Transfers the
+    /// side the source holds in `bank`.
+    pub async fn try_position_transfer_with_authorities<T: Into<f64> + Copy>(
+        &self,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        source_authority: &Keypair,
+        destination_authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let side = match self
+            .load()
+            .await
+            .lending_account
+            .get_balance(&bank.key)
+            .and_then(|b| b.get_side())
+        {
+            Some(BalanceSide::Liabilities) => BalanceSide::Liabilities,
+            _ => BalanceSide::Assets,
+        };
+        self.try_position_transfer_on_side(
+            side,
+            destination_account,
+            bank,
+            ui_amount,
+            source_authority,
+            destination_authority,
+        )
+        .await
+    }
+
+    /// Transfers `side` of the source's position in `bank`, whatever side it holds.
+    pub async fn try_position_transfer_on_side<T: Into<f64> + Copy>(
+        &self,
+        side: BalanceSide,
+        destination_account: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        source_authority: &Keypair,
+        destination_authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
+        // The remaining accounts are the observation set of the account taking on risk. A
+        // destination gaining a debt slot includes `bank`.
+        let (observation, data) = match side {
+            BalanceSide::Assets => (
+                self.load_observation_account_metas(vec![], vec![]).await,
+                marginfi::instruction::LendingAccountTransferAssetPosition {
+                    transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                }
+                .data(),
+            ),
+            BalanceSide::Liabilities => (
+                destination_account
+                    .load_observation_account_metas(vec![bank.key], vec![])
+                    .await,
+                marginfi::instruction::LendingAccountTransferLiabilityPosition {
+                    transfer_amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                }
+                .data(),
+            ),
+        };
+
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        let mut accounts = marginfi::accounts::LendingAccountTransferPosition {
+            group: self.load().await.group,
+            source_marginfi_account: self.key,
+            destination_marginfi_account: destination_account.key,
+            authority: source_authority.pubkey(),
+            destination_authority: destination_authority.map(|k| k.pubkey()),
+            fee_payer: payer.pubkey(),
+            bank: bank.key,
+            global_fee_wallet: fee_wallet,
+            fee_state: fee_state_key,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(observation);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data,
+        };
+
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if source_authority.pubkey() != payer.pubkey() {
+            signers.push(source_authority);
+        }
+        if let Some(destination_authority) = destination_authority {
+            if !signers
+                .iter()
+                .any(|k| k.pubkey() == destination_authority.pubkey())
+            {
+                signers.push(destination_authority);
+            }
+        }
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    async fn fee_state_and_wallet(&self) -> (Pubkey, Pubkey) {
+        let (fee_state_key, _bump) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
+        let fee_wallet = load_and_deserialize::<FeeState>(self.ctx.clone(), &fee_state_key)
+            .await
+            .global_fee_wallet;
+        (fee_state_key, fee_wallet)
+    }
+
+    async fn send_signed(
+        &self,
+        ix: Instruction,
+        authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if let Some(authority) = authority.filter(|k| k.pubkey() != payer.pubkey()) {
+            signers.push(authority);
+        }
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    /// Sends `ui_amount` of this account's deposit in `bank` into its escrow for `receiver`'s
+    /// authority, naming `receiver` as the account and leaving the memo empty.
+    pub async fn try_escrow_position<T: Into<f64> + Copy>(
+        &self,
+        receiver: &MarginfiAccountFixture,
+        bank: &BankFixture,
+        ui_amount: T,
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let receiver_authority = receiver.load().await.authority;
+        self.try_escrow_position_with_memo(
+            receiver_authority,
+            receiver.key,
+            bank,
+            ui_amount,
+            [0; 16],
+            authority,
+        )
+        .await
+    }
+
+    /// Sends `ui_amount` of this account's deposit in `bank` into its escrow for
+    /// `receiver_authority` under `memo`.
+    pub async fn try_escrow_position_with_memo<T: Into<f64> + Copy>(
+        &self,
+        receiver_authority: Pubkey,
+        receiver_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        memo: [u8; 16],
+        authority: &Keypair,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let (fee_state_key, fee_wallet) = self.fee_state_and_wallet().await;
+        let source = self.load().await;
+        let mut accounts = marginfi::accounts::LendingAccountEscrowPosition {
+            group: source.group,
+            source_marginfi_account: self.key,
+            position_escrow: find_position_escrow_pda(
+                &bank.key,
+                &receiver_authority,
+                &self.key,
+                &memo,
+            )
+            .0,
+            authority: authority.pubkey(),
+            fee_payer: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            global_fee_wallet: fee_wallet,
+            fee_state: fee_state_key,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+        let other_banks = source
+            .lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && b.bank_pk != bank.key)
+            .map(|b| b.bank_pk)
+            .collect();
+        accounts.extend(
+            self.load_observation_account_metas(vec![bank.key], other_banks)
+                .await,
+        );
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingAccountEscrowPosition {
+                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                receiver_authority,
+                receiver_account,
+                memo,
+            }
+            .data(),
+        };
+        self.send_signed(ix, Some(authority)).await
+    }
+
+    /// Moves the shares in `escrow` into this account as the receiver's claim.
+    pub async fn try_claim_position_escrow(
+        &self,
+        escrow: Pubkey,
+        bank: &BankFixture,
+        authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let data = marginfi::instruction::LendingAccountClaimPositionEscrow {}.data();
+        self.try_release_position_escrow(escrow, bank, authority, data)
+            .await
+    }
+
+    /// Moves the shares in `escrow` back into this account as the sender's return.
+    pub async fn try_return_position_escrow(
+        &self,
+        escrow: Pubkey,
+        bank: &BankFixture,
+        authority: Option<&Keypair>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let data = marginfi::instruction::LendingAccountReturnPositionEscrow {}.data();
+        self.try_release_position_escrow(escrow, bank, authority, data)
+            .await
+    }
+
+    async fn try_release_position_escrow(
+        &self,
+        escrow: Pubkey,
+        bank: &BankFixture,
+        authority: Option<&Keypair>,
+        data: Vec<u8>,
+    ) -> anyhow::Result<(), BanksClientError> {
+        let escrow_account =
+            load_and_deserialize::<PositionEscrow>(self.ctx.clone(), &escrow).await;
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ReleasePositionEscrow {
+                group: self.load().await.group,
+                position_escrow: escrow,
+                source_marginfi_account: escrow_account.source_account,
+                destination_marginfi_account: self.key,
+                bank: bank.key,
+                authority: authority.map(|k| k.pubkey()),
+                rent_payer: escrow_account.rent_payer,
+            }
+            .to_account_metas(Some(true)),
+            data,
+        };
+        self.send_signed(ix, authority).await
     }
 }

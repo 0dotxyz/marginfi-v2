@@ -12,6 +12,7 @@ import {
   deriveGlobalFeeState,
   deriveLiquidationRecord,
   deriveOrderPda,
+  derivePositionEscrow,
 } from "./pdas";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { createHash } from "crypto";
@@ -1051,5 +1052,175 @@ export const endExecuteOrderIx = (
     .marginfiAccountEndExecuteOrder()
     .accountsStrict(accounts)
     .remainingAccounts(rem)
+    .instruction();
+};
+
+export type LendingAccountTransferPositionArgs = {
+  group: PublicKey;
+  sourceMarginfiAccount: PublicKey;
+  destinationMarginfiAccount: PublicKey;
+  authority: PublicKey;
+  /** Signs to consent to receiving debt or a new position; null for a top-up of an existing deposit */
+  destinationAuthority: PublicKey | null;
+  feePayer: PublicKey;
+  bank: PublicKey;
+  globalFeeWallet: PublicKey;
+  transferAmount: BN;
+  /**
+   * Observation set, after the move, of the account taking on risk: the source's for a deposit,
+   * the destination's (with the transferred bank) for a debt
+   */
+  remaining: PublicKey[];
+};
+
+const transferPositionAccounts = (args: LendingAccountTransferPositionArgs) => ({
+  group: args.group,
+  sourceMarginfiAccount: args.sourceMarginfiAccount,
+  destinationMarginfiAccount: args.destinationMarginfiAccount,
+  authority: args.authority,
+  destinationAuthority: args.destinationAuthority,
+  feePayer: args.feePayer,
+  bank: args.bank,
+  globalFeeWallet: args.globalFeeWallet,
+  // feeState = deriveGlobalFeeState(id)
+});
+
+const readonlyMeta = (pubkey: PublicKey): AccountMeta => ({
+  pubkey,
+  isSigner: false,
+  isWritable: false,
+});
+
+/**
+ * Move part of a deposit to another account that holds no debt in the bank.
+ * `destinationAuthority` signs to consent to a new position; `feePayer` pays the flat fee.
+ */
+export const lendingAccountTransferAssetPositionIx = (
+  program: Program<Marginfi>,
+  args: LendingAccountTransferPositionArgs,
+) =>
+  program.methods
+    .lendingAccountTransferAssetPosition(args.transferAmount)
+    .accounts(transferPositionAccounts(args))
+    .remainingAccounts(args.remaining.map(readonlyMeta))
+    .instruction();
+
+/**
+ * Move part of a debt to another account that holds no deposit in the bank.
+ * `destinationAuthority` signs to consent; `feePayer` pays the flat fee.
+ */
+export const lendingAccountTransferLiabilityPositionIx = (
+  program: Program<Marginfi>,
+  args: LendingAccountTransferPositionArgs,
+) =>
+  program.methods
+    .lendingAccountTransferLiabilityPosition(args.transferAmount)
+    .accounts(transferPositionAccounts(args))
+    .remainingAccounts(args.remaining.map(readonlyMeta))
+    .instruction();
+
+export type EscrowPositionArgs = {
+  group: PublicKey;
+  sourceMarginfiAccount: PublicKey;
+  /** Accepts into any of its accounts, or declines */
+  receiverAuthority: PublicKey;
+  /** The account the shares are for, kept for accounting only */
+  receiverAccount: PublicKey;
+  /** 16 bytes, such as a distribution ID; each memo has its own escrow */
+  memo: number[];
+  bank: PublicKey;
+  /** The source account's authority */
+  authority: PublicKey;
+  /** Pays the escrow rent on the first send and the flat fee on each send */
+  feePayer: PublicKey;
+  globalFeeWallet: PublicKey;
+  amount: BN;
+  /** The bank and its oracles: `[bank, oracles...]` */
+  remaining: PublicKey[];
+};
+
+/** Send part of the source's deposit into its escrow for the receiver, opening it on the first send. */
+export const escrowPositionIx = (
+  program: Program<Marginfi>,
+  args: EscrowPositionArgs,
+) => {
+  return program.methods
+    .lendingAccountEscrowPosition(
+      args.amount,
+      args.receiverAuthority,
+      args.receiverAccount,
+      args.memo,
+    )
+    .accounts({
+      group: args.group,
+      sourceMarginfiAccount: args.sourceMarginfiAccount,
+      authority: args.authority,
+      feePayer: args.feePayer,
+      bank: args.bank,
+      globalFeeWallet: args.globalFeeWallet,
+      // positionEscrow = derivePositionEscrow(id, bank, receiverAuthority, source, memo)
+      // feeState = deriveGlobalFeeState(id)
+    })
+    .remainingAccounts(
+      args.remaining.map((pubkey) => ({
+        pubkey,
+        isSigner: false,
+        isWritable: false,
+      })),
+    )
+    .instruction();
+};
+
+export type ReleasePositionEscrowArgs = {
+  group: PublicKey;
+  bank: PublicKey;
+  sourceMarginfiAccount: PublicKey;
+  receiverAuthority: PublicKey;
+  memo: number[];
+  /** The account the shares land in */
+  destinationMarginfiAccount: PublicKey;
+  /** Receiver's authority to accept or decline, or the group admin for a frozen destination; null otherwise */
+  authority: PublicKey | null;
+  rentPayer: PublicKey;
+};
+
+const releasePositionEscrowAccounts = (
+  program: Program<Marginfi>,
+  args: ReleasePositionEscrowArgs,
+) => ({
+  group: args.group,
+  positionEscrow: derivePositionEscrow(
+    program.programId,
+    args.bank,
+    args.receiverAuthority,
+    args.sourceMarginfiAccount,
+    args.memo,
+  )[0],
+  sourceMarginfiAccount: args.sourceMarginfiAccount,
+  destinationMarginfiAccount: args.destinationMarginfiAccount,
+  bank: args.bank,
+  authority: args.authority,
+  rentPayer: args.rentPayer,
+});
+
+/** Move the escrowed shares into one of the receiver's accounts and close the escrow. */
+export const claimPositionEscrowIx = (
+  program: Program<Marginfi>,
+  args: ReleasePositionEscrowArgs,
+) => {
+  return program.methods
+    .lendingAccountClaimPositionEscrow()
+    .accounts(releasePositionEscrowAccounts(program, args))
+    .instruction();
+};
+
+/** Move the escrowed shares back to the sender and close the escrow. */
+export const returnPositionEscrowIx = (
+  program: Program<Marginfi>,
+  args: ReleasePositionEscrowArgs,
+) => {
+  return program.methods
+    .lendingAccountReturnPositionEscrow()
+    .accounts(releasePositionEscrowAccounts(program, args))
     .instruction();
 };
