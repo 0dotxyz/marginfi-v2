@@ -4,6 +4,7 @@
     unexpected_cfgs
 )]
 
+pub mod liquidity_instructions;
 pub mod state;
 
 use anchor_lang::prelude::*;
