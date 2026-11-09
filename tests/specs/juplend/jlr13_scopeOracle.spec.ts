@@ -20,6 +20,7 @@ import {
 
 import {
   addBankWithSeed,
+  configureBank,
   configureBankOracle,
   configureBankOracleScope,
   groupInitialize,
@@ -48,10 +49,12 @@ import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { bnToBigIntSafe } from "../../utils/bn-utils";
 import {
   ASSET_TAG_JUPLEND,
+  blankBankConfigOptRaw,
   CONF_INTERVAL_MULTIPLE_FLOAT,
   defaultBankConfig,
   ORACLE_SETUP_PYTH_PUSH,
   ORACLE_SETUP_SCOPE_JUPLEND,
+  u32_MAX,
 } from "../../utils/types";
 import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
 
@@ -84,6 +87,7 @@ const BORROW_SEED = new BN(112);
 /** entry 11 = 2.5 (value / 10^exp). USDC is not worth $2.50; the point is a price only this feed carries. */
 const ENTRY = { index: 11, value: 2_500_000_000n, exp: 9n };
 const SCOPE_PRICE = 2.5;
+const ONE_PERCENT_CONF = Math.floor(u32_MAX / 100);
 /** never written in any fixture below */
 const UNREFRESHED_ENTRY = 300;
 /** from defaultJuplendBankConfig */
@@ -138,6 +142,47 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       })
     );
     return processBankrunTransaction(ctx, tx, [user.wallet], trySend);
+  };
+
+  /** Refreshes oracles + lending, health-pulses user 3, and returns the cached values. */
+  const pulseHealth = async () => {
+    const user = users[3];
+    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+    await refreshLending();
+    await freshenFeed();
+
+    const tx = new Transaction().add(
+      await healthPulse(user.mrgnBankrunProgram, {
+        marginfiAccount: userAccount,
+        remaining: composeRemainingAccounts([
+          [scopeJuplendBank, feed, pool.lending],
+          [borrowBank, oracles.tokenAOracle.publicKey],
+        ]),
+      })
+    );
+    await processBankrunTransaction(ctx, tx, [user.wallet]);
+
+    const cache = (
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount)
+    ).healthCache;
+    return {
+      actualAssetValue: wrappedI80F48toBigNumber(cache.assetValue).toNumber(),
+      actualLiabilityValue: wrappedI80F48toBigNumber(
+        cache.liabilityValue
+      ).toNumber(),
+    };
+  };
+
+  const setOracleMaxConfidence = async (oracleMaxConfidence: number) => {
+    const config = blankBankConfigOptRaw();
+    config.oracleMaxConfidence = oracleMaxConfidence;
+    const tx = new Transaction().add(
+      await configureBank(groupAdmin.mrgnBankrunProgram, {
+        bank: scopeJuplendBank,
+        bankConfigOpt: config,
+      })
+    );
+    await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
   };
 
   const scopeConfigure = async (
@@ -366,7 +411,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       EXCHANGE_PRICES_PRECISION;
 
     assertI80F48Approx(bank.cache.lastOraclePrice, SCOPE_PRICE, 0.000001);
-    // Scope carries no confidence interval.
+    // oracle_max_confidence is 0, so no static confidence band.
     assertI80F48Approx(bank.cache.lastOraclePriceConfidence, 0);
     assertI80F48Approx(bank.cache.priceMultiplier, expectedMultiplier, 1e-9);
   });
@@ -523,31 +568,7 @@ describe("jlr13: Scope-priced JupLend bank", () => {
   });
 
   it("(user 3) health pulse values the collateral at scope price x exchange price", async () => {
-    const user = users[3];
-    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
-    await refreshLending();
-    await freshenFeed();
-
-    const tx = new Transaction().add(
-      await healthPulse(user.mrgnBankrunProgram, {
-        marginfiAccount: userAccount,
-        remaining: composeRemainingAccounts([
-          [scopeJuplendBank, feed, pool.lending],
-          [borrowBank, oracles.tokenAOracle.publicKey],
-        ]),
-      })
-    );
-    await processBankrunTransaction(ctx, tx, [user.wallet]);
-
-    const cache = (
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount)
-    ).healthCache;
-    const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue
-    ).toNumber();
-    const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue
-    ).toNumber();
+    const { actualAssetValue, actualLiabilityValue } = await pulseHealth();
 
     // The token exchange price is ~1.0 this early, so the deposit is valued at the scope price,
     // weighted by assetWeightInit.
@@ -566,6 +587,35 @@ describe("jlr13: Scope-priced JupLend bank", () => {
       expectedLiabilityValue,
       expectedLiabilityValue * 0.005
     );
+  });
+
+  it("(admin) static oracle_max_confidence haircuts scope-priced JupLend collateral", async () => {
+    await setOracleMaxConfidence(ONE_PERCENT_CONF);
+    await freshenFeed();
+    await pulse([feed, pool.lending]);
+
+    // The cache holds the raw scope reading: its confidence is 1% of the scope price, before the
+    // token exchange price is applied.
+    const bank = await bankrunProgram.account.bank.fetch(scopeJuplendBank);
+    assertI80F48Approx(bank.cache.lastOraclePrice, SCOPE_PRICE, 0.000001);
+    assertI80F48Approx(
+      bank.cache.lastOraclePriceConfidence,
+      SCOPE_PRICE * 0.01,
+      0.000001
+    );
+
+    const { actualAssetValue } = await pulseHealth();
+    const expectedAssetValue = SCOPE_PRICE * 1000 * ASSET_WEIGHT_INIT * 0.99;
+    assert.approximately(
+      actualAssetValue,
+      expectedAssetValue,
+      expectedAssetValue * 0.001
+    );
+
+    await setOracleMaxConfidence(0);
+    await pulse([feed, pool.lending]);
+    const reset = await bankrunProgram.account.bank.fetch(scopeJuplendBank);
+    assertI80F48Approx(reset.cache.lastOraclePriceConfidence, 0);
   });
 
   it("(user 3) withdraw from the scope-priced JupLend bank", async () => {
