@@ -1,11 +1,13 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::assert_custom_error;
-use fixtures::test::TestFixture;
+use fixtures::marginfi_account::MarginfiAccountFixture;
+use fixtures::test::{BankMint, TestFixture, TestSettings};
 use marginfi::{prelude::MarginfiError, state::marginfi_account::MarginfiAccountImpl};
 use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_DISABLED};
-use solana_program_test::tokio;
+use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
+    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use solana_system_interface::program as system_program;
 
@@ -387,6 +389,39 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
     old_account.set_flag(ACCOUNT_DISABLED, false);
     old_account_f.set_account(&old_account).await?;
 
+    let res = transfer_to_new_pda(&test_f, &old_account_f, new_authority).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountDisabled);
+
+    Ok(())
+}
+
+/// An open position escrow keeps the account from migrating.
+#[tokio::test]
+async fn transfer_with_open_position_escrow_fails() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let old_account_f = test_f.create_marginfi_account().await;
+    let usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
+    old_account_f
+        .try_bank_deposit(usdc.key, usdc_bank_f, 100.0, None)
+        .await?;
+    let receiver_f = test_f.create_marginfi_account().await;
+    old_account_f
+        .try_escrow_position(&receiver_f, usdc_bank_f, 50.0, &test_f.payer_keypair())
+        .await?;
+
+    let res = transfer_to_new_pda(&test_f, &old_account_f, Keypair::new().pubkey()).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalAction);
+
+    Ok(())
+}
+
+/// Migrates `old_account` (owned by the payer) to the PDA account of `new_authority` at index 0.
+async fn transfer_to_new_pda(
+    test_f: &TestFixture,
+    old_account: &MarginfiAccountFixture,
+    new_authority: Pubkey,
+) -> Result<(), BanksClientError> {
     let (new_marginfi_account_pda, _bump) = MarginfiAccount::derive_pda(
         &test_f.marginfi_group.key,
         &new_authority,
@@ -399,7 +434,7 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
         program_id: marginfi::ID,
         accounts: marginfi::accounts::TransferToNewAccountPda {
             group: test_f.marginfi_group.key,
-            old_marginfi_account: old_account_f.key,
+            old_marginfi_account: old_account.key,
             new_marginfi_account: new_marginfi_account_pda,
             authority: test_f.payer(),
             fee_payer: test_f.payer(),
@@ -424,14 +459,10 @@ async fn transfer_disabled_account_fails() -> anyhow::Result<()> {
         test_f.get_latest_blockhash().await,
     );
 
-    let res = test_f
+    test_f
         .context
         .borrow_mut()
         .banks_client
         .process_transaction(transfer_tx)
-        .await;
-
-    assert_custom_error!(res.unwrap_err(), MarginfiError::AccountDisabled);
-
-    Ok(())
+        .await
 }

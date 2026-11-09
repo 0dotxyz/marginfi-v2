@@ -38,11 +38,13 @@ The governance admin is the safety-critical authority and should be a timelocked
   and cloning. The stored `emode_admin` does not independently authorize an instruction.
 - Initialize, edit, and transition staked-collateral settings
 - Operate a frozen user account for remediation or seizure, including withdrawals
+- Accept a position escrow into a frozen receiver, or return an expired one into a frozen sender
 - Remove a user account from the frozen state
 
 **Cannot do:**
 - Fast emergency actions such as freezing a user account, pausing/reducing a bank, or changing
   circuit-breaker settings, unless it also holds the fast `admin` role
+- Send a frozen user account's position into an escrow with `lending_account_escrow_position`
 
 ### Admin (Group Admin)
 

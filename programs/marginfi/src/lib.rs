@@ -606,6 +606,61 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
+    /// (source authority) Move part of a deposit in one bank to another account that holds no debt
+    /// there. Without the receiver's consent (shared authority or `destination_authority`) it only
+    /// tops up a deposit the receiver holds outside any order.
+    pub fn lending_account_transfer_asset_position<'info>(
+        ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+        transfer_amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_transfer_asset_position(ctx, transfer_amount)
+    }
+
+    /// (source authority, receiver's consent) Move part of a debt in one bank to another account
+    /// that holds no deposit there. An over-ask moves all of the debt.
+    pub fn lending_account_transfer_liability_position<'info>(
+        ctx: Context<'info, LendingAccountTransferPosition<'info>>,
+        transfer_amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_transfer_liability_position(ctx, transfer_amount)
+    }
+
+    /// (source authority) Move part of a deposit into an escrow for `receiver_authority` to accept.
+    /// The source must hold no debts. Each memo has its own escrow. The fee payer pays its rent and
+    /// gets it back when the escrow closes. Each send restarts the expiry.
+    pub fn lending_account_escrow_position<'info>(
+        ctx: Context<'info, LendingAccountEscrowPosition<'info>>,
+        amount: u64,
+        receiver_authority: Pubkey,
+        receiver_account: Pubkey,
+        memo: [u8; 16],
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_escrow_position(
+            ctx,
+            amount,
+            receiver_authority,
+            receiver_account,
+            memo,
+        )
+    }
+
+    /// (receiver authority, or permissionless sweep; group admin if the destination is frozen)
+    /// Move the escrowed shares into an account of the receiver's authority: any of them when it
+    /// signs, or else one holding a deposit in the bank that no order tags. Closes the escrow.
+    pub fn lending_account_claim_position_escrow(
+        ctx: Context<ReleasePositionEscrow>,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_claim_position_escrow(ctx)
+    }
+
+    /// (receiver authority, or permissionless after expiry; group admin if the source is frozen)
+    /// Move the escrowed shares back to the source account. Closes the escrow.
+    pub fn lending_account_return_position_escrow(
+        ctx: Context<ReleasePositionEscrow>,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_return_position_escrow(ctx)
+    }
+
     /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
     /// origination fee, transfers tokens, and runs a health check. If group rate limits are
     /// enabled, `remaining_accounts` must include the borrowed bank's oracle group for USD
@@ -797,6 +852,14 @@ pub mod marginfi {
         marginfi_account::set_account_freeze(ctx, frozen)
     }
 
+    /// (account authority) Opt the account out of, or back into, receiving position transfers.
+    pub fn marginfi_account_set_position_transfer_flags(
+        ctx: Context<SetPositionTransferFlags>,
+        disable_receive: bool,
+    ) -> MarginfiResult {
+        marginfi_account::set_position_transfer_flags(ctx, disable_receive)
+    }
+
     /// (account authority) Close a marginfi account. Requires all balances to be empty and no
     /// active flags (disabled, flashloan, receivership).
     pub fn marginfi_account_close(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
@@ -885,6 +948,8 @@ pub mod marginfi {
         order_execution_max_fee: Option<WrappedI80F48>,
         pause_delegate_admin: Option<Pubkey>,
         account_transfer_fee: Option<u32>,
+        position_transfer_fee: Option<u32>,
+        position_transfer_min_value_usd_cents: Option<u32>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -899,6 +964,8 @@ pub mod marginfi {
             order_execution_max_fee,
             pause_delegate_admin,
             account_transfer_fee,
+            position_transfer_fee,
+            position_transfer_min_value_usd_cents,
         )
     }
 
