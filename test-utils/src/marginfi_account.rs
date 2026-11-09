@@ -1838,6 +1838,24 @@ impl MarginfiAccountFixture {
         }
     }
 
+    /// Refresh reserve accounting without updating its oracle price.
+    pub async fn make_kamino_refresh_reserves_batch_ix(&self, bank: &BankFixture) -> Instruction {
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        Instruction {
+            program_id: kamino_mocks::kamino_lending::ID,
+            accounts: vec![
+                AccountMeta::new(bank_state.integration_acc_1, false),
+                AccountMeta::new_readonly(reserve.lending_market, false),
+            ],
+            data: kamino::args::RefreshReservesBatch {
+                skip_price_updates: true,
+            }
+            .data(),
+        }
+    }
+
     pub async fn make_kamino_refresh_obligation_ix(&self, bank: &BankFixture) -> Instruction {
         let bank_state = bank.load().await;
         let lending_market = if let Some(kamino) = &bank.kamino {

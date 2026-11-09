@@ -1,4 +1,4 @@
-import { Program } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import {
   Keypair,
   LAMPORTS_PER_SOL,
@@ -12,7 +12,13 @@ import {
   configureBankOracle,
   groupInitialize,
 } from "../../utils/group-instructions";
-import { pulseBankPrice } from "../../utils/user-instructions";
+import {
+  accountInit,
+  composeRemainingAccounts,
+  depositIx,
+  healthPulse,
+  pulseBankPrice,
+} from "../../utils/user-instructions";
 import {
   bankrunContext,
   bankrunProgram,
@@ -20,6 +26,7 @@ import {
   ecosystem,
   groupAdmin,
   oracles,
+  users,
 } from "../../rootHooks";
 import {
   assertI80F48Approx,
@@ -33,6 +40,12 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
+import {
+  divI80,
+  mintToTokenAccount,
+  mulI80,
+  toI80Scaled,
+} from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 
@@ -123,11 +136,13 @@ describe("LST / mSOL internal oracle setups", () => {
     baseSolPrice = wrappedI80F48toBigNumber(base.lastOraclePrice).toNumber();
   });
 
-  // Overwrite the mint pubkey embedded at `offset` in a pricing account with the bank's mint.
-  const patchMint = async (account: PublicKey, offset: number) => {
+  const patchData = async (
+    account: PublicKey,
+    patch: (data: Buffer) => void,
+  ) => {
     const acc = await banksClient.getAccount(account);
     const data = Buffer.from(acc!.data);
-    ecosystem.wsolMint.publicKey.toBuffer().copy(data, offset);
+    patch(data);
     bankrunContext.setAccount(account, {
       lamports: acc!.lamports,
       data,
@@ -136,6 +151,18 @@ describe("LST / mSOL internal oracle setups", () => {
       rentEpoch: acc!.rentEpoch,
     });
   };
+
+  // Overwrite the mint pubkey embedded at `offset` in a pricing account with the bank's mint.
+  const patchMint = (account: PublicKey, offset: number) =>
+    patchData(account, (data) => {
+      ecosystem.wsolMint.publicKey.toBuffer().copy(data, offset);
+    });
+
+  // Marinade State's `paused` flag sits at byte 608 (600 past the disc).
+  const setMsolPaused = (paused: boolean) =>
+    patchData(MSOL_STATE, (data) => {
+      data[608] = Number(paused);
+    });
 
   const stakePoolRate = async (pool: PublicKey) => {
     const acc = await banksClient.getAccount(pool);
@@ -242,6 +269,94 @@ describe("LST / mSOL internal oracle setups", () => {
     assertI80F48Approx(cache.priceMultiplier, 1);
   });
 
+  it("(user 0) paused Marinade zeroes mSOL's Initial value only", async () => {
+    await setOracle(ORACLE_SETUP_PYTH_MSOL, [MSOL_STATE]);
+    const user = users[0];
+    const userAccount = Keypair.generate();
+    const amount = new BN(LAMPORTS_PER_SOL);
+    await mintToTokenAccount(
+      ecosystem.wsolMint.publicKey,
+      user.wsolAccount,
+      amount,
+    );
+    await user.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(
+        await accountInit(user.mrgnProgram, {
+          marginfiGroup: lstGroup.publicKey,
+          marginfiAccount: userAccount.publicKey,
+          authority: user.wallet.publicKey,
+          feePayer: user.wallet.publicKey,
+        }),
+      ),
+      [userAccount],
+    );
+    await user.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(
+        await depositIx(user.mrgnProgram, {
+          marginfiAccount: userAccount.publicKey,
+          bank: lstBank.publicKey,
+          tokenAccount: user.wsolAccount,
+          amount,
+        }),
+      ),
+    );
+
+    const pulseHealth = async () => {
+      await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+      await user.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await healthPulse(user.mrgnProgram, {
+            marginfiAccount: userAccount.publicKey,
+            remaining: composeRemainingAccounts([
+              [lstBank.publicKey, oracles.wsolOracle.publicKey, MSOL_STATE],
+            ]),
+          }),
+        ),
+      );
+      const { healthCache } = await program.account.marginfiAccount.fetch(
+        userAccount.publicKey,
+      );
+      return {
+        init: toI80Scaled(healthCache.assetValue),
+        maint: toI80Scaled(healthCache.assetValueMaint),
+      };
+    };
+
+    // The mock feed sets EMA equal to spot, so Initial prices at the cached spot price too.
+    await pulseCache([MSOL_STATE]);
+    const { cache, config, assetShareValue } = await program.account.bank.fetch(
+      lstBank.publicKey,
+    );
+    const { lendingAccount } = await program.account.marginfiAccount.fetch(
+      userAccount.publicKey,
+    );
+    const assets = mulI80(
+      toI80Scaled(lendingAccount.balances[0].assetShares),
+      toI80Scaled(assetShareValue),
+    );
+    const lowPrice =
+      toI80Scaled(cache.lastOraclePrice) -
+      toI80Scaled(cache.lastOraclePriceConfidence);
+    const scale = toI80Scaled(10n ** BigInt(ecosystem.wsolDecimals));
+    const valueAt = (weight: bigint) =>
+      divI80(mulI80(mulI80(assets, weight), lowPrice), scale);
+    const initValue = valueAt(toI80Scaled(config.assetWeightInit));
+    const maintValue = valueAt(toI80Scaled(config.assetWeightMaint));
+
+    const healthy = await pulseHealth();
+    assert.equal(healthy.init, initValue);
+    assert.equal(healthy.maint, maintValue);
+
+    await setMsolPaused(true);
+    const paused = await pulseHealth();
+    assert.equal(paused.init, 0n);
+    assert.equal(paused.maint, maintValue);
+
+    await setMsolPaused(false);
+    const resumed = await pulseHealth();
+    assert.equal(resumed.init, initValue);
+  });
+
   it("PythLST tracks pool appreciation", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
     const { poolTokenSupply } = decodeStakePool(
@@ -253,18 +368,11 @@ describe("LST / mSOL internal oracle setups", () => {
 
     // Simulate rewards: add 777 SOL of backing lamports, leaving the supply untouched.
     const addedLamports = 777 * LAMPORTS_PER_SOL;
-    const acc = await banksClient.getAccount(SANCTUM_SPL_POOL);
-    const data = Buffer.from(acc!.data);
-    data.writeBigUInt64LE(
-      decodeStakePool(data).totalLamports + BigInt(addedLamports),
-      258,
-    );
-    bankrunContext.setAccount(SANCTUM_SPL_POOL, {
-      lamports: acc!.lamports,
-      data,
-      owner: acc!.owner,
-      executable: acc!.executable,
-      rentEpoch: acc!.rentEpoch,
+    await patchData(SANCTUM_SPL_POOL, (data) => {
+      data.writeBigUInt64LE(
+        decodeStakePool(data).totalLamports + BigInt(addedLamports),
+        258,
+      );
     });
 
     // Price rises by exactly baseSolPrice * addedLamports / supply.
