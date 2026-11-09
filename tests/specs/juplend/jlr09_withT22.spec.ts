@@ -1,4 +1,4 @@
-import { BN } from "@coral-xyz/anchor";
+import { BN, IdlAccounts } from "@coral-xyz/anchor";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -19,6 +19,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { assert } from "chai";
+import { Marginfi } from "../../../target/types/marginfi";
 
 import {
   bankRunProvider,
@@ -75,7 +76,6 @@ import {
   HEALTH_CACHE_ENGINE_OK,
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
-  MarginfiHealthCacheRaw,
   blankBankConfigOptRaw,
 } from "../../utils/types";
 import { getJuplendPrograms } from "../../utils/juplend/programs";
@@ -102,6 +102,8 @@ const USER_BORROW_TOKEN_B = tokenB(5.2);
 const USER_REPAY_TOKEN_B = tokenB(1);
 const LIQUIDATOR_DEPOSIT_TOKEN_B = tokenB(10);
 const LIQUIDATION_T22 = t22(1);
+
+type MarginfiHealthCache = IdlAccounts<Marginfi>["marginfiAccount"]["healthCache"];
 
 describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
   let borrower: (typeof users)[number];
@@ -177,7 +179,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
     return bankrunProgram.account.marginfiAccount.fetch(marginfiAccountPk);
   };
 
-  const netHealth = (healthCache: MarginfiHealthCacheRaw) =>
+  const netHealth = (healthCache: MarginfiHealthCache) =>
     wrappedI80F48toBigNumber(healthCache.assetValue).minus(
       wrappedI80F48toBigNumber(healthCache.liabilityValue),
     );
@@ -207,7 +209,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       t22Mint.publicKey,
       T22_DECIMALS,
       globalProgramAdmin.wallet.publicKey,
-      globalProgramAdmin.wallet.publicKey,
+      null,
       TOKEN_2022_PROGRAM_ID,
     );
     await processBankrunTransaction(

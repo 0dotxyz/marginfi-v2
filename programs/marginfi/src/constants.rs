@@ -57,6 +57,9 @@ cfg_if::cfg_if! {
 /// Minimum share supply before a bank accepts a permissionless same-mint emissions donation.
 pub const MIN_EMISSIONS_SHARE_SUPPLY: I80F48 = I80F48!(1_048_576); // 2^20
 
+/// Exclusive upper bound on asset share value after an emissions donation.
+pub const MAX_EMISSIONS_ASSET_SHARE_VALUE: I80F48 = I80F48!(1_000);
+
 pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111111111111111");
 pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
@@ -98,8 +101,8 @@ pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour
 /// Time after tagging at which the premium reaches `LIQUIDATION_TAG_MAX_PREMIUM`, growing
 /// linearly from `LIQUIDATION_TAG_DELAY_SECS`.
 pub const LIQUIDATION_TAG_FULL_PREMIUM_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
-/// Maximum liquidation premium reachable via tag growth (1 = 100%).
-pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(1);
+/// Maximum liquidation premium reachable via tag growth (0.25 = 25%).
+pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(0.25);
 /// Share of the account's health deficit a liquidation must erase to restart the premium-growth
 /// clock (see `tag_after_liquidation`).
 pub const LIQUIDATION_TAG_RESET_DEFICIT_FRACTION: I80F48 = I80F48!(0.25);

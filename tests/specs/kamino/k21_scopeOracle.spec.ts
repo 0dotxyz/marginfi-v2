@@ -47,6 +47,7 @@ import {
 } from "../../utils/user-instructions";
 import {
   addBankWithSeed,
+  configureBank,
   configureBankOracle,
   configureBankOracleScope,
 } from "../../utils/group-instructions";
@@ -70,10 +71,12 @@ import { ProgramTestContext } from "../../utils/litesvm";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import {
   ASSET_TAG_KAMINO,
+  blankBankConfigOptRaw,
   CONF_INTERVAL_MULTIPLE_FLOAT,
   defaultBankConfig,
   ORACLE_SETUP_PYTH_PUSH,
   ORACLE_SETUP_SCOPE_KAMINO,
+  u32_MAX,
 } from "../../utils/types";
 import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
 
@@ -93,6 +96,7 @@ const BORROW_SEED = new BN(8889);
 /** entry 11 = 2.5 (value / 10^exp). USDC is not worth $2.50; the point is a price only this feed carries. */
 const ENTRY = { index: 11, value: 2_500_000_000n, exp: 9n };
 const SCOPE_PRICE = 2.5;
+const ONE_PERCENT_CONF = Math.floor(u32_MAX / 100);
 /** never written in any fixture below */
 const UNREFRESHED_ENTRY = 300;
 const DEPOSIT_AMOUNT = new BN(1_000 * 10 ** ecosystem.usdcDecimals);
@@ -127,6 +131,52 @@ describe("k21: Scope-priced Kamino bank", () => {
       }),
     );
     return processBankrunTransaction(ctx, tx, [user.wallet], trySend);
+  };
+
+  /** Refreshes oracles + the reserve, health-pulses user 3, and returns the cached values. */
+  const pulseHealth = async () => {
+    const user = users[3];
+    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+    await freshenFeed();
+
+    const tx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+      await healthPulse(user.mrgnBankrunProgram, {
+        marginfiAccount: userAccount,
+        remaining: composeRemainingAccounts([
+          [scopeKaminoBank, feed, usdcReserve],
+          [borrowBank, oracles.tokenAOracle.publicKey],
+        ]),
+      }),
+    );
+    await processBankrunTransaction(ctx, tx, [user.wallet]);
+
+    const cache = (
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount)
+    ).healthCache;
+    return {
+      actualAssetValue: wrappedI80F48toBigNumber(cache.assetValue).toNumber(),
+      actualLiabilityValue: wrappedI80F48toBigNumber(
+        cache.liabilityValue,
+      ).toNumber(),
+    };
+  };
+
+  const setOracleMaxConfidence = async (oracleMaxConfidence: number) => {
+    const config = blankBankConfigOptRaw();
+    config.oracleMaxConfidence = oracleMaxConfidence;
+    const tx = new Transaction().add(
+      await configureBank(groupAdmin.mrgnBankrunProgram, {
+        bank: scopeKaminoBank,
+        bankConfigOpt: config,
+      }),
+    );
+    await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
   };
 
   const scopeConfigure = async (
@@ -331,7 +381,7 @@ describe("k21: Scope-priced Kamino bank", () => {
     const reserve = { ...reserveRaw } as Reserve;
 
     assertI80F48Approx(bank.cache.lastOraclePrice, SCOPE_PRICE, 0.000001);
-    // Scope carries no confidence interval.
+    // oracle_max_confidence is 0, so no static confidence band.
     assertI80F48Approx(bank.cache.lastOraclePriceConfidence, 0);
     assertI80F48Approx(
       bank.cache.priceMultiplier,
@@ -491,36 +541,7 @@ describe("k21: Scope-priced Kamino bank", () => {
   });
 
   it("(user 3) health pulse values the collateral at scope price x exchange rate", async () => {
-    const user = users[3];
-    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
-    await freshenFeed();
-
-    const tx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
-      await healthPulse(user.mrgnBankrunProgram, {
-        marginfiAccount: userAccount,
-        remaining: composeRemainingAccounts([
-          [scopeKaminoBank, feed, usdcReserve],
-          [borrowBank, oracles.tokenAOracle.publicKey],
-        ]),
-      }),
-    );
-    await processBankrunTransaction(ctx, tx, [user.wallet]);
-
-    const cache = (
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount)
-    ).healthCache;
-    const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue,
-    ).toNumber();
-    const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue,
-    ).toNumber();
+    const { actualAssetValue, actualLiabilityValue } = await pulseHealth();
 
     // The collateral balance is stored in cTokens (liquidity / (liq/col rate)); the
     // ScopeKamino multiplier is that same rate, so the position is valued at the deposited
@@ -540,6 +561,35 @@ describe("k21: Scope-priced Kamino bank", () => {
       expectedLiabilityValue,
       expectedLiabilityValue * 0.005,
     );
+  });
+
+  it("(admin) static oracle_max_confidence haircuts scope-priced Kamino collateral", async () => {
+    await setOracleMaxConfidence(ONE_PERCENT_CONF);
+    await freshenFeed();
+    await pulse([feed, usdcReserve]);
+
+    // The cache holds the raw scope reading: its confidence is 1% of the scope price, before the
+    // reserve exchange rate is applied.
+    const bank = await bankrunProgram.account.bank.fetch(scopeKaminoBank);
+    assertI80F48Approx(bank.cache.lastOraclePrice, SCOPE_PRICE, 0.000001);
+    assertI80F48Approx(
+      bank.cache.lastOraclePriceConfidence,
+      SCOPE_PRICE * 0.01,
+      0.000001,
+    );
+
+    const { actualAssetValue } = await pulseHealth();
+    const expectedAssetValue = SCOPE_PRICE * 1000 * 0.99;
+    assert.approximately(
+      actualAssetValue,
+      expectedAssetValue,
+      expectedAssetValue * 0.001,
+    );
+
+    await setOracleMaxConfidence(0);
+    await pulse([feed, usdcReserve]);
+    const reset = await bankrunProgram.account.bank.fetch(scopeKaminoBank);
+    assertI80F48Approx(reset.cache.lastOraclePriceConfidence, 0);
   });
 
   it("(user 3) withdraw from the scope-priced Kamino bank", async () => {
