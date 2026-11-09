@@ -39,9 +39,7 @@ use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
-#[cfg(not(target_os = "solana"))]
-use scope_mocks::state::ScopeDatedPrice;
-use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
+use scope_mocks::state::{ScopeDatedPrice, ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
@@ -2056,10 +2054,19 @@ impl ScopePriceFeed {
     /// borrow power depends on both reserve and market emergency flags.
     #[cfg(not(target_os = "solana"))]
     pub fn from_entry(entry: &ScopeDatedPrice, has_borrow_power: bool) -> MarginfiResult<Self> {
+        Self::from_validated_entry(entry, has_borrow_power)
+    }
+
+    fn from_validated_entry(
+        entry: &ScopeDatedPrice,
+        has_borrow_power: bool,
+    ) -> MarginfiResult<Self> {
+        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
         check!(
             entry.price.value > 0 && entry.unix_timestamp > 0,
             MarginfiError::ScopeInvalidEntry
         );
+        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
         check!(
             (entry.price.exp as usize) < MAX_EXP_10_I80F48,
             MarginfiError::ScopeInvalidEntry
@@ -2100,26 +2107,7 @@ impl ScopePriceFeed {
             .get(entry_index as usize)
             .ok_or(MarginfiError::ScopeInvalidEntry)?;
 
-        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
-        check!(
-            entry.price.value > 0 && entry.unix_timestamp > 0,
-            MarginfiError::ScopeInvalidEntry
-        );
-        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
-        check!(
-            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
-            MarginfiError::ScopeInvalidEntry
-        );
-
-        let price = I80F48::from_num(entry.price.value)
-            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
-            .ok_or_else(math_error!())?;
-
-        Ok(Self {
-            price,
-            last_updated_timestamp: entry.unix_timestamp,
-            has_borrow_power: true,
-        })
+        Self::from_validated_entry(entry, true)
     }
 
     pub fn load_checked(
