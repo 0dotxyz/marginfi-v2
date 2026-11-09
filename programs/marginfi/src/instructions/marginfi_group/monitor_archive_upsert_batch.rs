@@ -3,12 +3,7 @@ use marginfi_type_crate::types::{MintSnapshotRecords, MintSnapshotsArchive, Snap
 
 use crate::{check, MarginfiError, MarginfiResult};
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SnapshotUpdateInput {
-    pub snapshot_hour: u64,
-    pub price: u64,
-    pub native_apy: u64,
-}
+pub use marginfi_type_crate::types::SnapshotUpdateInput;
 
 /// Upsert many monitor snapshot points in one instruction.
 ///

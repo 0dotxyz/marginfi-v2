@@ -1,5 +1,5 @@
-use crate::StakedSettingsEditConfig;
 use anchor_lang::prelude::*;
+use marginfi_type_crate::types::StakedSettingsEditConfig;
 use marginfi_type_crate::{
     constants::ORDER_ACTIVE_TAGS,
     types::{BankConfigOpt, HealthCache, OrderTriggerType, WrappedI80F48},
