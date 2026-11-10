@@ -2311,10 +2311,10 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
 /// eight-byte account discriminator. Reading little-endian bytes directly avoids the different i128
 /// alignment requirements of host and SBF targets, without copying the entire 3.2 KB account onto
 /// the SBF stack.
-/// 
-/// This is used only for legacy test suites that still utilize Switchboard: the mainnet program is
-/// defunct, this should not be interpreted as a substitute for using swb's crate if they were ever
-/// to be supported again.
+///
+/// * This is used only for legacy test suites that still utilize Switchboard: the mainnet program
+/// is defunct, this should not be interpreted as a substitute for using swb's crate if they were
+/// ever to be supported again.
 pub fn parse_swb_pull_feed(data: &[u8]) -> MarginfiResult<LitePullFeedAccountData> {
     const ACCOUNT_SIZE: usize = 3208;
     const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
