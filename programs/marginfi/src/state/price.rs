@@ -35,11 +35,12 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
+use marinade_mocks::state::MinimalMarinadeState;
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
-use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
+use scope_mocks::state::{ScopeDatedPrice, ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
@@ -1145,7 +1146,10 @@ impl OraclePriceFeedAdapter {
                 };
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -1185,7 +1189,11 @@ impl OraclePriceFeedAdapter {
                 apply_i80f48_multiplier(&mut price_feed, kamino_rate)?;
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any Kamino emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: kamino_rate,
                 })
@@ -1226,7 +1234,11 @@ impl OraclePriceFeedAdapter {
                 price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any JupLend emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: juplend_rate,
                 })
@@ -2108,6 +2120,44 @@ impl ScopePriceFeed {
 }
 
 impl ScopePriceFeed {
+    /// Constructs a feed from a decoded Scope entry for off-chain clients.
+    ///
+    /// The caller must authenticate the account, select the configured entry, and check its
+    /// timestamp against the current time and maximum age. Unlike `load_checked`, this does not
+    /// reject stale, future, or out-of-range timestamps. The caller must also apply any integration
+    /// exchange-rate multiplier and determine borrow power from integration state. For Kamino,
+    /// borrow power depends on both reserve and market emergency flags.
+    #[cfg(not(target_os = "solana"))]
+    pub fn from_entry(entry: &ScopeDatedPrice, has_borrow_power: bool) -> MarginfiResult<Self> {
+        Self::from_validated_entry(entry, has_borrow_power)
+    }
+
+    fn from_validated_entry(
+        entry: &ScopeDatedPrice,
+        has_borrow_power: bool,
+    ) -> MarginfiResult<Self> {
+        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
+        check!(
+            entry.price.value > 0 && entry.unix_timestamp > 0,
+            MarginfiError::ScopeInvalidEntry
+        );
+        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
+        check!(
+            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let price = I80F48::from_num(entry.price.value)
+            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
+            .ok_or_else(math_error!())?;
+
+        Ok(Self {
+            price,
+            last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power,
+        })
+    }
+
     /// Validates the account and reads `entry_index`, without a staleness check (used by config
     /// validation, where the feed may legitimately not have been cranked yet).
     fn read_entry(ai: &AccountInfo, entry_index: u16) -> MarginfiResult<Self> {
@@ -2132,26 +2182,7 @@ impl ScopePriceFeed {
             .get(entry_index as usize)
             .ok_or(MarginfiError::ScopeInvalidEntry)?;
 
-        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
-        check!(
-            entry.price.value > 0 && entry.unix_timestamp > 0,
-            MarginfiError::ScopeInvalidEntry
-        );
-        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
-        check!(
-            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
-            MarginfiError::ScopeInvalidEntry
-        );
-
-        let price = I80F48::from_num(entry.price.value)
-            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
-            .ok_or_else(math_error!())?;
-
-        Ok(Self {
-            price,
-            last_updated_timestamp: entry.unix_timestamp,
-            has_borrow_power: true,
-        })
+        Self::from_validated_entry(entry, true)
     }
 
     pub fn load_checked(
@@ -2446,6 +2477,11 @@ pub struct PythPushOraclePriceFeed {
 }
 
 impl PythPushOraclePriceFeed {
+    /// Disable has_borrow_power if the Marinade state is paused, otherwise no-op.
+    fn restrict_marinade_borrow_power(&mut self, state: &MinimalMarinadeState) {
+        self.has_borrow_power &= !state.is_paused();
+    }
+
     /// Load a Pyth Price feed.
     ///
     /// Security assumptions:
@@ -2895,10 +2931,41 @@ mod tests {
     }
 
     #[test]
+    fn marinade_pause_preserves_existing_borrow_power_restrictions() {
+        use bytemuck::Zeroable;
+
+        for venue_allows_borrow in [false, true] {
+            for paused in [false, true] {
+                let mut state = MinimalMarinadeState::zeroed();
+                state.paused = u8::from(paused);
+                let price = || price_update::Price {
+                    price: 100,
+                    conf: 2,
+                    exponent: 0,
+                    publish_time: 42,
+                };
+                let mut feed = PythPushOraclePriceFeed {
+                    price: Box::new(price()),
+                    ema_price: Box::new(price()),
+                    has_borrow_power: venue_allows_borrow,
+                };
+
+                feed.restrict_marinade_borrow_power(&state);
+
+                assert_eq!(feed.has_borrow_power(), venue_allows_borrow && !paused);
+                assert_eq!(feed.price.price, 100);
+                assert_eq!(feed.ema_price.price, 100);
+            }
+        }
+    }
+
+    #[test]
     fn marinade_state_field_offsets_round_trip() {
-        // Round-trip the balance offsets (validated against the live account) to prove the padding.
-        let mut raw = [0u8; core::mem::size_of::<MinimalMarinadeState>()];
-        assert_eq!(raw.len(), 568);
+        use bytemuck::Zeroable;
+        // Round-trip the field offsets (validated against the live account) to prove the padding.
+        let mut s = MinimalMarinadeState::zeroed();
+        let raw = bytemuck::bytes_of_mut(&mut s);
+        assert_eq!(raw.len(), 608);
         raw[218..226].copy_from_slice(&11u64.to_le_bytes()); // delayed_unstake_cooling_down
         raw[368..376].copy_from_slice(&22u64.to_le_bytes()); // total_active_balance
         raw[488..496].copy_from_slice(&33u64.to_le_bytes()); // available_reserve_balance
@@ -2906,9 +2973,10 @@ mod tests {
         raw[504..512].copy_from_slice(&55u64.to_le_bytes()); // msol_price
         raw[520..528].copy_from_slice(&66u64.to_le_bytes()); // circulating_ticket_balance
         raw[560..568].copy_from_slice(&77u64.to_le_bytes()); // emergency_cooling_down
-        let s: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
+        raw[600] = 1; // paused
         assert_eq!(s.msol_price(), 55);
         assert_eq!(s.msol_supply(), 44);
+        assert!(s.is_paused());
         // total_virtual_staked = active(22) + delayed(11) + emergency(77) + reserve(33) - tickets(66)
         assert_eq!(s.total_virtual_staked_lamports(), Some(77));
     }
@@ -3477,6 +3545,49 @@ mod tests {
         data: &'a mut [u8],
     ) -> AccountInfo<'a> {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    #[test]
+    fn scope_from_entry_matches_account_entry_validation() {
+        let key = Pubkey::new_unique();
+        for (value, exp, timestamp) in [
+            (10_344_510_800, 8, 1_000),
+            (123, 0, 1),
+            (1, (MAX_EXP_10_I80F48 - 1) as u64, 1),
+            (0, 8, 1_000),
+            (1, 8, 0),
+            (1, MAX_EXP_10_I80F48 as u64, 1),
+        ] {
+            let entry = ScopeDatedPrice {
+                price: ScopePrice { value, exp },
+                unix_timestamp: timestamp,
+                ..ScopeDatedPrice::default()
+            };
+            let mut data = scope_account_data(42, value, exp, timestamp);
+            let mut lamports = 0;
+            let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+            let account_feed = ScopePriceFeed::read_entry(&ai, 42);
+            let client_feed = ScopePriceFeed::from_entry(&entry, false);
+            match (account_feed, client_feed) {
+                (Ok(account), Ok(client)) => {
+                    assert_eq!(client.price, account.price);
+                    assert_eq!(
+                        client.last_updated_timestamp,
+                        account.last_updated_timestamp
+                    );
+                    assert!(account.has_borrow_power());
+                    assert!(!client.has_borrow_power());
+                    assert!(ScopePriceFeed::from_entry(&entry, true)
+                        .unwrap()
+                        .has_borrow_power());
+                }
+                (Err(account_error), Err(client_error)) => {
+                    assert_eq!(account_error, client_error);
+                }
+                _ => panic!("account and decoded-entry validation disagree"),
+            }
+        }
     }
 
     #[test]
