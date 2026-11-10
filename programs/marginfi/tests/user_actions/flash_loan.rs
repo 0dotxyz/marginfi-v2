@@ -1,6 +1,7 @@
 use anchor_lang::prelude::AccountMeta;
 use anchor_lang::solana_program::{instruction::Instruction, pubkey::Pubkey};
 use anchor_lang::{InstructionData, ToAccountMetas};
+use fixed::types::I80F48;
 use fixtures::{assert_custom_error, bank::BankFixture, prelude::*};
 use marginfi::prelude::*;
 use marginfi_type_crate::constants::{
@@ -49,6 +50,8 @@ async fn flashloan_success_1op() -> anyhow::Result<()> {
         .await?;
     let cache_before = borrower_mfi_account_f.load().await.health_cache;
     assert!(cache_before.is_engine_ok());
+    let clock = test_f.get_clock().await;
+    test_f.set_clock(clock.slot, clock.unix_timestamp + 1).await;
 
     let borrower_token_account_f_sol = test_f.sol_mint.create_empty_token_account().await;
     // Borrow SOL
@@ -70,16 +73,18 @@ async fn flashloan_success_1op() -> anyhow::Result<()> {
         .await;
 
     assert!(flash_loan_result.is_ok());
-    assert_eq!(
-        borrower_mfi_account_f.load().await.health_cache,
-        cache_before
-    );
+    let cache_after = borrower_mfi_account_f.load().await.health_cache;
+    assert!(cache_after.is_engine_ok());
+    assert!(cache_after.is_healthy());
+    assert_eq!(cache_after.timestamp, clock.unix_timestamp + 1);
+    assert_eq!(I80F48::from(cache_after.asset_value), I80F48::ZERO);
+    assert_eq!(I80F48::from(cache_after.liability_value), I80F48::ZERO);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn flashloan_withdraw_does_not_replace_health_cache() -> anyhow::Result<()> {
+async fn flashloan_withdraw_refreshes_health_cache_at_end() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let user = test_f.create_marginfi_account().await;
@@ -89,15 +94,29 @@ async fn flashloan_withdraw_does_not_replace_health_cache() -> anyhow::Result<()
     user.try_lending_account_pulse_health().await?;
     let cache_before = user.load().await.health_cache;
     assert!(cache_before.is_engine_ok());
+    let clock = test_f.get_clock().await;
+    test_f.set_clock(clock.slot, clock.unix_timestamp + 1).await;
 
     let withdraw = user
-        .make_bank_withdraw_ix(tokens.key, sol_bank, 1, None)
+        .make_bank_withdraw_ix(tokens.key, sol_bank, 4, None)
         .await;
     let deposit = user.make_deposit_ix(tokens.key, sol_bank, 1, None).await;
     user.try_flashloan(vec![withdraw, deposit], vec![], vec![], None)
         .await?;
 
-    assert_eq!(user.load().await.health_cache, cache_before);
+    let cache_after = user.load().await.health_cache;
+    assert!(cache_after.is_engine_ok());
+    assert!(cache_after.is_healthy());
+    assert_eq!(cache_after.timestamp, clock.unix_timestamp + 1);
+    assert!(I80F48::from(cache_after.asset_value) > I80F48::ZERO);
+    assert!(I80F48::from(cache_after.asset_value) < I80F48::from(cache_before.asset_value));
+
+    // A subsequent full pulse should agree on initial health for the final balances.
+    user.try_lending_account_pulse_health().await?;
+    let pulsed_cache = user.load().await.health_cache;
+    assert_eq!(cache_after.asset_value, pulsed_cache.asset_value);
+    assert_eq!(cache_after.liability_value, pulsed_cache.liability_value);
+    assert_eq!(cache_after.prices, pulsed_cache.prices);
     Ok(())
 }
 
