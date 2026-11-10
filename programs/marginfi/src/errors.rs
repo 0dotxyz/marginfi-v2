@@ -459,9 +459,7 @@ pub enum MarginfiError {
     CircuitBreakerAdminOnly, // 6601
     #[msg("Invalid circuit breaker config")]
     CircuitBreakerInvalidConfig, // 6602
-    #[msg(
-        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
-    )]
+    #[msg("Deprecated: enabling the circuit breaker no longer needs a cached price")]
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604

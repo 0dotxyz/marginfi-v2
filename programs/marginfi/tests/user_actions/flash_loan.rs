@@ -697,11 +697,11 @@ async fn seed_cb_reference_then_breach(
     test_f
         .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, WARM_TIME)
         .await;
+    sol_bank.update_config(standard_cb_config(), None).await?;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(sol_bank)
         .await?;
-    sol_bank.update_config(standard_cb_config(), None).await?;
 
     test_f.set_clock(WARM_SLOT + 10, WARM_TIME + 1).await;
     test_f

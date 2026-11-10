@@ -4207,17 +4207,13 @@ async fn rebalance_end_cb_gate_rejects_price_jump() -> anyhow::Result<()> {
     let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
     f.user.try_bank_borrow(user_sol.key, sol_bank, 10.0).await?;
 
-    // Warm the SOL bank's price cache at $10 and enable the breaker (reference seeds at $10).
+    // Enable the breaker on the SOL bank, then pulse at $10 to seed its reference.
     let warm_time: i64 = 100;
     let warm_slot: u64 = 1_000;
     f.test_f
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, warm_time)
         .await;
     f.test_f.set_clock(warm_slot, warm_time).await;
-    f.test_f
-        .marginfi_group
-        .try_pulse_bank_price_cache(sol_bank)
-        .await?;
     sol_bank
         .update_config(
             BankConfigOpt {
@@ -4230,6 +4226,10 @@ async fn rebalance_end_cb_gate_rejects_price_jump() -> anyhow::Result<()> {
             },
             None,
         )
+        .await?;
+    f.test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
         .await?;
 
     // Jump SOL to $11: a 1000 bps move past the 500 bps first tier.

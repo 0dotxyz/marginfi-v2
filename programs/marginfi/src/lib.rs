@@ -945,8 +945,7 @@ pub mod marginfi {
         marginfi_group::edit_staked_settings_fast(ctx, settings)
     }
 
-    /// (permissionless) Propagate updated staked settings to a staked collateral bank. Turning the
-    /// bank's circuit breaker on needs a price pulsed within `CB_ENABLE_MAX_PRICE_AGE_SECONDS`.
+    /// (permissionless) Propagate updated staked settings to a staked collateral bank.
     pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> MarginfiResult {
         marginfi_group::propagate_staked_settings(ctx)
     }

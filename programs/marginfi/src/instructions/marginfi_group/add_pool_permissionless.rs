@@ -109,8 +109,7 @@ fn write_staked_bank(
     bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
     if settings.flags & CIRCUIT_BREAKER_ENABLED != 0 {
         settings.apply_circuit_breaker_config(&mut bank.config)?;
-        // A new bank has no cached price; its first price observation seeds the references.
-        bank.flags |= CIRCUIT_BREAKER_ENABLED;
+        bank.set_circuit_breaker_enabled(true)?;
     }
     if is_t22 {
         bank.flags |= IS_T22;

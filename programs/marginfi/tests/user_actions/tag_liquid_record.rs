@@ -911,18 +911,18 @@ async fn tag_allowed_while_cb_halted() -> anyhow::Result<()> {
         setup_unhealthy_liquidatee().await?;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
 
-    // Warm the SOL price cache, enable the breaker, then trip a halt with a +100% spike
+    // Enable the breaker, pulse to seed its reference, then trip a halt with a +100% spike
     let warm_time: i64 = 100;
     let warm_slot: u64 = 1_000;
     test_f
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, warm_time)
         .await;
     test_f.set_clock(warm_slot, warm_time).await;
+    sol_bank.update_config(cb_config(), None).await?;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(sol_bank)
         .await?;
-    sol_bank.update_config(cb_config(), None).await?;
 
     let trip_time = warm_time + 1;
     test_f.set_clock(warm_slot + 10, trip_time).await;

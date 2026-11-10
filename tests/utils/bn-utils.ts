@@ -137,6 +137,16 @@ export const toWrappedI80F48Safe = (value: I80F48Like): WrappedI80F48 =>
 export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
   (lhsScaled * rhsScaled) >> I80F48_FRACTIONAL_BITS;
 
+/** The circuit breaker's observed price for a bank cache: price times the cached multiplier. */
+export const cachedCbPrice = (cache: {
+  lastOraclePrice: WrappedI80F48;
+  priceMultiplier: WrappedI80F48;
+}): bigint =>
+  mulI80(
+    toI80Scaled(cache.lastOraclePrice),
+    toI80Scaled(cache.priceMultiplier)
+  );
+
 export const divI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
   (lhsScaled << I80F48_FRACTIONAL_BITS) / rhsScaled;
 

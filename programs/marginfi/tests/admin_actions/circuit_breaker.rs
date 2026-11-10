@@ -1,3 +1,4 @@
+use fixed::types::I80F48;
 use fixtures::bank::BankFixture;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
@@ -6,13 +7,13 @@ use marginfi::instructions::marginfi_group::StakedSettingsEditConfigFast;
 use marginfi::prelude::*;
 use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
 use marginfi_type_crate::types::{BankConfigOpt, BankOperationalState};
-use solana_program_test::{BanksClientError, *};
+use solana_program_test::*;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
 
-/// Warms `bank`'s price cache, enables the circuit breaker on it, then trips it into an active
-/// halt by pulsing a large oracle spike — driving the halt entirely through real instructions.
+/// Enables the circuit breaker on `bank`, pulses once to seed its reference, then trips it into an
+/// active halt by pulsing a large oracle spike, driving the halt entirely through real instructions.
 /// Afterward `feed` is restored to `base_native` and every standard feed is refreshed to the
 /// post-trip clock, so callers can exercise a halted but otherwise healthy bank.
 async fn enable_cb_and_trip_halt(
@@ -27,12 +28,11 @@ async fn enable_cb_and_trip_halt(
         .set_pyth_oracle_price_native(feed, base_native, 0, warm_time)
         .await;
     test_f.set_clock(warm_slot, warm_time).await;
+    bank.update_config(standard_cb_config(), None).await?;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(bank)
         .await?;
-
-    bank.update_config(standard_cb_config(), None).await?;
 
     // A single +100% spike trips a halt on the first breaching pulse.
     let trip_time = warm_time + 1;
@@ -69,12 +69,12 @@ async fn enable_cb_and_trip_tier3_storm(
         .set_pyth_oracle_price_native(feed, base_native, 0, clock_time)
         .await;
     test_f.set_clock(clock_slot, clock_time).await;
+    bank.update_config(standard_cb_config(), None).await?;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(standard_cb_config(), None).await?;
     if let Some(operational_state) = pre_break_state {
         bank.update_config(
             BankConfigOpt {
@@ -488,19 +488,13 @@ async fn pyth_spike_trips_tier1_then_escalates_to_tier2_then_admin_clears() -> a
     let base_native: i64 = 10_000_000_000; // $10.00 * 1e9
     let spike_native: i64 = 10_990_000_000; // $10.99 * 1e9 (~9.9% spike)
 
-    // ---- Setup: warm the cache, then enable CB. Configure-bank's CB-enable path requires
-    // `last_oracle_price > 0` and seeds `cb_reference_price` from it.
+    // ---- Setup: enable CB, then pulse once to seed `cb_reference_price`.
     let mut clock_time: i64 = 100;
     let mut clock_slot: u64 = 1_000;
     test_f
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, base_native, 0, clock_time)
         .await;
     test_f.set_clock(clock_slot, clock_time).await;
-    test_f
-        .marginfi_group
-        .try_pulse_bank_price_cache(sol_bank)
-        .await?;
-
     sol_bank
         .update_config(
             BankConfigOpt {
@@ -513,6 +507,10 @@ async fn pyth_spike_trips_tier1_then_escalates_to_tier2_then_admin_clears() -> a
             },
             None,
         )
+        .await?;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
         .await?;
 
     // ---- Stage 1: bank operational → borrow succeeds.
@@ -647,79 +645,105 @@ async fn pyth_spike_trips_tier1_then_escalates_to_tier2_then_admin_clears() -> a
     Ok(())
 }
 
-/// Enabling CB on a bank that was never pulsed must fail with `CircuitBreakerRequiresWarmCache`.
-/// The seed-from-cache path needs a populated `last_oracle_price` to anchor the EMA reference.
+/// Enabling CB needs no cached price. It clears the references, and the next pulse seeds them
+/// from the live oracle. A re-enable drops the reference left over from before the disable.
 #[tokio::test]
-async fn cb_enable_fails_on_cold_cache() -> anyhow::Result<()> {
+async fn cb_enable_clears_references_and_next_pulse_seeds() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
 
-    // Note: no pulse_bank_price_cache call. `last_oracle_price` is zero on a fresh bank.
-    let result = sol_bank
-        .update_config(
-            BankConfigOpt {
-                circuit_breaker_enabled: Some(true),
-                cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-                cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_escalation_window_mult: Some(2),
-                cb_ema_alpha_bps: Some(1000),
-                ..Default::default()
-            },
-            None,
-        )
-        .await;
-    // `update_config` wraps the BanksClientError in anyhow::Error — downcast to access the
-    // custom-error matcher.
-    let err = result.unwrap_err().downcast::<BanksClientError>().unwrap();
-    assert_custom_error!(err, MarginfiError::CircuitBreakerRequiresWarmCache);
-    Ok(())
-}
+    let mut clock_time: i64 = 100;
+    let mut clock_slot: u64 = 1_000;
+    test_f.set_clock(clock_slot, clock_time).await;
 
-/// Enabling CB when the cached price is older than `CB_ENABLE_MAX_PRICE_AGE_SECONDS` must fail —
-/// otherwise an attacker who pulses with a manipulated price minutes before admin's enable tx
-/// could lock the EMA on a bad value. The freshness window forces admin to bundle (or near-bundle)
-/// a pulse with the enable.
-#[tokio::test]
-async fn cb_enable_fails_on_stale_cache() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
-    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let never_pulsed = sol_bank.load().await;
+    assert_eq!(
+        I80F48::from(never_pulsed.cache.last_oracle_price),
+        I80F48::ZERO
+    );
+    sol_bank.update_config(standard_cb_config(), None).await?;
+    let enabled = sol_bank.load().await;
+    assert_eq!(
+        enabled.flags & CIRCUIT_BREAKER_ENABLED,
+        CIRCUIT_BREAKER_ENABLED
+    );
+    assert_eq!(I80F48::from(enabled.cb_reference_price), I80F48::ZERO);
+    assert_eq!(
+        I80F48::from(enabled.cb_window_reference_price),
+        I80F48::ZERO
+    );
+    assert_eq!(enabled.cb_window_started_at, 0);
 
-    // Warm the cache with a pulse, then advance the clock past the freshness window.
-    let initial_clock_time: i64 = 100;
-    let initial_clock_slot: u64 = 1_000;
     test_f
-        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, initial_clock_time)
-        .await;
-    test_f
-        .set_clock(initial_clock_slot, initial_clock_time)
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, clock_time)
         .await;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(sol_bank)
         .await?;
+    let seeded = sol_bank.load().await;
+    assert_eq!(
+        I80F48::from(seeded.cb_reference_price),
+        I80F48::from_num(10)
+    );
+    assert_eq!(
+        I80F48::from(seeded.cb_window_reference_price),
+        I80F48::from_num(10)
+    );
+    assert_eq!(seeded.cb_window_started_at, clock_time);
 
-    // Bump the clock 60s into the future (well past CB_ENABLE_MAX_PRICE_AGE_SECONDS = 30).
-    test_f
-        .set_clock(initial_clock_slot + 1_000, initial_clock_time + 60)
-        .await;
-
-    let result = sol_bank
+    sol_bank
         .update_config(
             BankConfigOpt {
-                circuit_breaker_enabled: Some(true),
-                cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-                cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_escalation_window_mult: Some(2),
-                cb_ema_alpha_bps: Some(1000),
+                circuit_breaker_enabled: Some(false),
                 ..Default::default()
             },
             None,
         )
+        .await?;
+    let disabled = sol_bank.load().await;
+    assert_eq!(
+        I80F48::from(disabled.cb_reference_price),
+        I80F48::from_num(10)
+    );
+
+    // Re-enable an hour after the last cached price, then pulse at double the old reference.
+    clock_time += 3_600;
+    clock_slot += 9_000;
+    // Warp for a fresh blockhash: the enable and pulse below repeat earlier transactions.
+    test_f
+        .context
+        .borrow_mut()
+        .warp_to_slot(clock_slot)
+        .unwrap();
+    test_f.set_clock(clock_slot, clock_time).await;
+    sol_bank.update_config(standard_cb_config(), None).await?;
+    let reenabled = sol_bank.load().await;
+    assert_eq!(I80F48::from(reenabled.cb_reference_price), I80F48::ZERO);
+    assert_eq!(
+        I80F48::from(reenabled.cb_window_reference_price),
+        I80F48::ZERO
+    );
+    assert_eq!(reenabled.cb_window_started_at, 0);
+
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 20_000_000_000, 0, clock_time)
         .await;
-    // `update_config` wraps the BanksClientError in anyhow::Error — downcast to access the
-    // custom-error matcher.
-    let err = result.unwrap_err().downcast::<BanksClientError>().unwrap();
-    assert_custom_error!(err, MarginfiError::CircuitBreakerRequiresWarmCache);
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
+        .await?;
+    let reseeded = sol_bank.load().await;
+    assert_eq!(
+        I80F48::from(reseeded.cb_reference_price),
+        I80F48::from_num(20)
+    );
+    assert_eq!(
+        I80F48::from(reseeded.cb_window_reference_price),
+        I80F48::from_num(20)
+    );
+    assert_eq!(reseeded.cb_window_started_at, clock_time);
+    assert_eq!(reseeded.cb_tier, 0);
     Ok(())
 }
 
@@ -919,7 +943,7 @@ async fn cb_observes_price_through_operational_path() -> anyhow::Result<()> {
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    // Warm the cache and enable CB on SOL with a tight tier 1 threshold.
+    // Enable CB on SOL with a tight tier 1 threshold, then pulse once to seed its reference.
     let mut clock_time: i64 = 100;
     let mut clock_slot: u64 = 1_000;
     let base_native: i64 = 10_000_000_000; // $10
@@ -927,10 +951,6 @@ async fn cb_observes_price_through_operational_path() -> anyhow::Result<()> {
         .set_pyth_oracle_price_native(PYTH_SOL_FEED, base_native, 0, clock_time)
         .await;
     test_f.set_clock(clock_slot, clock_time).await;
-    test_f
-        .marginfi_group
-        .try_pulse_bank_price_cache(sol_bank)
-        .await?;
     sol_bank
         .update_config(
             BankConfigOpt {
@@ -943,6 +963,10 @@ async fn cb_observes_price_through_operational_path() -> anyhow::Result<()> {
             },
             None,
         )
+        .await?;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
         .await?;
 
     // Set up a borrower so withdraw paths fetch a live price.

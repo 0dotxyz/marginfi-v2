@@ -1,6 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey, Transaction } from "@solana/web3.js";
-import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import {
   bankrunContext,
@@ -15,7 +14,9 @@ import {
 import {
   addBankPermissionless,
   configureBank,
+  disableStakedOracles,
   editStakedSettingsFast,
+  enableStakedOracleOnramp,
   propagateStakedSettings,
 } from "../../utils/group-instructions";
 import { pulseBankPrice } from "../../utils/user-instructions";
@@ -31,6 +32,8 @@ import {
   blankStakedSettingsEditFast,
   CIRCUIT_BREAKER_ENABLED,
   CLOSE_ENABLED_FLAG,
+  STAKED_ORACLE_DISABLED,
+  STAKED_ORACLE_PRICE_USES_ONRAMP,
   StakedSettingsEditFast,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
@@ -39,11 +42,16 @@ import {
   getBankrunTime,
   processBankrunTransaction,
 } from "../../utils/tools";
-import { bnToBigIntSafe, mulI80, toI80Scaled } from "../../utils/bn-utils";
+import {
+  bnToBigIntSafe,
+  cachedCbPrice,
+  toI80Scaled,
+} from "../../utils/bn-utils";
 
 describe("Staked circuit breaker settings", () => {
   let settingsKey: PublicKey;
   let newBankKey: PublicKey;
+  let flagsBeforeOracleDisable: BN;
 
   const cbSettings: StakedSettingsEditFast = {
     ...blankStakedSettingsEditFast(),
@@ -60,16 +68,6 @@ describe("Staked circuit breaker settings", () => {
     validators[0].splSolPool,
     validators[0].splOnRampPool,
   ];
-
-  /** The breaker's reference for a bank's cached price: price times the cached multiplier. */
-  const cachedCbPrice = (cache: {
-    lastOraclePrice: WrappedI80F48;
-    priceMultiplier: WrappedI80F48;
-  }) =>
-    mulI80(
-      toI80Scaled(cache.lastOraclePrice),
-      toI80Scaled(cache.priceMultiplier)
-    );
 
   const cbFlag = (flags: BN) =>
     bnToBigIntSafe(flags) & BigInt(CIRCUIT_BREAKER_ENABLED);
@@ -151,37 +149,14 @@ describe("Staked circuit breaker settings", () => {
     assert.equal(settingsAcc.cbWindowMaxDownBps, 0);
   });
 
-  it("(permissionless) propagates to a staked bank without a fresh price - should fail", async () => {
+  it("(permissionless) propagates without a fresh price - the staked bank's breaker turns on with no reference", async () => {
     await advanceBankrunClock(bankrunContext, 60);
-    const tx = new Transaction().add(
-      await propagateStakedSettings(bankrunProgram, {
-        settings: settingsKey,
-        bank: validators[0].bank,
-      })
-    );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [groupAdmin.wallet],
-      true
-    );
-    // CircuitBreakerRequiresWarmCache
-    assertBankrunTxFailed(result, 6603);
-  });
-
-  it("(permissionless) pulses and propagates - the staked bank's breaker turns on", async () => {
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const bankBefore = await bankrunProgram.account.bank.fetch(
       validators[0].bank
     );
     assert.equal(cbFlag(bankBefore.flags), 0n);
-    assertI80F48Equal(bankBefore.cbReferencePrice, 0);
 
     const tx = new Transaction().add(
-      await pulseBankPrice(bankrunProgram, {
-        bank: validators[0].bank,
-        remaining: validator0Oracles(),
-      }),
       await propagateStakedSettings(bankrunProgram, {
         settings: settingsKey,
         bank: validators[0].bank,
@@ -198,6 +173,22 @@ describe("Staked circuit breaker settings", () => {
     assert.deepEqual(bank.config.cbTierDurationsSeconds, [600, 1800, 7200]);
     assert.equal(bank.config.cbEscalationWindowMult, 2);
     assert.equal(bank.config.cbEmaAlphaBps, 2000);
+    assertI80F48Equal(bank.cbReferencePrice, 0);
+    assertI80F48Equal(bank.cbWindowReferencePrice, 0);
+    assertBNEqual(bank.cbWindowStartedAt, 0);
+  });
+
+  it("(permissionless) pulses the staked bank - the pulse seeds the references", async () => {
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    const tx = new Transaction().add(
+      await pulseBankPrice(bankrunProgram, {
+        bank: validators[0].bank,
+        remaining: validator0Oracles(),
+      })
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
     assert.equal(toI80Scaled(bank.cbReferencePrice), cachedCbPrice(bank.cache));
     assert.equal(
       toI80Scaled(bank.cbWindowReferencePrice),
@@ -206,7 +197,7 @@ describe("Staked circuit breaker settings", () => {
     assertBNEqual(bank.cbWindowStartedAt, await getBankrunTime(bankrunContext));
   });
 
-  it("(admin) changes a staked breaker setting - propagation syncs it without a fresh price", async () => {
+  it("(admin) changes a staked breaker setting - propagation syncs it and keeps the references", async () => {
     await advanceBankrunClock(bankrunContext, 60);
     const bankBefore = await bankrunProgram.account.bank.fetch(
       validators[0].bank
@@ -272,6 +263,85 @@ describe("Staked circuit breaker settings", () => {
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     bank = await bankrunProgram.account.bank.fetch(newBankKey);
+    assert.equal(toI80Scaled(bank.cbReferencePrice), cachedCbPrice(bank.cache));
+    assert.equal(
+      toI80Scaled(bank.cbWindowReferencePrice),
+      cachedCbPrice(bank.cache)
+    );
+    assertBNEqual(bank.cbWindowStartedAt, await getBankrunTime(bankrunContext));
+  });
+
+  it("(permissionless) propagates to a bank with staked oracles disabled - its breaker turns on with no reference", async () => {
+    flagsBeforeOracleDisable = (
+      await bankrunProgram.account.bank.fetch(validators[0].bank)
+    ).flags;
+    let tx = new Transaction().add(
+      await configureBank(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        bankConfigOpt: {
+          ...blankBankConfigOptRaw(),
+          circuitBreakerEnabled: false,
+        },
+      }),
+      await disableStakedOracles(
+        groupAdmin.mrgnBankrunProgram,
+        stakedMarginfiGroup.publicKey
+      ),
+      await propagateStakedSettings(bankrunProgram, {
+        settings: settingsKey,
+        bank: validators[0].bank,
+      })
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+    assert.equal(
+      bnToBigIntSafe(bank.flags),
+      (bnToBigIntSafe(flagsBeforeOracleDisable) &
+        ~BigInt(STAKED_ORACLE_PRICE_USES_ONRAMP)) |
+        BigInt(STAKED_ORACLE_DISABLED)
+    );
+    assert.equal(cbFlag(bank.flags), BigInt(CIRCUIT_BREAKER_ENABLED));
+    assertI80F48Equal(bank.cbReferencePrice, 0);
+    assertI80F48Equal(bank.cbWindowReferencePrice, 0);
+    assertBNEqual(bank.cbWindowStartedAt, 0);
+
+    tx = new Transaction().add(
+      await pulseBankPrice(bankrunProgram, {
+        bank: validators[0].bank,
+        remaining: validator0Oracles(),
+      })
+    );
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [groupAdmin.wallet],
+      true
+    );
+    // StakeOraclesDisabled
+    assertBankrunTxFailed(result, 6053);
+  });
+
+  it("(admin) enables staked oracles again - the first pulse seeds the references", async () => {
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    const tx = new Transaction().add(
+      await enableStakedOracleOnramp(
+        groupAdmin.mrgnBankrunProgram,
+        stakedMarginfiGroup.publicKey
+      ),
+      await propagateStakedSettings(bankrunProgram, {
+        settings: settingsKey,
+        bank: validators[0].bank,
+      }),
+      await pulseBankPrice(bankrunProgram, {
+        bank: validators[0].bank,
+        remaining: validator0Oracles(),
+      })
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+    assertBNEqual(bank.flags, flagsBeforeOracleDisable);
     assert.equal(toI80Scaled(bank.cbReferencePrice), cachedCbPrice(bank.cache));
     assert.equal(
       toI80Scaled(bank.cbWindowReferencePrice),
