@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
-use anchor_lang::InstructionData;
+use marginfi_type_crate::marginfi_cpi_stubs;
 
 #[derive(Accounts)]
 pub struct StartLiquidationViaCpi<'info> {
@@ -44,7 +44,7 @@ impl StartLiquidationViaCpi<'_> {
         let ix = Instruction {
             program_id: ctx.accounts.marginfi_program.key(),
             accounts: account_metas,
-            data: marginfi::instruction::StartLiquidation {}.data(),
+            data: marginfi_cpi_stubs::start_liquidation_data(),
         };
 
         let mut infos = vec![

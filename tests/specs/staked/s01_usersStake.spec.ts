@@ -80,9 +80,13 @@ describe("User stakes some native and creates an account", () => {
       user0StakeAccount,
     );
     const stakeAccBefore = getStakeAccount(stakeAccountInfo.data);
-    const meta = stakeAccBefore.meta;
     const delegation = stakeAccBefore.stake.delegation;
-    const rent = new BN(meta.rentExemptReserve.toString());
+    // Stake v5 uses current rent; the stored reserve can reflect an older rate.
+    const rent = new BN(
+      (await banksClient.getRent())
+        .minimumBalance(BigInt(stakeAccountInfo.data.length))
+        .toString(),
+    );
 
     assertKeysEqual(delegation.voterPubkey, validators[0].voteAccount);
     assertBNEqual(
@@ -214,7 +218,11 @@ describe("User stakes some native and creates an account", () => {
       userStakeAccount,
     );
     const stakeAccBefore = getStakeAccount(stakeAccountInfo.data);
-    const rent = new BN(stakeAccBefore.meta.rentExemptReserve.toString());
+    const rent = new BN(
+      (await banksClient.getRent())
+        .minimumBalance(BigInt(stakeAccountInfo.data.length))
+        .toString(),
+    );
     const delegationBefore = Number(
       stakeAccBefore.stake.delegation.stake.toString(),
     );

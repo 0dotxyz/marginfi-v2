@@ -18,7 +18,7 @@ default = ["mainnet-beta", "custom-heap"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "pyth-solana-receiver-sdk/idl-build"]
 test-bpf = ["test", "debug"]
 test = []
-client = ["solana-program"]
+client = []
 debug = []
 transfer-hook = []
 mainnet-beta = ["id-crate/mainnet-beta", "marginfi-type-crate/mainnet-beta"]
@@ -33,7 +33,6 @@ id-crate = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
 spl-transfer-hook-interface = { workspace = true }
 spl-token-2022 = { workspace = true }
-solana-program = { workspace = true, optional = true }
 solana-stake-interface = { workspace = true, features = ["borsh"] }
 solana-vote-interface = { workspace = true }
 solana-sha256-hasher = { workspace = true }
@@ -45,7 +44,6 @@ anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
 pyth-solana-receiver-sdk = { workspace = true }
-switchboard-on-demand = { workspace = true }
 
 borsh = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
@@ -69,10 +67,10 @@ exponent-mocks = { path = "../exponent-mocks" , features = ["no-entrypoint"]}
 solana-account-decoder = { workspace = true }
 solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
-solana-sdk = { workspace = true }
+solana-sdk = "4.0.1"
 solana-compute-budget-interface = { workspace = true }
 solana-system-interface = { workspace = true }
-solana-system-transaction = { workspace = true }
+solana-system-transaction = "4.0.0"
 fixtures = { workspace = true }
 mocks = { workspace = true }
 
