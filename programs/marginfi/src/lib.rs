@@ -562,7 +562,8 @@ pub mod marginfi {
 
     /// (permissionless keeper) End Order execution
     /// * Closes the Order (keeper keeps the rent)
-    /// * Closes the borrow position involved in the Order, the lending position remains open
+    /// * Closes the borrow position involved in the Order; the lending balance slot remains open.
+    ///   If its assets are emptied, its tag is cleared and other Orders sharing it are orphaned.
     /// * User health must be "unchanged" (within Order requirements i.e. minus slippage). Keeper
     ///   may keep any slippage in excess of what was needed to complete the Order as profit.
     /// * `StartExecuteOrder` must appear earlier in the tx
