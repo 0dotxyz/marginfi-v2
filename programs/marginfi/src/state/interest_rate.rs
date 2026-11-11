@@ -551,7 +551,6 @@ mod tests {
             RatePoint, INTEREST_CURVE_SEVEN_POINT,
         },
     };
-    use solana_sdk::clock::Clock;
     #[cfg(not(feature = "client"))]
     use solana_sdk::pubkey::Pubkey;
 
@@ -985,10 +984,6 @@ mod tests {
 
         let pre_net_assets = bank.get_asset_amount(bank.total_asset_shares.into())?
             - bank.get_liability_amount(bank.total_liability_shares.into())?;
-
-        let mut clock = Clock::default();
-
-        clock.unix_timestamp = current_timestamp + 3600;
 
         bank.accrue_interest(
             current_timestamp,

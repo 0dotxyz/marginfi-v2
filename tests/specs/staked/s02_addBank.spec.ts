@@ -840,7 +840,7 @@ describe("Init group and add banks with asset category flags", () => {
     tx.sign(users[0].wallet);
     await expectFailedTxWithMessage(
       () => banksClient.tryProcessTransaction(tx).then(() => undefined),
-      "Missing signature for",
+      "missing signatures for addresses",
     );
   });
 
@@ -917,7 +917,7 @@ describe("Init group and add banks with asset category flags", () => {
     tx.sign(users[0].wallet);
     await expectFailedTxWithMessage(
       () => banksClient.tryProcessTransaction(tx).then(() => undefined),
-      "Missing signature for",
+      "missing signatures for addresses",
     );
   });
 

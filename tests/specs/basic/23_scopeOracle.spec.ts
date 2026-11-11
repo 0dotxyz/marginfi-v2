@@ -3,6 +3,7 @@ import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
 import {
   addBank,
+  configureBank,
   configureBankOracleScope,
   groupInitialize,
 } from "../../utils/group-instructions";
@@ -26,9 +27,11 @@ import {
   expectFailedTxWithError,
 } from "../../utils/genericTests";
 import {
+  blankBankConfigOptRaw,
   defaultBankConfig,
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
+  u32_MAX,
 } from "../../utils/types";
 import { bytesToF64, getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -269,6 +272,45 @@ describe("Scope oracle", () => {
     const pulsed = await pulse(scopeBank.publicKey);
     assertI80F48Approx(pulsed.cache.lastOraclePrice, 200.0, 0.000001);
     setFeed(feed, await freshFeed());
+  });
+
+  it("caches the admin-set static confidence, clamped at 5%", async () => {
+    const setConf = async (oracleMaxConfidence: number) => {
+      const admin = groupAdmin.mrgnProgram;
+      const config = blankBankConfigOptRaw();
+      config.oracleMaxConfidence = oracleMaxConfidence;
+      await admin.provider.sendAndConfirm!(
+        new Transaction().add(
+          await configureBank(admin, {
+            bank: scopeBank.publicKey,
+            bankConfigOpt: config,
+          })
+        )
+      );
+    };
+    const price = 103.445108;
+    setFeed(feed, await freshFeed());
+
+    await setConf(Math.floor(u32_MAX * 0.02));
+    let pulsed = await pulse(scopeBank.publicKey);
+    assertI80F48Approx(pulsed.cache.lastOraclePrice, price, 0.000001);
+    assertI80F48Approx(
+      pulsed.cache.lastOraclePriceConfidence,
+      price * 0.02,
+      0.000001
+    );
+
+    await setConf(u32_MAX);
+    pulsed = await pulse(scopeBank.publicKey);
+    assertI80F48Approx(
+      pulsed.cache.lastOraclePriceConfidence,
+      price * 0.05,
+      0.000001
+    );
+
+    await setConf(0);
+    pulsed = await pulse(scopeBank.publicKey);
+    assertI80F48Approx(pulsed.cache.lastOraclePriceConfidence, 0);
   });
 
   it("accepts exp 0 (integer-valued entry)", async () => {

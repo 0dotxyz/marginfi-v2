@@ -16,6 +16,7 @@ no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build"]
 anchor-debug = ["anchor-lang/anchor-debug"]
+agave-v4-test = ["dep:solana-program-v4"]
 
 [dependencies]
 anchor-lang = { workspace = true }
@@ -25,4 +26,6 @@ fixed-macro = { workspace = true }
 static_assertions = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
 solana-sha256-hasher = { workspace = true }
-solana-program = { workspace = true }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-program-v4 = { package = "solana-program", version = "4.0.0", optional = true }
