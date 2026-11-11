@@ -407,33 +407,33 @@ This is by design: the live price is more reactive than the TWAP/EMA, and the br
 soon as possible. A return to normal pricing (i.e., nearly flat TWAP) will allow the breaker to
 reset before an escalation, causing minimal disruption. 
 
-### PT Token Sy Rate Can Desync, and PT Emergency Mode May Block the Bank Entirely
+### PT Token Sy Rate Can Desync, and a Paused Exponent Vault Removes PT Borrowing Power
 
-We trust Exponent to make a timely update to their Vault's sy rate (triggering our oracle failure
-state). Even if they fail to do so, the underlying oracle should react to the loss, so there is no
-immediate solvency risk.
+We trust Exponent to make a timely update to their Vault's sy rate. If they fail to do so, a loss is
+not reflected until the vault is refreshed: `PTFixed` has no base feed, and the `PTPyth` base feed
+(e.g. SOL/USD) does not see losses inside the SY asset.
 
 Ensuring a fresh sy rate for all PT tokens requires us to pass the extra sy account or to mandate an
 Exponent refresh in the same tx: both of these are too cumbersome just to deal with this edge case,
 so we make the tradeoff of allowing, in the event Exponent does not make a timely update, a
 potentially stale sy rate.
 
-We use the sy rate to determine when to trigger Exponent "emergency mode". Exponent's emergency mode
-is a new feature (as of late Sept 2026) and our current implementation is proactively assuming
-assets in this state cannot be priced from normal Oracles. The feature would only take affect if the
-underlying asset has lost value. For a traditional LST this is generally impossible barring some
-black swan even like loss of underlying stake. For something like Hyusd, this can occur if a loss in
-Hyusd causes it to redeem for less than $1. 
+A PT is marked at the lower of its linear accretion toward par and its redemption backing (the SY
+Exponent holds per PT, at the last seen sy rate). If the sy rate falls below its pre-maturity
+all-time high, a PT redeems for less than par, and we mark it there rather than refuse a price. For a
+traditional LST this is generally impossible barring some black swan event like loss of underlying
+stake. For something like hyUSD, this can occur if a loss in hyUSD causes it to redeem for less than
+$1.
+
+When Exponent pauses merging, PT cannot be redeemed. The bank keeps being priced, but the PT loses
+borrowing power (see "Integration Emergencies" below). The pause is read live from the vault.
 
 The issue is that Exponent tokens are essentially locked until maturity. In the event of a loss, the
-future value would likely be valued below the usual value, for example hysd now worth $0.7 might be
+future value would likely be valued below the usual value, for example hyUSD now worth $0.7 might be
 worth $0.5 as a PT, as holders price in the increased risk of further holding. Since PT liquidity is
-limited, there is no good way to estimate the market's actual response. Our plan is to set a fixed
-oracle price in the event this occurs, so we currently have the oracle hard-fail until we are able
-to review. 
-
-Our use of the feature is still evolving, so we may relax liquidations during the initial oracle
-failure or enable them just for the risk manager.
+limited, there is no good way to estimate the market's actual response. If, after manual review, the
+mark is too generous, governance can set a conservative fixed price. Plain `Fixed` always has
+borrowing power, so also set the bank ReduceOnly if borrowing should stay off.
 
 ### Pairs of Banks With Very High Leverage May Block Classic Liquidation
 
@@ -500,21 +500,39 @@ A keeper moving funds from bank A -> B as part of a rebalance can manipulate rat
 
 Users should not footgun themselves by offering, for example, a 0.001 SOL tip on a 0.001 USDC move. Make sure the tip is proportional to the smallest move you are willing to accept for that tip amount, and set the tip/cap accordingly. The program does not enforce rational tips, as it would be too cumbersome to check the exchange rate of SOL/rebalance asset.
 
-### Kamino/Exponent Emergency Suspends All Interaction With Those Banks, Including Liquidation of Other Banks
+### Integration Emergencies Remove Borrowing Power, and a Kamino Market Emergency Halts Liquidation
 
-This is a trade-off we have deliberately made because (1) we assume Kamino/PT emergencies are either
-rare or transient, (2) there is no viable and safe automatic valuation of Kamino/PT banks in
+A Kamino reserve emergency, a JupLend (Fluid) global, token or supply-position pause, or an Exponent
+vault with merging paused removes the bank's borrowing power: it is worth zero for Initial margin and
+keeps its Maintenance value, so accounts holding it can still be liquidated. Classic liquidation
+checks the liquidator's own Initial health afterwards, where the seized collateral also counts as
+zero, so the liquidator must carry the repaid debt with other collateral. Withdrawing seized
+collateral from the venue may also be blocked: Fluid rejects JupLend withdrawals under all three
+pauses. The Kamino market and JupLend flags are cached on the bank by the permissionless
+`propagate_kamino_market_emergency` and `propagate_juplend_emergency`, so they take effect, and
+clear, only after someone propagates them.
+
+A Kamino *market* emergency is different. Kamino rejects `refresh_reserve`, and we only price a
+Kamino bank from a reserve refreshed in the current slot. Those banks are then worth zero for Initial
+margin, but Maintenance and Equity health error, so no account holding one can be liquidated or have
+its bankruptcy handled until Kamino lifts the emergency. The same applies to any integration whose
+own refresh halts.
+
+This is a trade-off we have deliberately made because (1) we assume integration emergencies are
+either rare or transient, (2) there is no viable and safe automatic valuation of these banks in
 emergency mode.
 
 Not all emergencies are equal: if Kamino is hacked like Drift, then the appropriate price is zero.
-If they merely paused out of caution, then the appropriate action is probably to wait and see.
-Generally, we would not want to assign a price until it is manually reviewed, hence the emergency
-pause creates a hard error. We therefore intentionally refuse to price the bank automatically and
-allow the resulting hard error rather than treating a stale reserve state as trustworthy.
+If they merely paused out of caution, then the appropriate action is probably to wait and see. Where
+the venue still lets us price the bank, its Maintenance value is therefore overstated until
+governance intervenes. Where it does not, we refuse to price the bank rather than trust a stale
+reserve.
 
-If, after manual review, governance determines that the bank should remain priceable, it can migrate
-the bank away from the Kamino oracle path and configure a regular conservative Fixed price. This is
-an explicit emergency-response decision, not an automated fallback.
+If, after manual review, governance determines that the bank should be repriced, it can set a
+conservative fixed price. For Kamino and JupLend banks this installs `FixedKamino` / `FixedJuplend`,
+which fixes only the underlying's price: the bank still needs a fresh reserve or lending account and
+still honors the venue's emergency flags, so it cannot restore pricing during a Kamino market
+emergency. This is an explicit emergency-response decision, not an automated fallback.
 
 ### Staked Collateral Banks Have Unlimited Deposits
 
