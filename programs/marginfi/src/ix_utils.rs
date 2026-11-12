@@ -2,6 +2,7 @@ use anchor_lang::{
     prelude::*,
     solana_program::instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
 };
+use anchor_spl::token_2022::spl_token_2022::instruction::TokenInstruction;
 use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 use solana_sha256_hasher::{hash, hashv};
 
@@ -208,14 +209,40 @@ pub fn load_and_validate_instructions(
     Ok(ixes)
 }
 
+fn validate_rebalance_token_2022_instructions(
+    ixes: &[Instruction],
+    mint: &Pubkey,
+) -> MarginfiResult {
+    for ix in ixes
+        .iter()
+        .filter(|ix| ix.program_id == anchor_spl::token_2022::ID)
+    {
+        check!(
+            matches!(
+                TokenInstruction::unpack(&ix.data),
+                Ok(TokenInstruction::TransferChecked { .. })
+            ),
+            MarginfiError::ForbiddenIx
+        );
+        check!(
+            ix.accounts
+                .get(1)
+                .is_some_and(|account| account.pubkey == *mint),
+            MarginfiError::RebalanceMintMismatch
+        );
+    }
+    Ok(())
+}
+
 /// Tx-structure sandwich for rebalance: the end instruction must be last, start must be top-level
 /// (not CPI), only the marginfi rebalance/withdraw/deposit legs and each venue program's
 /// refresh/crank ixs may appear, and every withdraw/deposit leg acts on `marginfi_account` and on
-/// one of `banks`.
+/// one of `banks`. Top-level Token-2022 instructions must be checked transfers of the order's mint.
 pub fn validate_rebalance_instructions(
     sysvar: &AccountInfo,
     marginfi_account: &Pubkey,
     banks: &[Pubkey],
+    mint: &Pubkey,
 ) -> MarginfiResult {
     let allowed_programs = [
         id_crate::ID,
@@ -230,6 +257,7 @@ pub fn validate_rebalance_instructions(
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
     validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
+    validate_rebalance_token_2022_instructions(&ixes, mint)?;
 
     // On every native and venue leg, `marginfi_account` is meta index 1 and `bank` is meta index 3.
     const MOVE_LEG_DISCRIMS: [[u8; 8]; 8] = [
@@ -554,6 +582,55 @@ mod tests {
             cranks,
         )
         .is_err());
+    }
+
+    #[test]
+    fn rebalance_token_2022_only_allows_checked_transfers_of_order_mint() {
+        use anchor_lang::solana_program::instruction::AccountMeta;
+
+        let mint = Pubkey::new_unique();
+        let other_mint = Pubkey::new_unique();
+        let checked_transfer = Instruction {
+            program_id: anchor_spl::token_2022::ID,
+            accounts: vec![
+                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new_readonly(Pubkey::new_unique(), true),
+            ],
+            data: TokenInstruction::TransferChecked {
+                amount: 1,
+                decimals: 6,
+            }
+            .pack(),
+        };
+
+        assert!(validate_rebalance_token_2022_instructions(&[checked_transfer.clone()], &mint)
+            .is_ok());
+
+        let mut foreign_mint = checked_transfer.clone();
+        foreign_mint.accounts[1].pubkey = other_mint;
+        assert!(validate_rebalance_token_2022_instructions(&[foreign_mint], &mint).is_err());
+
+        let mut unchecked_transfer = checked_transfer.clone();
+        unchecked_transfer.data = vec![3, 1, 0, 0, 0, 0, 0, 0, 0];
+        assert!(validate_rebalance_token_2022_instructions(&[unchecked_transfer], &mint).is_err());
+
+        let mut mint_to = checked_transfer.clone();
+        mint_to.data = TokenInstruction::MintToChecked {
+            amount: 1,
+            decimals: 6,
+        }
+        .pack();
+        assert!(validate_rebalance_token_2022_instructions(&[mint_to], &mint).is_err());
+
+        let mut malformed = checked_transfer.clone();
+        malformed.data = vec![12];
+        assert!(validate_rebalance_token_2022_instructions(&[malformed], &mint).is_err());
+
+        let mut missing_mint = checked_transfer;
+        missing_mint.accounts.truncate(1);
+        assert!(validate_rebalance_token_2022_instructions(&[missing_mint], &mint).is_err());
     }
 
     /// The golden discriminator constants must match the generated IDL
