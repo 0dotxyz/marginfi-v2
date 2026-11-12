@@ -24,9 +24,10 @@ use marginfi_type_crate::{
         u32_to_basis, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache,
         HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup,
         OracleFeedFamily, OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
-        ReconciledEmodeConfig, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        ReceivershipCacheOrigin, ReconciledEmodeConfig, RequirementType, RiskTier,
+        ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 use std::{
@@ -1256,6 +1257,18 @@ pub fn get_health_components<'info>(
             )
         };
 
+        // The start-of-receivership maintenance pass already has the reconciled e-mode and
+        // validated bank. Record by raw slot until start_receivership attaches it to the balance.
+        if let Some(cache) = liq_cache.as_mut() {
+            if matches!(requirement_type, RequirementType::Maintenance)
+                && matches!(balance.get_side(), Some(BalanceSide::Assets))
+                && matches!(bank.config.risk_tier, RiskTier::Collateral)
+                && bank.get_asset_weight(requirement_type, &reconciled_emode_config) > I80F48::ZERO
+            {
+                cache.record_receivership_collateral(balance_index);
+            }
+        }
+
         if emode_possible && !balance.is_empty(BalanceSide::Assets) {
             collateral_seen = true;
             if bank.get_asset_weight(requirement_type, &reconciled_emode_config)
@@ -1347,6 +1360,30 @@ pub fn get_health_components<'info>(
     }
 
     Ok((total_assets, total_liabilities))
+}
+
+/// Preserve the existing raw-initial-weight rule while allowing a balance that backed the
+/// account's maintenance health at the start of this receivership.
+pub fn receivership_withdraw_allowed(
+    account: &MarginfiAccount,
+    bank_key: &Pubkey,
+    bank: &Bank,
+) -> bool {
+    if !account.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+        || I80F48::from(bank.config.asset_weight_init) != I80F48::ZERO
+    {
+        return true;
+    }
+    let cache = &account.health_cache;
+    (cache.has_receivership_origin(ReceivershipCacheOrigin::Liquidation)
+        || cache.has_receivership_origin(ReceivershipCacheOrigin::Deleverage))
+        && account
+            .lending_account
+            .get_balance(bank_key)
+            .is_some_and(|balance| {
+                matches!(balance.get_side(), Some(BalanceSide::Assets))
+                    && balance.is_receivership_collateral()
+            })
 }
 
 /// Returns the total assets and liabilities restricted to the provided set of balance tags.
@@ -2295,7 +2332,8 @@ impl<'a> BankAccountWrapper<'a> {
                     liability_shares: I80F48::ZERO.into(),
                     premium_outstanding: I80F48::ZERO.into(),
                     last_update: Clock::get()?.unix_timestamp as u64,
-                    _padding: [0; 1],
+                    flags: 0,
+                    _padding: [0; 7],
                 };
 
                 Ok(Self {
@@ -2906,6 +2944,53 @@ mod test {
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::types::basis_to_u32;
+
+    #[test]
+    fn receivership_withdraw_uses_current_start_marker_for_the_asset_balance() {
+        let mut account = MarginfiAccount::zeroed();
+        let bank = Bank::zeroed();
+        let key = Pubkey::new_unique();
+        let other_key = Pubkey::new_unique();
+        let balance = &mut account.lending_account.balances[8];
+        balance.set_active(true);
+        balance.bank_pk = key;
+        balance.asset_shares = I80F48::ONE.into();
+        balance.flags = 2;
+        balance.set_receivership_collateral(true);
+
+        // A stale marker is ignored without the current receivership-start cache.
+        account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
+        assert!(!receivership_withdraw_allowed(&account, &key, &bank));
+        account
+            .health_cache
+            .set_receivership_origin(ReceivershipCacheOrigin::Liquidation);
+        assert!(receivership_withdraw_allowed(&account, &key, &bank));
+        assert!(!receivership_withdraw_allowed(&account, &other_key, &bank));
+
+        // Sorting preserves the marker with the bank, and cleanup preserves unrelated bits.
+        account.lending_account.sort_balances();
+        assert!(receivership_withdraw_allowed(&account, &key, &bank));
+        let balance = account
+            .lending_account
+            .balances
+            .iter_mut()
+            .find(|balance| balance.is_active() && balance.bank_pk == key)
+            .unwrap();
+        balance.set_receivership_collateral(false);
+        assert_eq!(balance.flags, 2);
+        assert!(!receivership_withdraw_allowed(&account, &key, &bank));
+
+        let balance = account
+            .lending_account
+            .balances
+            .iter_mut()
+            .find(|balance| balance.is_active() && balance.bank_pk == key)
+            .unwrap();
+        balance.set_receivership_collateral(true);
+        balance.close().unwrap();
+        assert!(!balance.is_receivership_collateral());
+        assert!(!receivership_withdraw_allowed(&account, &key, &bank));
+    }
 
     fn same_asset_eligible_bank(mint: Pubkey, oracle_key: Pubkey, liab_weight: I80F48) -> Bank {
         let mut bank = Bank::zeroed();

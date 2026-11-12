@@ -8,7 +8,7 @@ use marginfi::state::bank::BankImpl;
 use marginfi::{constants::LIQUIDATION_FLAT_FEE_DEFAULT, prelude::*};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
+    types::{Bank, BankConfigOpt, EmodeEntry, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -1177,6 +1177,83 @@ async fn setup_liquidatee(
     }
 
     Ok((test_f, liquidatee, liquidator_usdc_acc, record_pk))
+}
+
+/// Repaying the last debt removes e-mode before the withdrawal; the start snapshot must still
+/// recognize the zero-base-weight collateral, and must not persist after the transaction.
+#[tokio::test]
+async fn liquidate_receiver_withdraws_emode_collateral_after_full_repay() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(0.4, 2.0).await?;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48::ZERO.into()),
+                asset_weight_maint: Some(I80F48::ZERO.into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    const COLLATERAL_TAG: u16 = 123;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(sol_bank, COLLATERAL_TAG, &[])
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            usdc_bank,
+            124,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: COLLATERAL_TAG,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.25).into(),
+                asset_weight_maint: I80F48!(0.4).into(),
+            }],
+        )
+        .await?;
+
+    let payer = test_f.payer().clone();
+    let sol_destination = test_f.sol_mint.create_empty_token_account().await;
+    let start = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let repay = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
+        .await;
+    let withdraw = liquidatee
+        .make_bank_withdraw_ix(sol_destination.key, sol_bank, 0.2, None)
+        .await;
+    let end = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![usdc_bank.key],
+        )
+        .await;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start, repay, withdraw, end],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let account = liquidatee.load().await;
+    assert!(account
+        .lending_account
+        .balances
+        .iter()
+        .all(|balance| !balance.is_receivership_collateral()));
+    Ok(())
 }
 
 // Below the minimum value threshold the account may end healthy, but the premium cap still

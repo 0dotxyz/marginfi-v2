@@ -29,9 +29,19 @@ pub struct OraclePriceWithConfidence {
 pub struct LiquidationPriceCache {
     real_time: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
     time_weighted: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
+    /// Raw balance slots with positive effective maintenance collateral weight at start.
+    receivership_collateral: u16,
 }
 
 impl LiquidationPriceCache {
+    pub fn record_receivership_collateral(&mut self, balance_index: usize) {
+        self.receivership_collateral |= 1u16 << balance_index;
+    }
+
+    pub fn is_receivership_collateral(&self, balance_index: usize) -> bool {
+        self.receivership_collateral & (1u16 << balance_index) != 0
+    }
+
     pub fn record(
         &mut self,
         requirement_type: RequirementType,

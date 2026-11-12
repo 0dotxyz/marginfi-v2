@@ -367,12 +367,11 @@ pub struct SolendWithdraw<'info> {
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_solend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForSolendOperation,
-        // Block withdraw of zero-weight assets during receivership - prevents unfair liquidation
+        // Protect zero-weight assets unless the start-of-receivership health check counted them.
         constraint = {
             let a = marginfi_account.load()?;
             let b = bank.load()?;
-            let weight: I80F48 = b.config.asset_weight_init.into();
-            !(a.get_flag(ACCOUNT_IN_RECEIVERSHIP) && weight == I80F48::ZERO)
+            crate::state::marginfi_account::receivership_withdraw_allowed(&a, &bank.key(), &b)
         } @ MarginfiError::LiquidationPremiumTooHigh
     )]
     pub bank: AccountLoader<'info, Bank>,
