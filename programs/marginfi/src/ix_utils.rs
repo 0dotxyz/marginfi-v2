@@ -605,8 +605,9 @@ mod tests {
             .pack(),
         };
 
-        assert!(validate_rebalance_token_2022_instructions(&[checked_transfer.clone()], &mint)
-            .is_ok());
+        assert!(
+            validate_rebalance_token_2022_instructions(&[checked_transfer.clone()], &mint).is_ok()
+        );
 
         let mut foreign_mint = checked_transfer.clone();
         foreign_mint.accounts[1].pubkey = other_mint;
