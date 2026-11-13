@@ -1095,7 +1095,7 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .process_transaction_with_preflight(tx)
         .await;
     assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::LiquidationPremiumTooHigh);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ZeroWeightCollateralNotSeizable);
 
     Ok(())
 }
@@ -1216,6 +1216,39 @@ async fn liquidate_receiver_withdraws_emode_collateral_after_full_repay() -> any
         )
         .await?;
 
+    repay_all_and_seize_zero_init_sol(&test_f, &liquidatee, &liquidator_usdc_acc, record_pk).await
+}
+
+/// Raw init weight 0 with positive raw maintenance weight (e.g. a bank being wound down) backs
+/// maintenance health without any e-mode, so receivership may seize it.
+#[tokio::test]
+async fn liquidate_receiver_withdraws_zero_init_weight_collateral() -> anyhow::Result<()> {
+    let (test_f, liquidatee, liquidator_usdc_acc, record_pk) = setup_liquidatee(0.4, 2.0).await?;
+    test_f
+        .get_bank(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48::ZERO.into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    repay_all_and_seize_zero_init_sol(&test_f, &liquidatee, &liquidator_usdc_acc, record_pk).await
+}
+
+/// One receivership tx: repay all $2 of USDC debt, seize 0.2 SOL ($2) of the zero-init-weight
+/// collateral, end. Asserts no start marker outlives the transaction.
+async fn repay_all_and_seize_zero_init_sol(
+    test_f: &TestFixture,
+    liquidatee: &MarginfiAccountFixture,
+    liquidator_usdc_acc: &TokenAccountFixture,
+    record_pk: Pubkey,
+) -> anyhow::Result<()> {
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     let payer = test_f.payer().clone();
     let sol_destination = test_f.sol_mint.create_empty_token_account().await;
     let start = liquidatee.make_start_liquidation_ix(record_pk, payer).await;

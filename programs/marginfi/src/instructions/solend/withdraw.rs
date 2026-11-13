@@ -372,7 +372,7 @@ pub struct SolendWithdraw<'info> {
             let a = marginfi_account.load()?;
             let b = bank.load()?;
             crate::state::marginfi_account::receivership_withdraw_allowed(&a, &bank.key(), &b)
-        } @ MarginfiError::LiquidationPremiumTooHigh
+        } @ MarginfiError::ZeroWeightCollateralNotSeizable
     )]
     pub bank: AccountLoader<'info, Bank>,
 
