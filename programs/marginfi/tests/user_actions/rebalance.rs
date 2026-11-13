@@ -4228,6 +4228,88 @@ async fn rebalance_settle_after_account_closed() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A closed keypair account can be recreated with arbitrary ownership and data. Its new contents
+/// must not prevent settlement of a record belonging to the original marginfi account.
+#[test_case::test_case(0; "system_owned_with_data")]
+#[test_case::test_case(1; "foreign_owned")]
+#[test_case::test_case(2; "short_marginfi_owned")]
+#[test_case::test_case(3; "wrong_discriminator")]
+#[tokio::test]
+async fn rebalance_settle_after_account_recreated(case: u8) -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.set_keeper_tip(200_000).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    assert!(f.record_pending_tip().await > 0);
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+    let close_order = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    f.process_as_payer(&[close_order]).await?;
+    let dest = f.test_f.usdc_mint.create_empty_token_account().await;
+    f.user
+        .try_bank_withdraw(dest.key, &f.dst_bank_f, DEPOSIT_USDC, Some(true))
+        .await?;
+    let drain = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, payer, u64::MAX)
+        .await;
+    f.process_as_payer(&[drain]).await?;
+    f.user.try_close_account(0).await?;
+    assert_eq!(f.lamports_of(f.user.key).await, 0);
+
+    let (owner, space) = match case {
+        0 => (solana_system_interface::program::ID, 1),
+        1 => (Pubkey::new_unique(), 0),
+        2 => (marginfi::ID, 1),
+        3 => (
+            marginfi::ID,
+            8 + std::mem::size_of::<marginfi_type_crate::types::MarginfiAccount>(),
+        ),
+        _ => unreachable!(),
+    };
+    let blockhash = f.test_f.get_latest_blockhash().await;
+    {
+        let ctx = f.test_f.context.borrow_mut();
+        let rent = ctx.banks_client.get_rent().await?;
+        let create = system_instruction::create_account(
+            &payer,
+            &f.user.key,
+            rent.minimum_balance(space),
+            space as u64,
+            &owner,
+        );
+        let tx = Transaction::new_signed_with_payer(
+            &[create],
+            Some(&payer),
+            &[&ctx.payer, &f.user.account_keypair],
+            blockhash,
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+        let recreated = ctx.banks_client.get_account(f.user.key).await?.unwrap();
+        assert_eq!(recreated.owner, owner);
+        assert_eq!(recreated.data.len(), space);
+    }
+
+    f.advance_clock(601).await;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    f.process_as_payer(&[settle]).await?;
+    assert_eq!(f.lamports_of(f.record_pda).await, 0);
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports
+    );
+    Ok(())
+}
+
 /// A non-authority may not close an order whose account still holds a position in an allowed venue.
 #[tokio::test]
 async fn rebalance_keeper_close_rejected_while_position_held() -> anyhow::Result<()> {
