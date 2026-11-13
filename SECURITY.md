@@ -746,3 +746,40 @@ the doc on `should_skip_rate_limit`:
 /// Rebalance is an internal same-mint move (withdraw from one bank, deposit into another), so it
 /// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
 ```
+
+### Staked Bank Propagation Wipes Inidividually Configured Settings
+
+Some settings, including e.g. the FREEZE_SETTINGS flag, are wiped when a Staked bank accepts
+propagation from the Staked Settings. This is by design: Staked banks first priority is to respond
+to propagation, their ability to be individually configured is only for testing and compatibility
+purposes; staked banks are not intended to be individually configured in production.
+
+### Premium/Profit Limits Can be "Exceeded" at High Confidence
+
+Some might argue that when confidence is poor (i.e., large) we give more than the expected
+premium/profit for liquidation, order fulfillment, etc.
+
+This is because the liquidator must repay debts using seized assets on the actual open market. When
+confidence is poor, the liquidator also pays a premium to swap asset -> debt, above any normal
+market slippage and AMM fees.
+
+For example, let's say the liquidation fee is 2.5%, confidence on A is 2% and confidence on B is 2%.
+Let's say both A and B have a market price of $100. The liquidator is holding A and wants to
+liquidate a position where a user is lending A and borrowing B. They get a quote to swap A -> B. In
+this scenario, the quote is often inclusive of confidence: sellers of A get somewhere between
+~$98-100, buyers of B pay ~$100-102. In other words, you could say confidence reflects the bid-ask
+spread in the spot markets for A or B. Instantaneous buyers are always forced to take the best bid
+or ask on the books, they cannot trade at the median between them (which is the spot price itself).
+As the liquidator receives a confidence-adjusted quote, they cannot liquidate this A/B position
+without taking a loss; consequently, the position will go down further and may enter bad debt. 
+
+We use the confidence-adjusted price to reflect market pricing during periods of low confidence, to
+guarantee liquidators will be able to maintain solvency. If liquidators could actually sell A at
+$100 and buy B at $100 even when confidence is 2%, we would not need the adjustment.
+
+Likewise for Keepers: the risk engine always prices assets at price + confidence and liabilities at
+price - confidence. If you ignore confidence, the keeper might appear to retain more than the
+configured max equity loss, but when confidence is available, we explicitly treat it as a component
+of the equity price.
+
+In summary, the confidence-adjusted price is the true "market" price from our perspective.
