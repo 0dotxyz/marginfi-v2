@@ -236,6 +236,9 @@ pub fn end_receivership<'info>(
     let now = Clock::get()?.unix_timestamp;
 
     // clear receivership
+    for balance in &mut marginfi_account.lending_account.balances {
+        balance.set_receivership_collateral(false);
+    }
     marginfi_account.unset_flag(
         ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
         false,

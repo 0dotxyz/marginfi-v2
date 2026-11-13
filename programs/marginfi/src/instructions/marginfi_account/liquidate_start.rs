@@ -142,6 +142,16 @@ pub fn start_receivership<'info>(
     )?;
 
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
+    // Replace every marker, including inactive slots, so only this start's maintenance pass can
+    // authorize a zero-base-weight withdrawal. The marker moves with its balance when sorted.
+    for (index, balance) in marginfi_account
+        .lending_account
+        .balances
+        .iter_mut()
+        .enumerate()
+    {
+        balance.set_receivership_collateral(liq_price_cache.is_receivership_collateral(index));
+    }
     marginfi_account.set_receivership_start_health_cache(health_cache, origin);
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     marginfi_account.indexer_flags.has_ever_been_liquidated = 1;

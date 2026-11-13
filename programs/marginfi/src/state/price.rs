@@ -2400,8 +2400,8 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
 /// the SBF stack.
 ///
 /// * This is used only for legacy test suites that still utilize Switchboard: the mainnet program
-/// is defunct, this should not be interpreted as a substitute for using swb's crate if they were
-/// ever to be supported again.
+///   is defunct, this should not be interpreted as a substitute for using swb's crate if they
+///   were ever to be supported again.
 pub fn parse_swb_pull_feed(data: &[u8]) -> MarginfiResult<LitePullFeedAccountData> {
     const ACCOUNT_SIZE: usize = 3208;
     const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];

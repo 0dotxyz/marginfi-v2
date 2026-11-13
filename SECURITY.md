@@ -292,9 +292,9 @@ liquidated too, as the liquidator must still repay asset_value * (1 - fee) in de
 liquidation is more concerned with solvency of the platform. Issues when liquidating assets with
 zero (or negligible) weight are only in scope if they affect platform solvency.
 
-Note that receivership liquidation cannot capture zero-weight assets, because it does not tie the
-proportion of assets seized to the amount repaid like classic liquidation does, and this can lead to
-more unfavorable outcomes for the user.
+Receivership liquidation cannot capture assets with zero initial weight unless their balance had
+positive effective maintenance weight at the start of receivership (for example through e-mode).
+This protects genuinely zero-weight collateral from unfavorable seizure.
 
 ### Zero-weight Assets can be Seized in Orders
 

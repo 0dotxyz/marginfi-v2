@@ -319,15 +319,12 @@ pub struct LendingAccountWithdraw<'info> {
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForStandardInstructions,
-        // We want to block withdraw of assets with no weight (e.g. isolated) otherwise the
-        // liquidator can just take all of them and the user gets nothing back, which is unfair. For
-        // assets with any nominal weight, e.g. 10%, caveat emptor
+        // Protect zero-weight assets unless the start-of-receivership health check counted them.
         constraint = {
             let a = marginfi_account.load()?;
             let b = bank.load()?;
-            let weight: I80F48 = b.config.asset_weight_init.into();
-            !(a.get_flag(ACCOUNT_IN_RECEIVERSHIP) && weight == I80F48::ZERO)
-        } @MarginfiError::LiquidationPremiumTooHigh
+            crate::state::marginfi_account::receivership_withdraw_allowed(&a, &bank.key(), &b)
+        } @ MarginfiError::ZeroWeightCollateralNotSeizable
     )]
     pub bank: AccountLoader<'info, Bank>,
 
