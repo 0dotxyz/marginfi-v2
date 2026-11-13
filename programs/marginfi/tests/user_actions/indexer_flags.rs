@@ -2,7 +2,6 @@ use fixtures::{assert_custom_error, marginfi_account::MarginfiAccountFixture, pr
 use marginfi::errors::MarginfiError;
 use marginfi_type_crate::types::{
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -39,8 +38,6 @@ async fn pulse_health_rejects_transient_state() -> anyhow::Result<()> {
 
     for flags in [
         ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
-        ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
         ACCOUNT_IN_ORDER_EXECUTION,
         ACCOUNT_IN_REBALANCE,
     ] {

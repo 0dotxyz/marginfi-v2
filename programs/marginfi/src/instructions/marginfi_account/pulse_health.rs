@@ -5,7 +5,6 @@ use fixed::types::I80F48;
 use marginfi_type_crate::types::{
     HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE,
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 
 use crate::{
@@ -203,7 +202,6 @@ pub struct PulseHealth<'info> {
         constraint = !marginfi_account.load()?.get_flag(
             ACCOUNT_IN_RECEIVERSHIP
                 | ACCOUNT_IN_DELEVERAGE
-                | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION
                 | ACCOUNT_IN_ORDER_EXECUTION
                 | ACCOUNT_IN_REBALANCE
         ) @ MarginfiError::UnexpectedLiquidationState

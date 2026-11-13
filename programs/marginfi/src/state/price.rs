@@ -327,7 +327,6 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
-        ignore_pt_emergency: bool,
     ) -> MarginfiResult<Self> {
         let context = Self::load_oracle_context_with_max_age(
             bank,
@@ -335,7 +334,6 @@ impl OraclePriceFeedAdapter {
             clock,
             bank.config.get_oracle_max_age(),
             None,
-            ignore_pt_emergency,
         )?;
         Ok(context.adjusted_price_feed)
     }
@@ -346,8 +344,7 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
     ) -> MarginfiResult<Self> {
-        let context =
-            Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None, false)?;
+        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
         Ok(context.adjusted_price_feed)
     }
 
@@ -357,7 +354,6 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
-        ignore_pt_emergency: bool,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -1364,14 +1360,15 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate =
-                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
+                let pt_rate = pt_linear_multiplier(&vault, clock, start_price)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 // Bake the PT/SOL rate into the price -> feed now represents PT/USD.
                 apply_i80f48_multiplier(&mut price_feed, pt_rate)?;
+                // PT can't be redeemed while Exponent has merging paused.
+                price_feed.has_borrow_power = !vault.is_in_emergency();
 
                 // Cache the underlying (PT/USD) price; a plain PT bank has no wrapper multiplier.
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
@@ -1395,12 +1392,12 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_price =
-                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
+                let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
 
                 let feed = FixedPriceFeed {
                     price: pt_price,
-                    has_borrow_power: true,
+                    // PT can't be redeemed while Exponent has merging paused.
+                    has_borrow_power: !vault.is_in_emergency(),
                 };
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
                     Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
@@ -1422,7 +1419,6 @@ impl OraclePriceFeedAdapter {
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
         oracle_price_type: OraclePriceType,
-        ignore_pt_emergency: bool,
     ) -> MarginfiResult<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
         let max_age = bank.config.get_oracle_max_age();
         let max_conf = bank.config.oracle_max_confidence;
@@ -1432,7 +1428,6 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
-            ignore_pt_emergency,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -1457,7 +1452,6 @@ impl OraclePriceFeedAdapter {
             ais,
             clock,
             OraclePriceType::RealTime,
-            false,
         )?;
         Ok(cache_price)
     }
@@ -2400,8 +2394,8 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
 /// the SBF stack.
 ///
 /// * This is used only for legacy test suites that still utilize Switchboard: the mainnet program
-/// is defunct, this should not be interpreted as a substitute for using swb's crate if they were
-/// ever to be supported again.
+///   is defunct, this should not be interpreted as a substitute for using swb's crate if they
+///   were ever to be supported again.
 pub fn parse_swb_pull_feed(data: &[u8]) -> MarginfiResult<LitePullFeedAccountData> {
     const ACCOUNT_SIZE: usize = 3208;
     const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
@@ -2749,7 +2743,9 @@ mod tests {
 
     use crate::constants::SPL_STAKE_POOL_ID;
     use anchor_lang::solana_program::account_info::AccountInfo;
-    use exponent_mocks::state::{MinimalExponentVault, SY_EXCHANGE_RATE_PRECISION};
+    use exponent_mocks::state::{
+        MinimalExponentVault, STATUS_CAN_MERGE, SY_EXCHANGE_RATE_PRECISION,
+    };
     use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
     use scope_mocks::state::{ScopeDatedPrice, ScopePrice};
     use solana_stake_interface::{
@@ -3050,6 +3046,7 @@ mod tests {
         vault.last_seen_sy_exchange_rate = [2 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
         vault.pt_supply = 1_000_000_000_000;
         vault.sy_for_pt = 500_000_000_000;
+        vault.status = STATUS_CAN_MERGE;
         vault
     }
 
@@ -3064,19 +3061,19 @@ mod tests {
 
         // Before start -> start_price; at/after maturity -> par (1.0)
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(500), start_price, false).unwrap(),
+            pt_linear_multiplier(&vault, &at(500), start_price).unwrap(),
             start_price
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
             I80F48::ONE
         );
         assert_eq!(
-            pt_linear_multiplier(&vault, &at(9_999), start_price, false).unwrap(),
+            pt_linear_multiplier(&vault, &at(9_999), start_price).unwrap(),
             I80F48::ONE
         );
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
-        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
+        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
@@ -3093,56 +3090,52 @@ mod tests {
         // 0.4375 SY per PT * 2.0 asset per SY = 0.875, so the cap must beat par at maturity.
         let mut vault = fully_backed_vault(1_000, 1_000);
         vault.sy_for_pt = 437_500_000_000;
-        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
+        let matured = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
         assert_eq!(matured, I80F48::from_num(0.875));
 
         // Below the ceiling, the cap is inert: halfway from 0.5 to par is 0.75.
-        let early = pt_linear_multiplier(&vault, &at(1_500), start_price, false).unwrap();
+        let early = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
         assert_eq!(early, I80F48::from_num(0.75));
 
         vault.sy_for_pt = 125_000_000_000; // 0.25
-        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price, false).unwrap();
+        let broken = pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap();
         assert_eq!(broken, I80F48::from_num(0.25));
 
         // Degenerate vaults are rejected rather than priced at zero.
         let mut zero_supply = fully_backed_vault(1_000, 1_000);
         zero_supply.pt_supply = 0;
-        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price, false).is_err());
+        assert!(pt_linear_multiplier(&zero_supply, &at(1_500), start_price).is_err());
 
         let mut zero_rate = fully_backed_vault(1_000, 1_000);
         zero_rate.last_seen_sy_exchange_rate = [0; 4];
-        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price, false).is_err());
+        assert!(pt_linear_multiplier(&zero_rate, &at(1_500), start_price).is_err());
 
         let mut overflowed = fully_backed_vault(1_000, 1_000);
         overflowed.last_seen_sy_exchange_rate = [0, 1, 0, 0];
-        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price, false).is_err());
+        assert!(pt_linear_multiplier(&overflowed, &at(1_500), start_price).is_err());
     }
 
     #[test]
-    fn pt_linear_multiplier_rejects_emergency_mode() {
+    fn pt_linear_multiplier_prices_below_watermark() {
         let start_price = I80F48::from_num(0.5);
-        let at = Clock {
-            unix_timestamp: 1_500,
+        let at = |ts: i64| Clock {
+            unix_timestamp: ts,
             ..Clock::default()
         };
 
-        // Healthy vault (ATH == last_seen) prices normally.
-        let mut healthy = fully_backed_vault(1_000, 1_000);
-        healthy.all_time_high_sy_exchange_rate = healthy.last_seen_sy_exchange_rate;
-        assert!(!healthy.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&healthy, &at, start_price, false).is_ok());
-
-        // SY rate below its all-time high -> emergency mode -> refuse to price.
-        let mut depegged = fully_backed_vault(1_000, 1_000);
-        depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
-        assert!(depegged.is_in_emergency_mode());
-        assert!(pt_linear_multiplier(&depegged, &at, start_price, false).is_err());
-
-        // Deleverage prices it anyway, at the same mark a healthy vault would carry, so the risk
-        // admin can unwind a position the depeg would otherwise strand.
+        // Live rate 2.0 under a 4.0 watermark: Exponent sets aside `pt_supply / 4.0` SY, so a PT
+        // redeems for 0.25 SY * 2.0 = 0.5 and the PT is marked there, not refused.
+        let mut vault = fully_backed_vault(1_000, 1_000);
+        vault.all_time_high_sy_exchange_rate = [4 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
+        vault.sy_for_pt = 250_000_000_000;
         assert_eq!(
-            pt_linear_multiplier(&depegged, &at, start_price, true).unwrap(),
-            pt_linear_multiplier(&healthy, &at, start_price, false).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            I80F48::from_num(0.5)
+        );
+        // Still capped before maturity, where the linear rate (0.75) is higher.
+        assert_eq!(
+            pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap(),
+            I80F48::from_num(0.5)
         );
     }
 
@@ -3150,7 +3143,7 @@ mod tests {
     fn exponent_vault_field_offsets_match_borsh_layout() {
         // Round-trip raw bytes to prove the mirrored fields land on the right struct offsets.
         let mut raw = [0u8; core::mem::size_of::<MinimalExponentVault>()];
-        assert_eq!(raw.len(), 449);
+        assert_eq!(raw.len(), 516);
 
         let mint_pt = Pubkey::new_unique();
         raw[96..128].copy_from_slice(&mint_pt.to_bytes());
@@ -3160,6 +3153,8 @@ mod tests {
         raw[361..369].copy_from_slice(&(3 * SY_EXCHANGE_RATE_PRECISION as u64).to_le_bytes());
         raw[433..441].copy_from_slice(&500_000_000_000u64.to_le_bytes());
         raw[441..449].copy_from_slice(&1_000_000_000_000u64.to_le_bytes());
+        // Account offset 523, past `treasury_sy` .. `min_op_size_merge`.
+        raw[515] = !STATUS_CAN_MERGE;
 
         let parsed: &MinimalExponentVault = bytemuck::from_bytes(&raw);
         assert_eq!(parsed.mint_pt(), mint_pt);
@@ -3169,10 +3164,14 @@ mod tests {
             parsed.last_seen_sy_exchange_rate_raw(),
             Some(2 * SY_EXCHANGE_RATE_PRECISION as u64)
         );
-        // all_time_high (3x) sits above last_seen (2x) at struct offset 361 -> emergency mode.
-        assert!(parsed.is_in_emergency_mode());
+        let all_time_high = parsed.all_time_high_sy_exchange_rate;
+        assert_eq!(
+            all_time_high,
+            [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0]
+        );
         assert_eq!(parsed.sy_for_pt(), 500_000_000_000);
         assert_eq!(parsed.pt_supply(), 1_000_000_000_000);
+        assert!(parsed.is_in_emergency());
     }
 
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {

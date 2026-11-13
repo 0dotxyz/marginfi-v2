@@ -24,7 +24,6 @@ use marginfi_type_crate::{
         FeeState, HealthCache, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
         ReceivershipCacheOrigin, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
     },
 };
 
@@ -236,10 +235,7 @@ pub fn end_receivership<'info>(
     let now = Clock::get()?.unix_timestamp;
 
     // clear receivership
-    marginfi_account.unset_flag(
-        ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
-        false,
-    );
+    marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
     marginfi_account.liquidation_tagged_at = tag_after_liquidation(
         marginfi_account.liquidation_tagged_at,

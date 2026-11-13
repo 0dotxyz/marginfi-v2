@@ -14,7 +14,7 @@ use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
     centi_to_u32, u32_to_centi, BalanceSide, ExecuteOrderRecord, OrderTrigger, OrderTriggerType,
     WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-    ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
@@ -1461,10 +1461,6 @@ async fn order_close_rejects_transient_state() -> anyhow::Result<()> {
     for (flag, error) in [
         (
             ACCOUNT_IN_RECEIVERSHIP,
-            MarginfiError::UnexpectedLiquidationState,
-        ),
-        (
-            ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
             MarginfiError::UnexpectedLiquidationState,
         ),
         (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),

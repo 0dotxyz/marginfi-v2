@@ -217,8 +217,9 @@ const _: () =
     assert!(core::mem::offset_of!(MinimalLendingMarket, reserve_rewards_max_apr_bps) == 3350);
 
 impl MinimalLendingMarket {
-    /// True if Kamino put the whole market into emergency mode. Its own instructions then fail, but
-    /// `refresh_reserve` keeps working, so nothing upstream stops us lending against the collateral.
+    /// True if Kamino put the whole market into emergency mode. Most of its instructions then fail,
+    /// `refresh_reserve` and `refresh_reserves_batch` included, so the market's reserves go stale
+    /// and its banks cannot be priced.
     pub fn is_emergency_mode(&self) -> bool {
         self.emergency_mode != 0
     }

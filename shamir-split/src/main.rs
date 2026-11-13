@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use gf256::shamir::shamir;
 use std::{env, fs, path::Path};
 
-const N: usize = 3; // total shares
-const M: usize = 2; // threshold (any M can recover)
+const N: usize = 5; // total shares
+const M: usize = 3; // threshold (any M can recover)
 const SECRET_LEN: usize = 64;
 
 // Share line format (one line per share):

@@ -4,6 +4,9 @@ use marginfi_type_crate::assert_struct_size;
 // Anchor discriminator for Exponent's PT vault account.
 pub const VAULT_DISCRIMINATOR: [u8; 8] = [211, 8, 232, 43, 2, 152, 117, 119];
 
+/// `status` bit that allows `merge`, Exponent's only PT redemption path.
+pub const STATUS_CAN_MERGE: u8 = 0b0000_0010;
+
 /// Scaling factor of Exponent's `Number` type.
 pub const SY_EXCHANGE_RATE_PRECISION: u128 = 1_000_000_000_000;
 
@@ -28,17 +31,21 @@ pub struct MinimalExponentVault {
     /// Asset per SY, scaled by `SY_EXCHANGE_RATE_PRECISION`. Exponent stores it as a 256-bit
     /// integer, i.e. four u64 words, least significant first.
     pub last_seen_sy_exchange_rate: [u64; 4],
-    /// Highest `last_seen_sy_exchange_rate` ever recorded; `> last_seen` means the SY rate has
-    /// fallen from its peak (Exponent's "emergency mode").
+    /// Exponent's watermark: the highest SY rate seen before expiry. A live rate below it (negative
+    /// yield) shrinks `sy_for_pt`, which already marks the PT down.
     pub all_time_high_sy_exchange_rate: [u64; 4],
     pub _padding_6: [u8; 32],
     pub _padding_7: [u8; 8],
     /// Total SY set aside to back PT holders.
     pub sy_for_pt: u64,
     pub pt_supply: u64,
+    pub _padding_8: [u8; 64],
+    pub _padding_9: [u8; 2],
+    /// Operation flags; the pause admin can clear `STATUS_CAN_MERGE` to halt PT redemption.
+    pub status: u8,
 }
 
-assert_struct_size!(MinimalExponentVault, 449);
+assert_struct_size!(MinimalExponentVault, 516);
 
 impl MinimalExponentVault {
     #[inline]
@@ -66,6 +73,12 @@ impl MinimalExponentVault {
         self.pt_supply
     }
 
+    /// Exponent has paused merging, so PT can't be redeemed.
+    #[inline]
+    pub fn is_in_emergency(&self) -> bool {
+        self.status & STATUS_CAN_MERGE == 0
+    }
+
     /// The rate as a plain `u64`, or `None` if it does not fit in one. Real rates run ~1e12-1e14
     /// once scaled, five orders of magnitude short of `u64::MAX`, so a value needing the upper
     /// words is not an exchange rate.
@@ -73,19 +86,5 @@ impl MinimalExponentVault {
     pub fn last_seen_sy_exchange_rate_raw(&self) -> Option<u64> {
         let words = self.last_seen_sy_exchange_rate;
         (words[1] == 0 && words[2] == 0 && words[3] == 0).then_some(words[0])
-    }
-
-    /// True when the current SY rate sits below its all-time high, i.e. the underlying has depegged
-    /// from its peak. Compares the two 256-bit rates most-significant word first.
-    #[inline]
-    pub fn is_in_emergency_mode(&self) -> bool {
-        let ath = self.all_time_high_sy_exchange_rate;
-        let last = self.last_seen_sy_exchange_rate;
-        for i in (0..4).rev() {
-            if ath[i] != last[i] {
-                return ath[i] > last[i];
-            }
-        }
-        false
     }
 }

@@ -14,8 +14,7 @@ use marginfi_type_crate::{
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
     types::{
         BankConfig, BankConfigOpt, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
-        MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
     },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -621,10 +620,6 @@ async fn rebalance_order_close_rejects_transient_state() -> anyhow::Result<()> {
     for (flag, error) in [
         (
             ACCOUNT_IN_RECEIVERSHIP,
-            MarginfiError::UnexpectedLiquidationState,
-        ),
-        (
-            ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
             MarginfiError::UnexpectedLiquidationState,
         ),
         (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),

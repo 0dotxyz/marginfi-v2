@@ -537,9 +537,9 @@ async fn kamino_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Kamino halting a whole market stops its own instructions but keeps serving `refresh_reserve`,
-/// so nothing upstream stops users borrowing against collateral parked there. The market account
-/// never reaches our health path, so a permissionless ix caches the flag on the bank.
+/// Kamino halting a whole market also rejects `refresh_reserve`, so the bank only stays priced while
+/// its reserve was refreshed in the current slot, as here. The market account never reaches our
+/// health path, so a permissionless ix caches the flag on the bank.
 #[tokio::test]
 async fn kamino_market_emergency_mode_zeroes_init_value_only() -> anyhow::Result<()> {
     let setup = TestFixture::setup_kamino_bank(None).await;
