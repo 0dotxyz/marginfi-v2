@@ -85,8 +85,8 @@ use marginfi_type_crate::{
     types::{
         BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         RebalanceMove, RebalanceOrder, RebalanceRecord, RebalanceRefBank, WrappedI80F48,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
-        ORDER_BLOCKING_FLAGS,
+        ACCOUNT_FROZEN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS,
+        MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
 
@@ -303,9 +303,15 @@ pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResul
             None => (Pubkey::default(), Pubkey::default(), false),
             Some(mut marginfi_account) => {
                 check_order_close_state(&marginfi_account)?;
-                // The authority may close their own order anytime; anyone else may close it only
-                // once it holds no position in any allowed venue.
+                // The authority may close their own order anytime (unless the account is frozen);
+                // anyone else may close it only once it holds no position in any allowed venue.
                 let by_authority = signer == Some(marginfi_account.authority);
+                if by_authority {
+                    check!(
+                        !marginfi_account.get_flag(ACCOUNT_FROZEN),
+                        MarginfiError::AccountFrozen
+                    );
+                }
                 let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
                 let has_allowed_position = marginfi_account
                     .lending_account
@@ -432,7 +438,11 @@ pub fn update_rebalance_order(
 
 #[derive(Accounts)]
 pub struct UpdateRebalanceOrder<'info> {
-    #[account(has_one = authority @ MarginfiError::Unauthorized)]
+    #[account(
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = !marginfi_account.load()?.get_flag(ACCOUNT_FROZEN)
+            @ MarginfiError::AccountFrozen,
+    )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
     pub authority: Signer<'info>,
     #[account(
@@ -570,7 +580,11 @@ pub fn withdraw_rebalance_fee_pool(
 
 #[derive(Accounts)]
 pub struct WithdrawRebalanceFeePool<'info> {
-    #[account(has_one = authority @ MarginfiError::Unauthorized)]
+    #[account(
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = !marginfi_account.load()?.get_flag(ACCOUNT_FROZEN)
+            @ MarginfiError::AccountFrozen,
+    )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
     pub authority: Signer<'info>,
     #[account(

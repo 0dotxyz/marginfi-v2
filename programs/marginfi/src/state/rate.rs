@@ -134,16 +134,22 @@ fn check_drift_market_fresh(market: &MinimalSpotMarket, clock: &Clock) -> Margin
     Ok(())
 }
 
-/// The bank's rate-bearing venue account within `oracle_ais`: the LAST one, since the price oracle,
-/// if any, precedes it. Works for fixed and live-oracle variants alike; native banks have none.
+/// The bank's rate-bearing venue account within `oracle_ais`: index 0 for single-account fixed
+/// integration setups (`FixedKamino`, `FixedDrift`, `FixedJuplend`) and index 1 for multi-account
+/// integration setups (including 3-account `KaminoMSOL`, `JuplendMSOL`, `KaminoLST`, and
+/// `JuplendLST`, where `oracle_ais[2]` is the Marinade state or SPL stake pool). Native banks have
+/// none.
 fn venue_ai<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
 ) -> Option<&'info AccountInfo<'info>> {
-    if is_integration_asset_tag(bank.config.asset_tag) {
-        oracle_ais.last()
+    if !is_integration_asset_tag(bank.config.asset_tag) {
+        return None;
+    }
+    if oracle_ais.len() == 1 {
+        oracle_ais.first()
     } else {
-        None
+        oracle_ais.get(1)
     }
 }
 
@@ -607,5 +613,41 @@ mod slot_pacing {
         );
         assert!(slots_per_second_from(3_599, 3_600).is_none());
         assert!(slots_per_second_from(14_401, 3_600).is_none());
+    }
+
+    #[test]
+    fn venue_ai_selects_correct_index_for_1_2_and_3_account_setups() {
+        use bytemuck::Zeroable;
+        let mut bank = Bank::zeroed();
+        let k0 = Pubkey::new_unique();
+        let k1 = Pubkey::new_unique();
+        let k2 = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let mut l0 = 0u64;
+        let mut l1 = 0u64;
+        let mut l2 = 0u64;
+        let mut d0 = [];
+        let mut d1 = [];
+        let mut d2 = [];
+        let ai0 = AccountInfo::new(&k0, false, false, &mut l0, &mut d0, &owner, false);
+        let ai1 = AccountInfo::new(&k1, false, false, &mut l1, &mut d1, &owner, false);
+        let ai2 = AccountInfo::new(&k2, false, false, &mut l2, &mut d2, &owner, false);
+        let ais_1 = [ai0.clone()];
+        let ais_2 = [ai0.clone(), ai1.clone()];
+        let ais_3 = [ai0, ai1, ai2];
+
+        // Native bank returns None
+        bank.config.asset_tag = ASSET_TAG_DEFAULT;
+        assert!(venue_ai(&bank, &ais_3).is_none());
+
+        // Integration bank: 1-account fixed setup picks index 0; 2-account and 3-account
+        // (KaminoMSOL / JuplendMSOL / KaminoLST / JuplendLST) setups pick index 1.
+        for tag in [ASSET_TAG_KAMINO, ASSET_TAG_JUPLEND] {
+            bank.config.asset_tag = tag;
+            assert_eq!(venue_ai(&bank, &[]).map(|a| *a.key), None);
+            assert_eq!(venue_ai(&bank, &ais_1).map(|a| *a.key), Some(k0));
+            assert_eq!(venue_ai(&bank, &ais_2).map(|a| *a.key), Some(k1));
+            assert_eq!(venue_ai(&bank, &ais_3).map(|a| *a.key), Some(k1));
+        }
     }
 }
