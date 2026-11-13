@@ -29,9 +29,7 @@ anchor-debug = ["anchor-lang/anchor-debug"]
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
-marginfi = { path = "../marginfi", features = ["cpi"] }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
-solana-program = { workspace = true }
 
 bytemuck = { workspace = true, features = ["derive"] }
 static_assertions = { workspace = true }

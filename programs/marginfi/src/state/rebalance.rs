@@ -105,10 +105,10 @@ pub trait RebalanceRecordImpl {
     /// Reconcile the declared moves against the observed per-bank underlying-token deltas.
     /// `post_underlying[i]` is the end token amount of `ref_banks[i]`. For every referenced bank the net
     /// declared flow (incoming amounts minus outgoing) must equal `post - pre` within the conservation
-    /// dust. Returns `(total_moved, total_ref_pre, dust)`: the tokens that landed (sum of positive net
-    /// deltas), the start token amount summed across ALL referenced banks (the tip denominator, stable
-    /// against how the keeper splits the move across banks), and the tolerance applied (reused by the
-    /// caller's budget-cap cushion).
+    /// dust. Returns `(total_moved, total_ref_pre, dust)`: the tokens moved (the smaller of the tokens
+    /// that left banks and the tokens that landed in banks), the start token amount summed across ALL
+    /// referenced banks (the tip denominator, stable against how the keeper splits the move across
+    /// banks), and the tolerance applied (reused by the caller's budget-cap cushion).
     fn reconcile(
         &self,
         post_underlying: &[I80F48],
@@ -232,7 +232,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
             MarginfiError::IllegalBalanceState
         );
         let dust = self.conservation_dust(mint_decimals, venue_multiplier)?;
-        let mut total_moved = I80F48::ZERO;
+        let mut total_in = I80F48::ZERO;
         let mut total_ref_pre = I80F48::ZERO;
         let mut total_actual = I80F48::ZERO;
         for (i, post) in post_underlying.iter().enumerate().take(n) {
@@ -255,12 +255,16 @@ impl RebalanceRecordImpl for RebalanceRecord {
             total_actual = total_actual.checked_add(actual).ok_or_else(math_error!())?;
             total_ref_pre = total_ref_pre.checked_add(pre).ok_or_else(math_error!())?;
             if actual > I80F48::ZERO {
-                total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
+                total_in = total_in.checked_add(actual).ok_or_else(math_error!())?;
             }
         }
 
         check!(total_actual >= -dust, MarginfiError::RebalanceValueLeak);
-        Ok((total_moved, total_ref_pre, dust))
+        // `total_actual` is what landed minus what left, so this is what left.
+        let total_out = total_in
+            .checked_sub(total_actual)
+            .ok_or_else(math_error!())?;
+        Ok((total_in.min(total_out), total_ref_pre, dust))
     }
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {
@@ -463,6 +467,36 @@ mod tests {
         account.lending_account.balances[0] = balance(dst, 0);
         record.carry_tags(&mut account).unwrap();
         assert_eq!(account.lending_account.balances[0].tag, 7);
+    }
+
+    #[test]
+    fn carry_tags_after_balance_mutations_clear_the_drained_source() {
+        use crate::state::marginfi_account::BankAccountWrapper;
+        use marginfi_type_crate::types::Bank;
+
+        let src = Pubkey::new_unique();
+        let dst = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0] = balance(src, 7);
+        let record = record_for(&account, &[ref_bank(src, 7), ref_bank(dst, 0)]);
+
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = I80F48::from_num(100).into();
+        bank.config.deposit_limit = u64::MAX;
+        {
+            let mut source = BankAccountWrapper {
+                bank: &mut bank,
+                balance: &mut account.lending_account.balances[0],
+            };
+            source.withdraw(I80F48::ONE).unwrap();
+            assert_eq!(source.balance.tag, 0);
+            source.close_balance(false).unwrap();
+        }
+        account.lending_account.balances[1] = balance(dst, 0);
+        record.carry_tags(&mut account).unwrap();
+        assert_eq!(account.lending_account.balances[1].tag, 7);
     }
 
     /// An active slot below `EMPTY_BALANCE_THRESHOLD` is left out of the snapshot on both sides.

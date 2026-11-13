@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::solana_program::{program_option::COption, program_pack::Pack};
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
@@ -12,7 +13,6 @@ use pyth_solana_receiver_sdk::{
     PYTH_PUSH_ORACLE_ID,
 };
 use solana_cli_output::CliAccount;
-use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};
 use solana_program_test::*;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::account::WritableAccount;
@@ -20,6 +20,7 @@ use solana_sdk::{
     account::Account, account::AccountSharedData, hash::Hash, pubkey::Pubkey, rent::Rent,
     signature::Keypair,
 };
+use solana_sha256_hasher::hashv;
 use spl_token::state::{Account as SplAccount, AccountState, Mint as SplMint};
 use std::fs::File;
 use std::io::Read;
@@ -477,7 +478,15 @@ pub fn load_account_from_file(relative_path: &str) -> (Pubkey, AccountSharedData
 
     let cli: CliAccount = serde_json::from_str(&raw).expect("invalid account format");
     let address = Pubkey::from_str(&cli.keyed_account.pubkey).unwrap();
-    let mut acc: AccountSharedData = cli.keyed_account.account.decode().unwrap();
+    // CliAccount uses Solana 3 account types, while ProgramTest uses Solana 4.
+    let decoded: solana_account_v3::Account = cli.keyed_account.account.decode().unwrap();
+    let mut acc = AccountSharedData::from(Account {
+        lamports: decoded.lamports,
+        data: decoded.data,
+        owner: decoded.owner,
+        executable: decoded.executable,
+        rent_epoch: decoded.rent_epoch,
+    });
 
     let need = Rent::default().minimum_balance(acc.data().len());
     if acc.lamports() < need {

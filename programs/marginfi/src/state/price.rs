@@ -21,7 +21,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, KAMINO_MARKET_EMERGENCY,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED, JUPLEND_EMERGENCY, KAMINO_MARKET_EMERGENCY,
 };
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -35,14 +35,17 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
+use marinade_mocks::state::MinimalMarinadeState;
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
-use scope_mocks::state::{ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
+use scope_mocks::state::{ScopeDatedPrice, ScopeOraclePrices, SCOPE_ORACLE_PRICES_DISCRIMINATOR};
 use solend_mocks::state::SolendMinimalReserve;
-use std::{cell::Ref, cmp::min};
-use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
+use std::cmp::min;
+
+/// Decimal places used by Switchboard pull feed values.
+pub const SWITCHBOARD_PULL_PRECISION: usize = 18;
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
@@ -150,6 +153,11 @@ pub(crate) fn load_kamino_reserve<'info>(
 /// because the market account never reaches the pricing path.
 pub fn kamino_borrow_power(bank: &Bank, reserve: &MinimalReserve) -> bool {
     !reserve.is_emergency_mode() && !bank.get_flag(KAMINO_MARKET_EMERGENCY)
+}
+
+/// Borrow power follows the last permissionless propagation of Fluid's emergency states.
+pub fn juplend_borrow_power(bank: &Bank) -> bool {
+    !bank.get_flag(JUPLEND_EMERGENCY)
 }
 
 fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
@@ -280,6 +288,34 @@ fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80
     }
 }
 
+/// Static confidence for oracles that publish none (Switchboard, Scope): `price *
+/// oracle_max_confidence / U32_MAX`. 0 disables it; anything past `MAX_CONF_INTERVAL` (u32::MAX
+/// included) clamps at 5% of price.
+fn compute_confidence_interval(
+    price: I80F48,
+    oracle_max_confidence: u32,
+) -> MarginfiResult<I80F48> {
+    if oracle_max_confidence == 0 {
+        return Ok(I80F48::ZERO);
+    }
+
+    let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
+
+    // Note: negative prices also create negative confidence intervals (though we not anticipate
+    // negative prices in prod)
+    let conf_interval: I80F48 = price
+        .checked_mul(oracle_max_confidence)
+        .ok_or_else(math_error!())?
+        .checked_div(U32_MAX)
+        .ok_or_else(math_error!())?;
+
+    let max_conf_interval: I80F48 = price
+        .checked_mul(MAX_CONF_INTERVAL)
+        .ok_or_else(math_error!())?;
+
+    Ok(min(conf_interval, max_conf_interval))
+}
+
 struct OracleLoadContext {
     adjusted_price_feed: OraclePriceFeedAdapter,
     cache_raw_price: Option<OraclePriceWithConfidence>,
@@ -401,14 +437,18 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
                 price_feed.has_borrow_power = kamino_borrow_power(bank, &reserve);
 
-                // Apply the Kamino exchange rate in place (Scope carries no confidence to scale)
+                // Apply the Kamino exchange rate in place. The static confidence band is a
+                // fraction of `price`, so it scales with it.
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
@@ -441,16 +481,22 @@ impl OraclePriceFeedAdapter {
                     bank_config.scope_entry_index,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Apply the JupLend exchange rate in place (Scope carries no confidence to scale)
+                // Apply the JupLend exchange rate in place. The static confidence band is a
+                // fraction of `price`, so it scales with it.
                 price_feed.price = price_feed
                     .price
                     .checked_mul(multiplier)
                     .ok_or_else(math_error!())?;
+
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
@@ -961,7 +1007,7 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                        has_borrow_power: true,
+                        has_borrow_power: juplend_borrow_power(bank),
                         price: adjusted_price,
                     }),
                     cache_raw_price,
@@ -1016,6 +1062,8 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
+
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
                     cache_raw_price,
@@ -1064,6 +1112,8 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
+
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
                     cache_raw_price,
@@ -1098,7 +1148,10 @@ impl OraclePriceFeedAdapter {
                 };
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -1138,7 +1191,11 @@ impl OraclePriceFeedAdapter {
                 apply_i80f48_multiplier(&mut price_feed, kamino_rate)?;
 
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any Kamino emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: kamino_rate,
                 })
@@ -1176,8 +1233,14 @@ impl OraclePriceFeedAdapter {
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
 
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
+
                 Ok(OracleLoadContext {
-                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    adjusted_price_feed: {
+                        // Preserve any JupLend emergency restriction applied to this feed.
+                        price_feed.restrict_marinade_borrow_power(&state);
+                        OraclePriceFeedAdapter::PythPushOracle(price_feed)
+                    },
                     cache_raw_price,
                     cache_multiplier: juplend_rate,
                 })
@@ -1280,6 +1343,8 @@ impl OraclePriceFeedAdapter {
 
                 // Then apply the JupLend exchange rate to reach the deposited-token price.
                 apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
+
+                price_feed.has_borrow_power = juplend_borrow_power(bank);
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
@@ -2035,8 +2100,9 @@ impl OraclePriceFeedAdapter {
 /// Reads one entry out of a Scope feed's `OraclePrices` account.
 ///
 /// Scope stores a fixed array of 512 `DatedPrice` records; a bank names the account in
-/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Scope carries no confidence
-/// interval, so this adapter reports zero confidence and risk is expressed through weights.
+/// `oracle_keys[0]` and the record in `config.scope_entry_index`. Confidence is computed on demand
+/// from `oracle_max_confidence` (matching Switchboard semantics); collateral/debt bias is applied
+/// per `PriceAdapter`.
 #[derive(Copy, Clone, Debug)]
 pub struct ScopePriceFeed {
     pub price: I80F48,
@@ -2044,7 +2110,56 @@ pub struct ScopePriceFeed {
     has_borrow_power: bool,
 }
 
+#[cfg(test)]
 impl ScopePriceFeed {
+    pub fn new_for_tests(price: I80F48, has_borrow_power: bool) -> Self {
+        Self {
+            price,
+            last_updated_timestamp: 0,
+            has_borrow_power,
+        }
+    }
+}
+
+impl ScopePriceFeed {
+    /// Constructs a feed from a decoded Scope entry for off-chain clients.
+    ///
+    /// The caller must authenticate the account, select the configured entry, and check its
+    /// timestamp against the current time and maximum age. Unlike `load_checked`, this does not
+    /// reject stale, future, or out-of-range timestamps. The caller must also apply any integration
+    /// exchange-rate multiplier and determine borrow power from integration state. For Kamino,
+    /// borrow power depends on both reserve and market emergency flags.
+    #[cfg(not(target_os = "solana"))]
+    pub fn from_entry(entry: &ScopeDatedPrice, has_borrow_power: bool) -> MarginfiResult<Self> {
+        Self::from_validated_entry(entry, has_borrow_power)
+    }
+
+    fn from_validated_entry(
+        entry: &ScopeDatedPrice,
+        has_borrow_power: bool,
+    ) -> MarginfiResult<Self> {
+        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
+        check!(
+            entry.price.value > 0 && entry.unix_timestamp > 0,
+            MarginfiError::ScopeInvalidEntry
+        );
+        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
+        check!(
+            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
+            MarginfiError::ScopeInvalidEntry
+        );
+
+        let price = I80F48::from_num(entry.price.value)
+            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
+            .ok_or_else(math_error!())?;
+
+        Ok(Self {
+            price,
+            last_updated_timestamp: entry.unix_timestamp,
+            has_borrow_power,
+        })
+    }
+
     /// Validates the account and reads `entry_index`, without a staleness check (used by config
     /// validation, where the feed may legitimately not have been cranked yet).
     fn read_entry(ai: &AccountInfo, entry_index: u16) -> MarginfiResult<Self> {
@@ -2069,26 +2184,7 @@ impl ScopePriceFeed {
             .get(entry_index as usize)
             .ok_or(MarginfiError::ScopeInvalidEntry)?;
 
-        // A never-refreshed entry is all zeroes; reject rather than reporting a price of 0.
-        check!(
-            entry.price.value > 0 && entry.unix_timestamp > 0,
-            MarginfiError::ScopeInvalidEntry
-        );
-        // `exp` indexes the power-of-ten table; anything larger is a malformed entry.
-        check!(
-            (entry.price.exp as usize) < MAX_EXP_10_I80F48,
-            MarginfiError::ScopeInvalidEntry
-        );
-
-        let price = I80F48::from_num(entry.price.value)
-            .checked_div(EXP_10_I80F48[entry.price.exp as usize])
-            .ok_or_else(math_error!())?;
-
-        Ok(Self {
-            price,
-            last_updated_timestamp: entry.unix_timestamp,
-            has_borrow_power: true,
-        })
+        Self::from_validated_entry(entry, true)
     }
 
     pub fn load_checked(
@@ -2126,10 +2222,23 @@ impl PriceAdapter for ScopePriceFeed {
     fn get_price_of_type(
         &self,
         _oracle_price_type: OraclePriceType,
-        _bias: Option<PriceBias>,
-        _oracle_max_confidence: u32,
+        bias: Option<PriceBias>,
+        oracle_max_confidence: u32,
     ) -> MarginfiResult<I80F48> {
-        Ok(self.price)
+        let Some(bias) = bias else {
+            return Ok(self.price);
+        };
+        let confidence = compute_confidence_interval(self.price, oracle_max_confidence)?;
+        match bias {
+            PriceBias::Low => Ok(self
+                .price
+                .checked_sub(confidence)
+                .ok_or_else(math_error!())?),
+            PriceBias::High => Ok(self
+                .price
+                .checked_add(confidence)
+                .ok_or_else(math_error!())?),
+        }
     }
 
     fn get_price_and_confidence_of_type(
@@ -2139,8 +2248,7 @@ impl PriceAdapter for ScopePriceFeed {
     ) -> MarginfiResult<OraclePriceWithConfidence> {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
-            // Scope prices carry no confidence interval.
-            confidence: I80F48::ZERO,
+            confidence: compute_confidence_interval(self.price, oracle_max_confidence)?,
             source_time: self.last_updated_timestamp as i64,
         })
     }
@@ -2197,10 +2305,10 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let (lite_feed, last_updated) = load_swb_lite_feed(ai_data)?;
+        let lite_feed = parse_swb_pull_feed(&ai_data)?;
 
         // Check staleness
-        if current_timestamp.saturating_sub(last_updated) > max_age as i64 {
+        if current_timestamp.saturating_sub(lite_feed.last_update_timestamp) > max_age as i64 {
             return err!(MarginfiError::SwitchboardStalePrice);
         }
 
@@ -2218,7 +2326,7 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        load_swb_lite_feed(ai_data)?;
+        parse_swb_pull_feed(&ai_data)?;
 
         Ok(())
     }
@@ -2227,7 +2335,7 @@ impl SwitchboardPullPriceFeed {
         let sw_result = self.feed.result;
         // Note: Pull oracles support mean (result.mean) or median (result.value)
         let price: I80F48 = I80F48::from_num(sw_result.value)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
+            .checked_div(EXP_10_I80F48[SWITCHBOARD_PULL_PRECISION])
             .ok_or_else(math_error!())?;
         Ok(price)
     }
@@ -2235,27 +2343,8 @@ impl SwitchboardPullPriceFeed {
     /// 0 disables confidence adjustment, u32::MAX (or anything exceeding `MAX_CONF_INTERVAL`) will
     /// clamp at `MAX_CONF_INTERVAL`.
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
-        if oracle_max_confidence == 0 {
-            return Ok(I80F48::ZERO);
-        }
-
         let price: I80F48 = self.get_price()?;
-        let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
-
-        // Note: negative prices also create negative confidence intervals (though we not anticipate
-        // negative prices in prod)
-        let conf_interval: I80F48 = price
-            .checked_mul(oracle_max_confidence)
-            .ok_or_else(math_error!())?
-            .checked_div(U32_MAX)
-            .ok_or_else(math_error!())?;
-
-        // Clamp to MAX_CONF_INTERVAL (5%) of price
-        let max_conf_interval: I80F48 = price
-            .checked_mul(MAX_CONF_INTERVAL)
-            .ok_or_else(math_error!())?;
-
-        Ok(min(conf_interval, max_conf_interval))
+        compute_confidence_interval(price, oracle_max_confidence)
     }
 }
 
@@ -2305,62 +2394,42 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
     }
 }
 
-/// Parse a Switchboard pull feed into the lite form we retain, plus its `last_update_timestamp`
-/// (for the caller's staleness check).
+/// Read the fields used by marginfi from the Switchboard pull feed wire layout. Offsets include the
+/// eight-byte account discriminator. Reading little-endian bytes directly avoids the different i128
+/// alignment requirements of host and SBF targets, without copying the entire 3.2 KB account onto
+/// the SBF stack.
 ///
-/// `PullFeedAccountData` is ~3.2 KB and its 16-byte alignment comes from the `i128` fields in
-/// `CurrentResult`/`OracleSubmission`. The two targets disagree on that alignment, so we parse
-/// differently per target:
-///
-/// * On-chain (`target_os = "solana"`): `i128` is 8-byte aligned (the SBF data layout has no
-///   `i128:128` entry, so it inherits `i64`'s 8-byte alignment), and account data sits at an
-///   8-aligned offset, so upstream's zero-copy `PullFeedAccountData::parse` succeeds. We use it to
-///   avoid copying ~3.2 KB onto the 4 KB BPF stack on every price read.
-/// * Off-chain (host / `client`): native `i128` is 16-byte aligned, so the data at offset 8 is
-///   misaligned and `parse`'s `bytemuck::try_from_bytes` fails with `AccountDeserializeError`. We
-///   copy via `parse_swb_ignore_alignment` (`try_pod_read_unaligned`), which has no alignment
-///   requirement.
-///
-/// Verified alignment-sensitive upstream through switchboard-sdk `main` and the pinned rev f1a570a
-/// (2026-06-01) — `parse` still returns a `Ref` via `try_from_bytes`, so the off-chain copy stays.
-fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccountData, i64)> {
-    #[cfg(target_os = "solana")]
-    {
-        let feed = PullFeedAccountData::parse(data)
-            .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
-        Ok((
-            LitePullFeedAccountData::from(&*feed),
-            feed.last_update_timestamp,
-        ))
-    }
-    #[cfg(not(target_os = "solana"))]
-    {
-        let feed = parse_swb_ignore_alignment(data)?;
-        Ok((
-            LitePullFeedAccountData::from(&feed),
-            feed.last_update_timestamp,
-        ))
-    }
-}
+/// * This is used only for legacy test suites that still utilize Switchboard: the mainnet program
+/// is defunct, this should not be interpreted as a substitute for using swb's crate if they were
+/// ever to be supported again.
+pub fn parse_swb_pull_feed(data: &[u8]) -> MarginfiResult<LitePullFeedAccountData> {
+    const ACCOUNT_SIZE: usize = 3208;
+    const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
+    #[cfg(feature = "client")]
+    const FEED_HASH_OFFSET: usize = 2120;
+    const TIMESTAMP_OFFSET: usize = 2216;
+    const VALUE_OFFSET: usize = 2264;
+    const SLOT_OFFSET: usize = 2368;
 
-/// The same as PullFeedAccountData::parse but completely ignores input alignment by copying the
-/// bytes (`try_pod_read_unaligned`). Used off-chain, where native `i128` alignment (16) makes the
-/// zero-copy reference cast fail — see [`load_swb_lite_feed`]. Also reused by tests/clients.
-pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFeedAccountData> {
-    if data.len() < 8 + std::mem::size_of::<PullFeedAccountData>() {
+    if data.len() < ACCOUNT_SIZE || data[..8] != DISCRIMINATOR {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
-    if &data[..8] != PullFeedAccountData::DISCRIMINATOR {
-        return err!(MarginfiError::SwitchboardInvalidAccount);
-    }
-
-    let feed = bytemuck::try_pod_read_unaligned::<PullFeedAccountData>(
-        &data[8..8 + std::mem::size_of::<PullFeedAccountData>()],
-    )
-    .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
-
-    Ok(feed)
+    Ok(LitePullFeedAccountData {
+        result: SwitchboardPullResult {
+            value: i128::from_le_bytes(data[VALUE_OFFSET..VALUE_OFFSET + 16].try_into().unwrap()),
+            slot: u64::from_le_bytes(data[SLOT_OFFSET..SLOT_OFFSET + 8].try_into().unwrap()),
+        },
+        #[cfg(feature = "client")]
+        feed_hash: data[FEED_HASH_OFFSET..FEED_HASH_OFFSET + 32]
+            .try_into()
+            .unwrap(),
+        last_update_timestamp: i64::from_le_bytes(
+            data[TIMESTAMP_OFFSET..TIMESTAMP_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        ),
+    })
 }
 
 pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpdateV2> {
@@ -2390,6 +2459,11 @@ pub struct PythPushOraclePriceFeed {
 }
 
 impl PythPushOraclePriceFeed {
+    /// Disable has_borrow_power if the Marinade state is paused, otherwise no-op.
+    fn restrict_marinade_borrow_power(&mut self, state: &MinimalMarinadeState) {
+        self.has_borrow_power &= !state.is_paused();
+    }
+
     /// Load a Pyth Price feed.
     ///
     /// Security assumptions:
@@ -2631,36 +2705,19 @@ impl PriceAdapter for PythPushOraclePriceFeed {
     }
 }
 
-/// A slimmed down version of the PullFeedAccountData struct copied from the
-/// switchboard-on-demand/src/pull_feed.rs
+/// Fields of a Switchboard pull feed used by marginfi and its clients.
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct LitePullFeedAccountData {
-    pub result: CurrentResult,
+    pub result: SwitchboardPullResult,
     #[cfg(feature = "client")]
     pub feed_hash: [u8; 32],
     pub last_update_timestamp: i64,
 }
 
-impl From<&PullFeedAccountData> for LitePullFeedAccountData {
-    fn from(feed: &PullFeedAccountData) -> Self {
-        Self {
-            result: feed.result,
-            #[cfg(feature = "client")]
-            feed_hash: feed.feed_hash,
-            last_update_timestamp: feed.last_update_timestamp,
-        }
-    }
-}
-
-impl From<Ref<'_, PullFeedAccountData>> for LitePullFeedAccountData {
-    fn from(feed: Ref<'_, PullFeedAccountData>) -> Self {
-        Self {
-            result: feed.result,
-            #[cfg(feature = "client")]
-            feed_hash: feed.feed_hash,
-            last_update_timestamp: feed.last_update_timestamp,
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub struct SwitchboardPullResult {
+    pub value: i128,
+    pub slot: u64,
 }
 
 #[inline(always)]
@@ -2743,26 +2800,49 @@ mod tests {
         SwitchboardPullPriceFeed {
             has_borrow_power: true,
             feed: Box::new(LitePullFeedAccountData {
-                result: CurrentResult {
-                    value,
-                    // Deliberately non-zero to prove confidence no longer reads Switchboard std_dev.
-                    std_dev: value / 2,
-                    mean: value,
-                    range: 0,
-                    min_value: value,
-                    max_value: value,
-                    num_samples: 1,
-                    submission_idx: 0,
-                    padding1: [0; 6],
-                    slot: 0,
-                    min_slot: 0,
-                    max_slot: 0,
-                },
+                result: SwitchboardPullResult { value, slot: 0 },
                 #[cfg(feature = "client")]
                 feed_hash: [0; 32],
                 last_update_timestamp: 42,
             }),
         }
+    }
+
+    #[test]
+    fn swb_pull_parses_fixture_and_unaligned_data() {
+        let fixture = include_bytes!("../../../../test-utils/data/swb_pull_sol_price.bin");
+        let mut unaligned = vec![0];
+        unaligned.extend_from_slice(fixture);
+        let feed = parse_swb_pull_feed(&unaligned[1..]).unwrap();
+        assert_eq!(feed.result.value, 155_594_045_270_000_000_000);
+        assert_eq!(feed.result.slot, 282_612_970);
+        assert_eq!(feed.last_update_timestamp, 1_723_244_190);
+        #[cfg(feature = "client")]
+        assert_eq!(
+            feed.feed_hash,
+            hex_to_bytes("4c935636f2523f6aeeb6dc7b7dab0e86a13ff2c794f7895fc78851d69fdb593b")
+                .as_slice()
+        );
+
+        assert!(parse_swb_pull_feed(&fixture[..fixture.len() - 1]).is_err());
+        unaligned[1] ^= 1;
+        assert!(parse_swb_pull_feed(&unaligned[1..]).is_err());
+        assert!(parse_swb_pull_feed(&[]).is_err());
+    }
+
+    #[test]
+    fn swb_pull_checks_owner_and_age() {
+        let mut data =
+            include_bytes!("../../../../test-utils/data/swb_pull_sol_price.bin").to_vec();
+        let key = Pubkey::new_unique();
+        let mut lamports = 1;
+        let owner = Pubkey::new_unique();
+        let ai = test_account_info(&key, &mut lamports, &mut data, &owner);
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_190, 60).is_err());
+
+        let ai = test_account_info(&key, &mut lamports, &mut data, &SWITCHBOARD_PULL_ID);
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_250, 60).is_ok());
+        assert!(SwitchboardPullPriceFeed::load_checked(&ai, 1_723_244_251, 60).is_err());
     }
 
     #[test]
@@ -2839,10 +2919,41 @@ mod tests {
     }
 
     #[test]
+    fn marinade_pause_preserves_existing_borrow_power_restrictions() {
+        use bytemuck::Zeroable;
+
+        for venue_allows_borrow in [false, true] {
+            for paused in [false, true] {
+                let mut state = MinimalMarinadeState::zeroed();
+                state.paused = u8::from(paused);
+                let price = || price_update::Price {
+                    price: 100,
+                    conf: 2,
+                    exponent: 0,
+                    publish_time: 42,
+                };
+                let mut feed = PythPushOraclePriceFeed {
+                    price: Box::new(price()),
+                    ema_price: Box::new(price()),
+                    has_borrow_power: venue_allows_borrow,
+                };
+
+                feed.restrict_marinade_borrow_power(&state);
+
+                assert_eq!(feed.has_borrow_power(), venue_allows_borrow && !paused);
+                assert_eq!(feed.price.price, 100);
+                assert_eq!(feed.ema_price.price, 100);
+            }
+        }
+    }
+
+    #[test]
     fn marinade_state_field_offsets_round_trip() {
-        // Round-trip the balance offsets (validated against the live account) to prove the padding.
-        let mut raw = [0u8; core::mem::size_of::<MinimalMarinadeState>()];
-        assert_eq!(raw.len(), 568);
+        use bytemuck::Zeroable;
+        // Round-trip the field offsets (validated against the live account) to prove the padding.
+        let mut s = MinimalMarinadeState::zeroed();
+        let raw = bytemuck::bytes_of_mut(&mut s);
+        assert_eq!(raw.len(), 608);
         raw[218..226].copy_from_slice(&11u64.to_le_bytes()); // delayed_unstake_cooling_down
         raw[368..376].copy_from_slice(&22u64.to_le_bytes()); // total_active_balance
         raw[488..496].copy_from_slice(&33u64.to_le_bytes()); // available_reserve_balance
@@ -2850,9 +2961,10 @@ mod tests {
         raw[504..512].copy_from_slice(&55u64.to_le_bytes()); // msol_price
         raw[520..528].copy_from_slice(&66u64.to_le_bytes()); // circulating_ticket_balance
         raw[560..568].copy_from_slice(&77u64.to_le_bytes()); // emergency_cooling_down
-        let s: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
+        raw[600] = 1; // paused
         assert_eq!(s.msol_price(), 55);
         assert_eq!(s.msol_supply(), 44);
+        assert!(s.is_paused());
         // total_virtual_staked = active(22) + delayed(11) + emergency(77) + reserve(33) - tickets(66)
         assert_eq!(s.total_virtual_staked_lamports(), Some(77));
     }
@@ -3423,6 +3535,116 @@ mod tests {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
     }
 
+    #[cfg(not(target_os = "solana"))]
+    #[test]
+    fn scope_from_entry_matches_account_entry_validation() {
+        let key = Pubkey::new_unique();
+        for (value, exp, timestamp) in [
+            (10_344_510_800, 8, 1_000),
+            (123, 0, 1),
+            (1, (MAX_EXP_10_I80F48 - 1) as u64, 1),
+            (0, 8, 1_000),
+            (1, 8, 0),
+            (1, MAX_EXP_10_I80F48 as u64, 1),
+        ] {
+            let entry = ScopeDatedPrice {
+                price: ScopePrice { value, exp },
+                unix_timestamp: timestamp,
+                ..ScopeDatedPrice::default()
+            };
+            let mut data = scope_account_data(42, value, exp, timestamp);
+            let mut lamports = 0;
+            let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+            let account_feed = ScopePriceFeed::read_entry(&ai, 42);
+            let client_feed = ScopePriceFeed::from_entry(&entry, false);
+            match (account_feed, client_feed) {
+                (Ok(account), Ok(client)) => {
+                    assert_eq!(client.price, account.price);
+                    assert_eq!(
+                        client.last_updated_timestamp,
+                        account.last_updated_timestamp
+                    );
+                    assert!(account.has_borrow_power());
+                    assert!(!client.has_borrow_power());
+                    assert!(ScopePriceFeed::from_entry(&entry, true)
+                        .unwrap()
+                        .has_borrow_power());
+                }
+                (Err(account_error), Err(client_error)) => {
+                    assert_eq!(account_error, client_error);
+                }
+                _ => panic!("account and decoded-entry validation disagree"),
+            }
+        }
+    }
+
+    #[test]
+    fn juplend_fixed_and_scope_emergency_preserve_price_without_borrow_power() {
+        use bytemuck::Zeroable;
+        use juplend_mocks::state::LENDING_DISCRIMINATOR;
+
+        let lending_key = Pubkey::new_unique();
+        let feed_key = Pubkey::new_unique();
+        let mut lending = JuplendLending::zeroed();
+        lending.token_exchange_price = EXCHANGE_PRICES_PRECISION as u64;
+        lending.last_update_timestamp = 1_000;
+        let mut lending_data = LENDING_DISCRIMINATOR.to_vec();
+        lending_data.extend_from_slice(bytemuck::bytes_of(&lending));
+        let mut lending_lamports = 0;
+        let lending_ai = scope_ai(
+            &lending_key,
+            &juplend_mocks::ID,
+            &mut lending_lamports,
+            &mut lending_data,
+        );
+        let mut feed_data = scope_account_data(42, 100, 2, 1_000);
+        let mut feed_lamports = 0;
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let mut bank = Bank::zeroed();
+        bank.config.asset_tag = ASSET_TAG_JUPLEND;
+        bank.config.oracle_keys[0] = feed_key;
+        bank.config.oracle_keys[1] = lending_key;
+        bank.config.scope_entry_index = 42;
+        bank.config.fixed_price = I80F48::ONE.into();
+        let clock = Clock {
+            unix_timestamp: 1_000,
+            ..Clock::default()
+        };
+
+        let fixed_ais = [lending_ai.clone()];
+        let scope_ais = [feed_ai.clone(), lending_ai.clone()];
+        for (setup, ais) in [
+            (OracleSetup::FixedJuplend, fixed_ais.as_slice()),
+            (OracleSetup::ScopeJuplend, scope_ais.as_slice()),
+        ] {
+            bank.config.oracle_setup = setup;
+            bank.flags &= !JUPLEND_EMERGENCY;
+            let active =
+                OraclePriceFeedAdapter::try_from_bank_with_max_age(&bank, ais, &clock, 100)
+                    .unwrap();
+            assert!(active.has_borrow_power());
+            let price = active
+                .get_price_of_type(OraclePriceType::RealTime, None, 0)
+                .unwrap();
+            bank.flags |= JUPLEND_EMERGENCY;
+            let halted =
+                OraclePriceFeedAdapter::try_from_bank_with_max_age(&bank, ais, &clock, 100)
+                    .unwrap();
+            assert!(!halted.has_borrow_power());
+            assert_eq!(
+                halted
+                    .get_price_of_type(OraclePriceType::RealTime, None, 0)
+                    .unwrap(),
+                price
+            );
+        }
+    }
+
     #[test]
     fn scope_reads_the_configured_entry_and_rejects_stale_prices() {
         let key = Pubkey::new_unique();
@@ -3435,9 +3657,9 @@ mod tests {
         // value/10^exp, within I80F48 rounding of the decimal literal
         assert!((feed.price - I80F48::from_num(103.445108)).abs() < I80F48::from_num(1e-9));
         assert_eq!(feed.last_updated_timestamp, 1000);
-        // Scope carries no confidence, and bias must not move the price.
+        // With oracle_max_confidence=0, confidence is zero, so bias has no effect.
         assert_eq!(
-            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), u32::MAX)
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
                 .unwrap(),
             feed.price
         );
@@ -3447,6 +3669,84 @@ mod tests {
             ScopePriceFeed::load_checked(&ai, 1061, 60, 42).unwrap_err(),
             MarginfiError::ScopeStalePrice.into()
         );
+    }
+
+    #[test]
+    fn scope_static_confidence_biases_collateral_down_and_debt_up() {
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        // entry 10 = 100.0
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let feed = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+        let price = I80F48::from_num(100);
+        assert_eq!(feed.price, price);
+
+        let price_of = |bias, conf| {
+            feed.get_price_of_type(OraclePriceType::RealTime, bias, conf)
+                .unwrap()
+        };
+
+        // 0 disables the band in both directions
+        assert_eq!(price_of(Some(PriceBias::Low), 0), price);
+        assert_eq!(price_of(Some(PriceBias::High), 0), price);
+
+        // 1%: collateral worth ~99, debt ~101, unbiased untouched
+        let one_percent = u32::MAX / 100;
+        let reported = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap();
+        assert_eq!(reported.price, price);
+        assert_eq!(reported.source_time, 1000);
+        assert!((reported.confidence - I80F48::ONE).abs() < I80F48::from_num(1e-6));
+        assert_eq!(price_of(None, one_percent), price);
+        assert_eq!(
+            price_of(Some(PriceBias::Low), one_percent),
+            price - reported.confidence
+        );
+        assert_eq!(
+            price_of(Some(PriceBias::High), one_percent),
+            price + reported.confidence
+        );
+
+        // Anything past 5% clamps at MAX_CONF_INTERVAL
+        let clamped = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, u32::MAX)
+            .unwrap()
+            .confidence;
+        assert_eq!(clamped, price * MAX_CONF_INTERVAL);
+        assert_eq!(price_of(Some(PriceBias::Low), u32::MAX), price - clamped);
+        assert_eq!(price_of(Some(PriceBias::High), u32::MAX), price + clamped);
+    }
+
+    #[test]
+    fn scope_static_confidence_scales_with_exchange_rate() {
+        // ScopeKamino/ScopeJuplend scale `price` in place by the venue exchange rate before bias is
+        // applied; the band is proportional, so it must scale by the same factor.
+        let key = Pubkey::new_unique();
+        let mut lamports = 0u64;
+        let mut data = scope_account_data(10, 100_000_000, 6, 1000);
+        let ai = scope_ai(&key, &SCOPE_PROGRAM_ID, &mut lamports, &mut data);
+        let raw = ScopePriceFeed::load_checked(&ai, 1050, 100, 10).unwrap();
+        let multiplier = I80F48::from_num(1.5);
+        let mut scaled = raw;
+        scaled.price = raw.price * multiplier;
+
+        let one_percent = u32::MAX / 100;
+        let raw_conf = raw
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap()
+            .confidence;
+        let scaled_conf = scaled
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap()
+            .confidence;
+        assert!((scaled_conf - raw_conf * multiplier).abs() < I80F48::from_num(1e-9));
+
+        let scaled_low = scaled
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), one_percent)
+            .unwrap();
+        assert!((scaled_low - (raw.price - raw_conf) * multiplier).abs() < I80F48::from_num(1e-9));
     }
 
     #[test]

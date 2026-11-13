@@ -570,7 +570,69 @@ is very small (0.01%), but here the insurance fee brings it up to 2.51%.
 
 In some edge cases, classic liquidation can enable the liquidator to repay while leaving a small
 amount of liability dust in their own account. This is extremely difficult to do on purpose, since
-the repay amount is not known at call time. It is also not scalable since it requires a valid liquidation target to achieve. Such dust may be settled into bad debt at account closure, but is typically so nominal it does not even reach 1 token-atom.
+the repay amount is not known at call time. It is also not scalable since it requires a valid
+liquidation target to achieve. Such dust may be settled into bad debt at account closure, but is
+typically so nominal it does not even reach 1 token-atom.
+
+### Receivership Liquidators Can Avoid Clearing Liquidation Tags By Firing In Small Clips
+
+The liquidation tag doesn't reset if less than 25% of the unhealthy balance was repaid. Liquidators
+might then try to liquidate a user in sub-25-percent-clips to avoid resetting their tag and allowing
+the premium to keep growing.
+
+This is by design and mitigated by market forces. There are many third party liquidators. Only one
+liquidation (per sender) can typically land in a single tx due to tx limits (though bundles can land
+several, at a higher cost). A "greedy" liquidator attempting to liquidate in sub-25% clips to avoid
+tag-resetting will inherently race against a greedier liquidator that wants the entire eligible
+amount. Most liquidators simply want to optimize their profit within one tx: liquidators attempting
+to "save an account for later" will compete against that profit motive and likely fail.
+
+We cannot allow the tag to be cleared by a liquidation of any size (or the eligible user would just
+liquidate themselves for 1 lamport at regular intervals). Tracking cumulative progress is too
+cumbersome because the amount eligible for liquidation also fluctuates with prices.
+
+### Dust Balances Can Be Skipped During Orders/Liquidation/etc
+
+When a Balance is below the EMPTY_BALANCE_THRESHOLD (1 share), start/end flows such as receivership
+liquidation and Order fulfillment ignore that Balance. This means the executor/keeper can
+theoretically withdraw them. However, balances below the dust threshold are usually worth less than
+1-token-atom and are generally not transferable. We can consider the worst-case where the dust has
+above-threshold value: for BTC (with 8 decimals), assuming EMPTY_BALANCE_THRESHOLD is 1 share,
+assuming the user has .99999999 shares, and asset_share_value > 1, the attacker can claim 1 satoshi,
+which is around 10 cents in October 2026. Essentially the keeper can take up to asset_share_value
+satoshis, so if the asset_share_value is >2 then they can claim 2 and so forth. The
+asset_share_value rarely exceeds 2 even on banks that have sustained interest for several years.
+
+
+### Some Mathematical Protections Break When Share Value > 2^48
+
+There are certain protections that break down when the asset or liability share_value exceed 2^48.
+While reports regarding these are generally bounty eligible, they are capped to WONTFIX/INFO status
+unless paired with a mechanism that can reasonably raise the share value to this threshold, which
+currently would require centuries at max interest. One such bounty-eligible report involved emission
+donation, which is now prevented from raising the asset_share_value beyond a certain threshold for
+this reason.
+
+### Large Confidence Bands Can Walk Circuit Breaker Windows Up Faster
+
+The long-window deviation check subtracts the oracle confidence from the measured price move.
+Assuming a confidence of just under 5%, one 24h window admits a move of up to 1.03 / (1 - 0.05) =
++8.42% above the window reference with zero circuit breaker trips. A clean pulse then re-anchors
+this window.
+
+We consider this an acceptable design tradeoff: sustained poor confidence is rare, and the effect is
+minimal. The circuit breaker feature is intended to capture large moves, and walking up slightly
+more than would perhaps be expected, only during times of poor confidence, is acceptable. 
+
+### Empty Fee Pool Lets Keepers Incorrectly Earn Tips
+
+Alice funds a fee account and opens a rebalance Order. Bob fills it, escrowing a tip T. Alice then
+closes her fee account, returning the rent R. When Bob goes to settle his tip, let's assume he
+didn't earn it (rebalance failed to get a better yield), it should now be returned to the fee pool.
+The fee pool needs R, the rent, to be reopened. To avoid Alice griefing in this manner to steal R
+from the Keeper, the Keeper gets to keep T instead -- this is Alice's fault for draining her fee
+pool. At some point we may instead reopen the fee pool if T > R, but the current behavior
+discourages trolls from closing their fee pool.
 
 ### Interest and/or Emissions Deposits Exceed The Deposit Cap
 
@@ -684,3 +746,40 @@ the doc on `should_skip_rate_limit`:
 /// Rebalance is an internal same-mint move (withdraw from one bank, deposit into another), so it
 /// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
 ```
+
+### Staked Bank Propagation Wipes Inidividually Configured Settings
+
+Some settings, including e.g. the FREEZE_SETTINGS flag, are wiped when a Staked bank accepts
+propagation from the Staked Settings. This is by design: Staked banks first priority is to respond
+to propagation, their ability to be individually configured is only for testing and compatibility
+purposes; staked banks are not intended to be individually configured in production.
+
+### Premium/Profit Limits Can be "Exceeded" at High Confidence
+
+Some might argue that when confidence is poor (i.e., large) we give more than the expected
+premium/profit for liquidation, order fulfillment, etc.
+
+This is because the liquidator must repay debts using seized assets on the actual open market. When
+confidence is poor, the liquidator also pays a premium to swap asset -> debt, above any normal
+market slippage and AMM fees.
+
+For example, let's say the liquidation fee is 2.5%, confidence on A is 2% and confidence on B is 2%.
+Let's say both A and B have a market price of $100. The liquidator is holding A and wants to
+liquidate a position where a user is lending A and borrowing B. They get a quote to swap A -> B. In
+this scenario, the quote is often inclusive of confidence: sellers of A get somewhere between
+~$98-100, buyers of B pay ~$100-102. In other words, you could say confidence reflects the bid-ask
+spread in the spot markets for A or B. Instantaneous buyers are always forced to take the best bid
+or ask on the books, they cannot trade at the median between them (which is the spot price itself).
+As the liquidator receives a confidence-adjusted quote, they cannot liquidate this A/B position
+without taking a loss; consequently, the position will go down further and may enter bad debt. 
+
+We use the confidence-adjusted price to reflect market pricing during periods of low confidence, to
+guarantee liquidators will be able to maintain solvency. If liquidators could actually sell A at
+$100 and buy B at $100 even when confidence is 2%, we would not need the adjustment.
+
+Likewise for Keepers: the risk engine always prices assets at price + confidence and liabilities at
+price - confidence. If you ignore confidence, the keeper might appear to retain more than the
+configured max equity loss, but when confidence is available, we explicitly treat it as a component
+of the equity price.
+
+In summary, the confidence-adjusted price is the true "market" price from our perspective.

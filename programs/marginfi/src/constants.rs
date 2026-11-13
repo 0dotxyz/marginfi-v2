@@ -57,9 +57,13 @@ cfg_if::cfg_if! {
 /// Minimum share supply before a bank accepts a permissionless same-mint emissions donation.
 pub const MIN_EMISSIONS_SHARE_SUPPLY: I80F48 = I80F48!(1_048_576); // 2^20
 
+/// Exclusive upper bound on asset share value after an emissions donation.
+pub const MAX_EMISSIONS_ASSET_SHARE_VALUE: I80F48 = I80F48!(1_000);
+
 pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111111111111111");
 pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
+pub const DFLOW_KEY: Pubkey = pubkey!("DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH");
 pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 pub const SOLEND_PROGRAM_ID: Pubkey = pubkey!("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");

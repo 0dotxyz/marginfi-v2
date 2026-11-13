@@ -1,11 +1,13 @@
-use crate::constants::MIN_EMISSIONS_SHARE_SUPPLY;
+use crate::constants::{MAX_EMISSIONS_ASSET_SHARE_VALUE, MIN_EMISSIONS_SHARE_SUPPLY};
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
 use crate::ix_utils;
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
-use crate::state::emode::{check_same_asset_fee, EmodeSettingsImpl};
+use crate::state::emode::{
+    check_same_asset_fee, check_same_asset_weight_ordering, EmodeSettingsImpl,
+};
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
@@ -135,20 +137,36 @@ fn configure_bank(
             )?;
         }
 
+        let previous_liability_weight_init: I80F48 = bank.config.liability_weight_init.into();
+        let previous_liability_weight_maint: I80F48 = bank.config.liability_weight_maint.into();
+
         // Settings are not frozen, everything updates
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        let total_liquidation_fee = bank.total_liquidation_fee();
-        bank.emode.validate_entries_with_liability_weights(
-            &bank.config,
-            total_liquidation_fee,
-            group.emode_max_init_leverage,
-            group.emode_max_maint_leverage,
-        )?;
-        if bank_config.liquidation_liquidator_fee.is_some()
-            || bank_config.liquidation_insurance_fee.is_some()
+        let fees_changed = bank_config.liquidation_liquidator_fee.is_some()
+            || bank_config.liquidation_insurance_fee.is_some();
+        // `configure_gov` can lower the group caps below stored entries without re-checking banks.
+        if fees_changed
+            || bank_config.liability_weight_init.is_some()
+            || bank_config.liability_weight_maint.is_some()
         {
+            let total_liquidation_fee = bank.total_liquidation_fee();
+            bank.emode.validate_entries_with_liability_weights(
+                &bank.config,
+                total_liquidation_fee,
+                group.emode_max_init_leverage,
+                group.emode_max_maint_leverage,
+            )?;
+        }
+        // Lower initial or higher maintenance liability weights cannot worsen an already inverted
+        // same-asset-emode ordering, even if they do not fix the inversion.
+        if I80F48::from(bank.config.liability_weight_init) > previous_liability_weight_init
+            || I80F48::from(bank.config.liability_weight_maint) < previous_liability_weight_maint
+        {
+            check_same_asset_weight_ordering(bank, group)?;
+        }
+        if fees_changed {
             check_same_asset_fee(bank, group)?;
         }
 
@@ -249,6 +267,19 @@ pub fn lending_pool_emissions_deposit(
         ctx.accounts.bank.key(),
     )?;
 
+    let total_assets = bank.get_asset_amount(total_asset_shares)?;
+    let updated_total_assets = total_assets
+        .checked_add(I80F48::from_num(amount))
+        .ok_or_else(math_error!())?;
+    let new_asset_share_value = updated_total_assets
+        .checked_div(total_asset_shares)
+        .ok_or_else(math_error!())?;
+    check!(
+        new_asset_share_value < MAX_EMISSIONS_ASSET_SHARE_VALUE,
+        MarginfiError::EmissionsUpdateError,
+        "Emissions would raise asset share value to or above the limit"
+    );
+
     transfer_checked(
         CpiContext::new(
             ctx.accounts.token_program.key(),
@@ -263,15 +294,7 @@ pub fn lending_pool_emissions_deposit(
         ctx.accounts.mint.decimals,
     )?;
 
-    let total_assets = bank.get_asset_amount(total_asset_shares)?;
-    let updated_total_assets = total_assets
-        .checked_add(I80F48::from_num(amount))
-        .ok_or_else(math_error!())?;
-
-    bank.asset_share_value = updated_total_assets
-        .checked_div(total_asset_shares)
-        .ok_or_else(math_error!())?
-        .into();
+    bank.asset_share_value = new_asset_share_value.into();
 
     bank.update_bank_cache(&group)?;
 

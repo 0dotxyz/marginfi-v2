@@ -20,15 +20,14 @@ defaults:
     working-directory: .
 
 env:
-  RUST_TOOLCHAIN: 1.90.0
-  SOLANA_CLI_VERSION: 3.1.13
-  ANCHOR_CLI_VERSION: 1.0.2
+  RUST_TOOLCHAIN: 1.95.0
+  SOLANA_CLI_VERSION: 4.1.2
+  ANCHOR_CLI_VERSION: 1.2.2
   CARGO_TERM_COLOR: always
   # Trident-stack-only env. Kept here so the whole file shares one
   # convention; the libfuzzer + anchor stacks ignore these.
   TRIDENT_VERSION: "0.13.0-rc.4"
-  # cargo-fuzz 0.13.2 pulls cargo-platform 0.3.3, whose MSRV is rustc 1.91.
-  # Keep the libfuzzer job on a version compatible with the repo's 1.90 toolchain.
+  # Keep the libfuzzer version pinned for reproducible CI builds.
   CARGO_FUZZ_VERSION: "0.13.1"
   # `anchor idl build` writes `"address": ""` (Anchor 0.30+ moved the
   # address out of the source). Trident bakes the address into
@@ -100,9 +99,9 @@ jobs:
       with:
         path: |
           target/sbf
-        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-sbf-split-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.toml', 'Cargo.lock', 'scripts/build-workspace.sh', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**', 'type-crate/**', 'id-crate/**') }}
         restore-keys: |
-          anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+          anchor-sbf-split-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-
     - name: Cache Anchor localnet build (TS bankrun consumers)
       uses: actions/cache@v4
       with:
@@ -110,17 +109,17 @@ jobs:
           target/deploy
           target/idl
           target/types
-        key: anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-localnet-sbpf3-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
-          anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+          anchor-localnet-sbpf3-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
     - name: Build workspace (mainnet IDs → target/sbf/)
       uses: ./.github/actions/build-workspace/
     - name: Build mocks (target/deploy/)
-      run: anchor build -p mocks --ignore-keys
+      run: anchor build --arch v3 -p mocks --ignore-keys
     - name: Build transfer-hook (target/deploy/)
-      run: anchor build -p test_transfer_hook --no-idl
+      run: anchor build --arch v3 -p test_transfer_hook --no-idl
     - name: Build marginfi localnet (target/deploy/)
-      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+      run: anchor build --arch v3 -p marginfi -- --no-default-features --features custom-heap
     - name: Upload anchor-build artifact
       uses: actions/upload-artifact@v4
       with:
@@ -302,11 +301,11 @@ jobs:
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
+        key: anchor-transfer-hook-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl --ignore-keys
+      run: anchor build --arch v3 -p test_transfer_hook --no-idl --ignore-keys
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
@@ -317,15 +316,15 @@ jobs:
           target/deploy/mocks.so
           target/idl/mocks.json
           target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
+        key: anchor-mocks-sbpf3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks --ignore-keys
+      run: anchor build --arch v3 -p mocks --ignore-keys
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
-      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+      run: anchor build --arch v3 -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
       run: |
@@ -598,3 +597,94 @@ jobs:
         FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
         FUZZ_FLOWS_PER_ITER: '100'
       run: trident fuzz run ${{ matrix.test.target }} -e invariants
+
+  # ────────────────────────────────────────────────────────────────────
+  # Crucible fuzz harness (fuzz/crucible) — stateful invariant fuzzing on
+  # FuzzCorp. Same `if:` guard as trident. Builds marginfi with debug info
+  # (FuzzCorp maps coverage to source lines; debug info changes codegen,
+  # so this cannot reuse anchor-build's .so), reuses anchor-build's IDL,
+  # compiles the harness, smoke-runs it and assembles the bundle. That is
+  # the whole check for PRs into a release branch. Release PRs into main
+  # also upload the bundle; every feature merged into the release branch
+  # updates that PR, so each merge gets a fuzz campaign.
+  # ────────────────────────────────────────────────────────────────────
+
+  fuzz-crucible:
+    name: Fuzz (crucible)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    needs: [ anchor-build ]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-common/
+    - uses: ./.github/actions/setup-solana-cli/
+    - name: Download anchor-build artifact (IDL)
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: anchor-build
+    # llvm: dwarfdump for the coverage check in build-bundle.sh.
+    # Rust stable: the harness's own toolchain (fuzz/crucible/rust-toolchain.toml).
+    - name: Install llvm and Rust stable
+      run: |
+        sudo apt-get update && sudo apt-get install -y llvm
+        rustup toolchain install stable --profile minimal
+    # A PR can only reuse caches saved by its own earlier runs (or by its
+    # base branch, which has none). Feature PRs are short-lived, so saving
+    # ~1 GB per PR would only evict caches the other jobs rely on; the
+    # release PR is long-lived and updated on every merge, so there the
+    # caches pay off. Keyed on the lockfiles: cargo recompiles the
+    # first-party crates anyway (the checkout is newer than the cache) and
+    # reuses only the dependencies.
+    - name: Cache program build (release PR only)
+      if: github.base_ref == 'main'
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/fuzz/release
+          target/fuzz/sbpf-solana-solana
+        key: crucible-sbf-${{ runner.os }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Cargo.lock') }}
+    - name: Cache harness build (release PR only)
+      if: github.base_ref == 'main'
+      uses: actions/cache@v4
+      with:
+        path: fuzz/crucible/target
+        key: crucible-harness-${{ runner.os }}-${{ hashFiles('fuzz/crucible/Cargo.lock') }}
+    - name: Build program and fixtures, stage the IDL
+      run: ./fuzz/crucible/prepare.sh anchor-build/idl/marginfi.json
+    - name: Build harness
+      working-directory: fuzz/crucible
+      run: cargo build --release --locked --features invariant_test
+    # A harness that dies in setup() still builds and uploads, then fails on
+    # every worker. It must still be fuzzing when the timeout kills it (124).
+    - name: Smoke-run harness (60s)
+      working-directory: fuzz/crucible
+      run: |
+        rc=0
+        FUZZ_DEBUG=1 SCOUT_CHECK_RUN=ci-smoke timeout 60 ./target/release/invariant_test \
+          > /tmp/smoke.log 2>&1 || rc=$?
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::harness exited $rc before the 60s smoke window ended"
+          tail -200 /tmp/smoke.log
+          exit 1
+        fi
+    - name: Assemble bundle
+      working-directory: fuzz/crucible
+      env:
+        # github.sha is the synthetic merge commit on a PR; record the PR head.
+        FUZZ_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: ./build-bundle.sh
+    - name: Upload bundle to FuzzCorp
+      if: github.base_ref == 'main'
+      uses: asymmetric-research/fuzz-upload-action@d81375ddc1887ddf574713845dcfada9d3968edc  # v2.1.0
+      with:
+        upload_type: bundle
+        upload_path: fuzz/crucible/bundle
+      env:
+        FUZZ_ORGANIZATION: ${{ vars.FUZZ_ORGANIZATION || 'project-0' }}
+        FUZZ_PROJECT: ${{ vars.FUZZ_PROJECT || 'marginfi' }}
+        FUZZ_API_KEY: ${{ secrets.FUZZ_API_KEY }}
