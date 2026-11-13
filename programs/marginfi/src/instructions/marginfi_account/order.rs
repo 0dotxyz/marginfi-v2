@@ -9,13 +9,12 @@ use crate::ix_utils::{
 };
 use crate::math_error;
 use crate::state::marginfi_account::{
-    account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
-    is_signer_authorized, run_cb_price_gate,
+    account_not_frozen_for_authority, finalize_health_cache, get_health_components,
+    get_tagged_account_health_components, is_signer_authorized, run_cb_price_gate,
 };
 use crate::state::premium::{MarginfiAccountPremiumImpl, PremiumScratch};
 use crate::{
     check,
-    constants::PROGRAM_VERSION,
     prelude::*,
     state::{
         marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
@@ -360,7 +359,6 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let fee_state = fee_state_loader.load()?;
 
     let mut health_cache = HealthCache::zeroed();
-    health_cache.timestamp = Clock::get()?.unix_timestamp;
     let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
     let (
@@ -382,8 +380,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         let is_healthy = account_health >= I80F48::ZERO;
 
         health_cache.set_healthy(is_healthy);
-        health_cache.program_version = PROGRAM_VERSION;
-        health_cache.set_engine_ok(true);
+        finalize_health_cache(&mut health_cache, Clock::get()?.unix_timestamp);
 
         (
             get_tagged_account_health_components(
