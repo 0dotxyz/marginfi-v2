@@ -2344,19 +2344,19 @@ async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Resul
     let asset_bank_f = test_f.get_bank(&asset_mint); // SOL collateral
     let liability_bank_f = test_f.get_bank(&liability_mint); // USDC debt (the CB bank)
 
-    // Enable the circuit breaker on the liability bank and seed its reference at $1.
+    // Enable the circuit breaker on the liability bank, then pulse to seed its reference at $1.
     let warm_time: i64 = 100;
     let warm_slot: u64 = 1_000;
     test_f
         .set_pyth_oracle_price_native(PYTH_USDC_FEED, 1_000_000, 0, warm_time)
         .await;
     test_f.set_clock(warm_slot, warm_time).await;
+    liability_bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
     test_f
         .marginfi_group
         .try_pulse_bank_price_cache(liability_bank_f)
-        .await?;
-    liability_bank_f
-        .update_config(standard_cb_config(), None)
         .await?;
 
     // Move the liability's live oracle 10% past the reference (tier-0 is 5%). No pulse, so the bank

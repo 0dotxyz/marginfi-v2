@@ -220,10 +220,10 @@ async fn drift_withdraw_local_instruction_call_failure_oversized_amount(
 
 /// The circuit breaker tracks the multiplier-adjusted effective price on integration banks: for a
 /// Drift bank the risk price is base_oracle_price x the spot-market cumulative-interest rate.
-/// Enabling the breaker must seed the reference at that adjusted price, not the raw base, or an
-/// integration bank with a non-unit multiplier would spuriously trip on its first observation.
+/// The first observation after enable must seed the reference at that adjusted price, not the raw
+/// base, or an integration bank with a non-unit multiplier would spuriously trip on its second.
 #[tokio::test]
-async fn drift_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Result<()> {
+async fn drift_cb_first_observation_seeds_multiplier_adjusted_reference() -> anyhow::Result<()> {
     let setup = TestFixture::setup_drift_bank(None).await;
     let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
 
@@ -250,8 +250,13 @@ async fn drift_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Result
         .run_drift_deposit(&setup.bank_f, &user, user_token.key, 100_000_000)
         .await?;
 
-    // The Drift withdraw path warms the bank cache with the raw base price and the spot-market
-    // exchange-rate multiplier (deposit only refreshes interest rates).
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
+
+    // The Drift withdraw path observes the raw base price and the spot-market exchange-rate
+    // multiplier (deposit only refreshes interest rates), which seeds the breaker's reference.
     setup
         .test_f
         .run_drift_withdraw(
@@ -276,14 +281,7 @@ async fn drift_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Result
         "the Drift spot market must produce a non-unit multiplier for this test to be meaningful"
     );
 
-    // Enable the breaker; the reference must be the effective (multiplier-adjusted) price.
-    setup
-        .bank_f
-        .update_config(standard_cb_config(), None)
-        .await?;
-
-    let enabled = setup.bank_f.load().await;
-    let seeded_ref: I80F48 = enabled.cb_reference_price.into();
+    let seeded_ref: I80F48 = warmed.cb_reference_price.into();
     assert_eq!(seeded_ref, raw_price * multiplier);
     Ok(())
 }

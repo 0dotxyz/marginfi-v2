@@ -21,6 +21,7 @@ import {
   SINGLE_POOL_PROGRAM_ID,
   StakedSettingsConfig,
   StakedSettingsEdit,
+  StakedSettingsEditFast,
 } from "./types";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { bigNumberToWrappedI80F48, WrappedI80F48 } from "@mrgnlabs/mrgn-common";
@@ -808,6 +809,30 @@ export const editStakedSettings = (
       // rent = SYSVAR_RENT_PUBKEY,
       // systemProgram: SystemProgram.programId,
     })
+    .instruction();
+
+  return ix;
+};
+
+/**
+ * admin - optional, resolved from the group's `admin` when omitted
+ */
+export type EditStakedSettingsFastArgs = {
+  settingsKey: PublicKey;
+  settings: StakedSettingsEditFast;
+  admin?: PublicKey;
+};
+
+export const editStakedSettingsFast = (
+  program: Program<Marginfi>,
+  args: EditStakedSettingsFastArgs,
+) => {
+  const ix = program.methods
+    .editStakedSettingsFast(args.settings)
+    .accounts({
+      stakedSettings: args.settingsKey,
+    })
+    .accountsPartial({ admin: args.admin })
     .instruction();
 
   return ix;

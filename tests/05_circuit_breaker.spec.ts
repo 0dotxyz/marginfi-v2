@@ -14,6 +14,7 @@ import {
 import {
   assertBankrunTxFailed,
   assertBNEqual,
+  assertI80F48Equal,
 } from "./utils/genericTests";
 import {
   BankConfigOptRaw,
@@ -28,7 +29,8 @@ import {
 import { pulseBankPrice } from "./utils/user-instructions";
 import { setPythPullOraclePrice } from "./utils/bankrun-oracles";
 import { bankrunContext, banksClient } from "./rootHooks";
-import { getBankrunBlockhash } from "./utils/tools";
+import { getBankrunBlockhash, getBankrunTime } from "./utils/tools";
+import { cachedCbPrice, toI80Scaled } from "./utils/bn-utils";
 import { assert } from "chai";
 
 describe("Circuit breaker config + admin clear", () => {
@@ -47,11 +49,8 @@ describe("Circuit breaker config + admin clear", () => {
     cbEmaAlphaBps: 1000,
   });
 
-  // CB enable now requires the cached price to be no older than CB_ENABLE_MAX_PRICE_AGE_SECONDS
-  // (30s), so each enable test must be preceded by a pulse. This helper lands a fresh pulse on
-  // the SOL bank. It first warps a few slots so each call produces a distinct blockhash —
-  // bankrun's signature cache otherwise rejects identical pulse-tx bodies as "already processed"
-  // when failing configure-bank txs in between don't advance the slot.
+  // Lands a pulse on the SOL bank. Warps a few slots first so the tx gets a distinct blockhash:
+  // bankrun's signature cache rejects identical pulse-tx bodies as "already processed".
   const freshPulse = async () => {
     const clock = await banksClient.getClock();
     bankrunContext.warpToSlot(clock.slot + 5n);
@@ -87,7 +86,6 @@ describe("Circuit breaker config + admin clear", () => {
   });
 
   it("(admin) enabling CB with invalid config fails", async () => {
-    await freshPulse();
     // EMA alpha = 0 is not usable — validate_circuit_breaker rejects.
     const bad: BankConfigOptRaw = {
       ...validCbOpts(),
@@ -107,7 +105,6 @@ describe("Circuit breaker config + admin clear", () => {
   });
 
   it("(admin) enabling CB with non-monotonic tier thresholds fails", async () => {
-    await freshPulse();
     const bad: BankConfigOptRaw = {
       ...validCbOpts(),
       cbDeviationBpsTiers: [500, 400, 2500], // tier 2 lower than tier 1
@@ -125,7 +122,6 @@ describe("Circuit breaker config + admin clear", () => {
   });
 
   it("(admin) enabling CB with non-contiguous tiers fails", async () => {
-    await freshPulse();
     const bad: BankConfigOptRaw = {
       ...validCbOpts(),
       cbDeviationBpsTiers: [500, 0, 2500],
@@ -144,7 +140,6 @@ describe("Circuit breaker config + admin clear", () => {
   });
 
   it("(admin) enabling CB with missing tier 3 fails", async () => {
-    await freshPulse();
     const bad: BankConfigOptRaw = {
       ...validCbOpts(),
       cbDeviationBpsTiers: [500, 1000, 0],
@@ -163,7 +158,6 @@ describe("Circuit breaker config + admin clear", () => {
   });
 
   it("(admin) enable CB with valid config - happy path", async () => {
-    await freshPulse();
     const tx = new Transaction().add(
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: bankKey,
@@ -187,6 +181,21 @@ describe("Circuit breaker config + admin clear", () => {
     assert.equal(bank.cbTier, 0);
     assertBNEqual(bank.cbHaltStartedAt, 0);
     assertBNEqual(bank.cbHaltEndedAt, 0);
+    assertI80F48Equal(bank.cbReferencePrice, 0);
+    assertI80F48Equal(bank.cbWindowReferencePrice, 0);
+    assertBNEqual(bank.cbWindowStartedAt, 0);
+  });
+
+  it("(permissionless) the first pulse after enable seeds the references", async () => {
+    await freshPulse();
+
+    const bank = await program.account.bank.fetch(bankKey);
+    assert.equal(toI80Scaled(bank.cbReferencePrice), cachedCbPrice(bank.cache));
+    assert.equal(
+      toI80Scaled(bank.cbWindowReferencePrice),
+      cachedCbPrice(bank.cache)
+    );
+    assertBNEqual(bank.cbWindowStartedAt, await getBankrunTime(bankrunContext));
   });
 
   it("(non-admin) clear_circuit_breaker fails with Unauthorized", async () => {
@@ -256,8 +265,8 @@ describe("Circuit breaker config + admin clear", () => {
   };
 
   it("(real spike) tier-1 trip → escalation watch → tier-2 escalation → admin clear", async () => {
-    // SOL bank starts operational with `cb_reference_price` seeded at $150 (enabled earlier in
-    // the happy-path test). tiers = [500, 1000, 2500] bps:
+    // SOL bank starts operational with `cb_reference_price` seeded at $150 (by the first pulse
+    // after enable). tiers = [500, 1000, 2500] bps:
     //   $162 → +8% = 800 bps → tier 1 (>= 500, < 1000): the first breaching pulse trips tier 1.
     //   $170 inside the escalation window → +13% past tier 2; the escalation rule
     //   `new_tier = (cb_tier + 1).min(3)` bumps tier 1 → 2.
