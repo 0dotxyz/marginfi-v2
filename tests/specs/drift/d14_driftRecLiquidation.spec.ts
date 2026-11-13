@@ -261,7 +261,9 @@ describe("d14: Drift rec liquidation", () => {
       true,
     );
 
-    const borrowAmount = new BN(2 * 10 ** ecosystem.lstAlphaDecimals);
+    // $175 of debt on $500 of collateral: the equity stays above the 50% max fee on the debt, so
+    // the liquidations below may be partial
+    const borrowAmount = new BN(1 * 10 ** ecosystem.lstAlphaDecimals);
     const borrowTx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
       await borrowIx(liquidatee.mrgnBankrunProgram, {

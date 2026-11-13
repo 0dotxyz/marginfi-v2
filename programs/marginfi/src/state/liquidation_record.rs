@@ -53,6 +53,13 @@ pub fn tag_after_liquidation(
     tagged_at
 }
 
+/// Whether the account's equity is more than `premium` on all of its debt.
+/// A liquidation within the premium cap lowers equity by at most `premium` times what it repays, so
+/// such an account keeps some equity for as long as it has debt.
+pub fn premium_fits_equity(assets_equity: I80F48, liabs_equity: I80F48, premium: I80F48) -> bool {
+    assets_equity - liabs_equity > liabs_equity * premium
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +224,32 @@ mod tests {
             ),
             TAGGED_AT
         );
+    }
+
+    #[test]
+    fn premium_fits_ample_equity() {
+        // $60 of equity against the 5% premium on $1,000 of debt ($50)
+        assert!(premium_fits_equity(I80F48!(1060), LIABS, BASE));
+    }
+
+    #[test]
+    fn premium_must_stay_below_the_equity() {
+        // The 5% premium on $1,000 of debt is $50
+        assert!(!premium_fits_equity(I80F48!(1049.99), LIABS, BASE));
+        assert!(!premium_fits_equity(I80F48!(1050), LIABS, BASE));
+        assert!(premium_fits_equity(I80F48!(1050.01), LIABS, BASE));
+    }
+
+    #[test]
+    fn premium_never_fits_in_bad_debt() {
+        assert!(!premium_fits_equity(I80F48!(990), LIABS, BASE));
+        assert!(!premium_fits_equity(I80F48::ZERO, LIABS, BASE));
+    }
+
+    #[test]
+    fn premium_fits_equity_does_not_overflow_near_the_ceiling() {
+        let liabs = I80F48::MAX / I80F48!(2);
+        assert!(premium_fits_equity(I80F48::MAX, liabs, BASE));
+        assert!(!premium_fits_equity(liabs * I80F48!(1.04), liabs, BASE));
     }
 }
