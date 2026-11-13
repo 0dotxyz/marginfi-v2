@@ -1257,34 +1257,25 @@ pub fn get_health_components<'info>(
             )
         };
 
-        // Effective (e-mode-aware) asset weight, computed at most once for the two consumers below.
-        let has_assets = !balance.is_empty(BalanceSide::Assets);
-        let records_receivership_collateral = has_assets
-            && liq_cache.is_some()
-            && matches!(requirement_type, RequirementType::Maintenance)
-            && matches!(bank.config.risk_tier, RiskTier::Collateral);
-        let effective_asset_weight = (records_receivership_collateral
-            || (emode_possible && has_assets))
-            .then(|| bank.get_asset_weight(requirement_type, &reconciled_emode_config));
-
-        // The start-of-receivership maintenance pass already has the reconciled e-mode and
-        // validated bank. Record by raw slot until start_receivership attaches it to the balance.
-        if records_receivership_collateral
-            && effective_asset_weight.is_some_and(|weight| weight > I80F48::ZERO)
-        {
-            if let Some(cache) = liq_cache.as_mut() {
+        // Receivership start: mark slots whose collateral backs maintenance health (see
+        // `receivership_withdraw_allowed`).
+        if let Some(cache) = liq_cache.as_mut() {
+            if matches!(requirement_type, RequirementType::Maintenance)
+                && !balance.is_empty(BalanceSide::Assets)
+                && matches!(bank.config.risk_tier, RiskTier::Collateral)
+                && bank.get_asset_weight(requirement_type, &reconciled_emode_config) > I80F48::ZERO
+            {
                 cache.record_receivership_collateral(balance_index);
             }
         }
 
-        if emode_possible && has_assets {
+        if emode_possible && !balance.is_empty(BalanceSide::Assets) {
             collateral_seen = true;
-            if effective_asset_weight.is_some_and(|weight| {
-                weight
-                    <= bank
-                        .config
-                        .get_weight(requirement_type, BalanceSide::Assets)
-            }) {
+            if bank.get_asset_weight(requirement_type, &reconciled_emode_config)
+                <= bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+            {
                 unboosted_collateral_seen = true;
             }
         }
