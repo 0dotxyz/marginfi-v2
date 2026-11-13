@@ -1095,7 +1095,10 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .process_transaction_with_preflight(tx)
         .await;
     assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::ZeroWeightCollateralNotSeizable);
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::ZeroWeightCollateralNotSeizable
+    );
 
     Ok(())
 }
