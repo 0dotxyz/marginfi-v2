@@ -25,6 +25,7 @@ use marginfi_type_crate::{
 /// * `PTFixed` - a PT token priced as `linear_rate` against an implicit $1 base (no external feed,
 ///   e.g. a PT of a ~$1 stable). Pass `[Exponent vault]`; `price` is the start price, in (0, 1].
 ///
+/// `PTScope` needs a Scope entry index too, so it goes through `configure_bank_oracle_pt_scope`.
 /// Any other setup must be configured through `configure_bank_oracle` and is rejected here.
 pub fn lending_pool_set_oracle_price(
     ctx: Context<LendingPoolSetOraclePrice>,
@@ -34,23 +35,7 @@ pub fn lending_pool_set_oracle_price(
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
     let mut bank = ctx.accounts.bank.load_mut()?;
-
-    if bank.get_flag(FREEZE_SETTINGS) {
-        panic!("cannot change oracle settings on frozen banks");
-    }
-
-    check!(
-        !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
-        MarginfiError::BadEmodeConfig,
-        "disable same-asset e-mode eligibility before setting a fixed price"
-    );
-
-    // Staked banks must always price against their SVSP/stake-pool accounts and must never switch
-    // oracle types; they inherit settings by propagation instead.
-    if bank.config.asset_tag == ASSET_TAG_STAKED {
-        msg!("Staked banks cannot set a fixed price");
-        return err!(MarginfiError::Unauthorized);
-    }
+    check_oracle_price_settable(&bank)?;
 
     let price_i80: I80F48 = price.into();
     let requested =
@@ -63,10 +48,7 @@ pub fn lending_pool_set_oracle_price(
                 remaining.len() == 2,
                 MarginfiError::WrongNumberOfOracleAccounts
             );
-            check!(
-                price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
-                MarginfiError::InvalidPtStartPrice
-            );
+            check_pt_start_price(price_i80)?;
             bank.config.oracle_setup = OracleSetup::PTPyth;
             // [0] Pyth base feed, [1] Exponent vault
             bank.config.oracle_keys[0] = remaining[0].key();
@@ -77,10 +59,7 @@ pub fn lending_pool_set_oracle_price(
                 remaining.len() == 1,
                 MarginfiError::WrongNumberOfOracleAccounts
             );
-            check!(
-                price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
-                MarginfiError::InvalidPtStartPrice
-            );
+            check_pt_start_price(price_i80)?;
             bank.config.oracle_setup = OracleSetup::PTFixed;
             // [0] Exponent vault (no base feed)
             bank.config.oracle_keys[0] = remaining[0].key();
@@ -103,6 +82,9 @@ pub fn lending_pool_set_oracle_price(
             // state where oracles[0] is empty and other slots are not.
             bank.config.oracle_keys[0] = Pubkey::default();
         }
+        OracleSetup::PTScope => {
+            return err!(MarginfiError::UseConfigureBankOraclePtScope);
+        }
         _ => {
             return err!(MarginfiError::InvalidOracleSetup);
         }
@@ -122,6 +104,83 @@ pub fn lending_pool_set_oracle_price(
         price,
     });
 
+    Ok(())
+}
+
+/// Installs a `PTScope` oracle: a PT token priced as `scope_entry_price * linear_rate`, for a PT
+/// whose underlying has a Scope feed but no Pyth feed (e.g. PT-hyUSD). Pass `[Scope OraclePrices,
+/// Exponent vault]`.
+/// * `start_price` - the linear-pricing start price, in (0, 1]
+/// * `entry_index` - which of the 512 entries in the Scope feed prices the underlying
+///
+/// Separate from `set_oracle_price` because the pair `(oracle_keys[0], scope_entry_index)` is what
+/// identifies a Scope price, and that instruction has no way to provide the index.
+pub fn lending_pool_configure_bank_oracle_pt_scope(
+    ctx: Context<LendingPoolSetOraclePrice>,
+    start_price: WrappedI80F48,
+    entry_index: u16,
+) -> MarginfiResult {
+    ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
+
+    let mut bank = ctx.accounts.bank.load_mut()?;
+    check_oracle_price_settable(&bank)?;
+
+    let remaining = ctx.remaining_accounts;
+    check!(
+        remaining.len() == 2,
+        MarginfiError::WrongNumberOfOracleAccounts
+    );
+    check_pt_start_price(start_price.into())?;
+
+    bank.config.oracle_setup = OracleSetup::PTScope;
+    // [0] Scope feed, [1] Exponent vault
+    bank.config.oracle_keys[0] = remaining[0].key();
+    bank.config.oracle_keys[1] = remaining[1].key();
+    bank.config.scope_entry_index = entry_index;
+    bank.config.fixed_price = start_price;
+
+    bank.config
+        .validate_oracle_setup(bank.mint, remaining, None, None, None)?;
+
+    emit!(LendingPoolBankSetOraclePriceEvent {
+        header: GroupEventHeader {
+            marginfi_group: ctx.accounts.group.key(),
+            signer: Some(*ctx.accounts.governance_admin.key),
+        },
+        bank: ctx.accounts.bank.key(),
+        price: start_price,
+    });
+
+    Ok(())
+}
+
+/// Preconditions shared by every instruction that writes `fixed_price`.
+fn check_oracle_price_settable(bank: &Bank) -> MarginfiResult {
+    if bank.get_flag(FREEZE_SETTINGS) {
+        panic!("cannot change oracle settings on frozen banks");
+    }
+
+    check!(
+        !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
+        MarginfiError::BadEmodeConfig,
+        "disable same-asset e-mode eligibility before setting a fixed price"
+    );
+
+    // Staked banks must always price against their SVSP/stake-pool accounts and must never switch
+    // oracle types; they inherit settings by propagation instead.
+    if bank.config.asset_tag == ASSET_TAG_STAKED {
+        msg!("Staked banks cannot set a fixed price");
+        return err!(MarginfiError::Unauthorized);
+    }
+
+    Ok(())
+}
+
+fn check_pt_start_price(start_price: I80F48) -> MarginfiResult {
+    check!(
+        start_price > I80F48::ZERO && start_price <= I80F48::ONE,
+        MarginfiError::InvalidPtStartPrice
+    );
     Ok(())
 }
 

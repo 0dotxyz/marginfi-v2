@@ -545,7 +545,9 @@ pub enum MarginfiError {
     ScopeStalePrice, // 6802
     #[msg("Use lending_pool_configure_bank_oracle_scope; Scope requires an entry index")]
     UseConfigureBankOracleScope, // 6803
-                                 // **************END SCOPE ERRORS
+    #[msg("Use lending_pool_configure_bank_oracle_pt_scope; PTScope requires an entry index")]
+    UseConfigureBankOraclePtScope, // 6804
+                                   // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -837,6 +839,7 @@ impl From<u32> for MarginfiError {
             6801 => MarginfiError::ScopeInvalidEntry,
             6802 => MarginfiError::ScopeStalePrice,
             6803 => MarginfiError::UseConfigureBankOracleScope,
+            6804 => MarginfiError::UseConfigureBankOraclePtScope,
 
             _ => MarginfiError::InternalLogicError,
         }

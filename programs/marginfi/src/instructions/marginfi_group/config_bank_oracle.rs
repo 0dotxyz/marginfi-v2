@@ -48,6 +48,9 @@ pub fn lending_pool_configure_bank_oracle(
         ) {
             return err!(MarginfiError::UseConfigureBankOracleScope);
         }
+        if setup_type == OracleSetup::PTScope {
+            return err!(MarginfiError::UseConfigureBankOraclePtScope);
+        }
         check!(
             !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
                 || (bank.config.oracle_keys[0] == oracle

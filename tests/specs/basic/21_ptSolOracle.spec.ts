@@ -10,6 +10,7 @@ import {
   addBank,
   configureBankIxs,
   configureBankOracle,
+  configureBankOraclePtScope,
   groupConfigure,
   groupInitialize,
   setFixedPrice,
@@ -23,6 +24,7 @@ import {
   depositIx,
   endDeleverageIx,
   endLiquidationIx,
+  healthPulse,
   initLiquidationRecordIx,
   liquidateIx,
   pulseBankPrice,
@@ -52,10 +54,16 @@ import {
   defaultBankConfig,
   ORACLE_SETUP_PT_FIXED,
   ORACLE_SETUP_PT_PYTH,
+  ORACLE_SETUP_PT_SCOPE,
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
+import {
+  bytesToF64,
+  getBankrunTime,
+  processBankrunTransaction,
+} from "../../utils/tools";
+import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -871,5 +879,175 @@ describe("PT-SOL internal oracle setup", () => {
     setVault(vault, makeVault(now + 100_000, 1_000));
     await setPthyusd(0.85, vault);
     assertI80F48Approx((await pulseHyusd(vault)).lastOraclePrice, 0.85);
+  });
+
+  // --- PT-Scope: same Exponent lerp, base price from a Scope entry (hyUSD has no Pyth feed) ---
+  describe("PT-Scope", () => {
+    // A fresh bank: `ptBank` has a circuit breaker and cut weights from the tests above.
+    const ptScopeBank = Keypair.generate();
+    const scopeFeed = Keypair.generate().publicKey;
+    /**
+     * hyUSD/USD = 1.02 rather than a realistic 1.00: at 1.00 the expected price (1.00 * rate) would
+     * equal the bare PT rate, so the test couldn't tell whether the Scope price was applied at all.
+     */
+    const HYUSD_ENTRY = { index: 11, value: 102_000_000n, exp: 8n };
+
+    const setPtScope = async (startPrice: number, vault: PublicKey) => {
+      const timestamp = await getBankrunTime(bankrunContext);
+      setScopeFeed(
+        bankrunContext,
+        scopeFeed,
+        makeScopePrices([{ ...HYUSD_ENTRY, timestamp }]),
+      );
+      return processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await configureBankOraclePtScope(groupAdmin.mrgnBankrunProgram, {
+            bank: ptScopeBank.publicKey,
+            startPrice,
+            entryIndex: HYUSD_ENTRY.index,
+            remaining: [scopeFeed, vault],
+          }),
+        ),
+        [groupAdmin.wallet],
+      );
+    };
+
+    before(async () => {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await addBank(groupAdmin.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: ecosystem.wsolMint.publicKey,
+            bank: ptScopeBank.publicKey,
+            config: defaultBankConfig(),
+          }),
+        ),
+        [groupAdmin.wallet, ptScopeBank],
+      );
+    });
+
+    it("(admin) sets up PTScope (Scope entry + start price + vault) - happy path", async () => {
+      await setPtScope(0.9, okVault);
+      const { config } = await program.account.bank.fetch(
+        ptScopeBank.publicKey,
+      );
+      assert.deepEqual(config.oracleSetup, { ptScope: {} });
+      assertKeysEqual(config.oracleKeys[0], scopeFeed);
+      assertKeysEqual(config.oracleKeys[1], okVault);
+      assert.equal(config.scopeEntryIndex, HYUSD_ENTRY.index);
+      assertI80F48Approx(config.fixedPrice, 0.9);
+    });
+
+    it("(admin) tries to set up PTScope without an entry index - fails on the other oracle ixs", async () => {
+      for (const ix of [
+        await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+          bank: ptScopeBank.publicKey,
+          type: ORACLE_SETUP_PT_SCOPE,
+          oracle: scopeFeed,
+        }),
+        await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
+          bank: ptScopeBank.publicKey,
+          price: 0.9,
+          setup: ORACLE_SETUP_PT_SCOPE,
+          remaining: [scopeFeed, okVault],
+        }),
+      ]) {
+        await expectFailedTxWithError(
+          async () => {
+            await processBankrunTransaction(
+              bankrunContext,
+              new Transaction().add(ix),
+              [groupAdmin.wallet],
+            );
+          },
+          "UseConfigureBankOraclePtScope",
+          6804,
+        );
+      }
+    });
+
+    it("prices PT-hyUSD at Scope entry * linear rate, in the bank cache and the risk engine", async () => {
+      const user = users[1];
+      const acc = Keypair.generate();
+      const deposit = 2n * 10n ** BigInt(ecosystem.wsolDecimals);
+      const now = await getBankrunTime(bankrunContext);
+      const vault = Keypair.generate().publicKey;
+      setVault(vault, makeVault(now + 100_000, 1_000)); // not started -> rate = start price
+      await setPtScope(0.85, vault);
+      const expected = 1.02 * 0.85;
+
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+            bank: ptScopeBank.publicKey,
+            remaining: [scopeFeed, vault],
+          }),
+        ),
+        [groupAdmin.wallet],
+      );
+      const { cache } = await program.account.bank.fetch(ptScopeBank.publicKey);
+      assertI80F48Approx(cache.lastOraclePrice, expected);
+      assertI80F48Approx(cache.priceMultiplier, 1);
+
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          createMintToInstruction(
+            ecosystem.wsolMint.publicKey,
+            user.wsolAccount,
+            globalProgramAdmin.wallet.publicKey,
+            deposit,
+          ),
+        ),
+        [globalProgramAdmin.wallet],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await accountInit(user.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            marginfiAccount: acc.publicKey,
+            authority: user.wallet.publicKey,
+            feePayer: user.wallet.publicKey,
+          }),
+        ),
+        [user.wallet, acc],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await depositIx(user.mrgnBankrunProgram, {
+            marginfiAccount: acc.publicKey,
+            bank: ptScopeBank.publicKey,
+            tokenAccount: user.wsolAccount,
+            amount: new BN(deposit.toString()),
+          }),
+        ),
+        [user.wallet],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await healthPulse(user.mrgnBankrunProgram, {
+            marginfiAccount: acc.publicKey,
+            remaining: composeRemainingAccounts([
+              [ptScopeBank.publicKey, scopeFeed, vault],
+            ]),
+          }),
+        ),
+        [user.wallet],
+      );
+
+      const { healthCache } = await program.account.marginfiAccount.fetch(
+        acc.publicKey,
+      );
+      assert.equal(healthCache.mrgnErr, 0);
+      assert.approximately(bytesToF64(healthCache.prices[0]), expected, 1e-6);
+      assertI80F48Approx(healthCache.assetValueEquity, 2 * expected);
+    });
   });
 });

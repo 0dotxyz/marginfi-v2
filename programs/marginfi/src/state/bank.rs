@@ -2393,6 +2393,7 @@ mod cb_tests {
             (OracleSetup::Scope, true),
             (OracleSetup::ScopeKamino, true),
             (OracleSetup::ScopeJuplend, true),
+            (OracleSetup::PTScope, true),
             (OracleSetup::SwitchboardPull, true),
             (OracleSetup::KaminoSwitchboardPull, true),
         ] {

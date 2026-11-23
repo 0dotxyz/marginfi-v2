@@ -109,7 +109,7 @@ pub struct BankConfig {
     pub oracle_max_age: u16,
 
     /// Entry index into the Scope `OraclePrices` price list. Only read by the Scope setups
-    /// (`Scope`, `ScopeKamino`, `ScopeJuplend`); ignored (and zero) for every other setup.
+    /// (`Scope`, `ScopeKamino`, `ScopeJuplend`, `PTScope`); ignored for every other setup.
     /// Occupies what was previously `_padding0`, so the layout is unchanged.
     pub scope_entry_index: u16,
 
@@ -118,15 +118,16 @@ pub struct BankConfig {
     /// Oracle confidence configuration. Semantics depend on the oracle type:
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
-    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend): Static confidence spread used for
-    ///   price biasing.
+    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend/PTScope): Static confidence spread
+    ///   used for price biasing.
     ///   - 0 disables confidence adjustment.
     ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
     ///   - Clamped to MAX_CONF_INTERVAL (5% of price).
     ///   - Pricing only: the circuit breaker ignores this band when measuring price moves.
     pub oracle_max_confidence: u32,
 
-    /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
+    /// Stored oracle price for `OracleSetup::Fixed`; the linear-pricing start price for the PT
+    /// setups (`PTPyth`, `PTFixed`, `PTScope`); otherwise does nothing
     pub fixed_price: WrappedI80F48,
 
     /// Deviation thresholds in basis points for tiers 1/2/3, strictly monotonic.
@@ -471,8 +472,8 @@ pub struct BankConfigCompact {
     /// Oracle confidence configuration. Semantics depend on the oracle type.
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
-    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend): Static confidence spread used for
-    ///   price biasing.
+    /// * Switchboard and Scope (incl. ScopeKamino/ScopeJuplend/PTScope): Static confidence spread
+    ///   used for price biasing.
     ///   - 0 disables confidence adjustment.
     ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
     ///   - Clamped to MAX_CONF_INTERVAL (5% of price).

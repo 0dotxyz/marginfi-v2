@@ -1380,6 +1380,50 @@ export const setFixedPrice = (
   return ix;
 };
 
+export type ConfigureBankOraclePtScopeArgs = {
+  bank: PublicKey;
+  /** PT linear-pricing start price, in (0, 1] */
+  startPrice: number;
+  /** Which of the 512 entries in the Scope feed prices the PT's underlying */
+  entryIndex: number;
+  /** [Scope OraclePrices, Exponent vault] */
+  remaining: PublicKey[];
+  group?: PublicKey;
+  governanceAdmin?: PublicKey;
+};
+
+export const configureBankOraclePtScope = (
+  program: Program<Marginfi>,
+  args: ConfigureBankOraclePtScopeArgs,
+) => {
+  const governanceAdmin =
+    args.governanceAdmin ||
+    (program.provider as AnchorProvider).wallet.publicKey;
+  const accounts: Record<string, PublicKey> = {
+    bank: args.bank,
+    governanceAdmin,
+  };
+
+  if (args.group) {
+    accounts.group = args.group;
+  }
+
+  return program.methods
+    .lendingPoolConfigureBankOraclePtScope(
+      bigNumberToWrappedI80F48(args.startPrice),
+      args.entryIndex,
+    )
+    .accounts(accounts)
+    .remainingAccounts(
+      args.remaining.map((pubkey) => ({
+        pubkey,
+        isSigner: false,
+        isWritable: false,
+      })),
+    )
+    .instruction();
+};
+
 export type SetBankSameAssetEmodeEligibilityArgs = {
   // group: PublicKey;
   governanceAdmin: PublicKey;

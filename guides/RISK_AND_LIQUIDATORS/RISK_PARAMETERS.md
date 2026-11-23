@@ -82,7 +82,7 @@ Each bank has an oracle configuration that controls how prices are sourced.
 - **`oracle_max_confidence`**: Meaning depends on the oracle family.
   - Pyth: maximum allowed confidence interval width. If set to 0, defaults to 10% (0.10). If the
     oracle's confidence exceeds this threshold, the price is rejected.
-  - Scope (including ScopeKamino/ScopeJuplend): these publish no usable
+  - Scope (including ScopeKamino/ScopeJuplend/PTScope): these publish no usable
     confidence, so the value is a static band applied as the confidence interval
     (`price * oracle_max_confidence / u32::MAX`), capped at 5% of price. 0 disables it.
 

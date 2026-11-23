@@ -1414,6 +1414,51 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: I80F48::ONE,
                 })
             }
+            OracleSetup::PTScope => {
+                // (0) Scope feed (underlying/USD), (1) Exponent vault (for the PT linear rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let feed_info = &ais[0];
+                let vault_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, feed_info)?;
+
+                let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
+                let vault = vault_loader.load()?;
+                let start_price: I80F48 = bank.config.fixed_price.into();
+                let pt_rate =
+                    pt_linear_multiplier(&vault, clock, start_price, ignore_pt_emergency)?;
+
+                let mut price_feed = ScopePriceFeed::load_checked(
+                    feed_info,
+                    clock.unix_timestamp,
+                    max_age,
+                    bank_config.scope_entry_index,
+                )?;
+
+                // Bake the PT rate into the price -> feed now represents PT/USD. The static
+                // confidence band is a fraction of `price`, so it scales with it.
+                price_feed.price = price_feed
+                    .price
+                    .checked_mul(pt_rate)
+                    .ok_or_else(math_error!())?;
+
+                // Cache the PT/USD price; a plain PT bank has no wrapper multiplier.
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
+                } else {
+                    None
+                };
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Scope(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: I80F48::ONE,
+                })
+            }
         }
     }
 
@@ -2091,6 +2136,25 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
                 validate_exponent_vault_account(bank_config, &oracle_ais[0], 0, bank_mint)?;
+                Ok(())
+            }
+            OracleSetup::PTScope => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
+                // (0) Scope feed, (1) Exponent vault
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0], bank_config.scope_entry_index)?;
+
+                validate_exponent_vault_account(bank_config, &oracle_ais[1], 1, bank_mint)?;
                 Ok(())
             }
         }
@@ -3939,6 +4003,200 @@ mod tests {
             config.scope_entry_index = 300;
             assert_eq!(
                 validate(&config, mint, &feed_and_venue).unwrap_err(),
+                MarginfiError::ScopeInvalidEntry.into()
+            );
+        }
+    }
+
+    fn exponent_vault_data(vault: &MinimalExponentVault) -> Vec<u8> {
+        let mut data = exponent_mocks::state::VAULT_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(bytemuck::bytes_of(vault));
+        data
+    }
+
+    /// PTScope prices a PT as `scope entry * PT linear rate`: the static band scales with the PT
+    /// price, the cache carries PT/USD with no wrapper multiplier, and an Exponent emergency only
+    /// prices through on risk-admin paths.
+    #[test]
+    fn pt_scope_prices_scope_entry_times_pt_linear_rate() {
+        use bytemuck::Zeroable;
+
+        let feed_key = Pubkey::new_unique();
+        let vault_key = Pubkey::new_unique();
+        // entry 42 = 2.0 (underlying/USD), published at t=1_500
+        let mut feed_data = scope_account_data(42, 2_000_000, 6, 1_500);
+        let mut feed_lamports = 0;
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let mut vault_data = exponent_vault_data(&fully_backed_vault(1_000, 1_000));
+        let mut vault_lamports = 0;
+        let vault_ai = scope_ai(
+            &vault_key,
+            &exponent_mocks::ID,
+            &mut vault_lamports,
+            &mut vault_data,
+        );
+        let mut depegged = fully_backed_vault(1_000, 1_000);
+        depegged.all_time_high_sy_exchange_rate = [3 * SY_EXCHANGE_RATE_PRECISION as u64, 0, 0, 0];
+        let mut depegged_data = exponent_vault_data(&depegged);
+        let mut depegged_lamports = 0;
+        let depegged_ai = scope_ai(
+            &vault_key,
+            &exponent_mocks::ID,
+            &mut depegged_lamports,
+            &mut depegged_data,
+        );
+
+        let mut bank = Bank::zeroed();
+        bank.config.oracle_setup = OracleSetup::PTScope;
+        bank.config.oracle_keys[0] = feed_key;
+        bank.config.oracle_keys[1] = vault_key;
+        bank.config.scope_entry_index = 42;
+        bank.config.fixed_price = I80F48::from_num(0.5).into();
+        bank.config.oracle_max_age = 60;
+        bank.config.oracle_max_confidence = u32::MAX / 100; // 1%
+        let at = |unix_timestamp| Clock {
+            unix_timestamp,
+            ..Clock::default()
+        };
+
+        // Halfway from 0.5 to par is 0.75, so PT/USD = 2.0 * 0.75 = 1.5.
+        let ais = [feed_ai.clone(), vault_ai.clone()];
+        let expected = I80F48::from_num(1.5);
+        let (adjusted, cache) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+            &bank,
+            &ais,
+            &at(1_500),
+            OraclePriceType::RealTime,
+            false,
+        )
+        .unwrap();
+        assert_eq!(adjusted.price, expected);
+        assert!((adjusted.confidence - expected / 100).abs() < I80F48::from_num(1e-6));
+        assert_eq!(cache.oracle_price.price, expected);
+        assert_eq!(cache.oracle_price.confidence, adjusted.confidence);
+        assert_eq!(cache.price_multiplier, I80F48::ONE);
+
+        // The Scope entry's own staleness still applies.
+        assert_eq!(
+            OraclePriceFeedAdapter::try_from_bank(&bank, &ais, &at(1_561), false)
+                .err()
+                .unwrap(),
+            MarginfiError::ScopeStalePrice.into()
+        );
+
+        // The vault must be the configured one: an otherwise valid vault under another key fails.
+        let impostor_key = Pubkey::new_unique();
+        let mut impostor_data = exponent_vault_data(&fully_backed_vault(1_000, 1_000));
+        let mut impostor_lamports = 0;
+        let impostor_ai = scope_ai(
+            &impostor_key,
+            &exponent_mocks::ID,
+            &mut impostor_lamports,
+            &mut impostor_data,
+        );
+        let impostor_ais = [feed_ai.clone(), impostor_ai];
+        assert_eq!(
+            OraclePriceFeedAdapter::try_from_bank(&bank, &impostor_ais, &at(1_500), false)
+                .err()
+                .unwrap(),
+            MarginfiError::ExponentVaultValidationFailed.into()
+        );
+
+        // A depegged vault refuses to price, except on the risk admin's paths.
+        let depegged_ais = [feed_ai.clone(), depegged_ai];
+        assert_eq!(
+            OraclePriceFeedAdapter::try_from_bank(&bank, &depegged_ais, &at(1_500), false)
+                .err()
+                .unwrap(),
+            MarginfiError::ExponentVaultValidationFailed.into()
+        );
+        let through_emergency =
+            OraclePriceFeedAdapter::try_from_bank(&bank, &depegged_ais, &at(1_500), true).unwrap();
+        assert_eq!(
+            through_emergency
+                .get_price_of_type(OraclePriceType::RealTime, None, 0)
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn pt_scope_config_requires_default_tag_readable_entry_and_bank_mint_vault() {
+        let feed_key = Pubkey::new_unique();
+        let vault_key = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let mut feed_data = scope_account_data(42, 2_000_000, 6, 1_000);
+        let mut feed_lamports = 0;
+        let feed_ai = scope_ai(
+            &feed_key,
+            &SCOPE_PROGRAM_ID,
+            &mut feed_lamports,
+            &mut feed_data,
+        );
+        let mut vault = fully_backed_vault(1_000, 1_000);
+        vault.mint_pt = mint;
+        let mut vault_data = exponent_vault_data(&vault);
+        let mut vault_lamports = 0;
+        let vault_ai = scope_ai(
+            &vault_key,
+            &exponent_mocks::ID,
+            &mut vault_lamports,
+            &mut vault_data,
+        );
+
+        let mut config = BankConfig {
+            oracle_setup: OracleSetup::PTScope,
+            scope_entry_index: 42,
+            asset_tag: ASSET_TAG_DEFAULT,
+            ..BankConfig::default()
+        };
+        config.oracle_keys[0] = feed_key;
+        config.oracle_keys[1] = vault_key;
+
+        let ais = [feed_ai.clone(), vault_ai.clone()];
+        let validate = |config: &BankConfig, mint: Pubkey, ais| {
+            OraclePriceFeedAdapter::validate_bank_config(config, mint, ais, None, None, None)
+        };
+        validate(&config, mint, &ais).unwrap();
+
+        for tag in [
+            ASSET_TAG_SOL,
+            ASSET_TAG_KAMINO,
+            ASSET_TAG_DRIFT,
+            ASSET_TAG_SOLEND,
+            ASSET_TAG_JUPLEND,
+            ASSET_TAG_STAKED,
+        ] {
+            let mut tagged = config;
+            tagged.asset_tag = tag;
+            assert_eq!(
+                validate(&tagged, mint, &ais).unwrap_err(),
+                MarginfiError::InvalidOracleSetup.into()
+            );
+        }
+
+        assert_eq!(
+            validate(&config, mint, std::slice::from_ref(&feed_ai)).unwrap_err(),
+            MarginfiError::WrongNumberOfOracleAccounts.into()
+        );
+
+        // The vault must carry the bank's own PT mint.
+        assert_eq!(
+            validate(&config, Pubkey::new_unique(), &ais).unwrap_err(),
+            MarginfiError::ExponentVaultValidationFailed.into()
+        );
+
+        // The entry must be readable, same as plain Scope (7 was never refreshed).
+        for entry in [7, 300] {
+            let mut unreadable = config;
+            unreadable.scope_entry_index = entry;
+            assert_eq!(
+                validate(&unreadable, mint, &ais).unwrap_err(),
                 MarginfiError::ScopeInvalidEntry.into()
             );
         }

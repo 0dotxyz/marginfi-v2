@@ -255,6 +255,18 @@ pub mod marginfi {
         marginfi_group::lending_pool_set_oracle_price(ctx, price, setup)
     }
 
+    /// (governance_admin only) Price a PT bank from a Scope feed entry and its Exponent vault's
+    /// linear rate (`PTScope`). Remaining accounts: `[oracle_prices, exponent_vault]`.
+    /// * start_price - the PT linear-pricing start price, in (0, 1]
+    /// * entry_index - which of the 512 entries in the Scope feed prices the underlying
+    pub fn lending_pool_configure_bank_oracle_pt_scope(
+        ctx: Context<LendingPoolSetOraclePrice>,
+        start_price: WrappedI80F48,
+        entry_index: u16,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_bank_oracle_pt_scope(ctx, start_price, entry_index)
+    }
+
     /// (governance_admin only) Initialize the per-group same-asset e-mode registry.
     pub fn lending_pool_init_same_asset_emode_registry(
         ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
