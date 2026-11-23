@@ -18,7 +18,7 @@ pub fn kamino_harvest_reward(
     reward_index: u64,
 ) -> MarginfiResult {
     ctx.accounts.cpi_harvest_rewards(reward_index)?;
-    // Note: any assets sent to the ATA by a third party are treated like rewards and harvested too. 
+    // Note: any assets sent to the ATA by a third party are treated like rewards and harvested too.
     let balance = accessor::amount(&ctx.accounts.user_reward_ata.to_account_info())?;
     ctx.accounts
         .cpi_transfer_obligation_owner_to_destination(balance)?;
