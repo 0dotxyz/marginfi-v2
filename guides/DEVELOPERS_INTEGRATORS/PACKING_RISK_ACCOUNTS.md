@@ -66,6 +66,18 @@ validator vote account (`integration_acc_1`). Before
 account but does not price from it. Once that flag is set, the fourth account must be the correct
 on-ramp account or the instruction fails with `WrongOracleAccountKeys`.
 
+### mSOL / LST / PT Setups
+
+These setups price the base feed in `oracle_keys[0]` through a rate account, which must follow it:
+
+| Setup | Accounts after the bank |
+|---|---|
+| `PythMSOL`, `PythLST` | `oracle_keys[0]` (Pyth), `oracle_keys[1]` (Marinade State / SPL StakePool) |
+| `PTPyth` | `oracle_keys[0]` (Pyth), `oracle_keys[1]` (Exponent vault) |
+| `PTScope` | `oracle_keys[0]` (Scope `OraclePrices`), `oracle_keys[1]` (Exponent vault) |
+| `PTFixed` | `oracle_keys[0]` (Exponent vault) only |
+| `KaminoMSOL`, `KaminoLST`, `JuplendMSOL`, `JuplendLST` | `oracle_keys[0]` (Pyth), `oracle_keys[1]` (reserve / lending), `oracle_keys[2]` (Marinade State / SPL StakePool) |
+
 ### Liquidate Oracles
 
 For `lending_account_liquidate`, pack in the following order:
@@ -172,6 +184,7 @@ Assuming you already have the Balances and now have a list of Banks:
                     });
 
                     // For Kamino/Solend/Drift/JupLend setups, also push keys[1].
+                    // For mSOL/LST/PT setups, see "mSOL / LST / PT Setups" above.
                     // For Staked setup, also push keys[1], keys[2], and keys[3]
                     // (or the on-ramp PDA derived from integration_acc_1 if keys[3] is default).
                 }
