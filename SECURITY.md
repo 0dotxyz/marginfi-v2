@@ -747,7 +747,7 @@ the doc on `should_skip_rate_limit`:
 /// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
 ```
 
-### Staked Bank Propagation Wipes Inidividually Configured Settings
+### Staked Bank Propagation Wipes Individually Configured Settings
 
 Some settings, including e.g. the FREEZE_SETTINGS flag, are wiped when a Staked bank accepts
 propagation from the Staked Settings. This is by design: Staked banks first priority is to respond
