@@ -1220,6 +1220,26 @@ impl TestFixture {
         conf: u64,
         publish_time: i64,
     ) {
+        self.set_pyth_oracle_price_and_ema_native(
+            address,
+            native_price,
+            native_price,
+            conf,
+            publish_time,
+        )
+        .await;
+    }
+
+    /// As `set_pyth_oracle_price_native`, but with an independent EMA price. Maintenance health
+    /// reads the spot `price`; Initial and Equity read `ema_price`. `ema_conf` is set to `conf`.
+    pub async fn set_pyth_oracle_price_and_ema_native(
+        &self,
+        address: Pubkey,
+        native_price: i64,
+        native_ema_price: i64,
+        conf: u64,
+        publish_time: i64,
+    ) {
         let mut ctx = self.context.borrow_mut();
         let mut account = ctx
             .banks_client
@@ -1234,7 +1254,7 @@ impl TestFixture {
         price_update.price_message.conf = conf;
         price_update.price_message.publish_time = publish_time;
         price_update.price_message.prev_publish_time = publish_time;
-        price_update.price_message.ema_price = native_price;
+        price_update.price_message.ema_price = native_ema_price;
         price_update.price_message.ema_conf = conf;
 
         let mut new_data = vec![];
