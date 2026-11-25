@@ -71,6 +71,30 @@ Each bank has an oracle configuration that controls how prices are sourced.
 | `DriftSwitchboardPull` | 10 | For Drift integration positions using Switchboard |
 | `SolendPythPull` | 11 | For Solend integration positions using Pyth |
 | `SolendSwitchboardPull` | 12 | For Solend integration positions using Switchboard |
+| `FixedKamino` | 13 | Admin-set fixed price for Kamino positions (times the reserve rate) |
+| `FixedDrift` | 14 | Admin-set fixed price for Drift positions (times the spot market rate) |
+| `JuplendPythPull` | 15 | For JupLend integration positions using Pyth |
+| `JuplendSwitchboardPull` | 16 | For JupLend integration positions using Switchboard |
+| `FixedJuplend` | 17 | Admin-set fixed price for JupLend positions (times the lending rate) |
+| `Scope` | 18 | Scope oracle entry |
+| `PythMSOL` | 19 | mSOL: Pyth SOL price times the Marinade rate |
+| `KaminoMSOL` | 20 | `PythMSOL` for Kamino positions |
+| `JuplendMSOL` | 21 | `PythMSOL` for JupLend positions |
+| `PythLST` | 22 | SPL stake-pool LST: Pyth SOL price times the pool rate |
+| `KaminoLST` | 23 | `PythLST` for Kamino positions |
+| `JuplendLST` | 24 | `PythLST` for JupLend positions |
+| `PTPyth` | 25 | Exponent PT: Pyth underlying price times the PT linear rate |
+| `PTFixed` | 26 | Exponent PT: implicit $1 underlying times the PT linear rate |
+| `ScopeKamino` | 27 | `Scope` for Kamino positions |
+| `ScopeJuplend` | 28 | `Scope` for JupLend positions |
+| `ScopeLST` | 29 | `PythLST` with a Scope base price |
+| `ScopeMSOL` | 30 | `PythMSOL` with a Scope base price |
+| `ScopeKaminoLST` | 31 | `KaminoLST` with a Scope base price |
+| `ScopePT` | 32 | `PTPyth` with a Scope base price |
+| `StakedWithScope` | 33 | `StakedWithPythPush` with a Scope base price |
+| `ScopeKaminoMSOL` | 34 | `KaminoMSOL` with a Scope base price |
+| `ScopeJuplendMSOL` | 35 | `JuplendMSOL` with a Scope base price |
+| `ScopeJuplendLST` | 36 | `JuplendLST` with a Scope base price |
 
 ### Oracle Parameters
 
