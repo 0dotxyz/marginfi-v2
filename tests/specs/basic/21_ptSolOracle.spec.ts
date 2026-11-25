@@ -24,6 +24,7 @@ import {
   depositIx,
   endDeleverageIx,
   endLiquidationIx,
+  healthPulse,
   initLiquidationRecordIx,
   liquidateIx,
   pulseBankPrice,
@@ -58,7 +59,11 @@ import {
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
-import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
+import {
+  bytesToF64,
+  getBankrunTime,
+  processBankrunTransaction,
+} from "../../utils/tools";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -1036,5 +1041,117 @@ describe("PT-SOL internal oracle setup", () => {
     assert.deepEqual(config.oracleSetup, { ptPyth: {} });
     assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
     assert.equal(config.scopeEntryIndex, 0);
+  });
+
+  // PT-hyUSD: hyUSD has no Pyth Core feed, so it is ScopePT over a hyUSD entry plus its EMA.
+  describe("ScopePT with a smoothed entry (PT-hyUSD)", () => {
+    // A fresh bank: `ptBank` has a circuit breaker and cut weights from the tests above.
+    const hyusdBank = Keypair.generate();
+    const hyusdFeed = Keypair.generate().publicKey;
+    const SPOT = { index: 21, value: 102_000_000n, exp: 8n }; // 1.02
+    const EMA = { index: 121, value: 98_000_000n, exp: 8n }; // 0.98
+
+    before(async () => {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await addBank(groupAdmin.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: ecosystem.wsolMint.publicKey,
+            bank: hyusdBank.publicKey,
+            config: defaultBankConfig(),
+          }),
+        ),
+        [groupAdmin.wallet, hyusdBank],
+      );
+    });
+
+    it("initial margin prices EMA * PT rate, maintenance prices spot * PT rate", async () => {
+      const user = users[1];
+      const acc = Keypair.generate();
+      const deposit = new BN(2 * 10 ** ecosystem.wsolDecimals);
+      const now = await getBankrunTime(bankrunContext);
+      setScopeFeed(
+        bankrunContext,
+        hyusdFeed,
+        makeScopePrices([
+          { ...SPOT, timestamp: now },
+          { ...EMA, timestamp: now },
+        ]),
+      );
+      const vault = Keypair.generate().publicKey;
+      setVault(vault, makeVault(now + 100_000, 1_000)); // not started -> rate = start price
+
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await configureBankOracleScope(groupAdmin.mrgnBankrunProgram, {
+            bank: hyusdBank.publicKey,
+            type: ORACLE_SETUP_SCOPE_PT,
+            oracle: hyusdFeed,
+            entryIndex: SPOT.index,
+            smoothedEntryIndex: EMA.index,
+            ptStartPrice: 0.85,
+            remaining: [vault],
+          }),
+        ),
+        [groupAdmin.wallet],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          createMintToInstruction(
+            ecosystem.wsolMint.publicKey,
+            user.wsolAccount,
+            globalProgramAdmin.wallet.publicKey,
+            bnToBigIntSafe(deposit),
+          ),
+        ),
+        [globalProgramAdmin.wallet],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await accountInit(user.mrgnBankrunProgram, {
+            marginfiGroup: ptGroup.publicKey,
+            marginfiAccount: acc.publicKey,
+            authority: user.wallet.publicKey,
+            feePayer: user.wallet.publicKey,
+          }),
+        ),
+        [user.wallet, acc],
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction()
+          .add(
+            await depositIx(user.mrgnBankrunProgram, {
+              marginfiAccount: acc.publicKey,
+              bank: hyusdBank.publicKey,
+              tokenAccount: user.wsolAccount,
+              amount: deposit,
+            }),
+          )
+          .add(
+            await healthPulse(user.mrgnBankrunProgram, {
+              marginfiAccount: acc.publicKey,
+              remaining: composeRemainingAccounts([
+                [hyusdBank.publicKey, hyusdFeed, vault],
+              ]),
+            }),
+          ),
+        [user.wallet],
+      );
+
+      const { healthCache } = await program.account.marginfiAccount.fetch(
+        acc.publicKey,
+      );
+      assert.equal(healthCache.mrgnErr, 0);
+      // Weights are 1: 2 PT valued at 0.98 * 0.85 for initial, 1.02 * 0.85 for maintenance.
+      assert.approximately(bytesToF64(healthCache.prices[0]), 0.98 * 0.85, 1e-9);
+      assertI80F48Approx(healthCache.assetValue, 2 * 0.98 * 0.85);
+      assertI80F48Approx(healthCache.assetValueMaint, 2 * 1.02 * 0.85);
+    });
   });
 });

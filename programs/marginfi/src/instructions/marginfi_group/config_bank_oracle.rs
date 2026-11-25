@@ -58,7 +58,7 @@ pub fn lending_pool_configure_bank_oracle(
         bank.config.oracle_setup = setup_type;
         bank.config.oracle_keys[0] = oracle;
         bank.config.fixed_price = I80F48::ZERO.into();
-        // A Pyth / Switchboard feed: drop the Scope entries left from a prior setup.
+        // A Pyth feed: drop the Scope entries left from a prior setup.
         bank.config.scope_entry_index = 0;
         bank.config.set_scope_smoothed_entry(None);
 

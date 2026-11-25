@@ -82,9 +82,15 @@ Each bank has an oracle configuration that controls how prices are sourced.
 - **`oracle_max_confidence`**: Meaning depends on the oracle family.
   - Pyth: maximum allowed confidence interval width. If set to 0, defaults to 10% (0.10). If the
     oracle's confidence exceeds this threshold, the price is rejected.
-  - Scope (including ScopeKamino/ScopeJuplend): these publish no usable
-    confidence, so the value is a static band applied as the confidence interval
-    (`price * oracle_max_confidence / u32::MAX`), capped at 5% of price. 0 disables it.
+  - Scope-priced setups (`Scope`, `ScopeKamino`/`ScopeJuplend`, and the Scope-fed mSOL / LST / PT
+    / staked setups): these publish no usable confidence, so the value is a static band applied
+    as the confidence interval (`price * oracle_max_confidence / u32::MAX`), capped at 5% of
+    price. 0 disables it.
+- **`scope_entry_index` / `scope_smoothed_entry_index`** (Scope-priced setups only): the Scope
+  entry for the spot price and, if nonzero, the entry for the time-weighted price (e.g. that
+  asset's `PythLazerEMA`). Initial margin uses the time-weighted price, maintenance and liquidation
+  use spot; any multiplier (venue, stake-pool or PT rate) applies to both. With no smoothed entry,
+  spot is used for both.
 
 ### Price Bias
 
