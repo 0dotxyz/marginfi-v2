@@ -12,9 +12,9 @@ use marginfi::events::MarginfiAccountExecuteOrderEvent;
 use marginfi::prelude::MarginfiError;
 use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
-    centi_to_u32, u32_to_centi, BalanceSide, ExecuteOrderRecord, OrderTrigger, OrderTriggerType,
-    WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-    ACCOUNT_IN_RECEIVERSHIP,
+    centi_to_u32, u32_to_centi, BalanceSide, BankConfig, ExecuteOrderRecord, OrderTrigger,
+    OrderTriggerType, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
 };
 use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
@@ -786,6 +786,201 @@ async fn execute_order_fails_health_check(
     drop(ctx);
 
     assert_active_orders(&borrower_mfi_account_f, 1).await;
+    Ok(())
+}
+
+/// An order execution must leave the whole account maintenance-healthy (spot prices). The pair's
+/// net value not falling in Equity (EMA) terms is NOT enough: when the tagged liability trades
+/// below its EMA, an execution can improve the pair's EMA net while the account stays unhealthy,
+/// which previously passed and was the basis for an exploit that left untagged debt as bad debt.
+///
+/// Scenario (maintenance weights, zero confidence):
+/// * Order pair: 2000 USDC (aw 1.0) / 100 SOL debt (lw 1.10); SOL spot 9, EMA 10.
+/// * Untagged: 340 "BTC" (SolEquivalent, aw 0.90) that has crashed from 10 to `btc_price`,
+///   and 2700 PyUSD debt (lw 1.0).
+/// * Take-profit at 900; pair net at EMA is 2000 - 1000 = 1000, so it triggers.
+/// * Keeper repays the 100 SOL (900 at spot) and withdraws 950 USDC (50 for swap cost + fee).
+///   Pair net at EMA after = 1050 >= 1000, which the old pair-only check accepted.
+///
+/// * btc_price = 5.00: maint health -160 -> -120. Improved, still unhealthy: must fail.
+/// * btc_price = 5.45: maint health -22.3 -> +17.7. A rescue that ends healthy: must pass.
+#[test_case(5.0, -160.0, false ; "stays_unhealthy_rejected")]
+#[test_case(5.45, -22.3, true ; "rescued_to_healthy_succeeds")]
+#[tokio::test]
+async fn execute_order_must_leave_account_healthy_under_ema_skew(
+    btc_price: f64,
+    expected_maint_health_before: f64,
+    expect_success: bool,
+) -> anyhow::Result<()> {
+    // ---------------------------------------------------------------------
+    // Setup
+    // ---------------------------------------------------------------------
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                ..TestBankSetting::default()
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    liability_weight_init: fp!(1.1).into(),
+                    liability_weight_maint: fp!(1.1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: fp!(0.9).into(),
+                    asset_weight_maint: fp!(0.9).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                ..TestBankSetting::default()
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+
+    const NOW_SLOT: u64 = 1_000;
+    const NOW: i64 = 100;
+    let sol_native = |ui: f64| (ui * 1e9) as i64; // SOL and SolEquivalent: 9 decimals
+    let usd_native = |ui: f64| (ui * 1e6) as i64; // USDC and PyUSD: 6 decimals
+
+    test_f.set_clock(NOW_SLOT, NOW).await;
+    for (feed, price) in [
+        (PYTH_USDC_FEED, usd_native(1.0)),
+        (PYTH_PYUSD_FEED, usd_native(1.0)),
+        (PYTH_SOL_FEED, sol_native(10.0)),
+        (PYTH_SOL_EQUIVALENT_FEED, sol_native(10.0)),
+    ] {
+        test_f
+            .set_pyth_oracle_price_native(feed, price, 0, NOW)
+            .await;
+    }
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let btc_bank = test_f.get_bank(&BankMint::SolEquivalent);
+    let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
+
+    // Liquidity for the two borrows.
+    let lender = test_f.create_marginfi_account().await;
+    for (bank, amount) in [(sol_bank, 1_000.0), (pyusd_bank, 10_000.0)] {
+        let funding = bank.mint.create_token_account_and_mint_to(amount).await;
+        lender
+            .try_bank_deposit(funding.key, bank, amount, None)
+            .await?;
+    }
+
+    // Borrower, opened while everything is at its starting price.
+    let borrower = test_f.create_marginfi_account().await;
+    for (bank, amount) in [(usdc_bank, 2_000.0), (btc_bank, 340.0)] {
+        let funding = bank.mint.create_token_account_and_mint_to(amount).await;
+        borrower
+            .try_bank_deposit(funding.key, bank, amount, None)
+            .await?;
+    }
+    for (bank, amount) in [(sol_bank, 100.0), (pyusd_bank, 2_700.0)] {
+        let dest = bank.mint.create_empty_token_account().await;
+        borrower.try_bank_borrow(dest.key, bank, amount).await?;
+    }
+
+    let order_pda = borrower
+        .try_place_order(
+            vec![usdc_bank.key, sol_bank.key],
+            take_profit_trigger(fp!(900), slippage_bps(100)),
+        )
+        .await?;
+    assert_active_orders(&borrower, 1).await;
+
+    // Crash: "BTC" falls; SOL spot falls 10% below its (lagging) EMA.
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_EQUIVALENT_FEED, sol_native(btc_price), 0, NOW)
+        .await;
+    test_f
+        .set_pyth_oracle_price_and_ema_native(
+            PYTH_SOL_FEED,
+            sol_native(9.0),
+            sol_native(10.0),
+            0,
+            NOW,
+        )
+        .await;
+
+    // The account is liquidatable before execution, but still solvent at spot.
+    borrower.try_lending_account_pulse_health().await?;
+    let cache = borrower.load().await.health_cache;
+    let maint_health_before: I80F48 =
+        I80F48::from(cache.asset_value_maint) - I80F48::from(cache.liability_value_maint);
+    assert!(
+        (maint_health_before.to_num::<f64>() - expected_maint_health_before).abs() < 0.01,
+        "maint health before: {maint_health_before}"
+    );
+
+    // ---------------------------------------------------------------------
+    // Test
+    // ---------------------------------------------------------------------
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let keeper_sol = sol_bank
+        .mint
+        .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 200.0)
+        .await
+        .key;
+    let keeper_usdc = usdc_bank
+        .mint
+        .create_empty_token_account_with_owner(&keeper.pubkey())
+        .await
+        .key;
+
+    let (start_ix, execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(keeper_sol, sol_bank, 0.0, Some(true), keeper.pubkey())
+        .await;
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(keeper_usdc, usdc_bank, 950.0, None, keeper.pubkey())
+        .await;
+    let end_ix = borrower
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![sol_bank.key],
+        )
+        .await;
+
+    let blockhash = test_f.get_latest_blockhash().await;
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        Some(&keeper.pubkey()),
+        &[&keeper],
+        blockhash,
+    );
+    let result = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await;
+
+    if expect_success {
+        result?;
+        assert_active_orders(&borrower, 0).await;
+        let cache = borrower.load().await.health_cache;
+        assert!(cache.is_healthy());
+    } else {
+        assert_custom_error!(result.unwrap_err(), MarginfiError::WorseHealthPostExecution);
+        assert_active_orders(&borrower, 1).await;
+    }
+
     Ok(())
 }
 
