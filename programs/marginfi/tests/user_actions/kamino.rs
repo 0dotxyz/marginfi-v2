@@ -21,7 +21,7 @@ use solana_sdk::{
 use test_case::test_case;
 
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
-const SOLANA_SLOTS_PER_DAY: u64 = 216_000;
+const WARP_SLOTS_PER_DAY: u64 = 216_000;
 const WARP_DAYS: u64 = 30;
 const KAMINO_TX_CU_LIMIT: u32 = 800_000;
 
@@ -416,7 +416,7 @@ async fn kamino_withdraw_local_instruction_call_failure_oversized_amount(
 
 async fn warp_clock_forward(setup: &KaminoBankSetup) -> anyhow::Result<()> {
     let clock = setup.test_f.get_clock().await;
-    let next_slot = clock.slot + WARP_DAYS * SOLANA_SLOTS_PER_DAY;
+    let next_slot = clock.slot + WARP_DAYS * WARP_SLOTS_PER_DAY;
     let next_timestamp = clock.unix_timestamp + (WARP_DAYS * 24 * 60 * 60) as i64;
     // Kamino accrues interest using slots or timestamps depending on the reserve configuration.
     setup.test_f.context.borrow_mut().warp_to_slot(next_slot)?;

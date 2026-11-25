@@ -85,7 +85,7 @@ pub trait RebalanceRecordImpl {
         marginfi_account_key: Pubkey,
         executor: Pubkey,
         ref_banks: &[RebalanceRefBank],
-        pre_rates: &[I80F48],
+        pre_rates: &[Option<I80F48>],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult;
@@ -133,7 +133,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         marginfi_account_key: Pubkey,
         executor: Pubkey,
         ref_banks: &[RebalanceRefBank],
-        pre_rates: &[I80F48],
+        pre_rates: &[Option<I80F48>],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult {
@@ -166,7 +166,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         self.ref_bank_count = ref_banks.len() as u8;
         self.pre_rate = [WrappedI80F48::default(); MAX_REBALANCE_BANKS];
         for (slot, rate) in self.pre_rate.iter_mut().zip(pre_rates.iter()) {
-            *slot = (*rate).into();
+            *slot = rate.unwrap_or_default().into();
         }
         self.moves = [RebalanceMove::default(); MAX_REBALANCE_MOVES];
         self.moves[..moves.len()].copy_from_slice(moves);
@@ -426,7 +426,7 @@ mod tests {
                 Pubkey::new_unique(),
                 Pubkey::new_unique(),
                 ref_banks,
-                &vec![I80F48::ZERO; ref_banks.len()],
+                &vec![Some(I80F48::ZERO); ref_banks.len()],
                 &[mv],
                 account,
             )

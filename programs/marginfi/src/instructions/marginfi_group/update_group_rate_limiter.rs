@@ -6,7 +6,7 @@ use crate::{
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 
-const MAX_RATE_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500; // ~10 minutes at ~400ms/slot
+const MAX_RATE_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500;
 
 /// (delegate_flow_admin only) Update the group rate limiter inflow/outflow state.
 ///

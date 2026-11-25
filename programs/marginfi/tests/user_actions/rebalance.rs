@@ -4,10 +4,13 @@ use fixtures::{
     assert_custom_error,
     prelude::*,
     rebalance::{
-        drive_utilization, rebalance_move, setup, setup_multi_venue_fixture, DEPOSIT_USDC,
-        DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
+        drive_utilization, rebalance_move, setup, setup_drift_to_juplend_move_past_kamino,
+        setup_kamino_drift_move, setup_multi_venue_fixture, DEPOSIT_USDC, DRIFT_DST_BORROW_DEN,
+        DRIFT_DST_BORROW_NUM, KLEND_PACING, PACING_SAMPLE_SECONDS, VENUE_DEPOSIT_DRIFT_SHARES,
+        VENUE_DEPOSIT_NATIVE, VENUE_DEPOSIT_VALUE,
     },
 };
+use kamino_mocks::state::InterestRateBasis;
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     constants::REBALANCE_ORDER_SEED,
@@ -25,10 +28,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
-
-/// The per-venue deposit (`VENUE_DEPOSIT_NATIVE`, 100 USDC of 6-decimal native) as USD value, at the
-/// $1 test oracle.
-const VENUE_DEPOSIT_VALUE: f64 = 100.0;
 
 #[tokio::test]
 async fn rebalance_native_to_native_moves_the_deposit() -> anyhow::Result<()> {
@@ -1260,93 +1259,156 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .await;
 
     let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.0001)).await?;
-
-    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-    let refresh_reserve = f.user.make_kamino_refresh_reserve_ix(&f.kamino_bank).await;
-    let refresh_obligation = f
-        .user
-        .make_kamino_refresh_obligation_ix(&f.kamino_bank)
+    let ixs = f
+        .build_kamino_drift_sandwich(true, order_pda, record_pda)
         .await;
-    let drift_crank = f
-        .user
-        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
-        .await;
-    let ref_banks = vec![
-        RebalanceBankMeta::new(src, f.kamino_slice().await).with_rewards(f.kamino_rewards().await),
-        RebalanceBankMeta::new(dst, f.drift_slice().await),
-    ];
-    let moves = vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)];
-
-    let start_ix = f
-        .user
-        .make_rebalance_start_ix(
-            ref_banks.clone(),
-            moves,
-            0,
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-            f.keeper.pubkey(),
-        )
-        .await;
-    let withdraw_ix = f
-        .user
-        .make_kamino_withdraw_ix_with_authority(
-            f.keeper_token,
-            &f.kamino_bank,
-            VENUE_DEPOSIT_NATIVE,
-            Some(true),
-            f.keeper.pubkey(),
-        )
-        .await;
-    let deposit_ix = f
-        .user
-        .make_drift_deposit_ix_with_authority(
-            f.keeper_token,
-            &f.drift_bank,
-            // The venue withdraw rounds down, delivering one native unit less than requested.
-            VENUE_DEPOSIT_NATIVE - 1,
-            f.keeper.pubkey(),
-            None,
-        )
-        .await;
-    // Re-refresh the Kamino reserve after the withdraw leg marks it stale, before end reads its rate.
-    let refresh_reserve_end = f.user.make_kamino_refresh_reserve_ix(&f.kamino_bank).await;
-    let refresh_obligation_end = f
-        .user
-        .make_kamino_refresh_obligation_ix(&f.kamino_bank)
-        .await;
-    let end_ix = f
-        .user
-        .make_rebalance_end_ix(
-            ref_banks,
-            vec![src],
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-        )
-        .await;
-
-    f.process(&[
-        cu_ix,
-        refresh_reserve,
-        refresh_obligation,
-        drift_crank,
-        start_ix,
-        withdraw_ix,
-        deposit_ix,
-        refresh_reserve_end,
-        refresh_obligation_end,
-        end_ix,
-    ])
-    .await?;
+    f.process(&ixs).await?;
 
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
-    // The Drift mock bank scales shares 1000x (share value 0.001).
     assert_eq!(
         f.asset_shares(dst).await,
-        I80F48::from_num((VENUE_DEPOSIT_NATIVE - 1) * 1000)
+        I80F48::from_num(VENUE_DEPOSIT_DRIFT_SHARES)
     );
+    Ok(())
+}
+
+/// A Legacy Kamino reserve pays its quoted rate times chain pacing over klend's two slots per
+/// second, so a move out to Drift is allowed at two slots per second and refused at five.
+#[tokio::test]
+async fn rebalance_prices_a_legacy_kamino_source_at_chain_pacing() -> anyhow::Result<()> {
+    let (f, ixs) = setup_kamino_drift_move(true, InterestRateBasis::Legacy).await?;
+    f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS).await;
+    f.process(&ixs).await?;
+    assert_eq!(f.asset_shares(f.kamino_bank.key).await, I80F48::ZERO);
+    assert_eq!(
+        f.asset_shares(f.drift_bank.key).await,
+        I80F48::from_num(VENUE_DEPOSIT_DRIFT_SHARES)
+    );
+
+    let (f, ixs) = setup_kamino_drift_move(true, InterestRateBasis::Legacy).await?;
+    f.set_slot_pacing(5, PACING_SAMPLE_SECONDS).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    Ok(())
+}
+
+/// A move from Drift into a Legacy Kamino bank is refused at two slots per second and allowed
+/// at five.
+#[tokio::test]
+async fn rebalance_prices_a_legacy_kamino_destination_at_chain_pacing() -> anyhow::Result<()> {
+    let (f, ixs) = setup_kamino_drift_move(false, InterestRateBasis::Legacy).await?;
+    f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+
+    let (f, ixs) = setup_kamino_drift_move(false, InterestRateBasis::Legacy).await?;
+    let collateral = f
+        .kamino_reserve()
+        .await
+        .liquidity_to_collateral(VENUE_DEPOSIT_NATIVE - 1)?;
+    f.set_slot_pacing(5, PACING_SAMPLE_SECONDS).await;
+    f.process(&ixs).await?;
+    assert_eq!(f.asset_shares(f.drift_bank.key).await, I80F48::ZERO);
+    assert_eq!(
+        f.asset_shares(f.kamino_bank.key).await,
+        I80F48::from_num(collateral)
+    );
+    Ok(())
+}
+
+/// The move out of a Legacy Kamino bank is refused at the first slot of pacing that closes the
+/// order's margin and allowed one slot short of it. Whole slots do not land on the margin itself.
+#[tokio::test]
+async fn rebalance_rejects_a_legacy_kamino_move_one_slot_of_pacing_past_the_margin(
+) -> anyhow::Result<()> {
+    let (f, ixs) = setup_kamino_drift_move(true, InterestRateBasis::Legacy).await?;
+    let slots = f.first_refused_pacing_slots().await;
+    f.test_f
+        .set_slot_pacing_sample(slots, PACING_SAMPLE_SECONDS)
+        .await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+
+    let (f, ixs) = setup_kamino_drift_move(true, InterestRateBasis::Legacy).await?;
+    let slots = f.first_refused_pacing_slots().await;
+    f.test_f
+        .set_slot_pacing_sample(slots - 1, PACING_SAMPLE_SECONDS)
+        .await;
+    f.process(&ixs).await?;
+    assert_eq!(f.asset_shares(f.kamino_bank.key).await, I80F48::ZERO);
+    assert_eq!(
+        f.asset_shares(f.drift_bank.key).await,
+        I80F48::from_num(VENUE_DEPOSIT_DRIFT_SHARES)
+    );
+    Ok(())
+}
+
+/// One second short of an hour into the epoch there is no pacing sample, so a Legacy Kamino
+/// reserve has no rate and a move out of it or into it fails.
+#[tokio::test]
+async fn rebalance_rejects_a_legacy_kamino_move_without_a_pacing_sample() -> anyhow::Result<()> {
+    for out_of_kamino in [true, false] {
+        let (f, ixs) = setup_kamino_drift_move(out_of_kamino, InterestRateBasis::Legacy).await?;
+        f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS - 1)
+            .await;
+        let res = f.process(&ixs).await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::KaminoSlotPacingUnavailable);
+    }
+    Ok(())
+}
+
+/// A move from Drift to JupLend is refused while the listed Legacy Kamino bank could take the
+/// tokens instead: for paying more when it has a rate, and for having no rate without a sample.
+#[tokio::test]
+async fn rebalance_rejects_passing_over_a_legacy_kamino_bank_without_a_pacing_sample(
+) -> anyhow::Result<()> {
+    let (f, ixs) = setup_drift_to_juplend_move_past_kamino().await?;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotBestVenue);
+
+    // Two native units is the least room that counts: one rounds to none in whole-token units.
+    let (f, ixs) = setup_drift_to_juplend_move_past_kamino().await?;
+    f.set_kamino_deposit_capacity(2).await;
+    f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS - 1)
+        .await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::KaminoSlotPacingUnavailable);
+    Ok(())
+}
+
+/// A full Legacy Kamino bank can take none of the tokens, so the move from Drift to JupLend goes
+/// through while it has no rate.
+#[tokio::test]
+async fn rebalance_allows_a_move_past_a_full_legacy_kamino_bank_without_a_pacing_sample(
+) -> anyhow::Result<()> {
+    let (f, ixs) = setup_drift_to_juplend_move_past_kamino().await?;
+    f.set_kamino_deposit_capacity(0).await;
+    f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS - 1)
+        .await;
+    f.process(&ixs).await?;
+    assert_eq!(f.asset_shares(f.drift_bank.key).await, I80F48::ZERO);
+    // JupLend shares track native tokens 1:1.
+    assert_eq!(
+        f.asset_shares(f.juplend_bank.key).await,
+        I80F48::from_num(VENUE_DEPOSIT_NATIVE - 1)
+    );
+    Ok(())
+}
+
+/// A TrueApr Kamino reserve pays as quoted, so the move out to Drift is allowed at five slots per
+/// second, with a pacing sample and without one.
+#[tokio::test]
+async fn rebalance_prices_a_true_apr_kamino_reserve_without_chain_pacing() -> anyhow::Result<()> {
+    for sample_seconds in [PACING_SAMPLE_SECONDS, PACING_SAMPLE_SECONDS - 1] {
+        let (f, ixs) = setup_kamino_drift_move(true, InterestRateBasis::TrueApr).await?;
+        f.set_slot_pacing(5, sample_seconds).await;
+        f.process(&ixs).await?;
+        assert_eq!(f.asset_shares(f.kamino_bank.key).await, I80F48::ZERO);
+        assert_eq!(
+            f.asset_shares(f.drift_bank.key).await,
+            I80F48::from_num(VENUE_DEPOSIT_DRIFT_SHARES)
+        );
+    }
     Ok(())
 }
 
@@ -1369,71 +1431,10 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
 
     let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.0001)).await?;
 
-    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-    let drift_crank = f
-        .user
-        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+    let ixs = f
+        .build_drift_to_juplend_sandwich(false, order_pda, record_pda)
         .await;
-    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
-    let ref_banks = vec![
-        RebalanceBankMeta::new(src, f.drift_slice().await),
-        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
-            .with_rewards(f.juplend_rewards().await),
-    ];
-
-    let start_ix = f
-        .user
-        .make_rebalance_start_ix(
-            ref_banks.clone(),
-            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
-            0,
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-            f.keeper.pubkey(),
-        )
-        .await;
-    let withdraw_ix = f
-        .user
-        .make_drift_withdraw_ix_with_authority(
-            f.keeper_token,
-            &f.drift_bank,
-            VENUE_DEPOSIT_NATIVE,
-            Some(true),
-            f.keeper.pubkey(),
-            None,
-        )
-        .await;
-    let deposit_ix = f
-        .user
-        .make_juplend_deposit_ix_with_authority(
-            f.keeper_token,
-            &f.juplend_bank,
-            // The venue withdraw rounds down, delivering one native unit less than requested.
-            VENUE_DEPOSIT_NATIVE - 1,
-            f.keeper.pubkey(),
-        )
-        .await;
-    let end_ix = f
-        .user
-        .make_rebalance_end_ix(
-            ref_banks,
-            vec![src],
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-        )
-        .await;
-
-    f.process(&[
-        cu_ix,
-        drift_crank,
-        start_ix,
-        withdraw_ix,
-        deposit_ix,
-        end_ix,
-    ])
-    .await?;
+    f.process(&ixs).await?;
 
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
     // JupLend shares track native tokens 1:1.
@@ -1468,69 +1469,10 @@ async fn rebalance_prices_a_juplend_destination_on_its_curve() -> anyhow::Result
 
     let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.5)).await?;
 
-    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
-    let drift_crank = f
-        .user
-        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+    let ixs = f
+        .build_drift_to_juplend_sandwich(false, order_pda, record_pda)
         .await;
-    let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
-    let ref_banks = vec![
-        RebalanceBankMeta::new(src, f.drift_slice().await),
-        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
-            .with_rewards(f.juplend_rewards().await),
-    ];
-    let start_ix = f
-        .user
-        .make_rebalance_start_ix(
-            ref_banks.clone(),
-            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
-            0,
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-            f.keeper.pubkey(),
-        )
-        .await;
-    let withdraw_ix = f
-        .user
-        .make_drift_withdraw_ix_with_authority(
-            f.keeper_token,
-            &f.drift_bank,
-            VENUE_DEPOSIT_NATIVE,
-            Some(true),
-            f.keeper.pubkey(),
-            None,
-        )
-        .await;
-    let deposit_ix = f
-        .user
-        .make_juplend_deposit_ix_with_authority(
-            f.keeper_token,
-            &f.juplend_bank,
-            VENUE_DEPOSIT_NATIVE - 1,
-            f.keeper.pubkey(),
-        )
-        .await;
-    let end_ix = f
-        .user
-        .make_rebalance_end_ix(
-            ref_banks,
-            vec![src],
-            order_pda,
-            record_pda,
-            f.keeper.pubkey(),
-        )
-        .await;
-    let res = f
-        .process(&[
-            cu_ix,
-            drift_crank,
-            start_ix,
-            withdraw_ix,
-            deposit_ix,
-            end_ix,
-        ])
-        .await;
+    let res = f.process(&ixs).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
     Ok(())
 }

@@ -325,6 +325,8 @@ pub enum MarginfiError {
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
     InvalidKaminoObligation, // 6214
+    #[msg("Slot pacing is not measurable this early in the epoch; a Kamino reserve that accrues per slot cannot be priced")]
+    KaminoSlotPacingUnavailable, // 6215
     // **************END KAMINO ERRORS
 
     // ************** BEGIN DRIFT ERRORS (starting at 6300)
@@ -731,6 +733,7 @@ impl From<u32> for MarginfiError {
             6212 => MarginfiError::MaxMaintLeverageExceeded,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
+            6215 => MarginfiError::KaminoSlotPacingUnavailable,
 
             // Drift-specific errors (starting at 6300)
             6300 => MarginfiError::DriftInvalidOracleSetup,

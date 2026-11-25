@@ -8,7 +8,9 @@ use drift_mocks::drift::client as drift;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending, TokenReserve};
-use kamino_mocks::state::{CurvePoint, MinimalReserve};
+use kamino_mocks::state::{
+    CurvePoint, InterestRateBasis, MinimalLendingMarket, MinimalReserve, KLEND_SLOTS_PER_SECOND,
+};
 use marginfi_type_crate::pdas::{
     derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
     DRIFT_PROGRAM_ID,
@@ -18,6 +20,7 @@ use marginfi_type_crate::{
     pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
     types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_sdk::sysvar;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -703,6 +706,15 @@ impl RebalanceFixture {
 /// The user's src-venue deposit (native units, 6-decimal USDC). The keeper redeposits this full amount
 /// into the dst venue; value is strictly conserved and the keeper is paid a separate SOL tip.
 pub const VENUE_DEPOSIT_NATIVE: u64 = 100_000_000; // 100 USDC
+/// `VENUE_DEPOSIT_NATIVE` as USD value, at the $1 test oracle.
+pub const VENUE_DEPOSIT_VALUE: f64 = 100.0;
+/// The shortest slice of an epoch the program measures chain pacing from.
+pub const PACING_SAMPLE_SECONDS: i64 = 3_600;
+pub const KLEND_PACING: u64 = KLEND_SLOTS_PER_SECOND as u64;
+pub const VENUE_MIN_IMPROVEMENT: I80F48 = I80F48::lit("0.0001");
+/// Drift bank shares for the venue deposit once moved there: one native unit short from the venue
+/// withdraw's rounding, at the mock's 1000 shares per native unit.
+pub const VENUE_DEPOSIT_DRIFT_SHARES: u64 = (VENUE_DEPOSIT_NATIVE - 1) * 1_000;
 /// 50% borrow utilization engineered onto the Drift dst spot market: enough to make its supply rate
 /// clearly beat the 0%-utilization source while staying positive after the dst deposit grows it.
 pub const DRIFT_DST_BORROW_NUM: u128 = 1;
@@ -744,7 +756,7 @@ pub async fn setup_multi_venue_fixture() -> anyhow::Result<MultiVenueFixture> {
     let now = kamino.test_f.get_clock().await.unix_timestamp;
     kamino.test_f.set_pyth_oracle_timestamp(oracle, now).await;
 
-    Ok(MultiVenueFixture {
+    let f = MultiVenueFixture {
         test_f: kamino.test_f,
         user,
         mint,
@@ -754,31 +766,374 @@ pub async fn setup_multi_venue_fixture() -> anyhow::Result<MultiVenueFixture> {
         kamino_bank: kamino.bank_f,
         drift_bank,
         juplend_bank,
-    })
+    };
+    // The Kamino reserve accrues per slot, so pricing it needs a pacing sample. At klend's own
+    // pacing its rate reads as quoted.
+    f.set_slot_pacing(KLEND_PACING, PACING_SAMPLE_SECONDS).await;
+    Ok(f)
+}
+
+/// A Kamino bank quoted at 5/11 of the Drift bank's rate, which it matches at 4.4 slots per second,
+/// with the user's deposit in the source bank. Returns the keeper's move between the two.
+pub async fn setup_kamino_drift_move(
+    out_of_kamino: bool,
+    interest_rate_basis: InterestRateBasis,
+) -> anyhow::Result<(MultiVenueFixture, Vec<Instruction>)> {
+    let f = setup_multi_venue_fixture().await?;
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    let (src, dst) = if out_of_kamino {
+        f.test_f
+            .run_kamino_deposit(
+                &f.kamino_bank,
+                &f.user,
+                user_token.key,
+                VENUE_DEPOSIT_NATIVE,
+            )
+            .await?;
+        (f.kamino_bank.key, f.drift_bank.key)
+    } else {
+        f.test_f
+            .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+            .await?;
+        (f.drift_bank.key, f.kamino_bank.key)
+    };
+    f.seed_drift_liquidity(VENUE_DEPOSIT_NATIVE * 100).await?;
+    f.set_drift_borrow_utilization(DRIFT_DST_BORROW_NUM, DRIFT_DST_BORROW_DEN)
+        .await;
+
+    // Drift is priced with the deposit landed when it receives it, and as it stands when it is
+    // the source.
+    let drift = f
+        .drift_deposit_rate_at(if out_of_kamino {
+            VENUE_DEPOSIT_NATIVE
+        } else {
+            0
+        })
+        .await;
+    f.set_kamino_interest_rate_basis(interest_rate_basis).await;
+    f.set_kamino_quoted_supply_apr(drift * I80F48::from_num(5) / I80F48::from_num(11))
+        .await;
+
+    let (order_pda, record_pda) = f.place_order(src, dst, VENUE_MIN_IMPROVEMENT).await?;
+    let ixs = f
+        .build_kamino_drift_sandwich(out_of_kamino, order_pda, record_pda)
+        .await;
+    Ok((f, ixs))
+}
+
+/// The user's Drift deposit, a JupLend bank and a higher-rate Legacy Kamino bank on one order.
+/// Returns the keeper's move from Drift to JupLend.
+pub async fn setup_drift_to_juplend_move_past_kamino(
+) -> anyhow::Result<(MultiVenueFixture, Vec<Instruction>)> {
+    let f = setup_multi_venue_fixture().await?;
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    f.set_juplend_rate_high().await;
+    f.set_kamino_borrow_rate_bps(5_000).await;
+
+    let banks = vec![f.drift_bank.key, f.juplend_bank.key, f.kamino_bank.key];
+    let (order_pda, record_pda) = f.place_order_on(banks, VENUE_MIN_IMPROVEMENT).await?;
+    let ixs = f
+        .build_drift_to_juplend_sandwich(true, order_pda, record_pda)
+        .await;
+    Ok((f, ixs))
 }
 
 impl MultiVenueFixture {
-    /// Flattens the Kamino reserve's borrow-rate curve to zero (borrow rate 0 at every utilization
-    /// knot), making its supply rate ~0 regardless of the reserve's utilization. Touches only the
-    /// rate curve — never the balances — so the Kamino `refresh_reserve` exchange-rate math, which
-    /// reads liquidity/collateral, stays consistent. Used to make Kamino a low-rate source.
-    pub async fn set_kamino_rate_zero(&self) {
+    /// Paces the chain at `slots_per_second` over a `seconds`-long sample of the current epoch.
+    pub async fn set_slot_pacing(&self, slots_per_second: u64, seconds: i64) {
+        self.test_f
+            .set_slot_pacing_sample(slots_per_second * seconds as u64, seconds)
+            .await;
+    }
+
+    pub async fn kamino_reserve(&self) -> MinimalReserve {
+        let reserve_key = self.kamino_bank.load().await.integration_acc_1;
+        load_and_deserialize(self.test_f.context.clone(), &reserve_key).await
+    }
+
+    async fn edit_kamino_reserve(&self, edit: impl FnOnce(&mut MinimalReserve)) {
         let reserve_key = self.kamino_bank.load().await.integration_acc_1;
         let mut acct = self.test_f.try_load(&reserve_key).await.unwrap().unwrap();
-        let r = bytemuck::from_bytes_mut::<MinimalReserve>(&mut acct.data[8..]);
-        let mut points = [CurvePoint {
-            utilization_rate_bps: 0,
-            borrow_rate_bps: 0,
-        }; 11];
-        for (i, p) in points.iter_mut().enumerate() {
-            p.utilization_rate_bps = i as u32 * 1_000; // 0..10_000 bps, strictly increasing
-        }
-        r.config.borrow_rate_curve.points = points;
-        r.config.protocol_take_rate_pct = 0;
+        edit(bytemuck::from_bytes_mut::<MinimalReserve>(
+            &mut acct.data[8..],
+        ));
         self.test_f
             .context
             .borrow_mut()
             .set_account(&reserve_key, &AccountSharedData::from(acct));
+    }
+
+    /// Zeroes the Kamino reserve's supply rate at any utilization, making it a low-rate source.
+    pub async fn set_kamino_rate_zero(&self) {
+        self.set_kamino_borrow_rate_bps(0).await;
+    }
+
+    /// Flattens the Kamino reserve's borrow-rate curve at `bps` with no protocol take, so its quoted
+    /// supply rate is `bps` times its utilization. The balances, and so the exchange rate, stay put.
+    pub async fn set_kamino_borrow_rate_bps(&self, bps: u32) {
+        self.edit_kamino_reserve(|r| {
+            let mut points = [CurvePoint {
+                utilization_rate_bps: 0,
+                borrow_rate_bps: bps,
+            }; 11];
+            for (i, p) in points.iter_mut().enumerate() {
+                p.utilization_rate_bps = i as u32 * 1_000; // 0..10_000 bps, strictly increasing
+            }
+            r.config.borrow_rate_curve.points = points;
+            r.config.protocol_take_rate_pct = 0;
+        })
+        .await;
+    }
+
+    /// Sets the Kamino reserve's quoted supply rate to `rate`, to the nearest basis point of
+    /// borrow rate.
+    pub async fn set_kamino_quoted_supply_apr(&self, rate: I80F48) {
+        let r = self.kamino_reserve().await;
+        let utilization = r.borrowed_amount_sf() / r.calculate_total_supply_i80f48();
+        let bps = (rate / utilization * I80F48::from_num(10_000)).round();
+        self.set_kamino_borrow_rate_bps(bps.to_num()).await;
+    }
+
+    /// Caps the Kamino reserve so it accepts `capacity_native` more tokens and no more.
+    pub async fn set_kamino_deposit_capacity(&self, capacity_native: u64) {
+        let supply: u64 = self
+            .kamino_reserve()
+            .await
+            .calculate_total_supply_i80f48()
+            .ceil()
+            .to_num();
+        self.edit_kamino_reserve(|r| r.config.deposit_limit = supply + capacity_native)
+            .await;
+    }
+
+    pub async fn set_kamino_interest_rate_basis(&self, basis: InterestRateBasis) {
+        self.edit_kamino_reserve(|r| r.config.interest_rate_basis = basis as u8)
+            .await;
+    }
+
+    /// The Kamino reserve's supply rate, rewards included, as the program prices it from a pacing
+    /// sample of `slots` slots over `seconds` seconds.
+    pub async fn kamino_supply_apr(&self, slots: u64, seconds: i64) -> I80F48 {
+        let r = self.kamino_reserve().await;
+        let market: MinimalLendingMarket =
+            load_and_deserialize(self.test_f.context.clone(), &r.lending_market).await;
+        let pacing = I80F48::from_num(slots) / I80F48::from_num(seconds);
+        r.supply_apr(pacing).unwrap()
+            + r.rewards_apr(market.reserve_rewards_max_apr_bps, pacing)
+                .unwrap()
+    }
+
+    /// The Drift market's deposit rate after `extra_native` more tokens are deposited.
+    pub async fn drift_deposit_rate_at(&self, extra_native: u64) -> I80F48 {
+        let spot_market_key = self.drift_bank.load().await.integration_acc_1;
+        let m: MinimalSpotMarket =
+            load_and_deserialize(self.test_f.context.clone(), &spot_market_key).await;
+        m.deposit_rate_at(u128::from(extra_native)).unwrap()
+    }
+
+    /// The fewest slots in an hour-long pacing sample at which the Kamino bank no longer pays less
+    /// than the Drift bank, with the venue deposit landed, by `VENUE_MIN_IMPROVEMENT`.
+    pub async fn first_refused_pacing_slots(&self) -> u64 {
+        let drift = self.drift_deposit_rate_at(VENUE_DEPOSIT_NATIVE).await;
+        let hour = PACING_SAMPLE_SECONDS as u64;
+        let (mut allowed, mut refused) = (KLEND_PACING * hour, 5 * hour);
+        while refused - allowed > 1 {
+            let slots = (allowed + refused) / 2;
+            let kamino = self.kamino_supply_apr(slots, PACING_SAMPLE_SECONDS).await;
+            if drift > kamino + VENUE_MIN_IMPROVEMENT {
+                allowed = slots;
+            } else {
+                refused = slots;
+            }
+        }
+        refused
+    }
+
+    /// The `start_rebalance` and `end_rebalance` pair for a move of the whole venue deposit from
+    /// `ref_banks[0]` to `ref_banks[1]`. `emptied` are the banks the account then holds nothing in.
+    async fn build_start_and_end(
+        &self,
+        ref_banks: Vec<RebalanceBankMeta>,
+        emptied: Vec<Pubkey>,
+        order_pda: Pubkey,
+        record_pda: Pubkey,
+    ) -> (Instruction, Instruction) {
+        let keeper = self.keeper.pubkey();
+        let start_ix = self
+            .user
+            .make_rebalance_start_ix(
+                ref_banks.clone(),
+                vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+                0,
+                order_pda,
+                record_pda,
+                keeper,
+                keeper,
+            )
+            .await;
+        let end_ix = self
+            .user
+            .make_rebalance_end_ix(ref_banks, emptied, order_pda, record_pda, keeper)
+            .await;
+        (start_ix, end_ix)
+    }
+
+    /// The keeper sandwich that moves the user's whole `VENUE_DEPOSIT_NATIVE` deposit between the
+    /// Kamino and Drift banks: out of Kamino when `out_of_kamino`, into it otherwise.
+    pub async fn build_kamino_drift_sandwich(
+        &self,
+        out_of_kamino: bool,
+        order_pda: Pubkey,
+        record_pda: Pubkey,
+    ) -> Vec<Instruction> {
+        let keeper = self.keeper.pubkey();
+        let kamino = RebalanceBankMeta::new(self.kamino_bank.key, self.kamino_slice().await)
+            .with_rewards(self.kamino_rewards().await);
+        let drift = RebalanceBankMeta::new(self.drift_bank.key, self.drift_slice().await);
+        let (ref_banks, src) = if out_of_kamino {
+            (vec![kamino, drift], self.kamino_bank.key)
+        } else {
+            (vec![drift, kamino], self.drift_bank.key)
+        };
+        let (start_ix, end_ix) = self
+            .build_start_and_end(ref_banks, vec![src], order_pda, record_pda)
+            .await;
+        // The venue withdraw rounds down, delivering one native unit less than requested.
+        let landed = VENUE_DEPOSIT_NATIVE - 1;
+        let (withdraw_ix, deposit_ix) = if out_of_kamino {
+            (
+                self.user
+                    .make_kamino_withdraw_ix_with_authority(
+                        self.keeper_token,
+                        &self.kamino_bank,
+                        VENUE_DEPOSIT_NATIVE,
+                        Some(true),
+                        keeper,
+                    )
+                    .await,
+                self.user
+                    .make_drift_deposit_ix_with_authority(
+                        self.keeper_token,
+                        &self.drift_bank,
+                        landed,
+                        keeper,
+                        None,
+                    )
+                    .await,
+            )
+        } else {
+            (
+                self.user
+                    .make_drift_withdraw_ix_with_authority(
+                        self.keeper_token,
+                        &self.drift_bank,
+                        VENUE_DEPOSIT_NATIVE,
+                        Some(true),
+                        keeper,
+                        None,
+                    )
+                    .await,
+                self.user
+                    .make_kamino_deposit_ix_with_authority(
+                        self.keeper_token,
+                        &self.kamino_bank,
+                        landed,
+                        keeper,
+                    )
+                    .await,
+            )
+        };
+        let refresh_reserve = self
+            .user
+            .make_kamino_refresh_reserve_ix(&self.kamino_bank)
+            .await;
+        let refresh_obligation = self
+            .user
+            .make_kamino_refresh_obligation_ix(&self.kamino_bank)
+            .await;
+        vec![
+            ComputeBudgetInstruction::set_compute_unit_limit(2_000_000),
+            refresh_reserve.clone(),
+            refresh_obligation.clone(),
+            self.user
+                .make_drift_update_spot_market_cumulative_interest_ix(&self.drift_bank)
+                .await,
+            start_ix,
+            withdraw_ix,
+            deposit_ix,
+            // The Kamino leg marks the reserve stale; refresh it before end reads its rate.
+            refresh_reserve,
+            refresh_obligation,
+            end_ix,
+        ]
+    }
+
+    /// The keeper sandwich that moves the user's whole `VENUE_DEPOSIT_NATIVE` deposit from the Drift
+    /// bank to the JupLend bank, with the Kamino bank also referenced when `with_kamino`.
+    pub async fn build_drift_to_juplend_sandwich(
+        &self,
+        with_kamino: bool,
+        order_pda: Pubkey,
+        record_pda: Pubkey,
+    ) -> Vec<Instruction> {
+        let keeper = self.keeper.pubkey();
+        let juplend_reserve = derive_juplend_token_reserve(&self.mint.key).0;
+        let mut ref_banks = vec![
+            RebalanceBankMeta::new(self.drift_bank.key, self.drift_slice().await),
+            RebalanceBankMeta::with_reserve(
+                self.juplend_bank.key,
+                juplend_reserve,
+                self.juplend_slice().await,
+            )
+            .with_rewards(self.juplend_rewards().await),
+        ];
+        let mut ixs = vec![ComputeBudgetInstruction::set_compute_unit_limit(2_000_000)];
+        let mut emptied = vec![self.drift_bank.key];
+        if with_kamino {
+            emptied.push(self.kamino_bank.key);
+            ref_banks.push(
+                RebalanceBankMeta::new(self.kamino_bank.key, self.kamino_slice().await)
+                    .with_rewards(self.kamino_rewards().await),
+            );
+            ixs.push(
+                self.user
+                    .make_kamino_refresh_reserve_ix(&self.kamino_bank)
+                    .await,
+            );
+        }
+        let (start_ix, end_ix) = self
+            .build_start_and_end(ref_banks, emptied, order_pda, record_pda)
+            .await;
+        ixs.extend([
+            self.user
+                .make_drift_update_spot_market_cumulative_interest_ix(&self.drift_bank)
+                .await,
+            start_ix,
+            self.user
+                .make_drift_withdraw_ix_with_authority(
+                    self.keeper_token,
+                    &self.drift_bank,
+                    VENUE_DEPOSIT_NATIVE,
+                    Some(true),
+                    keeper,
+                    None,
+                )
+                .await,
+            // The venue withdraw rounds down, delivering one native unit less than requested.
+            self.user
+                .make_juplend_deposit_ix_with_authority(
+                    self.keeper_token,
+                    &self.juplend_bank,
+                    VENUE_DEPOSIT_NATIVE - 1,
+                    keeper,
+                )
+                .await,
+            end_ix,
+        ]);
+        ixs
     }
 
     /// Deposits `amount_native` into the Drift dst spot market through a native Drift lender,
@@ -959,6 +1314,16 @@ impl MultiVenueFixture {
         dst_bank: Pubkey,
         min_improvement: I80F48,
     ) -> anyhow::Result<(Pubkey, Pubkey)> {
+        self.place_order_on(vec![src_bank, dst_bank], min_improvement)
+            .await
+    }
+
+    /// Places the rebalance order on mint `M`, allowing `banks`. Returns the order/record PDAs.
+    pub async fn place_order_on(
+        &self,
+        banks: Vec<Pubkey>,
+        min_improvement: I80F48,
+    ) -> anyhow::Result<(Pubkey, Pubkey)> {
         let order_pda = Pubkey::find_program_address(
             &[
                 REBALANCE_ORDER_SEED.as_bytes(),
@@ -978,7 +1343,7 @@ impl MultiVenueFixture {
                 order_pda,
                 payer,
                 payer,
-                vec![src_bank, dst_bank],
+                banks,
                 Some(WrappedI80F48::from(min_improvement)),
                 Some(0),
                 None,
@@ -1037,10 +1402,7 @@ impl MultiVenueFixture {
 
     /// Kamino's reward accounts for start/end: its reserve's `LendingMarket`.
     pub async fn kamino_rewards(&self) -> Vec<Pubkey> {
-        let reserve_key = self.kamino_bank.load().await.integration_acc_1;
-        let reserve =
-            load_and_deserialize::<MinimalReserve>(self.test_f.context.clone(), &reserve_key).await;
-        vec![reserve.lending_market]
+        vec![self.kamino_reserve().await.lending_market]
     }
 
     /// JupLend's reward accounts for start/end: `[rewards_rate_model, f_token_mint]`.

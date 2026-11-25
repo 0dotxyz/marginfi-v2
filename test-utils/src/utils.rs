@@ -28,7 +28,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
 
-pub const MS_PER_SLOT: u64 = 400;
 pub const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
              solana_program_runtime::stable_log=debug,\
              solana_runtime::message_processor=debug,\

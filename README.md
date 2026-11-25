@@ -186,7 +186,7 @@ lot of activity.
 Different venues and providers handle the APR -> APY conversion in different ways, which can lead to
 slightly different rates depending on the source of the data. The rates displayed on
 [app.0.xyz](https://app.0.xyz) assume compounding roughly hourly for native banks. Some other venues
-use on-chain APY compounded every 400ms (the Solana slot time) using a Taylor series approximation
+use on-chain APY compounded every Solana slot using a Taylor series approximation
 instead of an APR, so they may have no APR to compare against. Those APYs are fetched using best-
 practices as defined in the venue's SDK.
 
