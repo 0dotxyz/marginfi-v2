@@ -16,7 +16,7 @@ use marginfi_type_crate::pdas::{
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::{derive_juplend_rate_model, derive_juplend_token_reserve},
-    types::{OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
+    types::{Bank, OrderTrigger, RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::sysvar;
 use solana_sdk::{
@@ -237,9 +237,10 @@ pub async fn setup(
 }
 
 impl RebalanceFixture {
-    /// A referenced native-USDC bank (one oracle) for the moves stream.
-    pub fn bank_meta(&self, bank: Pubkey) -> RebalanceBankMeta {
-        RebalanceBankMeta::new(bank, vec![self.oracle_metas[0].clone()])
+    /// A referenced bank for the moves stream.
+    pub async fn bank_meta(&self, bank: Pubkey) -> RebalanceBankMeta {
+        let bank_state = load_and_deserialize::<Bank>(self.test_f.context.clone(), &bank).await;
+        RebalanceBankMeta::new(bank, bank_observation_metas(&bank_state))
     }
 
     /// Add a second same-mint USDC destination bank driven to ~50% utilization (so it clears the
@@ -431,7 +432,7 @@ impl RebalanceFixture {
     pub async fn build_sandwich(&self, src: Pubkey, dst: Pubkey) -> Vec<Instruction> {
         let execution_seq = self.user.load().await.rebalance_execution_seq;
         let record_pda = record_pda_at(self.user.key, execution_seq);
-        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let ref_banks = vec![self.bank_meta(src).await, self.bank_meta(dst).await];
         let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
             .user
@@ -488,7 +489,7 @@ impl RebalanceFixture {
     ) -> Vec<Instruction> {
         let execution_seq = self.user.load().await.rebalance_execution_seq;
         let record_pda = record_pda_at(self.user.key, execution_seq);
-        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let ref_banks = vec![self.bank_meta(src).await, self.bank_meta(dst).await];
         let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
             .user
@@ -550,7 +551,7 @@ impl RebalanceFixture {
     /// `settle_rebalance_tip` with an explicit `caller`, so tests can settle from a third party and
     /// assert the tip and record rent still reach the recorded executor.
     pub async fn build_settle_as(&self, src: Pubkey, dst: Pubkey, caller: Pubkey) -> Instruction {
-        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let ref_banks = vec![self.bank_meta(src).await, self.bank_meta(dst).await];
         let seq = self.user.load().await.rebalance_execution_seq - 1;
         self.user
             .make_rebalance_settle_ix(
@@ -1012,27 +1013,18 @@ impl MultiVenueFixture {
 
     /// Per-Kamino-bank oracle slice for start/end: `[oracle, reserve]` (oracle first, venue last).
     pub async fn kamino_slice(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new_readonly(self.oracle, false),
-            AccountMeta::new_readonly(self.kamino_bank.load().await.integration_acc_1, false),
-        ]
+        bank_observation_metas(&self.kamino_bank.load().await)
     }
 
     /// Per-Drift-bank oracle slice for start/end: `[oracle, spot_market]`.
     pub async fn drift_slice(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new_readonly(self.oracle, false),
-            AccountMeta::new_readonly(self.drift_bank.load().await.integration_acc_1, false),
-        ]
+        bank_observation_metas(&self.drift_bank.load().await)
     }
 
     /// Per-JupLend-bank oracle slice for start/end: `[oracle, lending]`. The `TokenReserve` is passed
     /// separately via the start/end `*_token_reserve` argument, not in this slice.
     pub async fn juplend_slice(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new_readonly(self.oracle, false),
-            AccountMeta::new_readonly(self.juplend_bank.load().await.integration_acc_1, false),
-        ]
+        bank_observation_metas(&self.juplend_bank.load().await)
     }
 
     /// Kamino's reward accounts for start/end: its reserve's `LendingMarket`.

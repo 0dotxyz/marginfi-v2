@@ -1,4 +1,7 @@
-use marginfi_type_crate::pdas::{derive_bank_vault, derive_bank_vault_authority};
+use marginfi_type_crate::ix_builders;
+use marginfi_type_crate::pdas::{
+    bank_observation_keys, derive_bank_vault, derive_bank_vault_authority,
+};
 use {
     super::{group_get_all, load_all_banks},
     crate::{
@@ -6,7 +9,7 @@ use {
         output,
         utils::{find_bank_emssions_token_account_pda, send_tx},
     },
-    anchor_client::anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas},
+    anchor_client::anchor_lang::AnchorDeserialize,
     anyhow::{bail, Context, Result},
     marginfi::state::{
         bank::BankImpl,
@@ -27,7 +30,7 @@ use {
         account::{ReadableAccount, WritableAccount},
         account_info::IntoAccountInfo,
         clock::Clock,
-        instruction::{AccountMeta, Instruction},
+        instruction::AccountMeta,
         pubkey::Pubkey,
     },
     solana_system_interface::program as system_program,
@@ -151,7 +154,7 @@ pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> 
         )
         .map_err(|e| anyhow::anyhow!("failed to create oracle price feed adapter: {:?}", e))?,
         _ => {
-            let oracle_keys = crate::utils::bank_observation_keys(&bank);
+            let oracle_keys = bank_observation_keys(&bank);
             let rpc = config.mfi_program.rpc();
             let mut oracle_accounts: Vec<_> = oracle_keys
                 .iter()
@@ -505,15 +508,13 @@ pub fn dump_bank_metadata(
 pub fn bank_accrue_interest(config: Config, bank_pk: Pubkey) -> Result<()> {
     let bank: Bank = config.mfi_program.account(bank_pk)?;
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolAccrueBankInterest {
+    let ix = ix_builders::pool::lending_pool_accrue_bank_interest_with_program_id(
+        config.program_id,
+        &ix_builders::pool::LendingPoolAccrueBankInterest {
             group: bank.group,
             bank: bank_pk,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolAccrueBankInterest {}.data(),
-    };
+        },
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(&config, vec![ix], &signing_keypairs)?;
@@ -525,22 +526,19 @@ pub fn bank_accrue_interest(config: Config, bank_pk: Pubkey) -> Result<()> {
 pub fn bank_pulse_price_cache(config: Config, bank_pk: Pubkey) -> Result<()> {
     let bank: Bank = config.mfi_program.account(bank_pk)?;
 
-    let mut accounts = marginfi::accounts::LendingPoolPulseBankPriceCache {
-        group: bank.group,
-        bank: bank_pk,
-    }
-    .to_account_metas(Some(true));
+    let mut ix = ix_builders::pool::lending_pool_pulse_bank_price_cache_with_program_id(
+        config.program_id,
+        &ix_builders::pool::LendingPoolPulseBankPriceCache {
+            group: bank.group,
+            bank: bank_pk,
+        },
+    );
 
     // Append all oracle accounts needed for this bank's oracle setup
-    for oracle_pk in crate::utils::bank_observation_keys(&bank) {
-        accounts.push(AccountMeta::new_readonly(oracle_pk, false));
+    for oracle_pk in bank_observation_keys(&bank) {
+        ix.accounts
+            .push(AccountMeta::new_readonly(oracle_pk, false));
     }
-
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts,
-        data: marginfi::instruction::LendingPoolPulseBankPriceCache {}.data(),
-    };
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(&config, vec![ix], &signing_keypairs)?;
@@ -563,19 +561,18 @@ pub fn bank_withdraw_fees_permissionless(
 
     let fees_destination_account = bank.fees_destination_account;
 
-    let mut ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolWithdrawFeesPermissionless {
+    let mut ix = ix_builders::pool::lending_pool_withdraw_fees_permissionless_with_program_id(
+        config.program_id,
+        &ix_builders::pool::LendingPoolWithdrawFeesPermissionless {
             group: bank.group,
             bank: bank_pk,
             fee_vault,
             fee_vault_authority,
             fees_destination_account,
             token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolWithdrawFeesPermissionless { amount }.data(),
-    };
+        },
+        amount,
+    );
     if token_program == anchor_spl::token_2022::ID {
         ix.accounts
             .push(AccountMeta::new_readonly(bank.mint, false));
@@ -591,17 +588,15 @@ pub fn bank_withdraw_fees_permissionless(
 pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
     let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::InitBankMetadata {
+    let ix = ix_builders::pool::init_bank_metadata_with_program_id(
+        config.program_id,
+        &ix_builders::pool::InitBankMetadata {
             bank: bank_pk,
             fee_payer: config.authority(),
             metadata,
             system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata {}.data(),
-    };
+        },
+    );
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(&config, vec![ix], &signing_keypairs)?;

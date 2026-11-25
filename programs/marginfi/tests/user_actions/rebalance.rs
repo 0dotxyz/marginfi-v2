@@ -359,7 +359,10 @@ async fn rebalance_rejects_bank_outside_allowlist() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(outside), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(outside).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+            ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             0,
             f.order_pda,
@@ -483,7 +486,10 @@ async fn rebalance_unlimited_allows_partial_fill() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let old_src = f.asset_shares(f.src_bank_f.key).await;
     let half = DEPOSIT_USDC / 2.0;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -601,7 +607,10 @@ async fn rebalance_keeper_close_when_no_position() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_rejects_value_leak() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     // Declare a full move, but the keeper only delivers half — reconciliation catches the shortfall.
     let start_ix = f
         .user
@@ -747,7 +756,10 @@ async fn rebalance_partial_amount_moves_only_that_amount() -> anyhow::Result<()>
     let old_src = f.asset_shares(f.src_bank_f.key).await;
     // Manage half of the 1000 USDC deposit (6-decimal native), leaving the rest in src.
     f.set_amount(500_000_000).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
 
     let start_ix = f
         .user
@@ -816,7 +828,10 @@ async fn rebalance_partial_amount_moves_only_that_amount() -> anyhow::Result<()>
 async fn rebalance_partial_rejects_over_move() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.set_amount(500_000_000).await?; // authorize 500 USDC of total moved value
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
 
     // Keeper honestly declares (and moves) the full 1000 — more than the order's 500 budget.
     let start_ix = f
@@ -880,7 +895,10 @@ async fn rebalance_partial_fill_pays_prorata_tip() -> anyhow::Result<()> {
     f.top_up_pool(5_000_000).await?;
     let pool_before = f.lamports_of(f.fee_pool()).await;
 
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -950,8 +968,13 @@ async fn rebalance_executes_the_maximum_moves() -> anyhow::Result<()> {
     f.set_keeper_tip(tip).await?;
     f.top_up_pool(5_000_000).await?;
 
-    let mut ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
-    ref_banks.extend(extra.iter().map(|b| f.bank_meta(b.key)));
+    let mut ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
+    for b in &extra {
+        ref_banks.push(f.bank_meta(b.key).await);
+    }
     assert_eq!(ref_banks.len(), MAX_REBALANCE_BANKS);
 
     // Uneven, so reconciliation has to accumulate every entry rather than scale the first. Deposits
@@ -1054,9 +1077,9 @@ async fn rebalance_splits_across_two_destinations() -> anyhow::Result<()> {
     let pool_before = f.lamports_of(f.fee_pool()).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let half = DEPOSIT_USDC / 2.0;
 
@@ -1562,7 +1585,10 @@ async fn rebalance_dust_tolerance_scales_with_venue_multiplier() -> anyhow::Resu
 #[tokio::test]
 async fn rebalance_rejects_moves_more_than_declared() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -1632,7 +1658,10 @@ async fn rebalance_rejects_principal_skim() -> anyhow::Result<()> {
 async fn rebalance_rejects_omitting_an_allowlisted_bank() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.add_second_dst().await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -1661,9 +1690,9 @@ async fn rebalance_rejects_a_move_to_less_than_the_best_venue() -> anyhow::Resul
     drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -1717,9 +1746,9 @@ async fn rebalance_rejects_misrouted_deposit() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let dst2 = f.add_second_dst().await?;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let half = DEPOSIT_USDC / 2.0;
     let start_ix = f
@@ -1780,9 +1809,9 @@ async fn rebalance_consolidate_rejects_source_misattribution() -> anyhow::Result
     let src2 = f.add_second_src(500.0).await?;
     // Banks: src(0, holds 1000), src2(1, holds 500), dst(2, rate > 0).
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(src2.key),
-        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(src2.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
     ];
     let start_ix = f
         .user
@@ -1849,9 +1878,9 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
     let pool_before = f.lamports_of(f.fee_pool()).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(src2.key),
-        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(src2.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
     ];
     let start_ix = f
         .user
@@ -1930,9 +1959,9 @@ async fn rebalance_consolidate_rejects_destination_shortfall() -> anyhow::Result
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let src2 = f.add_second_src(500.0).await?;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(src2.key),
-        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(src2.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
     ];
     let start_ix = f
         .user
@@ -1999,9 +2028,9 @@ async fn rebalance_rejects_multi_move_when_one_not_improving() -> anyhow::Result
     // src2 is a rate-0 bank (added as a "source" helper, but here used as a non-improving destination).
     let flat = f.add_second_src(1.0).await?;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(flat.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(flat.key).await,
     ];
     let half = DEPOSIT_USDC / 2.0;
     // 0->1 improves (dst rate > 0); 0->2 does not (flat rate 0 == src rate 0).
@@ -2045,7 +2074,10 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
         .await
         .key;
 
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -2112,7 +2144,10 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
         .await
         .key;
 
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -2233,7 +2268,10 @@ async fn rebalance_rejects_a_partial_move_of_a_tagged_balance() -> anyhow::Resul
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.place_stop_loss_on(&f.src_bank_f).await?;
     let half = DEPOSIT_USDC / 2.0;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -2285,9 +2323,9 @@ async fn rebalance_rejects_splitting_a_tagged_balance() -> anyhow::Result<()> {
     f.place_stop_loss_on(&f.src_bank_f).await?;
     let half = DEPOSIT_USDC / 2.0;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2369,9 +2407,9 @@ async fn rebalance_rejects_clearing_the_tag_of_an_untouched_referenced_bank() ->
     let src2 = f.add_second_src(100.0).await?;
     f.place_stop_loss_on(&src2).await?;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(src2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(src2.key).await,
     ];
     let start_ix = f
         .user
@@ -2448,9 +2486,9 @@ async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<(
     drive_utilization(&f.test_f, &dst2, 100.0, 200.0).await?;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let half = DEPOSIT_USDC / 2.0;
     let split = f
@@ -2493,9 +2531,9 @@ async fn rebalance_rejects_passing_over_a_partly_full_higher_rate_bank() -> anyh
         .user
         .make_rebalance_start_ix(
             vec![
-                f.bank_meta(f.src_bank_f.key),
-                f.bank_meta(f.dst_bank_f.key),
-                f.bank_meta(dst2.key),
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+                f.bank_meta(dst2.key).await,
             ],
             vec![rebalance_move(0, 2, DEPOSIT_USDC)],
             0,
@@ -2531,9 +2569,9 @@ async fn rebalance_tagged_move_ignores_a_partly_full_better_bank() -> anyhow::Re
     let old_src = f.asset_shares(f.src_bank_f.key).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2593,9 +2631,9 @@ async fn rebalance_tagged_move_ignores_a_held_better_bank() -> anyhow::Result<()
     let old_dst = f.asset_shares(f.dst_bank_f.key).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2671,10 +2709,10 @@ async fn rebalance_tagged_move_ignores_a_better_bank_already_getting_inflow() ->
     let old_src2 = f.asset_shares(src2.key).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(src2.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(src2.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2750,9 +2788,9 @@ async fn rebalance_untagged_move_ignores_a_tagged_better_bank() -> anyhow::Resul
     let old_src = f.asset_shares(f.src_bank_f.key).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2828,10 +2866,10 @@ async fn rebalance_untagged_move_ignores_a_better_bank_getting_tagged_inflow() -
     let old_src2 = f.asset_shares(src2.key).await;
 
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(src2.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(src2.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -2911,9 +2949,9 @@ async fn rebalance_judges_a_repeated_destination_against_its_untouched_twin() ->
     let dst2 = f.add_second_dst().await?;
     let chunk = 200.0;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let doubled = f
         .user
@@ -3015,9 +3053,9 @@ async fn rebalance_allows_overflow_past_a_full_higher_rate_bank() -> anyhow::Res
 
     let old_src = f.asset_shares(f.src_bank_f.key).await;
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     let start_ix = f
         .user
@@ -3081,9 +3119,9 @@ async fn rebalance_amount_cap_sums_across_moves() -> anyhow::Result<()> {
     let dst2 = f.add_second_dst().await?;
     f.set_amount(500_000_000).await?; // $500 total budget
     let ref_banks = vec![
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-        f.bank_meta(dst2.key),
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+        f.bank_meta(dst2.key).await,
     ];
     // 300 + 300 = 600 > 500, though each move is under the cap.
     let start_ix = f
@@ -3146,7 +3184,10 @@ async fn rebalance_rejects_zero_amount_move() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+            ],
             vec![rebalance_move(0, 1, 0.0)],
             0,
             f.order_pda,
@@ -3167,7 +3208,10 @@ async fn rebalance_rejects_empty_moves() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+            ],
             vec![],
             0,
             f.order_pda,
@@ -3190,9 +3234,9 @@ async fn rebalance_rejects_a_bank_that_is_both_source_and_destination() -> anyho
         .user
         .make_rebalance_start_ix(
             vec![
-                f.bank_meta(f.src_bank_f.key),
-                f.bank_meta(f.dst_bank_f.key),
-                f.bank_meta(dst2.key),
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+                f.bank_meta(dst2.key).await,
             ],
             vec![rebalance_move(0, 1, 500.0), rebalance_move(1, 2, 500.0)],
             0,
@@ -3220,7 +3264,10 @@ async fn rebalance_rejects_stale_execution_seq() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+            ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             0,
             f.order_pda,
@@ -3241,7 +3288,10 @@ async fn rebalance_rejects_duplicate_referenced_bank() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.src_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.src_bank_f.key).await,
+            ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             0,
             f.order_pda,
@@ -3260,7 +3310,10 @@ async fn rebalance_rejects_duplicate_referenced_bank() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3297,7 +3350,10 @@ async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
     let end_ix = f
         .user
         .make_rebalance_end_ix(
-            vec![f.bank_meta(f.dst_bank_f.key), f.bank_meta(f.src_bank_f.key)],
+            vec![
+                f.bank_meta(f.dst_bank_f.key).await,
+                f.bank_meta(f.src_bank_f.key).await,
+            ],
             vec![f.src_bank_f.key],
             f.order_pda,
             f.record_pda,
@@ -3341,7 +3397,10 @@ async fn rebalance_bounded_move_at_cap_pays_full_tip() -> anyhow::Result<()> {
     f.top_up_pool(5_000_000).await?;
     let pool_before = f.lamports_of(f.fee_pool()).await;
 
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3396,7 +3455,10 @@ async fn rebalance_bounded_move_at_cap_pays_full_tip() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3452,7 +3514,10 @@ async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
 async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let old_src = f.asset_shares(f.src_bank_f.key).await;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3533,9 +3598,9 @@ async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![
-                f.bank_meta(f.src_bank_f.key),
-                f.bank_meta(f.dst_bank_f.key),
-                f.bank_meta(sol),
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+                f.bank_meta(sol).await,
             ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             0,
@@ -3558,7 +3623,10 @@ async fn rebalance_rejects_too_many_moves() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key).await,
+                f.bank_meta(f.dst_bank_f.key).await,
+            ],
             moves,
             0,
             f.order_pda,
@@ -3580,7 +3648,7 @@ async fn rebalance_rejects_missing_oracle_account() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![
-                f.bank_meta(f.src_bank_f.key),
+                f.bank_meta(f.src_bank_f.key).await,
                 RebalanceBankMeta::new(f.dst_bank_f.key, vec![]), // no oracle
             ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
@@ -3605,7 +3673,10 @@ async fn rebalance_tip_floors_fractional_lamport() -> anyhow::Result<()> {
     f.top_up_pool(5_000_000).await?;
     let pool_before = f.lamports_of(f.fee_pool()).await;
 
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3714,7 +3785,10 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
     f.process_as_payer(&[update]).await?;
 
     // Consolidate the 1000 USDC into the low-weight dst -> collateral counts as 500 -> health -100.
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(low_dst.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(low_dst.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3781,7 +3855,10 @@ async fn rebalance_end_rejects_a_deposit_beyond_the_declared_move() -> anyhow::R
     // A declared 1 USDC leaves dst near 50% utilization, clear of the 0.1 margin; the 1000 the legs
     // actually move halve that (lending rate 0.075).
     let f = setup(I80F48::from_num(0.1), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -3838,7 +3915,10 @@ async fn rebalance_prices_a_destination_at_its_total_inflow() -> anyhow::Result<
     // margin; the whole position leaves it at 25% (0.075). Two halves are judged as the whole.
     let f = setup(I80F48::from_num(0.1), 0).await?;
     let half = DEPOSIT_USDC / 2.0;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let split = f
         .user
         .make_rebalance_start_ix(
@@ -3930,7 +4010,10 @@ async fn rebalance_allows_a_move_that_spikes_the_drained_source() -> anyhow::Res
 
     // Move the withdrawable 950 (leaving the 50 that backs the borrow) from src into dst.
     let moved = 950.0;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -4302,7 +4385,10 @@ async fn rebalance_rejects_second_end_in_tx() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_rejects_no_op_move() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(

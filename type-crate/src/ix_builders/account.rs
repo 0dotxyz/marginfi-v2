@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -16,9 +17,9 @@ pub struct AdminCloseAccount {
     pub rebalance_fee_pool: Pubkey,
 }
 impl AdminCloseAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [131, 60, 75, 215, 109, 34, 157, 26];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::ADMIN_CLOSE_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -36,13 +37,13 @@ impl ToAccountMetas for AdminCloseAccount {
 /// (permissionless) Close an account that is empty, inactive for >60 days, and has no
 /// blocking state flags. Rent is returned to the group's global fee wallet.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn admin_close_account(accounts: &AdminCloseAccount) -> Instruction {
     admin_close_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn admin_close_account_with_program_id(
     program_id: Pubkey,
@@ -66,9 +67,9 @@ pub struct MarginfiAccountClose {
     pub rebalance_fee_pool: Pubkey,
 }
 impl MarginfiAccountClose {
-    pub const DISCRIMINATOR: [u8; 8] = [186, 221, 93, 34, 50, 97, 194, 241];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_CLOSE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -86,13 +87,13 @@ impl ToAccountMetas for MarginfiAccountClose {
 /// (account authority) Close a marginfi account. Requires all balances to be empty and no
 /// active flags (disabled, flashloan, receivership).
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close(accounts: &MarginfiAccountClose) -> Instruction {
     marginfi_account_close_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_with_program_id(
     program_id: Pubkey,
@@ -116,9 +117,9 @@ pub struct MarginfiAccountCloseLiqRecord {
     pub record_payer: Pubkey,
 }
 impl MarginfiAccountCloseLiqRecord {
-    pub const DISCRIMINATOR: [u8; 8] = [187, 222, 41, 134, 102, 10, 112, 147];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_CLOSE_LIQ_RECORD;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -135,13 +136,13 @@ impl ToAccountMetas for MarginfiAccountCloseLiqRecord {
 /// (permissionless) Close a liquidation record PDA and return rent to the original payer.
 /// Rent always goes to `record_payer`. Fails if the account is in receivership or deleverage.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_liq_record(accounts: &MarginfiAccountCloseLiqRecord) -> Instruction {
     marginfi_account_close_liq_record_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_close_liq_record_with_program_id(
     program_id: Pubkey,
@@ -164,9 +165,9 @@ pub struct MarginfiAccountInitLiqRecord {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountInitLiqRecord {
-    pub const DISCRIMINATOR: [u8; 8] = [236, 213, 238, 126, 147, 251, 164, 8];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::INIT_LIQUIDATION_RECORD;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -184,13 +185,13 @@ impl ToAccountMetas for MarginfiAccountInitLiqRecord {
 /// (permissionless) Initialize a liquidation record PDA for a marginfi account. The fee_payer
 /// pays rent; the record is required for receivership liquidation.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_init_liq_record(accounts: &MarginfiAccountInitLiqRecord) -> Instruction {
     marginfi_account_init_liq_record_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_init_liq_record_with_program_id(
     program_id: Pubkey,
@@ -214,9 +215,9 @@ pub struct MarginfiAccountInitialize {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountInitialize {
-    pub const DISCRIMINATOR: [u8; 8] = [43, 78, 61, 255, 148, 52, 249, 154];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_INITIALIZE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_group, false),
@@ -237,13 +238,13 @@ impl ToAccountMetas for MarginfiAccountInitialize {
 /// create the account manually and use `transfer_to_new_account` to gift it to the owner you
 /// wish.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_initialize(accounts: &MarginfiAccountInitialize) -> Instruction {
     marginfi_account_initialize_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_initialize_with_program_id(
     program_id: Pubkey,
@@ -270,9 +271,9 @@ pub struct MarginfiAccountInitializePda {
     pub system_program: Pubkey,
 }
 impl MarginfiAccountInitializePda {
-    pub const DISCRIMINATOR: [u8; 8] = [87, 177, 91, 80, 218, 119, 245, 31];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_INITIALIZE_PDA;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.marginfi_group, false),
@@ -299,7 +300,7 @@ impl ToAccountMetas for MarginfiAccountInitializePda {
 /// - third_party_id: Optional u16 for third-party tagging. Seeds < PDA_FREE_THRESHOLD can be
 /// used freely. For a dedicated seed used by just your program (via CPI), contact us.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_initialize_pda(
     accounts: &MarginfiAccountInitializePda,
@@ -314,7 +315,7 @@ pub fn marginfi_account_initialize_pda(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_initialize_pda_with_program_id(
     program_id: Pubkey,
@@ -347,9 +348,9 @@ pub struct MarginfiAccountSetFreeze {
     pub instruction_sysvar: Pubkey,
 }
 impl MarginfiAccountSetFreeze {
-    pub const DISCRIMINATOR: [u8; 8] = [199, 179, 231, 30, 138, 247, 110, 227];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_SET_FREEZE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -367,7 +368,7 @@ impl ToAccountMetas for MarginfiAccountSetFreeze {
 /// Freeze a marginfi account with the fast admin, or unfreeze it with the slow governance
 /// admin. A frozen account can only be operated on by the slow governance admin.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_set_freeze(
     accounts: &MarginfiAccountSetFreeze,
@@ -376,7 +377,7 @@ pub fn marginfi_account_set_freeze(
     marginfi_account_set_freeze_with_program_id(crate::ID, accounts, frozen)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_set_freeze_with_program_id(
     program_id: Pubkey,
@@ -401,9 +402,9 @@ pub struct MarginfiAccountTagLiqRecord {
     pub group: Pubkey,
 }
 impl MarginfiAccountTagLiqRecord {
-    pub const DISCRIMINATOR: [u8; 8] = [12, 189, 215, 239, 231, 122, 220, 158];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_ACCOUNT_TAG_LIQ_RECORD;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -419,13 +420,15 @@ impl ToAccountMetas for MarginfiAccountTagLiqRecord {
 /// (permissionless) Tag an unhealthy account, growing the allowed liquidation premium over
 /// time. Calling it on an account that is healthy again clears its existing tag.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_tag_liq_record(accounts: &MarginfiAccountTagLiqRecord) -> Instruction {
     marginfi_account_tag_liq_record_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_tag_liq_record_with_program_id(
     program_id: Pubkey,
@@ -448,9 +451,10 @@ pub struct MarginfiAccountUpdateEmissionsDestinationAccount {
     pub destination_account: Pubkey,
 }
 impl MarginfiAccountUpdateEmissionsDestinationAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [73, 185, 162, 201, 111, 24, 116, 185];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_ACCOUNT_UPDATE_EMISSIONS_DESTINATION_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -466,7 +470,7 @@ impl ToAccountMetas for MarginfiAccountUpdateEmissionsDestinationAccount {
 }
 /// (account authority) Set the wallet whose canonical ATA will receive off-chain emissions.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_update_emissions_destination_account(
     accounts: &MarginfiAccountUpdateEmissionsDestinationAccount,
@@ -474,7 +478,7 @@ pub fn marginfi_account_update_emissions_destination_account(
     marginfi_account_update_emissions_destination_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_account_update_emissions_destination_account_with_program_id(
     program_id: Pubkey,
@@ -502,9 +506,9 @@ pub struct TransferToNewAccount {
     pub system_program: Pubkey,
 }
 impl TransferToNewAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [28, 79, 129, 231, 169, 69, 69, 65];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::TRANSFER_TO_NEW_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -527,13 +531,13 @@ impl ToAccountMetas for TransferToNewAccount {
 /// (account authority) Transfer all positions to a new account under a new authority. The old
 /// account is disabled. Pays a flat SOL fee to the protocol.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn transfer_to_new_account(accounts: &TransferToNewAccount) -> Instruction {
     transfer_to_new_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn transfer_to_new_account_with_program_id(
     program_id: Pubkey,
@@ -563,9 +567,9 @@ pub struct TransferToNewAccountPda {
     pub system_program: Pubkey,
 }
 impl TransferToNewAccountPda {
-    pub const DISCRIMINATOR: [u8; 8] = [172, 210, 224, 220, 146, 212, 253, 49];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::TRANSFER_TO_NEW_ACCOUNT_PDA;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -595,7 +599,7 @@ impl ToAccountMetas for TransferToNewAccountPda {
 /// - third_party_id: Optional u16 for third-party tagging. Seeds < PDA_FREE_THRESHOLD can be
 /// used freely. For a dedicated seed used by just your program (via CPI), contact us.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn transfer_to_new_account_pda(
     accounts: &TransferToNewAccountPda,
@@ -605,7 +609,7 @@ pub fn transfer_to_new_account_pda(
     transfer_to_new_account_pda_with_program_id(crate::ID, accounts, account_index, third_party_id)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn transfer_to_new_account_pda_with_program_id(
     program_id: Pubkey,

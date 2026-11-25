@@ -301,7 +301,7 @@ pub fn derive_bank_vault_authority(
 }
 
 /// Oracle accounts a bank contributes to a health check, in the order the risk engine expects.
-/// Append these after the fixed accounts for any instruction that prices this bank.
+/// Instructions that price this bank take these after their fixed accounts.
 pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
     let keys = &bank.config.oracle_keys;
 
@@ -372,6 +372,19 @@ mod tests {
             bank.config.oracle_setup = setup;
             assert_eq!(bank_observation_keys(&bank), expected, "{setup:?}");
         }
+    }
+
+    #[test]
+    fn observation_keys_keep_onramp_slot_for_legacy_staked_bank() {
+        use bytemuck::Zeroable;
+        let mut bank = Bank::zeroed();
+        bank.config.oracle_setup = OracleSetup::StakedWithPythPush;
+        let keys = [1, 2, 3].map(|n| Pubkey::new_from_array([n; 32]));
+        bank.config.oracle_keys[..3].copy_from_slice(&keys);
+        assert_eq!(
+            bank_observation_keys(&bank),
+            vec![keys[0], keys[1], keys[2], Pubkey::default()]
+        );
     }
 
     #[test]

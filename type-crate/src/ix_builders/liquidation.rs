@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
@@ -15,9 +16,9 @@ pub struct EndDeleverage {
     pub instruction_sysvar: Pubkey,
 }
 impl EndDeleverage {
-    pub const DISCRIMINATOR: [u8; 8] = [114, 14, 250, 143, 252, 104, 214, 209];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::END_DELEVERAGE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -35,13 +36,15 @@ impl ToAccountMetas for EndDeleverage {
 }
 /// (risk_admin only) End forced deleverage. Validates health did not worsen.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn end_deleverage(accounts: &EndDeleverage) -> Instruction {
     end_deleverage_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn end_deleverage_with_program_id(program_id: Pubkey, accounts: &EndDeleverage) -> Instruction {
     let data = EndDeleverage::DISCRIMINATOR.to_vec();
@@ -69,9 +72,9 @@ pub struct EndLiquidation {
     pub fee_payer: Option<Pubkey>,
 }
 impl EndLiquidation {
-    pub const DISCRIMINATOR: [u8; 8] = [110, 11, 244, 54, 229, 181, 22, 184];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::END_LIQUIDATION;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -96,13 +99,15 @@ impl ToAccountMetas for EndLiquidation {
 /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
 /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn end_liquidation(accounts: &EndLiquidation) -> Instruction {
     end_liquidation_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn end_liquidation_with_program_id(
     program_id: Pubkey,
@@ -130,9 +135,9 @@ pub struct StartDeleverage {
     pub instruction_sysvar: Pubkey,
 }
 impl StartDeleverage {
-    pub const DISCRIMINATOR: [u8; 8] = [10, 138, 10, 57, 40, 232, 182, 193];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::START_DELEVERAGE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -151,13 +156,15 @@ impl ToAccountMetas for StartDeleverage {
 /// (risk_admin only) Begin forced deleverage on an account. Similar to start_liquidation but
 /// does not require the account to be unhealthy.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn start_deleverage(accounts: &StartDeleverage) -> Instruction {
     start_deleverage_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn start_deleverage_with_program_id(
     program_id: Pubkey,
@@ -186,9 +193,9 @@ pub struct StartLiquidation {
     pub instruction_sysvar: Pubkey,
 }
 impl StartLiquidation {
-    pub const DISCRIMINATOR: [u8; 8] = [244, 93, 90, 214, 192, 166, 191, 21];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::START_LIQUIDATION;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_account, false),
@@ -207,13 +214,15 @@ impl ToAccountMetas for StartLiquidation {
 /// (permissionless) Begin receivership liquidation on an unhealthy account. Snapshots health
 /// and marks the account in receivership. Must have `end_liquidation` as the last ix in the tx.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn start_liquidation(accounts: &StartLiquidation) -> Instruction {
     start_liquidation_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn start_liquidation_with_program_id(
     program_id: Pubkey,

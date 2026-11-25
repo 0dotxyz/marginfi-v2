@@ -1,5 +1,4 @@
 use fixtures::prelude::*;
-use marginfi::instruction::MarginfiGroupConfigureGov;
 use marginfi_type_crate::types::{FeeState, MarginfiGroup};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -81,15 +80,13 @@ async fn group_resize_unbricks_v1_account() -> anyhow::Result<()> {
     group_f
         .try_group_configure_gov_with_signer(
             &governance_admin,
-            MarginfiGroupConfigureGov {
-                new_admin: None,
-                new_emode_admin: Some(new_emode_admin),
-                new_risk_admin: None,
-                emode_max_init_leverage: None,
-                emode_max_maint_leverage: None,
-                same_asset_emode_init_leverage: None,
-                same_asset_emode_maint_leverage: None,
-            },
+            None,
+            Some(new_emode_admin),
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .await?;
     let group = group_f.load().await;

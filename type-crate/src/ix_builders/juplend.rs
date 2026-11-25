@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::JuplendConfigCompact;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -43,9 +44,9 @@ pub struct JuplendDeposit {
     pub system_program: Pubkey,
 }
 impl JuplendDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [114, 11, 218, 81, 183, 165, 143, 255];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::JUPLEND_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -82,13 +83,13 @@ impl ToAccountMetas for JuplendDeposit {
 /// (user) Deposit into a JupLend lending pool through a marginfi account.
 /// * amount - in the underlying token (e.g., USDC), in native decimals
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_deposit(accounts: &JuplendDeposit, amount: u64) -> Instruction {
     juplend_deposit_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_deposit_with_program_id(
     program_id: Pubkey,
@@ -140,9 +141,9 @@ pub struct JuplendInitPosition {
     pub system_program: Pubkey,
 }
 impl JuplendInitPosition {
-    pub const DISCRIMINATOR: [u8; 8] = [176, 255, 151, 106, 5, 207, 74, 215];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::JUPLEND_INIT_POSITION;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.fee_payer, true),
@@ -180,13 +181,13 @@ impl ToAccountMetas for JuplendInitPosition {
 /// performs a nominal seed deposit into JupLend, then flips the bank from `Paused` to
 /// `Operational`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_init_position(accounts: &JuplendInitPosition, amount: u64) -> Instruction {
     juplend_init_position_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_init_position_with_program_id(
     program_id: Pubkey,
@@ -248,9 +249,9 @@ pub struct JuplendWithdraw {
     pub system_program: Pubkey,
 }
 impl JuplendWithdraw {
-    pub const DISCRIMINATOR: [u8; 8] = [245, 164, 253, 202, 53, 77, 251, 221];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::JUPLEND_WITHDRAW;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -290,7 +291,9 @@ impl ToAccountMetas for JuplendWithdraw {
 /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
 /// `remaining_accounts`
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: each active bank followed by its oracle and integration accounts, for the health check.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_withdraw(
     accounts: &JuplendWithdraw,
@@ -300,7 +303,7 @@ pub fn juplend_withdraw(
     juplend_withdraw_with_program_id(crate::ID, accounts, amount, withdraw_all)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn juplend_withdraw_with_program_id(
     program_id: Pubkey,
@@ -355,9 +358,10 @@ pub struct LendingPoolAddBankJuplend {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBankJuplend {
-    pub const DISCRIMINATOR: [u8; 8] = [18, 208, 117, 90, 53, 111, 195, 41];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::integration::LENDING_POOL_ADD_BANK_JUPLEND;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -391,7 +395,7 @@ impl ToAccountMetas for LendingPoolAddBankJuplend {
 /// 0. underlying oracle feed (pyth push or switchboard pull)
 /// 1. JupLend `Lending` state
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_juplend(
     accounts: &LendingPoolAddBankJuplend,
@@ -401,7 +405,7 @@ pub fn lending_pool_add_bank_juplend(
     lending_pool_add_bank_juplend_with_program_id(crate::ID, accounts, bank_config, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_juplend_with_program_id(
     program_id: Pubkey,

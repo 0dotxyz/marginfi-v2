@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::{
     BankConfigCompact, BankConfigFast, BankConfigGov, EmodeEntry, InterestRateConfigOpt,
     WrappedI80F48,
@@ -22,9 +23,9 @@ pub struct InitBankMetadata {
     pub system_program: Pubkey,
 }
 impl InitBankMetadata {
-    pub const DISCRIMINATOR: [u8; 8] = [94, 239, 50, 136, 137, 204, 254, 213];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::INIT_BANK_METADATA;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.bank, false),
@@ -43,13 +44,13 @@ impl ToAccountMetas for InitBankMetadata {
 /// to exist yet — callers can pre-create metadata for an upcoming bank pubkey at their own
 /// rent expense. When the bank is initialized and its seed is on-chain, the PDA is verified.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn init_bank_metadata(accounts: &InitBankMetadata) -> Instruction {
     init_bank_metadata_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn init_bank_metadata_with_program_id(
     program_id: Pubkey,
@@ -70,9 +71,9 @@ pub struct LendingPoolAccrueBankInterest {
     pub bank: Pubkey,
 }
 impl LendingPoolAccrueBankInterest {
-    pub const DISCRIMINATOR: [u8; 8] = [108, 201, 30, 87, 47, 65, 97, 188];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_ACCRUE_BANK_INTEREST;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -87,13 +88,13 @@ impl ToAccountMetas for LendingPoolAccrueBankInterest {
 }
 /// (permissionless) Accrue interest on a bank, updating share values and collecting fees.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_accrue_bank_interest(accounts: &LendingPoolAccrueBankInterest) -> Instruction {
     lending_pool_accrue_bank_interest_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_accrue_bank_interest_with_program_id(
     program_id: Pubkey,
@@ -129,9 +130,9 @@ pub struct LendingPoolAddBank {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBank {
-    pub const DISCRIMINATOR: [u8; 8] = [215, 68, 72, 78, 208, 218, 103, 182];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_ADD_BANK;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -160,7 +161,7 @@ impl ToAccountMetas for LendingPoolAddBank {
 }
 /// (governance_admin only) Add a new bank to the lending pool
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank(
     accounts: &LendingPoolAddBank,
@@ -169,7 +170,7 @@ pub fn lending_pool_add_bank(
     lending_pool_add_bank_with_program_id(crate::ID, accounts, bank_config)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_with_program_id(
     program_id: Pubkey,
@@ -220,9 +221,10 @@ pub struct LendingPoolAddBankPermissionless {
     pub system_program: Pubkey,
 }
 impl LendingPoolAddBankPermissionless {
-    pub const DISCRIMINATOR: [u8; 8] = [127, 187, 121, 34, 187, 167, 238, 102];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_ADD_BANK_PERMISSIONLESS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -252,7 +254,9 @@ impl ToAccountMetas for LendingPoolAddBankPermissionless {
 }
 /// (permissionless) Add a staked collateral bank. Requires a valid SPL single-pool LST mint.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the oracle, the LST mint, the SOL pool, then the on-ramp.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_permissionless(
     accounts: &LendingPoolAddBankPermissionless,
@@ -261,7 +265,7 @@ pub fn lending_pool_add_bank_permissionless(
     lending_pool_add_bank_permissionless_with_program_id(crate::ID, accounts, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_permissionless_with_program_id(
     program_id: Pubkey,
@@ -301,9 +305,9 @@ pub struct LendingPoolAddBankWithSeed {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolAddBankWithSeed {
-    pub const DISCRIMINATOR: [u8; 8] = [76, 211, 213, 171, 117, 78, 158, 76];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_ADD_BANK_WITH_SEED;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -334,7 +338,7 @@ impl ToAccountMetas for LendingPoolAddBankWithSeed {
 /// This seed is used to create a PDA for the bank's signature.
 /// lending_pool_add_bank is preserved for backwards compatibility.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_with_seed(
     accounts: &LendingPoolAddBankWithSeed,
@@ -344,7 +348,7 @@ pub fn lending_pool_add_bank_with_seed(
     lending_pool_add_bank_with_seed_with_program_id(crate::ID, accounts, bank_config, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_add_bank_with_seed_with_program_id(
     program_id: Pubkey,
@@ -374,9 +378,10 @@ pub struct LendingPoolBackfillBankIsT22Flag {
     pub mint: Pubkey,
 }
 impl LendingPoolBackfillBankIsT22Flag {
-    pub const DISCRIMINATOR: [u8; 8] = [189, 14, 205, 160, 172, 46, 157, 52];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_BACKFILL_BANK_IS_T22_FLAG;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.bank, false),
@@ -394,7 +399,7 @@ impl ToAccountMetas for LendingPoolBackfillBankIsT22Flag {
 /// Also optionally backfills `bank_seed` in the same call.
 /// Pass `None` to skip seed backfill, `Some(seed)` to backfill (including `Some(0)`).
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_backfill_bank_is_t22_flag(
     accounts: &LendingPoolBackfillBankIsT22Flag,
@@ -403,7 +408,7 @@ pub fn lending_pool_backfill_bank_is_t22_flag(
     lending_pool_backfill_bank_is_t22_flag_with_program_id(crate::ID, accounts, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_backfill_bank_is_t22_flag_with_program_id(
     program_id: Pubkey,
@@ -428,9 +433,10 @@ pub struct LendingPoolBackfillStakedBankValidatorVoteAccount {
     pub validator_vote_account: Pubkey,
 }
 impl LendingPoolBackfillStakedBankValidatorVoteAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [141, 6, 23, 125, 72, 34, 199, 24];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_BACKFILL_STAKED_BANK_VALIDATOR_VOTE_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.bank, false),
@@ -446,7 +452,7 @@ impl ToAccountMetas for LendingPoolBackfillStakedBankValidatorVoteAccount {
 /// (permissionless) Backfill validator vote account on existing staked-collateral banks.
 /// No-op if already set to the same validator vote account.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_backfill_staked_bank_validator_vote_account(
     accounts: &LendingPoolBackfillStakedBankValidatorVoteAccount,
@@ -454,7 +460,7 @@ pub fn lending_pool_backfill_staked_bank_validator_vote_account(
     lending_pool_backfill_staked_bank_validator_vote_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_backfill_staked_bank_validator_vote_account_with_program_id(
     program_id: Pubkey,
@@ -478,9 +484,10 @@ pub struct LendingPoolClearCircuitBreaker {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolClearCircuitBreaker {
-    pub const DISCRIMINATOR: [u8; 8] = [64, 73, 106, 46, 213, 86, 31, 48];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CLEAR_CIRCUIT_BREAKER;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -500,7 +507,7 @@ impl ToAccountMetas for LendingPoolClearCircuitBreaker {
 /// from live oracle data (use when clearing because the new price level is valid and the
 /// pre-halt reference would cause an immediate re-halt).
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clear_circuit_breaker(
     accounts: &LendingPoolClearCircuitBreaker,
@@ -509,7 +516,7 @@ pub fn lending_pool_clear_circuit_breaker(
     lending_pool_clear_circuit_breaker_with_program_id(crate::ID, accounts, reseed_reference)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clear_circuit_breaker_with_program_id(
     program_id: Pubkey,
@@ -549,9 +556,9 @@ pub struct LendingPoolCloneBank {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolCloneBank {
-    pub const DISCRIMINATOR: [u8; 8] = [214, 93, 17, 236, 177, 228, 78, 17];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CLONE_BANK;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -580,13 +587,13 @@ impl ToAccountMetas for LendingPoolCloneBank {
 /// (governance_admin only) Staging or localnet only, panics on mainnet
 /// This instruction is used to clone a bank to a new PDA.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clone_bank(accounts: &LendingPoolCloneBank, bank_seed: u64) -> Instruction {
     lending_pool_clone_bank_with_program_id(crate::ID, accounts, bank_seed)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clone_bank_with_program_id(
     program_id: Pubkey,
@@ -614,9 +621,9 @@ pub struct LendingPoolCloneEmode {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolCloneEmode {
-    pub const DISCRIMINATOR: [u8; 8] = [146, 167, 94, 106, 184, 202, 15, 10];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CLONE_EMODE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -635,13 +642,13 @@ impl ToAccountMetas for LendingPoolCloneEmode {
 /// (governance_admin only) Copies emode settings from one bank to another. Useful when applying
 /// emode settings from e.g. one LST to another.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clone_emode(accounts: &LendingPoolCloneEmode) -> Instruction {
     lending_pool_clone_emode_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_clone_emode_with_program_id(
     program_id: Pubkey,
@@ -664,9 +671,9 @@ pub struct LendingPoolCloseBank {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolCloseBank {
-    pub const DISCRIMINATOR: [u8; 8] = [22, 115, 7, 130, 227, 85, 0, 47];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CLOSE_BANK;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -696,7 +703,7 @@ impl ToAccountMetas for LendingPoolCloseBank {
 /// * all three outstanding-fee fields are zero (or you don't care if anything remaining is lost
 /// **FOREVER**)
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_close_bank(
     accounts: &LendingPoolCloseBank,
@@ -705,7 +712,7 @@ pub fn lending_pool_close_bank(
     lending_pool_close_bank_with_program_id(crate::ID, accounts, force_close)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_close_bank_with_program_id(
     program_id: Pubkey,
@@ -739,9 +746,9 @@ pub struct LendingPoolCollectBankFees {
     pub token_program: Pubkey,
 }
 impl LendingPoolCollectBankFees {
-    pub const DISCRIMINATOR: [u8; 8] = [201, 5, 215, 116, 230, 92, 75, 150];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_COLLECT_BANK_FEES;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -764,13 +771,15 @@ impl ToAccountMetas for LendingPoolCollectBankFees {
 /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
 /// vaults.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_collect_bank_fees(accounts: &LendingPoolCollectBankFees) -> Instruction {
     lending_pool_collect_bank_fees_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_collect_bank_fees_with_program_id(
     program_id: Pubkey,
@@ -798,9 +807,10 @@ pub struct LendingPoolCollectBankPremiumFees {
     pub token_program: Pubkey,
 }
 impl LendingPoolCollectBankPremiumFees {
-    pub const DISCRIMINATOR: [u8; 8] = [193, 168, 164, 176, 80, 191, 33, 180];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_COLLECT_BANK_PREMIUM_FEES;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -821,7 +831,9 @@ impl ToAccountMetas for LendingPoolCollectBankPremiumFees {
 /// (permissionless) Sweep realized variable-borrow premium from the liquidity vault to the
 /// canonical ATA of `FeeState.premium_wallet` for the bank's mint.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_collect_bank_premium_fees(
     accounts: &LendingPoolCollectBankPremiumFees,
@@ -829,7 +841,7 @@ pub fn lending_pool_collect_bank_premium_fees(
     lending_pool_collect_bank_premium_fees_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_collect_bank_premium_fees_with_program_id(
     program_id: Pubkey,
@@ -852,9 +864,9 @@ pub struct LendingPoolConfigureBank {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBank {
-    pub const DISCRIMINATOR: [u8; 8] = [121, 173, 156, 40, 93, 148, 56, 237];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -874,7 +886,7 @@ impl ToAccountMetas for LendingPoolConfigureBank {
 /// ReduceOnly. The fast admin may pause a bank from any state. Restoring a bank to
 /// Operational requires `lending_pool_configure_bank_gov`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank(
     accounts: &LendingPoolConfigureBank,
@@ -883,7 +895,7 @@ pub fn lending_pool_configure_bank(
     lending_pool_configure_bank_with_program_id(crate::ID, accounts, bank_config_opt)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_with_program_id(
     program_id: Pubkey,
@@ -910,9 +922,9 @@ pub struct LendingPoolConfigureBankEmode {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankEmode {
-    pub const DISCRIMINATOR: [u8; 8] = [17, 175, 91, 57, 239, 86, 49, 71];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_EMODE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -929,7 +941,7 @@ impl ToAccountMetas for LendingPoolConfigureBankEmode {
 }
 /// (governance_admin only)
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_emode(
     accounts: &LendingPoolConfigureBankEmode,
@@ -939,7 +951,7 @@ pub fn lending_pool_configure_bank_emode(
     lending_pool_configure_bank_emode_with_program_id(crate::ID, accounts, emode_tag, entries)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_emode_with_program_id(
     program_id: Pubkey,
@@ -970,9 +982,9 @@ pub struct LendingPoolConfigureBankGov {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankGov {
-    pub const DISCRIMINATOR: [u8; 8] = [122, 87, 141, 86, 182, 34, 146, 25];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_GOV;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -990,7 +1002,7 @@ impl ToAccountMetas for LendingPoolConfigureBankGov {
 /// Configure slow, timelocked governance bank parameters, including risk settings,
 /// freezing bank settings, and restoring a bank to Operational.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_gov(
     accounts: &LendingPoolConfigureBankGov,
@@ -999,7 +1011,7 @@ pub fn lending_pool_configure_bank_gov(
     lending_pool_configure_bank_gov_with_program_id(crate::ID, accounts, bank_config_opt)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_gov_with_program_id(
     program_id: Pubkey,
@@ -1026,9 +1038,10 @@ pub struct LendingPoolConfigureBankInterestOnly {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankInterestOnly {
-    pub const DISCRIMINATOR: [u8; 8] = [245, 107, 83, 38, 103, 219, 163, 241];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_INTEREST_ONLY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1046,7 +1059,7 @@ impl ToAccountMetas for LendingPoolConfigureBankInterestOnly {
 /// (delegate_curve_admin only) Update interest rate config. Does nothing if bank has
 /// `FREEZE_SETTINGS`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_interest_only(
     accounts: &LendingPoolConfigureBankInterestOnly,
@@ -1059,7 +1072,7 @@ pub fn lending_pool_configure_bank_interest_only(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_interest_only_with_program_id(
     program_id: Pubkey,
@@ -1086,9 +1099,10 @@ pub struct LendingPoolConfigureBankLimitsOnly {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankLimitsOnly {
-    pub const DISCRIMINATOR: [u8; 8] = [157, 196, 221, 200, 202, 62, 84, 21];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_LIMITS_ONLY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1105,7 +1119,7 @@ impl ToAccountMetas for LendingPoolConfigureBankLimitsOnly {
 }
 /// (delegate_limit_admin only) Update deposit/borrow/init limits only.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_limits_only(
     accounts: &LendingPoolConfigureBankLimitsOnly,
@@ -1122,7 +1136,7 @@ pub fn lending_pool_configure_bank_limits_only(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_limits_only_with_program_id(
     program_id: Pubkey,
@@ -1157,9 +1171,10 @@ pub struct LendingPoolConfigureBankOracle {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankOracle {
-    pub const DISCRIMINATOR: [u8; 8] = [209, 82, 255, 171, 124, 21, 71, 81];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_ORACLE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1176,7 +1191,9 @@ impl ToAccountMetas for LendingPoolConfigureBankOracle {
 }
 /// (governance_admin only)
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the oracle and integration accounts of the new setup, in the order a health check takes them.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_oracle(
     accounts: &LendingPoolConfigureBankOracle,
@@ -1186,7 +1203,7 @@ pub fn lending_pool_configure_bank_oracle(
     lending_pool_configure_bank_oracle_with_program_id(crate::ID, accounts, setup, oracle)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_oracle_with_program_id(
     program_id: Pubkey,
@@ -1217,9 +1234,10 @@ pub struct LendingPoolConfigureBankOracleScope {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankOracleScope {
-    pub const DISCRIMINATOR: [u8; 8] = [134, 228, 127, 3, 117, 132, 85, 146];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_ORACLE_SCOPE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1240,7 +1258,7 @@ impl ToAccountMetas for LendingPoolConfigureBankOracleScope {
 /// * oracle - the feed's `OraclePrices` account
 /// * entry_index - which of the 512 entries in that account prices this bank
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_oracle_scope(
     accounts: &LendingPoolConfigureBankOracleScope,
@@ -1255,7 +1273,7 @@ pub fn lending_pool_configure_bank_oracle_scope(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_oracle_scope_with_program_id(
     program_id: Pubkey,
@@ -1286,9 +1304,10 @@ pub struct LendingPoolConfigureBankPremium {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureBankPremium {
-    pub const DISCRIMINATOR: [u8; 8] = [216, 82, 134, 217, 11, 240, 78, 42];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_BANK_PREMIUM;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1305,7 +1324,7 @@ impl ToAccountMetas for LendingPoolConfigureBankPremium {
 }
 /// (fast group admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_premium(
     accounts: &LendingPoolConfigureBankPremium,
@@ -1315,7 +1334,7 @@ pub fn lending_pool_configure_bank_premium(
     lending_pool_configure_bank_premium_with_program_id(crate::ID, accounts, premium_tag, active)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_bank_premium_with_program_id(
     program_id: Pubkey,
@@ -1345,9 +1364,10 @@ pub struct LendingPoolConfigureGroupPremium {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolConfigureGroupPremium {
-    pub const DISCRIMINATOR: [u8; 8] = [184, 196, 245, 41, 203, 77, 75, 170];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_CONFIGURE_GROUP_PREMIUM;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -1364,7 +1384,7 @@ impl ToAccountMetas for LendingPoolConfigureGroupPremium {
 /// (fast group admin only) Set one pair of the group's variable-borrow premium matrix:
 /// `rate > 0` inserts or updates the pair, `rate == 0` removes it.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_group_premium(
     accounts: &LendingPoolConfigureGroupPremium,
@@ -1381,7 +1401,7 @@ pub fn lending_pool_configure_group_premium(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_configure_group_premium_with_program_id(
     program_id: Pubkey,
@@ -1420,9 +1440,9 @@ pub struct LendingPoolEmissionsDeposit {
     pub token_program: Pubkey,
 }
 impl LendingPoolEmissionsDeposit {
-    pub const DISCRIMINATOR: [u8; 8] = [121, 118, 123, 58, 59, 192, 74, 138];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_EMISSIONS_DEPOSIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1443,7 +1463,7 @@ impl ToAccountMetas for LendingPoolEmissionsDeposit {
 /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
 /// depositors' value via `asset_share_value`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_emissions_deposit(
     accounts: &LendingPoolEmissionsDeposit,
@@ -1452,7 +1472,7 @@ pub fn lending_pool_emissions_deposit(
     lending_pool_emissions_deposit_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_emissions_deposit_with_program_id(
     program_id: Pubkey,
@@ -1479,9 +1499,10 @@ pub struct LendingPoolForceTokenlessRepayComplete {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolForceTokenlessRepayComplete {
-    pub const DISCRIMINATOR: [u8; 8] = [15, 203, 147, 232, 199, 14, 231, 37];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_FORCE_TOKENLESS_REPAY_COMPLETE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1500,7 +1521,7 @@ impl ToAccountMetas for LendingPoolForceTokenlessRepayComplete {
 /// still has liability dust after the risk admin has completed deleveraging all debts. The
 /// risk admin is trusted not to execute this until all non-dust debts have been deleveraged.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_force_tokenless_repay_complete(
     accounts: &LendingPoolForceTokenlessRepayComplete,
@@ -1508,7 +1529,7 @@ pub fn lending_pool_force_tokenless_repay_complete(
     lending_pool_force_tokenless_repay_complete_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_force_tokenless_repay_complete_with_program_id(
     program_id: Pubkey,
@@ -1538,9 +1559,9 @@ pub struct LendingPoolHandleBankruptcy {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolHandleBankruptcy {
-    pub const DISCRIMINATOR: [u8; 8] = [162, 11, 56, 139, 90, 128, 70, 173];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_HANDLE_BANKRUPTCY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1564,13 +1585,15 @@ impl ToAccountMetas for LendingPoolHandleBankruptcy {
 /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
 /// insurance fund and socializes any remainder among depositors.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the bank mint for Token-2022, then each active bank of the bankrupt account followed by its oracle and integration accounts.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_handle_bankruptcy(accounts: &LendingPoolHandleBankruptcy) -> Instruction {
     lending_pool_handle_bankruptcy_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_handle_bankruptcy_with_program_id(
     program_id: Pubkey,
@@ -1594,9 +1617,10 @@ pub struct LendingPoolInitSameAssetEmodeRegistry {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolInitSameAssetEmodeRegistry {
-    pub const DISCRIMINATOR: [u8; 8] = [217, 78, 227, 223, 147, 231, 213, 108];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_INIT_SAME_ASSET_EMODE_REGISTRY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1614,7 +1638,7 @@ impl ToAccountMetas for LendingPoolInitSameAssetEmodeRegistry {
 }
 /// (governance_admin only) Initialize the per-group same-asset e-mode registry.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_init_same_asset_emode_registry(
     accounts: &LendingPoolInitSameAssetEmodeRegistry,
@@ -1622,7 +1646,7 @@ pub fn lending_pool_init_same_asset_emode_registry(
     lending_pool_init_same_asset_emode_registry_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_init_same_asset_emode_registry_with_program_id(
     program_id: Pubkey,
@@ -1643,9 +1667,10 @@ pub struct LendingPoolPulseBankPriceCache {
     pub bank: Pubkey,
 }
 impl LendingPoolPulseBankPriceCache {
-    pub const DISCRIMINATOR: [u8; 8] = [192, 19, 201, 135, 105, 203, 32, 222];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_PULSE_BANK_PRICE_CACHE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1660,7 +1685,9 @@ impl ToAccountMetas for LendingPoolPulseBankPriceCache {
 }
 /// (Permissionless) Refresh the cached oracle price for a bank.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the bank's oracle and integration accounts from `pdas::bank_observation_keys`, without the bank itself.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_pulse_bank_price_cache(
     accounts: &LendingPoolPulseBankPriceCache,
@@ -1668,7 +1695,7 @@ pub fn lending_pool_pulse_bank_price_cache(
     lending_pool_pulse_bank_price_cache_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_pulse_bank_price_cache_with_program_id(
     program_id: Pubkey,
@@ -1692,9 +1719,9 @@ pub struct LendingPoolResizeBankAccount {
     pub system_program: Pubkey,
 }
 impl LendingPoolResizeBankAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [44, 109, 34, 113, 110, 33, 139, 160];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_RESIZE_BANK_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.bank, false),
@@ -1711,13 +1738,13 @@ impl ToAccountMetas for LendingPoolResizeBankAccount {
 /// (permissionless) Resize a v1-sized bank account to the current struct size; `payer`
 /// funds the added rent.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_resize_bank_account(accounts: &LendingPoolResizeBankAccount) -> Instruction {
     lending_pool_resize_bank_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_resize_bank_account_with_program_id(
     program_id: Pubkey,
@@ -1741,9 +1768,9 @@ pub struct LendingPoolResizeGroupAccount {
     pub system_program: Pubkey,
 }
 impl LendingPoolResizeGroupAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [97, 221, 69, 96, 204, 162, 174, 250];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_RESIZE_GROUP_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.group, false),
@@ -1760,13 +1787,13 @@ impl ToAccountMetas for LendingPoolResizeGroupAccount {
 /// (permissionless) Resize the group account to the v2 layout size; `payer` funds the
 /// added rent.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_resize_group_account(accounts: &LendingPoolResizeGroupAccount) -> Instruction {
     lending_pool_resize_group_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_resize_group_account_with_program_id(
     program_id: Pubkey,
@@ -1790,9 +1817,10 @@ pub struct LendingPoolSetBankSameAssetEmodeEligibility {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolSetBankSameAssetEmodeEligibility {
-    pub const DISCRIMINATOR: [u8; 8] = [149, 50, 162, 236, 150, 119, 9, 47];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_SET_BANK_SAME_ASSET_EMODE_ELIGIBILITY;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1810,7 +1838,7 @@ impl ToAccountMetas for LendingPoolSetBankSameAssetEmodeEligibility {
 }
 /// (governance_admin only) Opt a bank in/out of same-asset e-mode participation.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     accounts: &LendingPoolSetBankSameAssetEmodeEligibility,
@@ -1819,7 +1847,7 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     lending_pool_set_bank_same_asset_emode_eligibility_with_program_id(crate::ID, accounts, enabled)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_set_bank_same_asset_emode_eligibility_with_program_id(
     program_id: Pubkey,
@@ -1846,9 +1874,9 @@ pub struct LendingPoolSetOraclePrice {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolSetOraclePrice {
-    pub const DISCRIMINATOR: [u8; 8] = [234, 244, 37, 65, 101, 255, 217, 160];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_SET_ORACLE_PRICE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1865,7 +1893,9 @@ impl ToAccountMetas for LendingPoolSetOraclePrice {
 }
 /// (governance_admin only)
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts: the oracle and integration accounts of the new setup, in the order a health check takes them.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_set_oracle_price(
     accounts: &LendingPoolSetOraclePrice,
@@ -1875,7 +1905,7 @@ pub fn lending_pool_set_oracle_price(
     lending_pool_set_oracle_price_with_program_id(crate::ID, accounts, price, setup)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_set_oracle_price_with_program_id(
     program_id: Pubkey,
@@ -1908,9 +1938,10 @@ pub struct LendingPoolUpdateFeesDestinationAccount {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolUpdateFeesDestinationAccount {
-    pub const DISCRIMINATOR: [u8; 8] = [102, 4, 121, 243, 237, 110, 95, 13];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_UPDATE_FEES_DESTINATION_ACCOUNT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1928,7 +1959,7 @@ impl ToAccountMetas for LendingPoolUpdateFeesDestinationAccount {
 }
 /// (admin only) Set the destination wallet for permissionless fee withdrawals.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_update_fees_destination_account(
     accounts: &LendingPoolUpdateFeesDestinationAccount,
@@ -1936,7 +1967,7 @@ pub fn lending_pool_update_fees_destination_account(
     lending_pool_update_fees_destination_account_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_update_fees_destination_account_with_program_id(
     program_id: Pubkey,
@@ -1963,9 +1994,9 @@ pub struct LendingPoolWithdrawFees {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolWithdrawFees {
-    pub const DISCRIMINATOR: [u8; 8] = [92, 140, 215, 254, 170, 0, 83, 174];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_WITHDRAW_FEES;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -1986,13 +2017,15 @@ impl ToAccountMetas for LendingPoolWithdrawFees {
 }
 /// (admin only) Withdraw collected group fees from the fee vault.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_fees(accounts: &LendingPoolWithdrawFees, amount: u64) -> Instruction {
     lending_pool_withdraw_fees_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_fees_with_program_id(
     program_id: Pubkey,
@@ -2021,9 +2054,10 @@ pub struct LendingPoolWithdrawFeesPermissionless {
     pub token_program: Pubkey,
 }
 impl LendingPoolWithdrawFeesPermissionless {
-    pub const DISCRIMINATOR: [u8; 8] = [57, 245, 1, 208, 130, 18, 145, 113];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::LENDING_POOL_WITHDRAW_FEES_PERMISSIONLESS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -2042,7 +2076,9 @@ impl ToAccountMetas for LendingPoolWithdrawFeesPermissionless {
 }
 /// (permissionless) Withdraw group fees to the pre-configured `fees_destination_account`.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_fees_permissionless(
     accounts: &LendingPoolWithdrawFeesPermissionless,
@@ -2051,7 +2087,7 @@ pub fn lending_pool_withdraw_fees_permissionless(
     lending_pool_withdraw_fees_permissionless_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_fees_permissionless_with_program_id(
     program_id: Pubkey,
@@ -2082,9 +2118,9 @@ pub struct LendingPoolWithdrawInsurance {
     pub instruction_sysvar: Pubkey,
 }
 impl LendingPoolWithdrawInsurance {
-    pub const DISCRIMINATOR: [u8; 8] = [108, 60, 60, 246, 104, 79, 159, 243];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::LENDING_POOL_WITHDRAW_INSURANCE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -2105,7 +2141,9 @@ impl ToAccountMetas for LendingPoolWithdrawInsurance {
 }
 /// (admin only) Withdraw from the insurance vault.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// Remaining accounts for Token-2022: the bank mint, then the transfer-hook accounts if the mint has a hook.
+///
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_insurance(
     accounts: &LendingPoolWithdrawInsurance,
@@ -2114,7 +2152,7 @@ pub fn lending_pool_withdraw_insurance(
     lending_pool_withdraw_insurance_with_program_id(crate::ID, accounts, amount)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn lending_pool_withdraw_insurance_with_program_id(
     program_id: Pubkey,
@@ -2140,9 +2178,9 @@ pub struct MarginfiGroupConfigure {
     pub instruction_sysvar: Pubkey,
 }
 impl MarginfiGroupConfigure {
-    pub const DISCRIMINATOR: [u8; 8] = [62, 199, 81, 78, 33, 13, 236, 61];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_GROUP_CONFIGURE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -2160,7 +2198,7 @@ impl ToAccountMetas for MarginfiGroupConfigure {
 ///
 /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_configure(
     accounts: &MarginfiGroupConfigure,
@@ -2183,7 +2221,7 @@ pub fn marginfi_group_configure(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_configure_with_program_id(
     program_id: Pubkey,
@@ -2229,9 +2267,9 @@ pub struct MarginfiGroupConfigureGov {
     pub instruction_sysvar: Pubkey,
 }
 impl MarginfiGroupConfigureGov {
-    pub const DISCRIMINATOR: [u8; 8] = [3, 33, 122, 31, 239, 33, 35, 5];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_GROUP_CONFIGURE_GOV;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -2250,7 +2288,7 @@ impl ToAccountMetas for MarginfiGroupConfigureGov {
 /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
 /// values below `1`, including `0`, are invalid.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_configure_gov(
     accounts: &MarginfiGroupConfigureGov,
@@ -2275,7 +2313,7 @@ pub fn marginfi_group_configure_gov(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_configure_gov_with_program_id(
     program_id: Pubkey,
@@ -2327,9 +2365,9 @@ pub struct MarginfiGroupInitialize {
     pub instruction_sysvar: Pubkey,
 }
 impl MarginfiGroupInitialize {
-    pub const DISCRIMINATOR: [u8; 8] = [255, 67, 67, 26, 94, 31, 34, 20];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MARGINFI_GROUP_INITIALIZE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, true),
@@ -2347,13 +2385,13 @@ impl ToAccountMetas for MarginfiGroupInitialize {
 }
 /// (admin only) Initialize a new marginfi group. The signer becomes the group admin.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_initialize(accounts: &MarginfiGroupInitialize) -> Instruction {
     marginfi_group_initialize_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_initialize_with_program_id(
     program_id: Pubkey,
@@ -2375,9 +2413,10 @@ pub struct MarginfiGroupSetGovernanceAdmin {
     pub instruction_sysvar: Pubkey,
 }
 impl MarginfiGroupSetGovernanceAdmin {
-    pub const DISCRIMINATOR: [u8; 8] = [87, 57, 22, 85, 152, 57, 23, 75];
+    pub const DISCRIMINATOR: [u8; 8] =
+        ix_discriminators::native::MARGINFI_GROUP_SET_GOVERNANCE_ADMIN;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.marginfi_group, false),
@@ -2395,7 +2434,7 @@ impl ToAccountMetas for MarginfiGroupSetGovernanceAdmin {
 /// legacy group, the fast admin may bootstrap it once; thereafter only the current governance
 /// admin may rotate it.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_set_governance_admin(
     accounts: &MarginfiGroupSetGovernanceAdmin,
@@ -2404,7 +2443,7 @@ pub fn marginfi_group_set_governance_admin(
     marginfi_group_set_governance_admin_with_program_id(crate::ID, accounts, new_governance_admin)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn marginfi_group_set_governance_admin_with_program_id(
     program_id: Pubkey,
@@ -2428,9 +2467,9 @@ pub struct SyncIndexerFlags {
     pub payer: Pubkey,
 }
 impl SyncIndexerFlags {
-    pub const DISCRIMINATOR: [u8; 8] = [171, 146, 145, 43, 190, 175, 9, 32];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::SYNC_INDEXER_FLAGS;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![AccountMeta::new(self.payer, true)]
     }
@@ -2443,13 +2482,13 @@ impl ToAccountMetas for SyncIndexerFlags {
 /// (Permissionless) Batch-sync balance-derived indexer flags for existing accounts.
 /// Pass MarginfiAccounts as writable remaining_accounts.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn sync_indexer_flags(accounts: &SyncIndexerFlags) -> Instruction {
     sync_indexer_flags_with_program_id(crate::ID, accounts)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn sync_indexer_flags_with_program_id(
     program_id: Pubkey,
@@ -2475,9 +2514,9 @@ pub struct WriteBankMetadata {
     pub instruction_sysvar: Pubkey,
 }
 impl WriteBankMetadata {
-    pub const DISCRIMINATOR: [u8; 8] = [147, 78, 81, 133, 129, 138, 233, 59];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::WRITE_BANK_METADATA;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -2496,7 +2535,7 @@ impl ToAccountMetas for WriteBankMetadata {
 /// (metadata admin only) Write ticker/description for an initialized bank. The bank account
 /// must exist; when its seed is on-chain, the canonical PDA is verified.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn write_bank_metadata(
     accounts: &WriteBankMetadata,
@@ -2506,7 +2545,7 @@ pub fn write_bank_metadata(
     write_bank_metadata_with_program_id(crate::ID, accounts, ticker, description)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn write_bank_metadata_with_program_id(
     program_id: Pubkey,
@@ -2539,9 +2578,9 @@ pub struct WriteBankMetadataPreInit {
     pub instruction_sysvar: Pubkey,
 }
 impl WriteBankMetadataPreInit {
-    pub const DISCRIMINATOR: [u8; 8] = [224, 124, 22, 73, 60, 209, 80, 170];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::WRITE_BANK_METADATA_PRE_INIT;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.group, false),
@@ -2561,7 +2600,7 @@ impl ToAccountMetas for WriteBankMetadataPreInit {
 /// (metadata admin only) Write ticker/description before bank initialization, for canonical
 /// seeded banks only.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn write_bank_metadata_pre_init(
     accounts: &WriteBankMetadataPreInit,
@@ -2578,7 +2617,7 @@ pub fn write_bank_metadata_pre_init(
     )
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn write_bank_metadata_pre_init_with_program_id(
     program_id: Pubkey,

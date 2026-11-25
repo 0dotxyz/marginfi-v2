@@ -356,8 +356,8 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
     validate_instructions(
         instruction_sysvar,
         ctx.program_id,
-        &ix_discriminators::START_EXECUTE_ORDER,
-        &ix_discriminators::END_EXECUTE_ORDER,
+        &ix_discriminators::native::START_EXECUTE_ORDER,
+        &ix_discriminators::native::END_EXECUTE_ORDER,
     )
 }
 

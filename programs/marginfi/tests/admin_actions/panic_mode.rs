@@ -1,13 +1,10 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::MarginfiError;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::{FeeState, MarginfiGroup, PanicState};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
-};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 
 #[tokio::test]
 async fn test_panic_pause_and_unpause_instructions() -> anyhow::Result<()> {
@@ -116,29 +113,24 @@ async fn test_pause_delegate_admin_cannot_edit_fee_state() -> anyhow::Result<()>
         .await?;
 
     let fee_state: FeeState = test_f.load_and_deserialize(&marginfi_group.fee_state).await;
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::EditFeeState {
+    let ix = ix_builders::admin::edit_global_fee_state(
+        &ix_builders::admin::EditGlobalFeeState {
             global_fee_admin: pause_delegate_admin.pubkey(),
             fee_state: marginfi_group.fee_state,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::EditGlobalFeeState {
-            admin: Some(fee_state.global_fee_admin),
-            fee_wallet: Some(fee_state.global_fee_wallet),
-            bank_init_flat_sol_fee: Some(fee_state.bank_init_flat_sol_fee),
-            liquidation_flat_sol_fee: Some(fee_state.liquidation_flat_sol_fee),
-            order_init_flat_sol_fee: Some(fee_state.order_init_flat_sol_fee),
-            program_fee_fixed: Some(fee_state.program_fee_fixed),
-            program_fee_rate: Some(fee_state.program_fee_rate),
-            liquidation_max_fee: Some(fee_state.liquidation_max_fee),
-            order_execution_max_fee: Some(fee_state.order_execution_max_fee),
-            pause_delegate_admin: None,
-            account_transfer_fee: None,
-        }
-        .data(),
-    };
+        },
+        Some(fee_state.global_fee_admin),
+        Some(fee_state.global_fee_wallet),
+        Some(fee_state.bank_init_flat_sol_fee),
+        Some(fee_state.liquidation_flat_sol_fee),
+        Some(fee_state.order_init_flat_sol_fee),
+        Some(fee_state.program_fee_fixed),
+        Some(fee_state.program_fee_rate),
+        Some(fee_state.liquidation_max_fee),
+        Some(fee_state.order_execution_max_fee),
+        None,
+        None,
+    );
 
     let payer = test_f.payer_keypair();
     let tx = Transaction::new_signed_with_payer(

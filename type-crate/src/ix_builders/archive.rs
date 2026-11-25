@@ -2,6 +2,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use super::ToAccountMetas;
+use crate::constants::ix_discriminators;
 use crate::types::SnapshotUpdateInput;
 use borsh::BorshSerialize;
 use solana_instruction::{AccountMeta, Instruction};
@@ -16,9 +17,9 @@ pub struct MonitorArchiveInitialize {
     pub archive: Pubkey,
 }
 impl MonitorArchiveInitialize {
-    pub const DISCRIMINATOR: [u8; 8] = [5, 144, 117, 234, 36, 188, 147, 216];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MONITOR_ARCHIVE_INITIALIZE;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new(self.payer, true),
@@ -33,7 +34,7 @@ impl ToAccountMetas for MonitorArchiveInitialize {
 }
 /// (snapshot manager only) Initialize the monitor snapshot archive account metadata.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn monitor_archive_initialize(
     accounts: &MonitorArchiveInitialize,
@@ -42,7 +43,7 @@ pub fn monitor_archive_initialize(
     monitor_archive_initialize_with_program_id(crate::ID, accounts, snapshot_manager)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn monitor_archive_initialize_with_program_id(
     program_id: Pubkey,
@@ -70,9 +71,9 @@ pub struct MonitorArchiveUpsertBatch {
     pub archive: Pubkey,
 }
 impl MonitorArchiveUpsertBatch {
-    pub const DISCRIMINATOR: [u8; 8] = [203, 39, 50, 74, 141, 37, 14, 248];
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::native::MONITOR_ARCHIVE_UPSERT_BATCH;
 
-    /// Construct account metas for a specific program ID, including optional-account sentinels.
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
     pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(self.snapshot_manager, true),
@@ -90,9 +91,9 @@ impl ToAccountMetas for MonitorArchiveUpsertBatch {
 /// Mints are sourced positionally from `remaining_accounts`: `updates[i]` maps to
 /// `remaining_accounts[i]`.
 ///
-/// Pass one mint account per update in the same order as the updates.
+/// Remaining accounts: one mint account per update, in the order of the updates.
 ///
-/// Append any required remaining accounts after the fixed account metas.
+/// The returned instruction does not include remaining accounts.
 #[allow(clippy::too_many_arguments)]
 pub fn monitor_archive_upsert_batch(
     accounts: &MonitorArchiveUpsertBatch,
@@ -101,7 +102,7 @@ pub fn monitor_archive_upsert_batch(
     monitor_archive_upsert_batch_with_program_id(crate::ID, accounts, updates)
 }
 
-/// Build the instruction for a program ID selected at runtime.
+/// Builds the instruction for a program ID chosen at runtime.
 #[allow(clippy::too_many_arguments)]
 pub fn monitor_archive_upsert_batch_with_program_id(
     program_id: Pubkey,
