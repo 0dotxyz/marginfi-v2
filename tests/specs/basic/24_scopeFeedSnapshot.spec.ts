@@ -14,7 +14,7 @@ import {
   groupAdmin,
 } from "../../rootHooks";
 import { assertI80F48Approx } from "../../utils/genericTests";
-import { defaultBankConfig } from "../../utils/types";
+import { defaultBankConfig, ORACLE_SETUP_SCOPE } from "../../utils/types";
 import { getBankrunTime } from "../../utils/tools";
 import { assert } from "chai";
 import * as snapshot from "../../fixtures/scope_mrgn_feed.json";
@@ -118,6 +118,7 @@ describe("Scope oracle (live feed snapshot)", () => {
       await admin.provider.sendAndConfirm!(
         new Transaction().add(
           await configureBankOracleScope(admin, {
+            type: ORACLE_SETUP_SCOPE,
             bank: snapshotBank.publicKey,
             oracle: feed,
             entryIndex: e.index,

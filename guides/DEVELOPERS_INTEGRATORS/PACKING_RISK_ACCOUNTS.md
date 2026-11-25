@@ -47,7 +47,8 @@ extra pricing data.
 
 ### Staked Collateral / SVSP
 
-`OracleSetup::StakedWithPythPush` banks always need four oracle/venue accounts after the bank:
+`OracleSetup::StakedWithPythPush` and `StakedWithScope` banks always need four oracle/venue
+accounts after the bank:
 
 ```
 [bank, pyth_push_oracle, lst_mint, sol_pool, pool_onramp]
@@ -55,7 +56,7 @@ extra pricing data.
 
 Those accounts are:
 
-- `oracle_keys[0]` - SOL Pyth push oracle
+- `oracle_keys[0]` - SOL Pyth push oracle (the Scope `OraclePrices` account for `StakedWithScope`)
 - `oracle_keys[1]` - SVSP LST mint
 - `oracle_keys[2]` - SVSP SOL pool / stake account
 - `oracle_keys[3]` - SVSP on-ramp account
@@ -65,6 +66,19 @@ validator vote account (`integration_acc_1`). Before
 `STAKED_ORACLE_PRICE_USES_ONRAMP` is propagated to the bank, the program still expects the fourth
 account but does not price from it. Once that flag is set, the fourth account must be the correct
 on-ramp account or the instruction fails with `WrongOracleAccountKeys`.
+
+### mSOL / LST / PT Setups
+
+These price the base feed in `oracle_keys[0]` through rate accounts, which must follow it. The base
+feed is the Pyth feed for the Pyth setups and the Scope `OraclePrices` account for their `Scope*`
+twins; the order is the same.
+
+| Setup | Accounts after the bank |
+|---|---|
+| `PythMSOL`, `PythLST`, `ScopeMSOL`, `ScopeLST` | base feed, `oracle_keys[1]` (Marinade State / SPL StakePool) |
+| `PTPyth`, `ScopePT` | base feed, `oracle_keys[1]` (Exponent vault) |
+| `PTFixed` | `oracle_keys[0]` (Exponent vault) only |
+| `KaminoMSOL`, `KaminoLST`, `JuplendMSOL`, `JuplendLST` and their `Scope*` twins | base feed, `oracle_keys[1]` (reserve / lending), `oracle_keys[2]` (Marinade State / SPL StakePool) |
 
 ### Liquidate Oracles
 
@@ -172,6 +186,7 @@ Assuming you already have the Balances and now have a list of Banks:
                     });
 
                     // For Kamino/Solend/Drift/JupLend setups, also push keys[1].
+                    // For mSOL/LST/PT setups, see "mSOL / LST / PT Setups" above.
                     // For Staked setup, also push keys[1], keys[2], and keys[3]
                     // (or the on-ramp PDA derived from integration_acc_1 if keys[3] is default).
                 }

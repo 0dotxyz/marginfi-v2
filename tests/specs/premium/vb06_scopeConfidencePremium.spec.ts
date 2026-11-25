@@ -40,6 +40,7 @@ import {
   I80F48_ZERO,
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
+  ORACLE_SETUP_SCOPE,
   u32_MAX,
 } from "../../utils/types";
 import {
@@ -190,6 +191,7 @@ describe("vb06: Scope confidence and premium accrual", () => {
         bankrunContext,
         new Transaction().add(
           await configureBankOracleScope(groupAdmin.mrgnBankrunProgram, {
+            type: ORACLE_SETUP_SCOPE,
             bank,
             oracle: scopeFeed,
             entryIndex: 17,

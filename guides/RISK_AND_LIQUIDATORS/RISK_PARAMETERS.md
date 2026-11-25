@@ -71,6 +71,30 @@ Each bank has an oracle configuration that controls how prices are sourced.
 | `DriftSwitchboardPull` | 10 | For Drift integration positions using Switchboard |
 | `SolendPythPull` | 11 | For Solend integration positions using Pyth |
 | `SolendSwitchboardPull` | 12 | For Solend integration positions using Switchboard |
+| `FixedKamino` | 13 | Admin-set fixed price for Kamino positions (times the reserve rate) |
+| `FixedDrift` | 14 | Admin-set fixed price for Drift positions (times the spot market rate) |
+| `JuplendPythPull` | 15 | For JupLend integration positions using Pyth |
+| `JuplendSwitchboardPull` | 16 | For JupLend integration positions using Switchboard |
+| `FixedJuplend` | 17 | Admin-set fixed price for JupLend positions (times the lending rate) |
+| `Scope` | 18 | Scope oracle entry |
+| `PythMSOL` | 19 | mSOL: Pyth SOL price times the Marinade rate |
+| `KaminoMSOL` | 20 | `PythMSOL` for Kamino positions |
+| `JuplendMSOL` | 21 | `PythMSOL` for JupLend positions |
+| `PythLST` | 22 | SPL stake-pool LST: Pyth SOL price times the pool rate |
+| `KaminoLST` | 23 | `PythLST` for Kamino positions |
+| `JuplendLST` | 24 | `PythLST` for JupLend positions |
+| `PTPyth` | 25 | Exponent PT: Pyth underlying price times the PT linear rate |
+| `PTFixed` | 26 | Exponent PT: implicit $1 underlying times the PT linear rate |
+| `ScopeKamino` | 27 | `Scope` for Kamino positions |
+| `ScopeJuplend` | 28 | `Scope` for JupLend positions |
+| `ScopeLST` | 29 | `PythLST` with a Scope base price |
+| `ScopeMSOL` | 30 | `PythMSOL` with a Scope base price |
+| `ScopeKaminoLST` | 31 | `KaminoLST` with a Scope base price |
+| `ScopePT` | 32 | `PTPyth` with a Scope base price |
+| `StakedWithScope` | 33 | `StakedWithPythPush` with a Scope base price |
+| `ScopeKaminoMSOL` | 34 | `KaminoMSOL` with a Scope base price |
+| `ScopeJuplendMSOL` | 35 | `JuplendMSOL` with a Scope base price |
+| `ScopeJuplendLST` | 36 | `JuplendLST` with a Scope base price |
 
 ### Oracle Parameters
 
@@ -82,9 +106,15 @@ Each bank has an oracle configuration that controls how prices are sourced.
 - **`oracle_max_confidence`**: Meaning depends on the oracle family.
   - Pyth: maximum allowed confidence interval width. If set to 0, defaults to 10% (0.10). If the
     oracle's confidence exceeds this threshold, the price is rejected.
-  - Scope (including ScopeKamino/ScopeJuplend): these publish no usable
-    confidence, so the value is a static band applied as the confidence interval
-    (`price * oracle_max_confidence / u32::MAX`), capped at 5% of price. 0 disables it.
+  - Scope-priced setups (`Scope`, `ScopeKamino`/`ScopeJuplend`, and the Scope-fed mSOL / LST / PT
+    / staked setups): these publish no usable confidence, so the value is a static band applied
+    as the confidence interval (`price * oracle_max_confidence / u32::MAX`), capped at 5% of
+    price. 0 disables it.
+- **`scope_entry_index` / `scope_smoothed_entry_index`** (Scope-priced setups only): the Scope
+  entry for the spot price and, if nonzero, the entry for the time-weighted price (e.g. that
+  asset's `PythLazerEMA`). Initial margin uses the time-weighted price, maintenance and liquidation
+  use spot; any multiplier (venue, stake-pool or PT rate) applies to both. With no smoothed entry,
+  spot is used for both.
 
 ### Price Bias
 

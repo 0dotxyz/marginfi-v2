@@ -6,22 +6,36 @@ use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::{ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE, STAKED_ORACLE_FLAGS},
-    types::{Bank, MarginfiGroup, StakedSettings},
+    types::{Bank, MarginfiGroup, ScopePriceSelection, StakedSettings},
 };
 
 pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Result<()> {
     let settings = ctx.accounts.staked_settings.load()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
 
-    let (oracle_before, oracle_after) = (bank.config.oracle_keys[0], settings.oracle);
+    // `StakedWithPythPush` or `StakedWithScope`; the Scope entries are zero / unset for Pyth.
+    let oracle_setup = settings.staked_oracle_setup();
+    let selection = ScopePriceSelection {
+        entry_index: settings.scope_base_feed().unwrap_or(0),
+        smoothed_entry: settings.scope_smoothed_entry(),
+    };
+    let pricing_changed = bank.config.oracle_setup != oracle_setup
+        || bank.config.oracle_keys[0] != settings.oracle
+        || bank.config.effective_scope_selection() != selection;
 
+    // The setup and both Scope entries are part of the same-asset price identity, like the feed.
     check!(
-        oracle_before == oracle_after || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
+        !pricing_changed || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
         MarginfiError::BadEmodeConfig,
-        "disable same-asset e-mode eligibility before changing oracle_keys[0]"
+        "disable same-asset e-mode eligibility before changing the oracle setup, oracle_keys[0], \
+         or the Scope entries"
     );
 
+    bank.config.oracle_setup = oracle_setup;
     bank.config.oracle_keys[0] = settings.oracle;
+    bank.config.scope_entry_index = selection.entry_index;
+    bank.config
+        .set_scope_smoothed_entry(selection.smoothed_entry);
     bank.config.asset_weight_init = settings.asset_weight_init;
     bank.config.asset_weight_maint = settings.asset_weight_maint;
     bank.config.deposit_limit = settings.deposit_limit;
@@ -31,8 +45,8 @@ pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Resul
     bank.flags &= !STAKED_ORACLE_FLAGS;
     bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
 
-    // Only validate the oracle info if it has changed
-    if oracle_before != oracle_after {
+    // Revalidate whenever the setup, the feed, or either Scope entry changes.
+    if pricing_changed {
         bank.config
             .validate_oracle_setup(bank.mint, ctx.remaining_accounts, None, None, None)?;
     }

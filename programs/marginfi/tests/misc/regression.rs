@@ -676,7 +676,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     // Reclaimed from the former `_pad0: [u8; 6]`; legacy banks read 0 (→ CB_WINDOW_* defaults).
     assert_eq!(bank.config.cb_window_max_up_bps, 0);
     assert_eq!(bank.config.cb_window_max_down_bps, 0);
-    assert_eq!(bank.config._pad0, [0; 2]);
+    // Reclaimed from the remaining `_pad0: [u8; 2]`; legacy banks read 0, which means no EMA
+    // entry.
+    assert_eq!(bank.config.scope_smoothed_entry_index, 0);
     assert_eq!(bank.config.borrow_limit, 2000000000000);
     assert_eq!(bank.config.risk_tier, RiskTier::Collateral);
     assert_eq!(bank.config.asset_tag, ASSET_TAG_DEFAULT);

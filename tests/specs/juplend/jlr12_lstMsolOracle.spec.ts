@@ -2,12 +2,18 @@ import { Program } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
 import {
+  bankrunContext,
   bankrunProgram,
   groupAdmin,
   juplendAccounts,
   oracles,
 } from "../../rootHooks";
-import { configureBankOracle } from "../../utils/group-instructions";
+import {
+  configureBankOracle,
+  configureBankOracleScope,
+} from "../../utils/group-instructions";
+import { makeScopePrices, setScopeFeed } from "../../utils/scope-utils";
+import { getBankrunTime } from "../../utils/tools";
 import {
   assertKeysEqual,
   expectFailedTxWithError,
@@ -17,6 +23,8 @@ import {
   ORACLE_SETUP_JUPLEND_MSOL,
   ORACLE_SETUP_JUPLEND_PYTH_PULL,
   ORACLE_SETUP_KAMINO_LST,
+  ORACLE_SETUP_SCOPE_JUPLEND_LST,
+  ORACLE_SETUP_SCOPE_JUPLEND_MSOL,
 } from "../../utils/types";
 import { JUPLEND_STATE_KEYS } from "../../utils/juplend/test-state";
 import { assert } from "chai";
@@ -133,6 +141,85 @@ describe("JupLend LST / mSOL oracle setups", () => {
           oracles.wsolOracle.publicKey,
           [lending, Keypair.generate().publicKey],
         );
+      },
+      "StakePoolValidationFailed",
+      6048,
+    );
+  });
+
+  // ScopeJuplendLST / ScopeJuplendMSOL go through configure_bank_oracle_scope; this USDC bank
+  // fails the setup's mint check, which proves the Scope path reaches the same validation.
+  const scopeFeed = Keypair.generate().publicKey;
+  const SOL_ENTRY = { index: 13, value: 15_000_000_000n, exp: 8n };
+
+  const setScopeOracle = async (type: number, remaining: PublicKey[]) => {
+    const now = await getBankrunTime(bankrunContext);
+    setScopeFeed(
+      bankrunContext,
+      scopeFeed,
+      makeScopePrices([{ ...SOL_ENTRY, timestamp: now }]),
+    );
+    const ix = await configureBankOracleScope(groupAdmin.mrgnProgram, {
+      bank,
+      type,
+      oracle: scopeFeed,
+      entryIndex: SOL_ENTRY.index,
+      remaining,
+    });
+    return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(ix),
+    );
+  };
+
+  it("(admin) ScopeJuplendLST with a stake pool for the wrong mint - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_JUPLEND_LST, [lending, BSOL_POOL]);
+      },
+      "StakePoolValidationFailed",
+      6048,
+    );
+  });
+
+  it("(admin) ScopeJuplendMSOL with a State for the wrong mint - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_JUPLEND_MSOL, [lending, MSOL_STATE]);
+      },
+      "MarinadeStateValidationFailed",
+      6136,
+    );
+  });
+
+  it("(admin) Pyth-fed JuplendLST / JuplendMSOL on the Scope ix - fails, InvalidOracleSetup", async () => {
+    for (const type of [ORACLE_SETUP_JUPLEND_LST, ORACLE_SETUP_JUPLEND_MSOL]) {
+      await expectFailedTxWithError(
+        async () => {
+          await setScopeOracle(type, [lending, MSOL_STATE]);
+        },
+        "InvalidOracleSetup",
+        6025,
+      );
+    }
+  });
+
+  it("(admin) ScopeJuplendLST with the wrong number of accounts - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_JUPLEND_LST, [lending]);
+      },
+      "WrongNumberOfOracleAccounts",
+      6051,
+    );
+  });
+
+  it("(admin) ScopeJuplendLST with a non-stake-pool account - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setScopeOracle(ORACLE_SETUP_SCOPE_JUPLEND_LST, [
+          lending,
+          Keypair.generate().publicKey,
+        ]);
       },
       "StakePoolValidationFailed",
       6048,
