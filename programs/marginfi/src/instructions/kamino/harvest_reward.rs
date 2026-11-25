@@ -17,12 +17,11 @@ pub fn kamino_harvest_reward(
     ctx: Context<KaminoHarvestReward>,
     reward_index: u64,
 ) -> MarginfiResult {
-    let pre_transfer_balance = accessor::amount(&ctx.accounts.user_reward_ata.to_account_info())?;
     ctx.accounts.cpi_harvest_rewards(reward_index)?;
-    let post_transfer_balance = accessor::amount(&ctx.accounts.user_reward_ata.to_account_info())?;
-    let received = post_transfer_balance - pre_transfer_balance;
+    // Note: any assets sent to the ATA by a third party are treated like rewards and harvested too.
+    let balance = accessor::amount(&ctx.accounts.user_reward_ata.to_account_info())?;
     ctx.accounts
-        .cpi_transfer_obligation_owner_to_destination(received)?;
+        .cpi_transfer_obligation_owner_to_destination(balance)?;
     Ok(())
 }
 
@@ -74,10 +73,16 @@ pub struct KaminoHarvestReward<'info> {
 
     pub reward_mint: InterfaceAccount<'info, Mint>,
 
-    /// An initialized ATA of type reward mint owned by liquidity vault
-    /// CHECK:
-    #[account(mut)]
-    pub user_reward_ata: UncheckedAccount<'info>,
+    /// The authority's reward cannonical ATA
+    #[account(
+        mut,
+        associated_token::mint = reward_mint,
+        associated_token::authority = liquidity_vault_authority,
+        associated_token::token_program = token_program,
+        // Sanity check
+        constraint = user_reward_ata.key() != bank.load()?.liquidity_vault @ MarginfiError::InvalidBankAccount,
+    )]
+    pub user_reward_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK:
     #[account(mut)]
