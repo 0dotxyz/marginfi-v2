@@ -46,7 +46,6 @@ use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 use fixed_macro::types::I80F48;
 use lazy_static::lazy_static;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_program::{hash::Hash, sysvar};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
@@ -55,9 +54,10 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_sdk::{hash::Hash, sysvar};
 
+use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::system_program;
-use solana_program::clock::Clock;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 #[derive(Default, Debug, Clone)]
@@ -201,9 +201,10 @@ pub struct TestBankSetting {
     pub config: Option<BankConfig>,
 }
 
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Default, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum BankMint {
     /// $1
+    #[default]
     Usdc,
     /// $2
     Fixed,
@@ -247,12 +248,6 @@ pub enum BankMint {
     KaminoUsdc,
 }
 
-impl Default for BankMint {
-    fn default() -> Self {
-        Self::Usdc
-    }
-}
-
 impl BankMint {
     pub fn is_integration_bank(&self) -> bool {
         matches!(self, Self::KaminoUsdc)
@@ -278,6 +273,25 @@ pub struct KaminoBankSetup {
     pub bank_f: BankFixture,
     pub obligation: Pubkey,
     pub reserve_liquidity_supply: Pubkey,
+}
+
+/// Select external and internal Kamino refreshes independently.
+#[derive(Clone, Copy, Debug)]
+pub struct KaminoRefreshOptions {
+    pub external: bool,
+    pub internal: bool,
+    /// Use a batch reserve refresh without oracle updates for the external refresh.
+    pub skip_external_price_updates: bool,
+}
+
+impl Default for KaminoRefreshOptions {
+    fn default() -> Self {
+        Self {
+            external: true,
+            internal: false,
+            skip_external_price_updates: false,
+        }
+    }
 }
 
 impl KaminoBankSetup {
@@ -775,6 +789,7 @@ impl TestFixture {
         let requires_real_kamino_program = add_integration_programs;
         let mut original_sbf_out_dir = None;
 
+        // ProgramTest's processor! macro uses the unqualified standard Result type.
         if requires_real_kamino_program {
             original_sbf_out_dir = Some(std::env::var_os("SBF_OUT_DIR"));
             let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -797,22 +812,19 @@ impl TestFixture {
             program.add_program("token_metadata", TOKEN_METADATA_PROGRAM_ID, None);
             program.prefer_bpf(false);
         } else {
-            program.add_program(
-                "kamino_lending",
-                kamino_mocks::kamino_lending::ID,
-                processor!(mock_kamino_lending_processor),
-            );
-            program.add_program(
-                "kamino_farms",
-                kamino_mocks::kamino_farms::ID,
-                processor!(mock_kamino_lending_processor),
-            );
+            program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, {
+                use std::result::Result;
+                processor!(mock_kamino_lending_processor)
+            });
+            program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, {
+                use std::result::Result;
+                processor!(mock_kamino_lending_processor)
+            });
         }
-        program.add_program(
-            "fake_kamino_lending",
-            FAKE_KAMINO_PROGRAM_ID,
-            processor!(mock_kamino_lending_processor),
-        );
+        program.add_program("fake_kamino_lending", FAKE_KAMINO_PROGRAM_ID, {
+            use std::result::Result;
+            processor!(mock_kamino_lending_processor)
+        });
 
         let usdc_keypair = Keypair::new();
         let fixed_keypair = Keypair::new();
@@ -1287,7 +1299,7 @@ impl TestFixture {
             .unwrap()
     }
 
-    async fn process_ixs(
+    pub async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
     ) -> std::result::Result<(), BanksClientError> {
@@ -2283,13 +2295,37 @@ impl TestFixture {
         signer_token_account: Pubkey,
         amount: u64,
     ) -> std::result::Result<(), BanksClientError> {
-        let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
-        let refresh_obligation_ix = user.make_kamino_refresh_obligation_ix(bank_f).await;
-        let deposit_ix = user
+        self.run_kamino_deposit_with_options(
+            bank_f,
+            user,
+            signer_token_account,
+            amount,
+            KaminoRefreshOptions::default(),
+            &[],
+        )
+        .await
+    }
+
+    pub async fn run_kamino_deposit_with_options(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        signer_token_account: Pubkey,
+        amount: u64,
+        refresh: KaminoRefreshOptions,
+        pre_instructions: &[Instruction],
+    ) -> std::result::Result<(), BanksClientError> {
+        let mut ixs = pre_instructions.to_vec();
+        ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
+        let mut deposit_ix = user
             .make_kamino_deposit_ix(signer_token_account, bank_f, amount)
             .await;
-
-        let ixs = vec![refresh_reserve_ix, refresh_obligation_ix, deposit_ix];
+        deposit_ix.data = marginfi::instruction::KaminoDeposit {
+            amount,
+            refresh_reserve: Some(refresh.internal),
+        }
+        .data();
+        ixs.push(deposit_ix);
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
@@ -2301,14 +2337,69 @@ impl TestFixture {
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> std::result::Result<(), BanksClientError> {
-        let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
-        let refresh_obligation_ix = user.make_kamino_refresh_obligation_ix(bank_f).await;
-        let withdraw_ix = user
+        self.run_kamino_withdraw_with_options(
+            bank_f,
+            user,
+            destination_token_account,
+            amount,
+            withdraw_all,
+            KaminoRefreshOptions::default(),
+            &[],
+        )
+        .await
+    }
+
+    pub async fn run_kamino_withdraw_with_options(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        refresh: KaminoRefreshOptions,
+        pre_instructions: &[Instruction],
+    ) -> std::result::Result<(), BanksClientError> {
+        const WITHDRAW_ALL_FLAG: u8 = 1 << 0;
+        const REFRESH_RESERVE_FLAG: u8 = 1 << 1;
+
+        let mut ixs = pre_instructions.to_vec();
+        ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
+        let mut withdraw_ix = user
             .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
-
-        let ixs = vec![refresh_reserve_ix, refresh_obligation_ix, withdraw_ix];
+        let mut flags = 0;
+        if withdraw_all.unwrap_or(false) {
+            flags |= WITHDRAW_ALL_FLAG;
+        }
+        if refresh.internal {
+            flags |= REFRESH_RESERVE_FLAG;
+        }
+        withdraw_ix.data = marginfi::instruction::KaminoWithdraw {
+            amount,
+            flags: (flags != 0).then_some(flags),
+        }
+        .data();
+        ixs.push(withdraw_ix);
         Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
+    async fn kamino_refresh_ixs(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        refresh: KaminoRefreshOptions,
+    ) -> Vec<Instruction> {
+        let mut ixs = Vec::new();
+        if refresh.external {
+            let reserve_ix = if refresh.skip_external_price_updates {
+                user.make_kamino_refresh_reserves_batch_ix(bank_f).await
+            } else {
+                user.make_kamino_refresh_reserve_ix(bank_f).await
+            };
+            ixs.push(reserve_ix);
+            ixs.push(user.make_kamino_refresh_obligation_ix(bank_f).await);
+        }
+        ixs
     }
 
     pub async fn run_drift_deposit(

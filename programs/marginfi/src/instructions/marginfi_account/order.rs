@@ -275,6 +275,8 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
     let mut order = order_loader.load_mut()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
+    // Gate at start: the order can close a tagged balance before the end gate runs, so a bank
+    // whose breaching price sets the trigger must be caught here while it's still active.
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
@@ -296,10 +298,6 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         order_asset_count == 1 && order_liab_count == 1,
         MarginfiError::InvalidAssetOrLiabilitiesCount
     );
-
-    // Also gate at start: the order can close a tagged balance before the end gate runs, so a bank
-    // whose breaching price sets the trigger must be caught here while it's still active.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let net = order_assets_in_equity
         .checked_sub(order_liabs_in_equity)

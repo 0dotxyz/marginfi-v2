@@ -53,7 +53,7 @@ pub const ORDER_ACTIVE_TAGS: usize = 2;
 /// Compile-time guard to ensure ORDER_ACTIVE_TAGS stays 2 as assumed
 /// in several places in the code for simplicity.
 /// It can be removed when orders are extended to allow more balances.
-pub const _: () = assert!(ORDER_ACTIVE_TAGS == 2);
+const _: () = assert!(ORDER_ACTIVE_TAGS == 2);
 /// Padding length (in bytes) to preserve `Order` layout when more balances are added.
 pub const ORDER_TAG_PADDING: usize = 32;
 
