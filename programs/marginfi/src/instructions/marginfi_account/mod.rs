@@ -25,7 +25,7 @@ mod withdraw;
 use anchor_lang::{prelude::*, system_program};
 use marginfi_type_crate::types::{
     MarginfiAccount, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
-    ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use std::cell::RefMut;
 
@@ -35,7 +35,7 @@ use crate::{check, check_eq, prelude::*};
 /// order closure eligibility.
 fn check_order_close_state(account: &MarginfiAccount) -> MarginfiResult {
     check!(
-        !account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_RISK_ADMIN_LIQUIDATION),
+        !account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
         MarginfiError::UnexpectedLiquidationState
     );
     check!(

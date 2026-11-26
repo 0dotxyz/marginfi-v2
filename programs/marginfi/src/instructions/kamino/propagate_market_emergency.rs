@@ -7,9 +7,10 @@ use marginfi_type_crate::{
     types::Bank,
 };
 
-/// Kamino halts its own instructions when a market is in emergency mode, but it keeps serving
-/// `refresh_reserve`, so nothing upstream stops users borrowing against collateral parked there.
-/// The health path never sees the market account, so the flag is cached on the bank instead.
+/// Kamino rejects `refresh_reserve` while a market is in emergency mode, so the market's banks
+/// cannot be priced until it lifts. Once it does, this cached flag keeps borrowing power off until
+/// the recovery is propagated. The health path never sees the market account, so the flag is
+/// cached on the bank instead.
 pub fn propagate_kamino_market_emergency(
     ctx: Context<PropagateKaminoMarketEmergency>,
 ) -> MarginfiResult {

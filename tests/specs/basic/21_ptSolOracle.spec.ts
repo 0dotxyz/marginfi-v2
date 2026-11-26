@@ -1,16 +1,9 @@
 import { Program } from "@coral-xyz/anchor";
-import {
-  ComputeBudgetProgram,
-  Keypair,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
 import {
   addBank,
-  configureBankIxs,
   configureBankOracle,
-  groupConfigure,
   groupInitialize,
   setFixedPrice,
 } from "../../utils/group-instructions";
@@ -18,18 +11,8 @@ import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsMetaBanksOnly,
-  composeRemainingAccountsWriteableMeta,
   depositIx,
-  endDeleverageIx,
-  endLiquidationIx,
-  initLiquidationRecordIx,
-  liquidateIx,
   pulseBankPrice,
-  repayIx,
-  startDeleverageIx,
-  startLiquidationIx,
-  withdrawIx,
 } from "../../utils/user-instructions";
 import {
   bankrunContext,
@@ -39,7 +22,6 @@ import {
   globalProgramAdmin,
   groupAdmin,
   oracles,
-  riskAdmin,
   users,
 } from "../../rootHooks";
 import {
@@ -48,7 +30,6 @@ import {
   expectFailedTxWithError,
 } from "../../utils/genericTests";
 import {
-  blankBankConfigOptRaw,
   defaultBankConfig,
   ORACLE_SETUP_PT_FIXED,
   ORACLE_SETUP_PT_PYTH,
@@ -56,13 +37,9 @@ import {
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { getBankrunTime, processBankrunTransaction } from "../../utils/tools";
-import {
-  bigNumberToWrappedI80F48,
-  wrappedI80F48toBigNumber,
-} from "@mrgnlabs/mrgn-common";
-import { toI80Scaled } from "../../utils/bn-utils";
 import { BN } from "@coral-xyz/anchor";
 import { createMintToInstruction } from "@solana/spl-token";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 
 const EXPONENT_PROGRAM = new PublicKey(
@@ -77,10 +54,13 @@ const VAULT_DISCRIMINATOR = Buffer.from([211, 8, 232, 43, 2, 152, 117, 119]);
 
 /** Precision of Exponent's `Number` type. */
 const SY_RATE_PRECISION = 1_000_000_000_000n;
+/** Exponent `Vault.status` with every operation enabled; bit 1 is `STATUS_CAN_MERGE`. */
+const STATUS_ALL = 0b11_1111;
+const STATUS_CAN_MERGE = 0b10;
 
-// Minimal Exponent vault bytes, at absolute offsets 104 / 264 / 268 / 337 / 441 / 449. Defaults
-// describe a fully-backed vault (sy_for_pt = pt_supply / sy_rate), whose redemption rate is 1.0
-// and so never caps the linear price.
+// Minimal Exponent vault bytes, at absolute offsets 104 / 264 / 268 / 337 / 369 / 441 / 449 / 523.
+// Defaults describe a fully-backed vault (sy_for_pt = pt_supply / max(watermark, sy_rate), as
+// Exponent sets it), whose redemption rate is 1.0 unless the rate sits below the watermark.
 const makeVault = (
   startTs: number,
   duration: number,
@@ -90,14 +70,16 @@ const makeVault = (
     allTimeHigh?: bigint;
     syForPt?: bigint;
     ptSupply?: bigint;
+    status?: number;
   } = {},
 ) => {
   const syRate = opts.syRate ?? 2n * SY_RATE_PRECISION;
-  const allTimeHigh = opts.allTimeHigh ?? syRate; // healthy vault: ATH == current rate
+  const allTimeHigh = opts.allTimeHigh ?? syRate;
   const ptSupply = opts.ptSupply ?? 1_000_000_000_000n;
-  const syForPt = opts.syForPt ?? (ptSupply * SY_RATE_PRECISION) / syRate;
+  const watermark = allTimeHigh > syRate ? allTimeHigh : syRate;
+  const syForPt = opts.syForPt ?? (ptSupply * SY_RATE_PRECISION) / watermark;
 
-  const data = Buffer.alloc(457);
+  const data = Buffer.alloc(524);
   VAULT_DISCRIMINATOR.copy(data, 0);
   (opts.mintPt ?? ecosystem.wsolMint.publicKey).toBuffer().copy(data, 104);
   data.writeUInt32LE(startTs, 264);
@@ -106,6 +88,7 @@ const makeVault = (
   data.writeBigUInt64LE(allTimeHigh, 369);
   data.writeBigUInt64LE(syForPt, 441);
   data.writeBigUInt64LE(ptSupply, 449);
+  data.writeUInt8(opts.status ?? STATUS_ALL, 523);
   return data;
 };
 
@@ -297,259 +280,56 @@ describe("PT-SOL internal oracle setup", () => {
     assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * expectedMult);
   });
 
-  it("refuses to price a vault in emergency mode (SY below its all-time high)", async () => {
+  it("prices a vault below its watermark at what its PT redeems for (negative yield)", async () => {
     const now = await getBankrunTime(bankrunContext);
     const vault = Keypair.generate().publicKey;
+    // Live rate 2.0 under a 2.5 watermark: Exponent sets aside pt_supply / 2.5 SY, so a matured PT
+    // redeems for 2.0 / 2.5 = 0.8 SOL.
     setVault(
       vault,
-      makeVault(now - 5_000, 10_000, {
+      makeVault(now - 10_000, 5_000, {
         syRate: 2n * SY_RATE_PRECISION,
-        allTimeHigh: 3n * SY_RATE_PRECISION, // rate fell from its peak -> emergency mode
+        allTimeHigh: (5n * SY_RATE_PRECISION) / 2n,
       }),
     );
     await setPtsol(0.9, vault);
 
-    await expectFailedTxWithError(
-      async () => {
-        await pulseCache([vault]);
-      },
-      "ExponentVaultValidationFailed",
-      6137,
-    );
+    const cache = await pulseCache([vault]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * 0.8);
   });
 
-
-  it("deleverages a bank whose vault is in emergency mode, which its owner cannot", async () => {
+  it("PT backs no new borrows while Exponent has merging paused", async () => {
     const borrower = users[0];
     const lender = users[1];
     const borrowerAcc = Keypair.generate();
     const lenderAcc = Keypair.generate();
     const debtBank = Keypair.generate();
-    const depeggedVault = Keypair.generate().publicKey;
+    const vault = Keypair.generate().publicKey;
     const wsol = (n: number) => new BN(n * 10 ** ecosystem.wsolDecimals);
     const usdc = (n: number) => new BN(n * 10 ** ecosystem.usdcDecimals);
 
-    await setPtsol(0.9, okVault);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction()
-        .add(
-          await addBank(groupAdmin.mrgnBankrunProgram, {
-            marginfiGroup: ptGroup.publicKey,
-            feePayer: groupAdmin.wallet.publicKey,
-            bankMint: ecosystem.usdcMint.publicKey,
-            bank: debtBank.publicKey,
-            config: defaultBankConfig(),
-          }),
-        )
-        .add(
-          await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-            marginfiGroup: ptGroup.publicKey,
-            newRiskAdmin: riskAdmin.wallet.publicKey,
-          }),
-        ),
-      [groupAdmin.wallet, debtBank],
-    );
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
-          bank: debtBank.publicKey,
-          type: ORACLE_SETUP_PYTH_PUSH,
-          oracle: oracles.usdcOracle.publicKey,
-        }),
-      ),
-      [groupAdmin.wallet],
-    );
-
-    const mintTo = (mint: PublicKey, account: PublicKey, amount: BN) =>
-      processBankrunTransaction(
-        bankrunContext,
-        new Transaction().add(
-          createMintToInstruction(
-            mint,
-            account,
-            globalProgramAdmin.wallet.publicKey,
-            BigInt(amount.toString()),
-          ),
-        ),
-        [globalProgramAdmin.wallet],
-      );
-    await mintTo(ecosystem.wsolMint.publicKey, borrower.wsolAccount, wsol(2));
-    await mintTo(ecosystem.usdcMint.publicKey, lender.usdcAccount, usdc(1_000));
-    await mintTo(ecosystem.usdcMint.publicKey, riskAdmin.usdcAccount, usdc(100));
-
-    for (const [user, acc] of [
-      [borrower, borrowerAcc],
-      [lender, lenderAcc],
-    ] as const) {
-      await processBankrunTransaction(
-        bankrunContext,
-        new Transaction().add(
-          await accountInit(user.mrgnBankrunProgram, {
-            marginfiGroup: ptGroup.publicKey,
-            marginfiAccount: acc.publicKey,
-            authority: user.wallet.publicKey,
-            feePayer: user.wallet.publicKey,
-          }),
-        ),
-        [user.wallet, acc],
-      );
-    }
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await depositIx(lender.mrgnBankrunProgram, {
-          marginfiAccount: lenderAcc.publicKey,
-          bank: debtBank.publicKey,
-          tokenAccount: lender.usdcAccount,
-          amount: usdc(1_000),
-        }),
-      ),
-      [lender.wallet],
-    );
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction()
-        .add(
-          await depositIx(borrower.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            bank: ptBank.publicKey,
-            tokenAccount: borrower.wsolAccount,
-            amount: wsol(2),
-          }),
-        )
-        .add(
-          await initLiquidationRecordIx(riskAdmin.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            feePayer: riskAdmin.wallet.publicKey,
-          }),
-        ),
-      [borrower.wallet, riskAdmin.wallet],
-    );
-
-    const groupsFor = (vault: PublicKey) => [
-      [ptBank.publicKey, oracles.wsolOracle.publicKey, vault],
-      [debtBank.publicKey, oracles.usdcOracle.publicKey],
-    ];
-    const remaining = composeRemainingAccounts(groupsFor(okVault));
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await borrowIx(borrower.mrgnBankrunProgram, {
-          marginfiAccount: borrowerAcc.publicKey,
-          bank: debtBank.publicKey,
-          tokenAccount: borrower.usdcAccount,
-          remaining,
-          amount: usdc(50),
-        }),
-      ),
-      [borrower.wallet],
-    );
-
-    // The vault depegs, so the collateral can no longer be priced.
     const now = await getBankrunTime(bankrunContext);
-    setVault(
-      depeggedVault,
-      makeVault(now - 5_000, 10_000, {
-        syRate: 2n * SY_RATE_PRECISION,
-        allTimeHigh: 3n * SY_RATE_PRECISION,
-      }),
-    );
-    await setPtsol(0.9, depeggedVault);
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    const depegged = composeRemainingAccounts(groupsFor(depeggedVault));
+    const setMergeable = (mergeable: boolean) =>
+      setVault(
+        vault,
+        makeVault(now - 10_000, 5_000, {
+          status: mergeable ? STATUS_ALL : STATUS_ALL & ~STATUS_CAN_MERGE,
+        }),
+      );
+    setMergeable(false);
+    await setPtsol(0.9, vault);
 
-    const seize = (program: Program<Marginfi>, tokenAccount: PublicKey) =>
-      withdrawIx(program, {
-        marginfiAccount: borrowerAcc.publicKey,
-        bank: ptBank.publicKey,
-        tokenAccount,
-        remaining: depegged,
-        amount: wsol(0.1),
-      });
-
-    // The borrower's own risk check cannot price the depegged collateral, so the risk engine
-    // rejects the withdraw on an account that is otherwise healthy.
-    await expectFailedTxWithError(
-      async () => {
-        await processBankrunTransaction(
-          bankrunContext,
-          new Transaction().add(
-            await seize(borrower.mrgnBankrunProgram, borrower.wsolAccount),
-          ),
-          [borrower.wallet],
-        );
-      },
-      "RiskEngineInitRejected",
-      6009,
-    );
-
-    // The risk admin still unwinds it: seize collateral, pay down the debt.
     await processBankrunTransaction(
       bankrunContext,
-      new Transaction()
-        .add(
-          await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            riskAdmin: riskAdmin.wallet.publicKey,
-            remaining: composeRemainingAccountsWriteableMeta(
-              groupsFor(depeggedVault),
-            ),
-          }),
-        )
-        .add(await seize(riskAdmin.mrgnBankrunProgram, riskAdmin.wsolAccount))
-        .add(
-          await repayIx(riskAdmin.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            bank: debtBank.publicKey,
-            tokenAccount: riskAdmin.usdcAccount,
-            amount: usdc(25),
-          }),
-        )
-        .add(
-          await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            remaining: composeRemainingAccountsMetaBanksOnly(
-              groupsFor(depeggedVault),
-            ),
-          }),
-        ),
-      [riskAdmin.wallet],
-    );
-  });
-
-  it("liquidates (classic and receivership) through a vault emergency only when the risk admin signs", async () => {
-    const borrower = users[0];
-    const liquidator = users[2];
-    const borrowerAcc = Keypair.generate();
-    const liquidatorAcc = Keypair.generate();
-    const riskAdminAcc = Keypair.generate();
-    const debtBank = Keypair.generate();
-    const depeggedVault = Keypair.generate().publicKey;
-    const wsol = (n: number) => new BN(n * 10 ** ecosystem.wsolDecimals);
-    const usdc = (n: number) => new BN(n * 10 ** ecosystem.usdcDecimals);
-
-    await setPtsol(0.9, okVault);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction()
-        .add(
-          await addBank(groupAdmin.mrgnBankrunProgram, {
-            marginfiGroup: ptGroup.publicKey,
-            feePayer: groupAdmin.wallet.publicKey,
-            bankMint: ecosystem.usdcMint.publicKey,
-            bank: debtBank.publicKey,
-            config: defaultBankConfig(),
-          }),
-        )
-        .add(
-          await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-            marginfiGroup: ptGroup.publicKey,
-            newRiskAdmin: riskAdmin.wallet.publicKey,
-          }),
-        ),
+      new Transaction().add(
+        await addBank(groupAdmin.mrgnBankrunProgram, {
+          marginfiGroup: ptGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank: debtBank.publicKey,
+          config: defaultBankConfig(),
+        }),
+      ),
       [groupAdmin.wallet, debtBank],
     );
     await processBankrunTransaction(
@@ -563,36 +343,27 @@ describe("PT-SOL internal oracle setup", () => {
       ),
       [groupAdmin.wallet],
     );
-
-    const mintTo = (mint: PublicKey, account: PublicKey, amount: BN) =>
-      processBankrunTransaction(
-        bankrunContext,
-        new Transaction().add(
-          createMintToInstruction(
-            mint,
-            account,
-            globalProgramAdmin.wallet.publicKey,
-            BigInt(amount.toString()),
-          ),
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        createMintToInstruction(
+          ecosystem.wsolMint.publicKey,
+          borrower.wsolAccount,
+          globalProgramAdmin.wallet.publicKey,
+          2n * 10n ** BigInt(ecosystem.wsolDecimals),
         ),
-        [globalProgramAdmin.wallet],
-      );
-    await mintTo(ecosystem.wsolMint.publicKey, borrower.wsolAccount, wsol(2));
-    await mintTo(
-      ecosystem.usdcMint.publicKey,
-      liquidator.usdcAccount,
-      usdc(100),
+        createMintToInstruction(
+          ecosystem.usdcMint.publicKey,
+          lender.usdcAccount,
+          globalProgramAdmin.wallet.publicKey,
+          1_000n * 10n ** BigInt(ecosystem.usdcDecimals),
+        ),
+      ),
+      [globalProgramAdmin.wallet],
     );
-    await mintTo(
-      ecosystem.usdcMint.publicKey,
-      riskAdmin.usdcAccount,
-      usdc(200),
-    );
-
-    for (const [user, acc] of [
-      [borrower, borrowerAcc],
-      [liquidator, liquidatorAcc],
-      [riskAdmin, riskAdminAcc],
+    for (const [user, acc, bank, tokenAccount, amount] of [
+      [lender, lenderAcc, debtBank.publicKey, lender.usdcAccount, usdc(1_000)],
+      [borrower, borrowerAcc, ptBank.publicKey, borrower.wsolAccount, wsol(2)],
     ] as const) {
       await processBankrunTransaction(
         bankrunContext,
@@ -606,211 +377,49 @@ describe("PT-SOL internal oracle setup", () => {
         ),
         [user.wallet, acc],
       );
-    }
-    // Both liquidators' USDC also funds the borrow.
-    for (const [user, acc] of [
-      [liquidator, liquidatorAcc],
-      [riskAdmin, riskAdminAcc],
-    ] as const) {
       await processBankrunTransaction(
         bankrunContext,
         new Transaction().add(
           await depositIx(user.mrgnBankrunProgram, {
             marginfiAccount: acc.publicKey,
-            bank: debtBank.publicKey,
-            tokenAccount: user.usdcAccount,
-            amount: usdc(100),
+            bank,
+            tokenAccount,
+            amount,
           }),
         ),
         [user.wallet],
       );
     }
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction()
-        .add(
-          await depositIx(borrower.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            bank: ptBank.publicKey,
-            tokenAccount: borrower.wsolAccount,
-            amount: wsol(2),
-          }),
-        )
-        .add(
-          await initLiquidationRecordIx(borrower.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            feePayer: borrower.wallet.publicKey,
-          }),
-        ),
-      [borrower.wallet],
-    );
 
-    const ptGroupFor = (vault: PublicKey) => [
-      ptBank.publicKey,
-      oracles.wsolOracle.publicKey,
-      vault,
-    ];
-    const debtGroup = [debtBank.publicKey, oracles.usdcOracle.publicKey];
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await borrowIx(borrower.mrgnBankrunProgram, {
-          marginfiAccount: borrowerAcc.publicKey,
-          bank: debtBank.publicKey,
-          tokenAccount: borrower.usdcAccount,
-          remaining: composeRemainingAccounts([ptGroupFor(okVault), debtGroup]),
-          amount: usdc(50),
-        }),
-      ),
-      [borrower.wallet],
-    );
-    // A PT debt (larger than what it'll seize) makes the risk admin's own health check price PT.
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await borrowIx(riskAdmin.mrgnBankrunProgram, {
-          marginfiAccount: riskAdminAcc.publicKey,
-          bank: ptBank.publicKey,
-          tokenAccount: riskAdmin.wsolAccount,
-          remaining: composeRemainingAccounts([ptGroupFor(okVault), debtGroup]),
-          amount: wsol(0.2),
-        }),
-      ),
-      [riskAdmin.wallet],
-    );
-
-    // Cut the PT collateral weight so the borrower is liquidatable at the PT's normal mark...
-    const weights = blankBankConfigOptRaw();
-    weights.assetWeightInit = bigNumberToWrappedI80F48(0.01);
-    weights.assetWeightMaint = bigNumberToWrappedI80F48(0.02);
-    // The breaker's price gate must also price PT through the emergency.
-    weights.circuitBreakerEnabled = true;
-    weights.cbDeviationBpsTiers = [500, 1000, 2500];
-    weights.cbTierDurationsSeconds = [600, 3600, 14400];
-    weights.cbEscalationWindowMult = 2;
-    weights.cbEmaAlphaBps = 1000;
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        ...(await configureBankIxs(groupAdmin.mrgnBankrunProgram, {
-          bank: ptBank.publicKey,
-          bankConfigOpt: weights,
-        })),
-      ),
-      [groupAdmin.wallet],
-    );
-    // ...then depeg the vault, so the PT can no longer be priced.
-    const now = await getBankrunTime(bankrunContext);
-    setVault(
-      depeggedVault,
-      makeVault(now - 5_000, 10_000, {
-        syRate: 2n * SY_RATE_PRECISION,
-        allTimeHigh: 3n * SY_RATE_PRECISION,
-      }),
-    );
-    await setPtsol(0.9, depeggedVault);
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-
-    const liquidate = (
-      program: Program<Marginfi>,
-      liquidatorAccount: PublicKey,
-    ) =>
-      liquidateIx(program, {
-        assetBankKey: ptBank.publicKey,
-        liabilityBankKey: debtBank.publicKey,
-        liquidatorMarginfiAccount: liquidatorAccount,
-        liquidateeMarginfiAccount: borrowerAcc.publicKey,
-        remaining: [
-          oracles.wsolOracle.publicKey,
-          depeggedVault,
-          oracles.usdcOracle.publicKey,
-          ...composeRemainingAccounts([ptGroupFor(depeggedVault), debtGroup]),
-          ...composeRemainingAccounts([ptGroupFor(depeggedVault), debtGroup]),
-        ],
-        amount: wsol(0.1),
-        liquidateeAccounts: 5,
-        liquidatorAccounts: 5,
-      });
-
-    // An ordinary liquidator can't price the depegged collateral.
-    await expectFailedTxWithError(
-      async () => {
-        await processBankrunTransaction(
-          bankrunContext,
-          new Transaction().add(
-            await liquidate(
-              liquidator.mrgnBankrunProgram,
-              liquidatorAcc.publicKey,
-            ),
-          ),
-          [liquidator.wallet],
-        );
-      },
-      "ExponentVaultValidationFailed",
-      6137,
-    );
-
-    const before = await program.account.marginfiAccount.fetch(
-      borrowerAcc.publicKey,
-    );
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-        await liquidate(riskAdmin.mrgnBankrunProgram, riskAdminAcc.publicKey),
-      ),
-      [riskAdmin.wallet],
-    );
-    const after = await program.account.marginfiAccount.fetch(
-      borrowerAcc.publicKey,
-    );
-    const ptShares = (acc: typeof before) =>
-      toI80Scaled(
-        acc.lendingAccount.balances.find((b) =>
-          b.bankPk.equals(ptBank.publicKey),
-        )!.assetShares,
-      );
-    assert.isTrue(ptShares(after) < ptShares(before));
-
-    // Receivership: naming the risk admin as receiver isn't enough, the risk admin must sign.
-    const groups = [ptGroupFor(depeggedVault), debtGroup];
-    const receivership = async (user: typeof liquidator) =>
+    const borrow = async () =>
       processBankrunTransaction(
         bankrunContext,
         new Transaction().add(
-          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
-          await startLiquidationIx(user.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            liquidationReceiver: riskAdmin.wallet.publicKey,
-            remaining: composeRemainingAccountsWriteableMeta(groups),
-          }),
-          await withdrawIx(user.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            bank: ptBank.publicKey,
-            tokenAccount: user.wsolAccount,
-            remaining: composeRemainingAccounts(groups),
-            amount: wsol(0.05),
-          }),
-          await repayIx(user.mrgnBankrunProgram, {
+          await borrowIx(borrower.mrgnBankrunProgram, {
             marginfiAccount: borrowerAcc.publicKey,
             bank: debtBank.publicKey,
-            tokenAccount: user.usdcAccount,
-            amount: usdc(7.5),
-          }),
-          await endLiquidationIx(user.mrgnBankrunProgram, {
-            marginfiAccount: borrowerAcc.publicKey,
-            remaining: composeRemainingAccountsMetaBanksOnly(groups),
+            tokenAccount: borrower.usdcAccount,
+            remaining: composeRemainingAccounts([
+              [ptBank.publicKey, oracles.wsolOracle.publicKey, vault],
+              [debtBank.publicKey, oracles.usdcOracle.publicKey],
+            ]),
+            amount: usdc(50),
           }),
         ),
-        [user.wallet],
+        [borrower.wallet],
       );
+
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await expectFailedTxWithError(
-      () => receivership(liquidator),
-      "ExponentVaultValidationFailed",
-      6137,
+      async () => {
+        await borrow();
+      },
+      "RiskEngineInitRejected",
+      6009,
     );
-    await receivership(riskAdmin);
+
+    setMergeable(true);
+    await borrow();
   });
 
   // --- PT-hyUSD: same Exponent lerp, but no base feed (hyUSD ~= $1, so the rate is the price) ---

@@ -4,7 +4,7 @@
         {
             "label": "Setup & Run Anchor Tests (+ IDL)",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p test_transfer_hook --no-idl --ignore-keys && anchor build -p mocks --ignore-keys && anchor build -p marginfi -- --no-default-features --features custom-heap && anchor test --skip-build --skip-local-validator --skip-deploy",
+            "command": "./scripts/build-workspace.sh && yarn install && anchor build --arch v3 -p test_transfer_hook --no-idl --ignore-keys && anchor build --arch v3 -p mocks --ignore-keys && anchor build --arch v3 -p marginfi -- --no-default-features --features custom-heap && anchor test --skip-build --skip-local-validator --skip-deploy",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -148,7 +148,7 @@
         {
             "label": "Build Fuzz (libfuzzer, compile check)",
             "type": "shell",
-            "command": "cd programs/marginfi/fuzz && cargo +nightly-2025-08-01 fuzz build lend --strip-dead-code --no-cfg-fuzzing",
+            "command": "rustup toolchain list | grep -q nightly-2025-08-01 || rustup toolchain install nightly-2025-08-01 --component rust-src; cd programs/marginfi/fuzz && cargo +nightly-2025-08-01 fuzz build lend --strip-dead-code --no-cfg-fuzzing",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -166,7 +166,7 @@
         {
             "label": "Run Fuzz Tests (libfuzzer)",
             "type": "shell",
-            "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=60 -max_len=4096",
+            "command": "rustup toolchain list | grep -q nightly-2025-08-01 || rustup toolchain install nightly-2025-08-01 --component rust-src; cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=60 -max_len=4096",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
