@@ -330,12 +330,22 @@ pub mod marginfi {
     }
 
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
-    /// depositors' value via `asset_share_value`.
+    /// depositors' value via `asset_share_value`, all at once.
     pub fn lending_pool_emissions_deposit(
         ctx: Context<LendingPoolEmissionsDeposit>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_emissions_deposit(ctx, amount)
+    }
+
+    /// (permissionless) Deposit same-bank emissions into the liquidity vault. They are added to
+    /// `asset_share_value` only as accrual pays them out over the next `seconds`.
+    pub fn lending_pool_emissions_deposit_streamed(
+        ctx: Context<LendingPoolEmissionsDeposit>,
+        amount: u64,
+        seconds: u64,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_emissions_deposit_streamed(ctx, amount, seconds)
     }
 
     /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)

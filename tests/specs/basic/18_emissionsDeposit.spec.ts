@@ -31,6 +31,7 @@ import {
 } from "../../rootHooks";
 import { assert } from "chai";
 import {
+  assertBNEqual,
   getTokenBalance,
   expectFailedTxWithError,
 } from "../../utils/genericTests";
@@ -39,6 +40,7 @@ import {
   configureBank,
   configureBankOracle,
   lendingPoolEmissionsDeposit,
+  lendingPoolEmissionsDepositStreamed,
   panicPause,
   panicUnpause,
   propagateFeeState,
@@ -50,6 +52,8 @@ import {
 import {
   blankBankConfigOptRaw,
   defaultBankConfig,
+  EMISSIONS_STREAM_MAX_SECONDS,
+  EMISSIONS_STREAM_MIN_SECONDS,
   ORACLE_CONF_INTERVAL,
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
@@ -64,6 +68,7 @@ import {
 } from "../../utils/bankrun-oracles";
 import { accountInit } from "../../utils/user-instructions";
 import { dummyIx } from "../../utils/bankrunConnection";
+import { nativeToI80Scaled, toI80Scaled } from "../../utils/bn-utils";
 
 function assertSameBankDeposit(
   sharesBefore: { value: number[] },
@@ -458,6 +463,35 @@ describe("Same-bank deposit", () => {
       await setProtocolPaused(false);
     }
   });
+
+  it("streamed emissions deposit fails with a period out of range", async () => {
+    const bank = await program.account.bank.fetch(bankKeypairA.publicKey);
+    for (const seconds of [
+      EMISSIONS_STREAM_MIN_SECONDS - 1,
+      EMISSIONS_STREAM_MAX_SECONDS + 1,
+    ]) {
+      const ix = await lendingPoolEmissionsDepositStreamed(program, {
+        bank: bankKeypairA.publicKey,
+        mint: bank.mint,
+        fundingAccount: getAssociatedTokenAddressSync(
+          ecosystem.tokenAMint.publicKey,
+          depositor
+        ),
+        depositor,
+        liquidityVault: bank.liquidityVault,
+        amount: new BN(3),
+        seconds: new BN(seconds),
+      });
+
+      await expectFailedTxWithError(
+        async () => {
+          await provider.sendAndConfirm(new Transaction().add(ix));
+        },
+        "EmissionsUpdateError",
+        6034
+      );
+    }
+  });
 });
 
 describe("Same-bank deposit - T22", () => {
@@ -714,6 +748,57 @@ describe("Same-bank deposit - T22", () => {
       liquidityVaultBefore,
       liquidityVaultAfter,
       emissionsDepositAmount
+    );
+  });
+
+  it("streamed emissions deposit waits to be paid out", async () => {
+    const bankKey = t22BankKeypair.publicKey;
+    const [liquidityVault] = deriveLiquidityVault(program.programId, bankKey);
+    const bankBefore = await program.account.bank.fetch(bankKey);
+    const liquidityVaultBefore = await getTokenBalance(
+      provider,
+      liquidityVault
+    );
+
+    const amount = new BN(50 * 10 ** T22_DECIMALS);
+    await provider.sendAndConfirm(
+      new Transaction().add(
+        await program.methods
+          .lendingPoolEmissionsDepositStreamed(
+            amount,
+            new BN(EMISSIONS_STREAM_MIN_SECONDS)
+          )
+          .accounts({
+            bank: bankKey,
+            depositor,
+            emissionsFundingAccount: getAssociatedTokenAddressSync(
+              t22Mint.publicKey,
+              depositor,
+              false,
+              TOKEN_2022_PROGRAM_ID
+            ),
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .instruction()
+      )
+    );
+
+    const bankAfter = await program.account.bank.fetch(bankKey);
+    assert.equal(
+      (await getTokenBalance(provider, liquidityVault)) - liquidityVaultBefore,
+      amount.toNumber()
+    );
+    assert.equal(
+      toI80Scaled(bankAfter.assetShareValue),
+      toI80Scaled(bankBefore.assetShareValue)
+    );
+    assert.equal(
+      toI80Scaled(bankAfter.emissionsStreamPending),
+      nativeToI80Scaled(amount)
+    );
+    assertBNEqual(
+      bankAfter.emissionsStreamSeconds,
+      EMISSIONS_STREAM_MIN_SECONDS
     );
   });
 

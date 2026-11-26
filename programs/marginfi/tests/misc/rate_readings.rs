@@ -6,7 +6,9 @@ use fixtures::bank::BankFixture;
 use fixtures::prelude::*;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use marginfi::constants::MIN_EMISSIONS_SHARE_SUPPLY;
-use marginfi_type_crate::constants::BANK_RATE_READING_SPACING_SECONDS;
+use marginfi_type_crate::constants::{
+    BANK_RATE_READING_SPACING_SECONDS, EMISSIONS_STREAM_MIN_SECONDS,
+};
 use marginfi_type_crate::types::RateReading;
 use solana_program_test::tokio;
 use solana_sdk::account::AccountSharedData;
@@ -130,7 +132,7 @@ async fn an_index_past_the_reading_range_is_skipped_without_blocking_pricing() -
     let group = &test_f.marginfi_group;
     pin_clock(&test_f, BASE_TS).await;
 
-    // The smallest share supply that accepts emissions, where a donation moves the share value most.
+    // The smallest share supply that accepts emissions, where a stream moves the share value most.
     let supply: u64 = MIN_EMISSIONS_SHARE_SUPPLY.to_num();
     let depositor = test_f.create_marginfi_account().await;
     let depositor_usdc = test_f
@@ -149,9 +151,11 @@ async fn an_index_past_the_reading_range_is_skipped_without_blocking_pricing() -
         .usdc_mint
         .create_token_account_and_mint_to(5_000_000_000.0)
         .await;
-    usdc.try_emissions_deposit(donation, funding.key).await?;
+    usdc.try_emissions_deposit_streamed(donation, EMISSIONS_STREAM_MIN_SECONDS, funding.key)
+        .await?;
 
-    let now = BASE_TS + BANK_RATE_READING_SPACING_SECONDS;
+    // The stream has paid all of it by its last second.
+    let now = BASE_TS + EMISSIONS_STREAM_MIN_SECONDS as i64;
     pin_clock(&test_f, now).await;
     group.try_pulse_bank_price_cache(usdc).await?;
 
@@ -163,6 +167,93 @@ async fn an_index_past_the_reading_range_is_skipped_without_blocking_pricing() -
     assert_eq!(bank.recorded_rate_readings().count(), 1);
     assert_eq!(bank.newest_rate_reading().unwrap().timestamp, BASE_TS);
     assert_eq!(bank.cache.last_oracle_price_timestamp, now);
+    Ok(())
+}
+
+/// An emissions deposit paid at once stays out of a native bank's readings. A drop of a quarter of
+/// the supply lifts the share value to 1.25 while every reading after it stays at 1.
+#[tokio::test]
+async fn an_emissions_deposit_paid_at_once_stays_out_of_the_readings() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let group = &test_f.marginfi_group;
+    pin_clock(&test_f, BASE_TS).await;
+
+    let depositor = test_f.create_marginfi_account().await;
+    let depositor_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(3_456.0)
+        .await;
+    depositor
+        .try_bank_deposit(depositor_usdc.key, usdc, 3_456.0, None)
+        .await?;
+    let funding = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(864.0)
+        .await;
+    usdc.try_emissions_deposit(864_000_000, funding.key).await?;
+
+    for now in [BASE_TS, BASE_TS + BANK_RATE_READING_SPACING_SECONDS] {
+        pin_clock(&test_f, now).await;
+        group.try_pulse_bank_price_cache(usdc).await?;
+        assert_eq!(
+            *usdc.load().await.newest_rate_reading().unwrap(),
+            RateReading::new(I80F48::ONE, I80F48::ONE, now).unwrap()
+        );
+    }
+    let bank = usdc.load().await;
+    assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(1.25));
+    assert_eq!(
+        I80F48::from(bank.emissions_at_once_growth),
+        I80F48::from_num(0.25)
+    );
+    Ok(())
+}
+
+/// A native bank's readings take in streamed emissions as they are paid: 864 USDC streamed over ten
+/// days into 3_456 USDC of supply lifts the share value by an eighth every five days, then stops.
+#[tokio::test]
+async fn streamed_emissions_enter_the_readings_as_they_are_paid() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc = test_f.get_bank(&BankMint::Usdc);
+    let group = &test_f.marginfi_group;
+    pin_clock(&test_f, BASE_TS).await;
+
+    let depositor = test_f.create_marginfi_account().await;
+    let depositor_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(3_456.0)
+        .await;
+    depositor
+        .try_bank_deposit(depositor_usdc.key, usdc, 3_456.0, None)
+        .await?;
+    let funding = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(864.0)
+        .await;
+    let five_days = 432_000;
+    usdc.try_emissions_deposit_streamed(864_000_000, 2 * five_days as u64, funding.key)
+        .await?;
+
+    for (now, index) in [
+        (BASE_TS, I80F48::ONE),
+        (BASE_TS + five_days, I80F48::from_num(1.125)),
+        (BASE_TS + 2 * five_days, I80F48::from_num(1.25)),
+        (BASE_TS + 3 * five_days, I80F48::from_num(1.25)),
+    ] {
+        pin_clock(&test_f, now).await;
+        group.try_pulse_bank_price_cache(usdc).await?;
+        let bank = usdc.load().await;
+        assert_eq!(I80F48::from(bank.asset_share_value), index);
+        assert_eq!(
+            *bank.newest_rate_reading().unwrap(),
+            RateReading::new(index, I80F48::ONE, now).unwrap()
+        );
+    }
+    assert_eq!(
+        I80F48::from(usdc.load().await.emissions_stream_pending),
+        I80F48::ZERO
+    );
     Ok(())
 }
 

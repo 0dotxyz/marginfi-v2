@@ -2,7 +2,7 @@ use crate::{
     check,
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolSuperAdminDepositEvent},
-    ix_utils, math_error,
+    ix_utils,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
     utils,
@@ -73,14 +73,7 @@ pub fn super_admin_deposit<'info>(
         MarginfiError::NoAssetFound
     );
 
-    let assets_before = bank.get_asset_amount(total_asset_shares)?;
-    let assets_after = assets_before
-        .checked_add(I80F48::from_num(amount))
-        .ok_or_else(math_error!())?;
-    bank.asset_share_value = assets_after
-        .checked_div(total_asset_shares)
-        .ok_or_else(math_error!())?
-        .into();
+    bank.pay_depositors(I80F48::from_num(amount))?;
 
     bank.deposit_spl_transfer(
         amount,

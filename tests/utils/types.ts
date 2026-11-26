@@ -125,6 +125,9 @@ export const PAUSE_DURATION_SECONDS = 6 * 60 * 60; // 6 hours
 export const MAX_CONSECUTIVE_PAUSES = 4;
 export const MAX_DAILY_PAUSES = 3;
 export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
+/** Shortest and longest periods a streamed emissions deposit can be paid over. */
+export const EMISSIONS_STREAM_MIN_SECONDS = 86_400; // 1 day
+export const EMISSIONS_STREAM_MAX_SECONDS = 2_592_000; // 30 days
 
 export const INTEREST_CURVE_LEGACY = 0;
 export const INTEREST_CURVE_SEVEN_POINT = 1;

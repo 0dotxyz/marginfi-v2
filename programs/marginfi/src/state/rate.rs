@@ -6,14 +6,14 @@
 //! reads and unit-tested there. This module only dispatches by `asset_tag`, loads/staleness-checks
 //! the rate-bearing account, and maps the pure `Option` result to a marginfi error:
 //!
-//! - Native marginfi banks: the bank's own interest curve at its utilization after the deposit (net
-//!   by construction; fees fall on borrowers). The caller accrues the bank first.
-//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`. A reserve that accrues per slot
-//!   is rescaled from klend's slot-year to a wall-clock year at measured chain pacing.
+//! - Native marginfi banks: the bank's own interest curve at its post-deposit utilization (net;
+//!   fees fall on borrowers) plus its streamed emissions. The caller accrues first.
+//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)` plus reserve rewards; a per-slot
+//!   reserve is rescaled from klend's slot-year to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
 //! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
-//!   post-deposit utilization (rewards APR is layered on OFF-CHAIN by the keeper).
+//!   post-deposit utilization, plus the fToken's `LendingRewardsRateModel` rewards.
 //!
 //! [`yield_index_of`] / [`debt_index_of`] serve the REALIZED rate: growth of a monotonic share
 //! index across a span, which a single-transaction rate spike cannot move.
@@ -28,7 +28,10 @@ use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,
     OraclePriceFeedAdapter,
 };
-use crate::{check, math_error, prelude::*, utils::is_integration_asset_tag};
+use crate::{
+    check, constants::MIN_EMISSIONS_SHARE_SUPPLY, math_error, prelude::*,
+    utils::is_integration_asset_tag,
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::Mint;
 use drift_mocks::state::MinimalSpotMarket;
@@ -93,12 +96,16 @@ pub fn current_supply_apr<'info>(
     }
 }
 
-/// A native bank's interest curve and current totals, captured once after accrual so the bank can
-/// be priced at any deposit size without re-reading it.
+/// A native bank's interest curve, current totals and emissions stream, captured once after
+/// accrual so the bank can be priced at any deposit size without re-reading it.
 pub struct NativeRateModel {
     curve: LendingCurve,
     assets: I80F48,
     liabilities: I80F48,
+    /// Native units of streamed emissions paid per year, shared by every deposit once the supply
+    /// reaches `stream_min_assets`.
+    stream_per_year: I80F48,
+    stream_min_assets: I80F48,
 }
 
 impl NativeRateModel {
@@ -107,25 +114,51 @@ impl NativeRateModel {
             curve: LendingCurve::new(&bank.config.interest_rate_config)?,
             assets: bank.get_asset_amount(bank.total_asset_shares.into())?,
             liabilities: bank.get_liability_amount(bank.total_liability_shares.into())?,
+            stream_per_year: emissions_stream_rate(bank)?.saturating_mul(SECONDS_PER_YEAR),
+            stream_min_assets: bank.get_asset_amount(MIN_EMISSIONS_SHARE_SUPPLY)?,
         })
     }
 
-    /// The lending rate after `extra_native` more tokens are deposited. Zero when the bank has no
-    /// deposits or no borrows, matching `update_bank_cache`.
+    /// Supply rate after `extra_native` more tokens are deposited: the lending rate (zero with no
+    /// borrows, as in `update_bank_cache`) plus streamed emissions over that supply.
     pub fn rate_at(&self, extra_native: u64) -> MarginfiResult<I80F48> {
         let assets = self
             .assets
             .checked_add(I80F48::from_num(extra_native))
             .ok_or_else(math_error!())?;
-        if assets == I80F48::ZERO || self.liabilities == I80F48::ZERO {
+        if assets == I80F48::ZERO {
             return Ok(I80F48::ZERO);
+        }
+        let emissions = if self.stream_per_year == I80F48::ZERO || assets < self.stream_min_assets {
+            I80F48::ZERO
+        } else {
+            self.stream_per_year
+                .checked_div(assets)
+                .ok_or_else(math_error!())?
+        };
+        if self.liabilities == I80F48::ZERO {
+            return Ok(emissions);
         }
         let utilization = self
             .liabilities
             .checked_div(assets)
             .ok_or_else(math_error!())?;
-        self.curve.lending_rate(utilization)
+        Ok(self
+            .curve
+            .lending_rate(utilization)?
+            .checked_add(emissions)
+            .ok_or_else(math_error!())?)
     }
+}
+
+/// Native units of `bank`'s emissions stream paid per second, zero once the stream ends.
+pub fn emissions_stream_rate(bank: &Bank) -> MarginfiResult<I80F48> {
+    if bank.emissions_stream_seconds == 0 {
+        return Ok(I80F48::ZERO);
+    }
+    Ok(I80F48::from(bank.emissions_stream_pending)
+        .checked_div(I80F48::from_num(bank.emissions_stream_seconds))
+        .ok_or_else(math_error!())?)
 }
 
 /// Rejects a stale Drift market. Drift stamps `last_interest_ts` only while interest accrues, so a
@@ -209,13 +242,20 @@ pub fn venue_multiplier<'info>(
     Ok(priced.price_multiplier)
 }
 
-/// Monotonic per-share supply index for `bank`: `asset_share_value` times the venue exchange-rate
-/// multiplier, excluding the oracle spot price. Its growth over a window is the realized yield.
+/// Monotonic per-share supply index for `bank`: `asset_share_value` times the venue multiplier,
+/// with `emissions_at_once_growth` divided out. Its growth over a window is the realized yield.
 pub fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
-    I80F48::from(bank.asset_share_value)
+    let index = I80F48::from(bank.asset_share_value)
         .checked_mul(multiplier)
-        .ok_or_else(math_error!())
-        .map_err(Into::into)
+        .ok_or_else(math_error!())?;
+    let at_once_growth = I80F48::from(bank.emissions_at_once_growth);
+    if at_once_growth == I80F48::ZERO {
+        return Ok(index);
+    }
+    Ok(I80F48::ONE
+        .checked_add(at_once_growth)
+        .and_then(|divisor| index.checked_div(divisor))
+        .ok_or_else(math_error!())?)
 }
 
 /// Debt-side counterpart to [`yield_index_of`]: `liability_share_value` times the venue multiplier,
@@ -697,6 +737,138 @@ mod native_dilution {
     }
 }
 
+/// A native bank's supply rate counts its emissions stream at the pace the stream pays. Every
+/// figure here is exact in I80F48.
+#[cfg(test)]
+mod emissions_stream {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::{
+        make_points, milli_to_u32, InterestRateConfig, INTEREST_CURVE_SEVEN_POINT,
+    };
+
+    /// Native units over which a stream of one unit a second pays 25% a year.
+    fn quarter_supply() -> I80F48 {
+        SECONDS_PER_YEAR * 4
+    }
+
+    /// A bank of `supply` native units at a share value of 1, streaming `pending` over `seconds`.
+    /// Its curve runs linearly from 0 to 100%.
+    fn streaming_bank(supply: I80F48, pending: u64, seconds: u64) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.config.interest_rate_config = InterestRateConfig {
+            hundred_util_rate: milli_to_u32(I80F48::ONE),
+            points: make_points(&[]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        };
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.liability_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = supply.into();
+        bank.emissions_stream_pending = I80F48::from_num(pending).into();
+        bank.emissions_stream_seconds = seconds;
+        bank
+    }
+
+    fn rate_at(bank: &Bank, extra_native: u64) -> I80F48 {
+        NativeRateModel::new(bank)
+            .unwrap()
+            .rate_at(extra_native)
+            .unwrap()
+    }
+
+    #[test]
+    fn the_stream_is_shared_over_the_supply_after_the_deposit() {
+        let bank = streaming_bank(quarter_supply(), 1_000, 1_000);
+        assert_eq!(rate_at(&bank, 0), I80F48::from_num(0.25));
+        assert_eq!(
+            rate_at(&bank, quarter_supply().to_num()),
+            I80F48::from_num(0.125)
+        );
+    }
+
+    #[test]
+    fn the_stream_adds_to_the_lending_rate() {
+        let mut bank = streaming_bank(quarter_supply(), 1_000, 1_000);
+        bank.total_liability_shares = (quarter_supply() / 2).into();
+        let lending = LendingCurve::new(&bank.config.interest_rate_config)
+            .unwrap()
+            .lending_rate(I80F48::from_num(0.5))
+            .unwrap();
+        assert_eq!(rate_at(&bank, 0), lending + I80F48::from_num(0.25));
+    }
+
+    /// The pace is what is left over the seconds left: two units in the last second count twice
+    /// one unit a second, and an ended stream counts nothing.
+    #[test]
+    fn the_stream_counts_the_pace_of_what_is_left() {
+        let last_second = streaming_bank(quarter_supply(), 2, 1);
+        assert_eq!(rate_at(&last_second, 0), I80F48::from_num(0.5));
+
+        let ended = streaming_bank(quarter_supply(), 0, 0);
+        assert_eq!(rate_at(&ended, 0), I80F48::ZERO);
+    }
+
+    /// The stream counts from `MIN_EMISSIONS_SHARE_SUPPLY`: under it, on it and over it.
+    #[test]
+    fn the_stream_counts_from_the_minimum_share_supply() {
+        let min = MIN_EMISSIONS_SHARE_SUPPLY;
+        let bank = streaming_bank(min - I80F48::from_num(2), 1_000, 1_000);
+        assert_eq!(rate_at(&bank, 1), I80F48::ZERO);
+        assert_eq!(rate_at(&bank, 2), SECONDS_PER_YEAR / min);
+        assert_eq!(rate_at(&bank, 3), SECONDS_PER_YEAR / (min + I80F48::ONE));
+    }
+
+    /// A year of `pay_streamed_emissions` at one native unit a second grows the share value by the
+    /// rate the model counted for it.
+    #[test]
+    fn the_counted_rate_is_what_a_year_of_payments_pays() {
+        let year: u64 = SECONDS_PER_YEAR.to_num();
+        let mut bank = streaming_bank(quarter_supply(), 2 * year, 2 * year);
+        let counted = rate_at(&bank, 0);
+        bank.pay_streamed_emissions(year).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value) - I80F48::ONE, counted);
+    }
+
+    /// The largest stream, `u64::MAX` in its last second, saturates its yearly pace. Over the
+    /// smallest paying supply it prices down to a share value of 2^-20 and fails below it.
+    #[test]
+    fn the_largest_stream_over_the_smallest_supply_is_priced_down_to_its_limit() {
+        let rate_at_share_value = |share_value: I80F48| {
+            let mut bank = streaming_bank(MIN_EMISSIONS_SHARE_SUPPLY, u64::MAX, 1);
+            bank.asset_share_value = share_value.into();
+            NativeRateModel::new(&bank).unwrap().rate_at(0)
+        };
+        assert_eq!(
+            rate_at_share_value(I80F48::ONE).unwrap(),
+            I80F48::MAX / MIN_EMISSIONS_SHARE_SUPPLY
+        );
+        assert_eq!(rate_at_share_value(I80F48::ONE >> 20).unwrap(), I80F48::MAX);
+        assert_eq!(
+            rate_at_share_value(I80F48::ONE >> 21).unwrap_err(),
+            MarginfiError::MathError.into()
+        );
+    }
+
+    #[test]
+    fn every_native_tag_prices_its_stream() {
+        for tag in [ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_STAKED] {
+            let mut bank = streaming_bank(quarter_supply(), 1_000, 1_000);
+            bank.config.asset_tag = tag;
+            let rate = current_supply_apr(
+                &bank,
+                None,
+                None,
+                RewardsAccounts::default(),
+                quarter_supply().to_num(),
+                &Clock::default(),
+            )
+            .unwrap();
+            assert_eq!(rate, I80F48::from_num(0.125));
+        }
+    }
+}
+
 /// Pacing samples accepted for converting slot-denominated rates.
 #[cfg(test)]
 mod slot_pacing {
@@ -823,5 +995,119 @@ mod realized_rates {
         assert!(realized_apr(I80F48::ZERO, I80F48::ONE, YEAR).is_err());
         assert!(realized_apr(I80F48::ONE, I80F48::ONE, 0).is_err());
         assert!(realized_apr(I80F48::ONE, I80F48::ONE, -1).is_err());
+    }
+}
+
+/// The yield index leaves out what `pay_emissions_at_once` paid. Every figure is exact in I80F48.
+#[cfg(test)]
+mod emissions_at_once {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::{
+        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+    };
+
+    const T0: i64 = 1_700_000_000;
+    const MIN: I80F48 = MIN_EMISSIONS_SHARE_SUPPLY;
+
+    /// A bank of `shares` at a share value of 1 that was never paid at once.
+    fn bank_of(shares: I80F48) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = shares.into();
+        bank
+    }
+
+    /// A deposit of a quarter of the supply lifts the share value to 1.25 and the index not at all,
+    /// under any venue multiplier.
+    #[test]
+    fn a_deposit_paid_at_once_leaves_the_yield_index_where_it_was() {
+        let mut bank = bank_of(MIN * 4);
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(1.25));
+        assert_eq!(yield_index_of(&bank, I80F48::ONE).unwrap(), I80F48::ONE);
+        assert_eq!(
+            yield_index_of(&bank, I80F48::from_num(2)).unwrap(),
+            I80F48::from_num(2)
+        );
+    }
+
+    /// Paid at once, streamed, then paid at once again: the share value goes 1, 2, 3, 6 and the
+    /// index takes in only the stream, going from 1 to 1.5.
+    #[test]
+    fn the_yield_index_takes_in_only_what_is_paid_over_time() {
+        let mut bank = bank_of(MIN);
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+        assert_eq!(yield_index_of(&bank, I80F48::ONE).unwrap(), I80F48::ONE);
+
+        bank.emissions_stream_pending = MIN.into();
+        bank.emissions_stream_seconds = 1_000;
+        bank.pay_streamed_emissions(1_000).unwrap();
+        assert_eq!(
+            yield_index_of(&bank, I80F48::ONE).unwrap(),
+            I80F48::from_num(1.5)
+        );
+
+        bank.pay_emissions_at_once((MIN * 3).to_num()).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(6));
+        assert_eq!(
+            yield_index_of(&bank, I80F48::ONE).unwrap(),
+            I80F48::from_num(1.5)
+        );
+    }
+
+    /// The largest deposit inside the shortest or longest rate window realizes no supply rate.
+    #[test]
+    fn a_deposit_paid_at_once_realizes_no_supply_rate() {
+        for window in [INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS] {
+            let mut bank = bank_of(MIN);
+            bank.take_rate_reading(I80F48::ONE, T0).unwrap();
+            bank.pay_emissions_at_once(u64::MAX).unwrap();
+
+            let now = T0 + i64::from(window);
+            let index_now = yield_index_of(&bank, I80F48::ONE).unwrap();
+            assert_eq!(
+                realized_supply_apr(&bank, window, index_now, now).unwrap(),
+                I80F48::ZERO
+            );
+        }
+    }
+
+    #[test]
+    fn a_bank_never_paid_at_once_keeps_its_raw_index() {
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::from_num(1.5).into();
+        assert_eq!(
+            yield_index_of(&bank, I80F48::from_num(2)).unwrap(),
+            I80F48::from_num(3)
+        );
+    }
+
+    /// Each one-unit deposit into the smallest supply rounds the growth down, lifting the index one
+    /// fixed-point step: a thousand read as 0.00000052% a year over the shortest window.
+    #[test]
+    fn repeated_dust_deposits_move_the_yield_index_a_step_each() {
+        let deposits = 1_000;
+        let mut bank = bank_of(MIN);
+        bank.take_rate_reading(I80F48::ONE, T0).unwrap();
+        for _ in 0..deposits {
+            bank.pay_emissions_at_once(1).unwrap();
+        }
+        assert_eq!(
+            I80F48::from(bank.asset_share_value),
+            I80F48::ONE + I80F48::from_num(deposits) / MIN
+        );
+
+        let index = yield_index_of(&bank, I80F48::ONE).unwrap();
+        assert_eq!(
+            index,
+            I80F48::ONE + I80F48::DELTA * I80F48::from_num(deposits)
+        );
+        let now = T0 + i64::from(INTEREST_MIN_WINDOW_SECONDS);
+        assert_eq!(
+            realized_supply_apr(&bank, INTEREST_MIN_WINDOW_SECONDS, index, now).unwrap(),
+            I80F48::DELTA * I80F48::from_num(1_460 * deposits)
+        );
     }
 }

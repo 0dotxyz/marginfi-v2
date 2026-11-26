@@ -500,6 +500,12 @@ A keeper moving funds from bank A -> B as part of a rebalance can manipulate rat
 
 Users should not footgun themselves by offering, for example, a 0.001 SOL tip on a 0.001 USDC move. Make sure the tip is proportional to the smallest move you are willing to accept for that tip amount, and set the tip/cap accordingly. The program does not enforce rational tips, as it would be too cumbersome to check the exchange rate of SOL/rebalance asset.
 
+### Streamed Native Emissions Merge By Amount
+
+`lending_pool_emissions_deposit_streamed` is permissionless. It pays its tokens to a native bank's depositors over a period of one to 30 days (`EMISSIONS_STREAM_MIN_SECONDS`, `EMISSIONS_STREAM_MAX_SECONDS`). The share value does not move when the tokens land. Accrual pays them out second by second to the depositors holding shares at the time, so a lender who deposits mid-stream earns a share of what is left and none of what was paid before. A streamed deposit into a running stream joins it, and the stream's seconds left become the average of its own and the deposit's period, weighted by the amounts. So anyone can speed up or slow down tokens already streaming, but only in proportion to what they add, and every token they add goes to the bank's depositors. One native unit moves a week's stream of 1,000 tokens by under half a second. Halving a week's stream with a one-day deposit takes 1.4 times what is pending.
+
+Orders count a stream at what it pays per second right now. A keeper can open a one-day stream on a destination just before a move to pass the spot check, but the rate window counts only what the stream has paid by then. Passing both checks this way means paying the destination's depositors, the moved deposit included, at that rate for at least a day. A stream that ends right after a move leaves the deposit in a bank that no longer pays it, and the settle check pays the keeper only if the move still out-earned the source. A stream pauses while the bank's share supply is under `MIN_EMISSIONS_SHARE_SUPPLY` and during circuit-breaker halts, and a bank cannot close while a stream is unpaid.
+
 ### Kamino/Exponent Emergency Suspends All Interaction With Those Banks, Including Liquidation of Other Banks
 
 This is a trade-off we have deliberately made because (1) we assume Kamino/PT emergencies are either

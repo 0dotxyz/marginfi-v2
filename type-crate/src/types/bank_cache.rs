@@ -28,7 +28,8 @@ pub struct BankCache {
     /// * in seconds
     pub interest_accumulated_for: u32,
     /// equivalent to (share value increase in the last `interest_accumulated_for` seconds *
-    /// shares), i.e. the delta in `asset_share_value`, in token.
+    /// shares), i.e. the delta in `asset_share_value` from interest, in token. Emissions paid in
+    /// the same accrual are not included.
     /// * Note: if the tx that triggered this cache update increased or decreased the net shares,
     ///   this value still reports using the PRE-CHANGE share amount, since interest is always
     ///   earned on that amount.

@@ -16,8 +16,8 @@ assert_struct_align!(RateReading, 8);
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
 pub struct RateReading {
-    /// `asset_share_value` times the venue exchange multiplier, as I80F48 bits with the low
-    /// `INDEX_DROPPED_BITS` removed.
+    /// `asset_share_value` with `Bank::emissions_at_once_growth` divided out, times the venue
+    /// exchange multiplier, as I80F48 bits with the low `INDEX_DROPPED_BITS` removed.
     pub asset_index: u64,
     /// `liability_share_value` times the venue exchange multiplier, encoded like `asset_index`.
     pub debt_index: u64,
