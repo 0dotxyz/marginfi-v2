@@ -10,10 +10,7 @@ use {
     anyhow::{bail, Context, Result},
     marginfi::state::{
         bank::BankImpl,
-        price::{
-            parse_swb_ignore_alignment, LitePullFeedAccountData, OraclePriceFeedAdapter,
-            PriceAdapter,
-        },
+        price::{parse_swb_pull_feed, OraclePriceFeedAdapter, PriceAdapter},
     },
     marginfi_type_crate::types::BankVaultType,
     marginfi_type_crate::{
@@ -24,7 +21,7 @@ use {
     serde::{Deserialize, Serialize},
     solana_client::rpc_filter::{Memcmp, RpcFilterType},
     solana_sdk::{
-        account::{ReadableAccount, WritableAccount},
+        account::ReadableAccount,
         account_info::IntoAccountInfo,
         clock::Clock,
         instruction::{AccountMeta, Instruction},
@@ -32,7 +29,6 @@ use {
     },
     solana_system_interface::program as system_program,
     std::{
-        cell::RefCell,
         collections::HashSet,
         fs,
         mem::size_of,
@@ -298,24 +294,21 @@ pub fn show_oracle_ages(
     let mut swb_rows: Vec<(f64, f64, Pubkey)> = Vec::new();
     if !swb_feeds.is_empty() {
         let keys = swb_feeds.iter().map(|(_, _, key)| *key).collect::<Vec<_>>();
-        let mut accounts = config
+        let accounts = config
             .mfi_program
             .rpc()
             .get_multiple_accounts(keys.as_slice())?;
 
-        for (maybe_account, (max_age, mint, _)) in accounts.iter_mut().zip(swb_feeds.iter()) {
+        for (maybe_account, (max_age, mint, _)) in accounts.iter().zip(swb_feeds.iter()) {
             let Some(account) = maybe_account else {
                 continue;
             };
 
-            let data = account.data_as_mut_slice();
-            let cell = RefCell::new(data);
-            let Ok(feed) = parse_swb_ignore_alignment(cell.borrow()) else {
+            let Ok(feed) = parse_swb_pull_feed(account.data()) else {
                 continue;
             };
-            let lite_feed = LitePullFeedAccountData::from(&feed);
 
-            let age_min = (now - lite_feed.last_update_timestamp) as f64 / 60.0;
+            let age_min = (now - feed.last_update_timestamp) as f64 / 60.0;
             let allowed_min = if *max_age == 0 {
                 1.0
             } else {

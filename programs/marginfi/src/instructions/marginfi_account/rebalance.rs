@@ -27,12 +27,11 @@
 //! closes the record at `end_rebalance`. The record's lifetime is independent of the order's and
 //! the account's.
 //!
-//! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
-//! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
-//! gates, and unwind afterwards, so the move itself can be induced. Settlement pays the tip only on
-//! realized yield, by any margin above zero: a spike realizing nothing refunds the tip and leaves
-//! unpaid griefing bounded by the per-order cooldown and the conservation dust, while any realized
-//! edge pays the full tip for a move that did leave the position in the better venue.
+//! Residual risk (accepted): the sandwich restricts in-transaction rate manipulation, trusting any
+//! transfer hook on the listed order mint. A Jito bundle can spike a destination's utilization-derived
+//! rate in a PRIOR transaction, pass both rate gates, and unwind afterwards, so the move itself can be
+//! induced. Settlement compares venue yield indices from the move until settlement, paying the tip if
+//! the destination out-yielded the source. This comparison does not track later position moves.
 
 use super::{check_order_close_state, load_marginfi_account_unless_closed};
 use crate::{
@@ -990,6 +989,7 @@ pub fn start_rebalance<'info>(
         &ctx.accounts.instruction_sysvar,
         &ctx.accounts.marginfi_account.key(),
         allowed,
+        &order.mint,
     )?;
     Ok(())
 }

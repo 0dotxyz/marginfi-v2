@@ -562,7 +562,8 @@ pub mod marginfi {
 
     /// (permissionless keeper) End Order execution
     /// * Closes the Order (keeper keeps the rent)
-    /// * Closes the borrow position involved in the Order, the lending position remains open
+    /// * Closes the borrow position involved in the Order; the lending balance slot remains open.
+    ///   If its assets are emptied, its tag is cleared and other Orders sharing it are orphaned.
     /// * User health must be "unchanged" (within Order requirements i.e. minus slippage). Keeper
     ///   may keep any slippage in excess of what was needed to complete the Order as profit.
     /// * `StartExecuteOrder` must appear earlier in the tx
@@ -1181,6 +1182,10 @@ pub mod marginfi {
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
+    /// * refresh_reserve - defaults to false. When true, refresh the reserve and then the
+    ///   obligation before calculating amounts. The reserve refresh skips oracle price updates;
+    ///   callers may need a separate Kamino price refresh. When false, callers must supply the
+    ///   necessary reserve and obligation refreshes before this instruction.
     pub fn kamino_deposit<'info>(
         ctx: Context<'info, KaminoDeposit<'info>>,
         amount: u64,
@@ -1196,7 +1201,10 @@ pub mod marginfi {
     ///   `remaining_accounts`
     /// * flags - optional bitflags:
     ///   - bit 0 (`0x01`): withdraw all
-    ///   - bit 1 (`0x02`): refresh reserve via batch refresh
+    ///   - bit 1 (`0x02`): refresh the reserve and then the obligation before calculating amounts
+    ///     (the reserve refresh skips oracle price updates)
+    ///   With bit 1 unset, callers must supply the necessary reserve and obligation refreshes.
+    ///   A separate Kamino price refresh may still be needed when bit 1 is set.
     pub fn kamino_withdraw<'info>(
         ctx: Context<'info, KaminoWithdraw<'info>>,
         amount: u64,
