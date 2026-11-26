@@ -1,6 +1,6 @@
 [package]
 name = "marginfi-type-crate"
-version = "0.2.0"
+version = "0.1.13"
 edition = "2021"
 publish = true
 description = "Anchor-optional marginfi account types and instruction builders"

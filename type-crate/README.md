@@ -9,7 +9,7 @@ The default features keep the Anchor integration. An Anchor-free dependency disa
 and selects a network:
 
 ```toml
-marginfi-type-crate = { version = "0.2.0", default-features = false, features = ["ix_builders", "pdas", "mainnet-beta"] }
+marginfi-type-crate = { version = "0.1.13", default-features = false, features = ["ix_builders", "pdas", "mainnet-beta"] }
 ```
 
 The network options are `mainnet-beta`, `devnet`, `staging`, `stagingalt`, and `localnet`. Exactly
@@ -82,7 +82,7 @@ Solana crates:
 
 ```toml
 [dependencies]
-marginfi-type-crate = { version = "0.2.0", default-features = false, features = ["ix_builders", "pdas", "mainnet-beta"] }
+marginfi-type-crate = { version = "0.1.13", default-features = false, features = ["ix_builders", "pdas", "mainnet-beta"] }
 solana-account-info = "3.1"
 solana-cpi = "3.1"
 solana-instruction = "3.4"
