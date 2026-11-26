@@ -10,8 +10,9 @@ trigger point to execute the order, and the type of order (Stop Loss, Take Profi
 
 ### Order Execution
 
-The borrow-side position of an Order is always closed in full. The lending position is never closed
-(F2). This means if you have a \$200 SOL lend and \$100 USDC borrow, and you would like to close
+The borrow-side position of an Order is always closed in full. The lending balance slot remains open,
+although its assets may be withdrawn down to zero if the execution checks allow it (F2). This means
+if you have a \$200 SOL lend and \$100 USDC borrow, and you would like to close
 just half of your net LONG position with an order, you will have to create two accounts with \$100
 SOL and \$50 USDC each!
 
@@ -48,11 +49,14 @@ their account. For example, if a user has lending positions A, B, C, and borrowi
 F, the user might have orders on A/D, A/E, and C/F at the same time.
 
 Using orders with more than two positions is an advanced feature with many financial nuances! If a
-user sets a take-profit on A/D and then separately sets a stop loss on A/E, then the A/D order
-executes such that they no longer have enough of asset A to fulfill the A/E stop loss, then the A/E
-stop loss will remain open but can't be executed, which could lead to losses. It's up to users to
-make sure their various orders do not interfere. This is consistent with e.g. most perps platforms,
-where executing a stop-loss or take-profit does not close the other open order.
+user sets a take-profit on A/D and a stop loss on A/E, executing A/D may leave too little A to
+execute A/E. If A remains nonempty, depositing more A may make A/E executable again.
+
+If executing A/D empties A, the A/E order is **orphaned**: it remains on the books but cannot
+execute, even if A is later deposited again. A withdrawal that empties A clears the shared order tag,
+even when A's balance slot remains open. The user or a keeper can close the orphaned order; the user
+can then place a new order on the replenished position. Users should account for how their orders
+interact when choosing their positions.
 
 ### Proof of Maximum Possible Orders
 
@@ -77,11 +81,16 @@ Opening this many orders would be a silly idea, but the program supports it. Do 
 close the Stop Loss and open an Order for Both. Send this in an atomic transaction to avoid being
 unprotected between the close of the Stop Loss and the open of the Both order.
 
-(F2) The lending position can be withdrawn down to $0, but must remain open. If the Balance is closed
-by the user (e.g. by withdraw_all), and the same asset is deposited later to re-open it, Orders
-created prior to the Balance being closed **will not work**. This means users are able to modify
-their accounts such that active Orders are orphaned and can no longer execute, it's up to users to make
-sure they do not close out positions involved with their Orders without updating the Orders too.
+(F2) During order execution, the lending balance slot must remain open. The keeper may withdraw its
+assets down to zero only if the order's slippage and health checks permit it. Emptying the balance
+clears its order tag, so any other orders sharing that balance become orphaned.
+
+Outside order execution, a withdrawal that empties the lending balance also clears its order tag,
+even if the balance slot remains open. Closing the balance with `withdraw_all` has the same effect.
+Depositing the asset again does not restore the old tag or revive those orders. Likewise, fully
+repaying or closing a borrowing position or changing a balance's side can orphan its orders. The user
+or a keeper can close an orphaned order; the user can place a new one after restoring the position.
+An authorized whole-balance rebalance can carry an order tag to the destination balance.
 
 
 
@@ -106,6 +115,7 @@ sure they do not close out positions involved with their Orders without updating
 - `EndExecuteOrder` (Keeper) - Must be the last tx in executing an Order. Requires a risk check of
   just the balances involved in the Order.
 - `CloseOrder` (user) - Clear an unwanted Order, user gets their rent back.
-- `SetKeeperCloseFlags` (user) - Enables the Keeper to close Orders via `KeeperCloserOrder`,
+- `SetKeeperCloseFlags` (user) - Enables the Keeper to close Orders via `KeeperCloseOrder`,
   typically use `CloseOrder` instead.
-- `KeeperCloserOrder` (Keeper) - Close an Order on an account where neither of the original positions exists or all the tags have been cleared by the user
+- `KeeperCloseOrder` (Keeper) - Close an Order when either original balance no longer has its order
+  tag, including when its balance was closed or its tag was cleared.

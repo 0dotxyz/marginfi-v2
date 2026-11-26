@@ -9,6 +9,15 @@ pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241
 pub const TOKEN_RESERVE_DISCRIMINATOR: [u8; 8] = [21, 18, 59, 135, 120, 20, 31, 12];
 pub const REWARDS_RATE_MODEL_DISCRIMINATOR: [u8; 8] = [166, 72, 71, 131, 172, 74, 166, 181];
 pub const RATE_MODEL_DISCRIMINATOR: [u8; 8] = [94, 3, 203, 219, 107, 137, 4, 162];
+pub const LIQUIDITY_DISCRIMINATOR: [u8; 8] = [54, 252, 249, 226, 137, 172, 121, 58];
+pub const SUPPLY_POSITION_DISCRIMINATOR: [u8; 8] = [202, 219, 136, 118, 61, 177, 21, 146];
+
+// Offsets and lengths include the 8-byte Anchor account discriminator.
+pub const LIQUIDITY_STATUS_OFFSET: usize = 8 + 32 + 32;
+pub const RESERVE_INTERACTING_PROTOCOL_OFFSET: usize =
+    8 + core::mem::offset_of!(TokenReserve, interacting_protocol);
+pub const RESERVE_LEN: usize = 8 + core::mem::size_of::<TokenReserve>();
+pub const SUPPLY_POSITION_STATUS_OFFSET: usize = 123;
 
 /// Precision used for exchange prices in JupLend (1e12).
 ///

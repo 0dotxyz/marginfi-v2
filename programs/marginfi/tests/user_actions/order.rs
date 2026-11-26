@@ -1,3 +1,5 @@
+use anchor_lang::{AnchorDeserialize, Discriminator};
+use base64::Engine;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
@@ -6,11 +8,15 @@ use fixtures::{
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
 use marginfi::constants::PROGRAM_VERSION;
+use marginfi::events::MarginfiAccountExecuteOrderEvent;
 use marginfi::prelude::MarginfiError;
+use marginfi::state::{bank::BankImpl, marginfi_account::calc_value};
 use marginfi_type_crate::types::{
-    centi_to_u32, u32_to_centi, BalanceSide, OrderTrigger, WrappedI80F48,
+    centi_to_u32, u32_to_centi, BalanceSide, BankConfig, ExecuteOrderRecord, OrderTrigger,
+    OrderTriggerType, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
-use solana_program_test::tokio;
+use solana_program_test::{tokio, BanksClientError};
 use solana_sdk::{
     account::Account,
     pubkey::Pubkey,
@@ -19,6 +25,24 @@ use solana_sdk::{
 };
 use solana_system_interface::error::SystemError;
 use test_case::test_case;
+
+fn execution_events(logs: &[String]) -> Vec<MarginfiAccountExecuteOrderEvent> {
+    logs.iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .map(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap()
+        })
+        .filter(|data| data.starts_with(MarginfiAccountExecuteOrderEvent::DISCRIMINATOR))
+        .map(|data| {
+            MarginfiAccountExecuteOrderEvent::deserialize(
+                &mut &data[MarginfiAccountExecuteOrderEvent::DISCRIMINATOR.len()..],
+            )
+            .unwrap()
+        })
+        .collect()
+}
 
 /// Helper to create an OrderTrigger with a stop-loss threshold.
 fn stop_loss_trigger(threshold: I80F48, max_slippage: u32) -> OrderTrigger {
@@ -482,11 +506,15 @@ async fn execute_order_fails_post_trigger_not_met(
         blockhash,
     );
 
-    let result = ctx.banks_client.process_transaction(tx).await;
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
     assert_custom_error!(
-        result.unwrap_err(),
+        BanksClientError::from(result.result.unwrap_err()),
         MarginfiError::OrderExecutionOverWithdrawal
     );
+    assert!(execution_events(&result.metadata.unwrap().log_messages).is_empty());
     drop(ctx);
 
     assert_active_orders(&borrower_mfi_account_f, 1).await;
@@ -761,15 +789,212 @@ async fn execute_order_fails_health_check(
     Ok(())
 }
 
+/// An order execution must leave the whole account maintenance-healthy (spot prices). The pair's
+/// net value not falling in Equity (EMA) terms is NOT enough: when the tagged liability trades
+/// below its EMA, an execution can improve the pair's EMA net while the account stays unhealthy,
+/// which previously passed and was the basis for an exploit that left untagged debt as bad debt.
+///
+/// Scenario (maintenance weights, zero confidence):
+/// * Order pair: 2000 USDC (aw 1.0) / 100 SOL debt (lw 1.10); SOL spot 9, EMA 10.
+/// * Untagged: 340 "BTC" (SolEquivalent, aw 0.90) that has crashed from 10 to `btc_price`,
+///   and 2700 PyUSD debt (lw 1.0).
+/// * Take-profit at 900; pair net at EMA is 2000 - 1000 = 1000, so it triggers.
+/// * Keeper repays the 100 SOL (900 at spot) and withdraws 950 USDC (50 for swap cost + fee).
+///   Pair net at EMA after = 1050 >= 1000, which the old pair-only check accepted.
+///
+/// * btc_price = 5.00: maint health -160 -> -120. Improved, still unhealthy: must fail.
+/// * btc_price = 5.45: maint health -22.3 -> +17.7. A rescue that ends healthy: must pass.
+#[test_case(5.0, -160.0, false ; "stays_unhealthy_rejected")]
+#[test_case(5.45, -22.3, true ; "rescued_to_healthy_succeeds")]
+#[tokio::test]
+async fn execute_order_must_leave_account_healthy_under_ema_skew(
+    btc_price: f64,
+    expected_maint_health_before: f64,
+    expect_success: bool,
+) -> anyhow::Result<()> {
+    // ---------------------------------------------------------------------
+    // Setup
+    // ---------------------------------------------------------------------
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                ..TestBankSetting::default()
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    liability_weight_init: fp!(1.1).into(),
+                    liability_weight_maint: fp!(1.1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: fp!(0.9).into(),
+                    asset_weight_maint: fp!(0.9).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                ..TestBankSetting::default()
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+
+    const NOW_SLOT: u64 = 1_000;
+    const NOW: i64 = 100;
+    let sol_native = |ui: f64| (ui * 1e9) as i64; // SOL and SolEquivalent: 9 decimals
+    let usd_native = |ui: f64| (ui * 1e6) as i64; // USDC and PyUSD: 6 decimals
+
+    test_f.set_clock(NOW_SLOT, NOW).await;
+    for (feed, price) in [
+        (PYTH_USDC_FEED, usd_native(1.0)),
+        (PYTH_PYUSD_FEED, usd_native(1.0)),
+        (PYTH_SOL_FEED, sol_native(10.0)),
+        (PYTH_SOL_EQUIVALENT_FEED, sol_native(10.0)),
+    ] {
+        test_f
+            .set_pyth_oracle_price_native(feed, price, 0, NOW)
+            .await;
+    }
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let btc_bank = test_f.get_bank(&BankMint::SolEquivalent);
+    let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
+
+    // Liquidity for the two borrows.
+    let lender = test_f.create_marginfi_account().await;
+    for (bank, amount) in [(sol_bank, 1_000.0), (pyusd_bank, 10_000.0)] {
+        let funding = bank.mint.create_token_account_and_mint_to(amount).await;
+        lender
+            .try_bank_deposit(funding.key, bank, amount, None)
+            .await?;
+    }
+
+    // Borrower, opened while everything is at its starting price.
+    let borrower = test_f.create_marginfi_account().await;
+    for (bank, amount) in [(usdc_bank, 2_000.0), (btc_bank, 340.0)] {
+        let funding = bank.mint.create_token_account_and_mint_to(amount).await;
+        borrower
+            .try_bank_deposit(funding.key, bank, amount, None)
+            .await?;
+    }
+    for (bank, amount) in [(sol_bank, 100.0), (pyusd_bank, 2_700.0)] {
+        let dest = bank.mint.create_empty_token_account().await;
+        borrower.try_bank_borrow(dest.key, bank, amount).await?;
+    }
+
+    let order_pda = borrower
+        .try_place_order(
+            vec![usdc_bank.key, sol_bank.key],
+            take_profit_trigger(fp!(900), slippage_bps(100)),
+        )
+        .await?;
+    assert_active_orders(&borrower, 1).await;
+
+    // Crash: "BTC" falls; SOL spot falls 10% below its (lagging) EMA.
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_EQUIVALENT_FEED, sol_native(btc_price), 0, NOW)
+        .await;
+    test_f
+        .set_pyth_oracle_price_and_ema_native(
+            PYTH_SOL_FEED,
+            sol_native(9.0),
+            sol_native(10.0),
+            0,
+            NOW,
+        )
+        .await;
+
+    // The account is liquidatable before execution, but still solvent at spot.
+    borrower.try_lending_account_pulse_health().await?;
+    let cache = borrower.load().await.health_cache;
+    let maint_health_before: I80F48 =
+        I80F48::from(cache.asset_value_maint) - I80F48::from(cache.liability_value_maint);
+    assert!(
+        (maint_health_before.to_num::<f64>() - expected_maint_health_before).abs() < 0.01,
+        "maint health before: {maint_health_before}"
+    );
+
+    // ---------------------------------------------------------------------
+    // Test
+    // ---------------------------------------------------------------------
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let keeper_sol = sol_bank
+        .mint
+        .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 200.0)
+        .await
+        .key;
+    let keeper_usdc = usdc_bank
+        .mint
+        .create_empty_token_account_with_owner(&keeper.pubkey())
+        .await
+        .key;
+
+    let (start_ix, execute_record) = borrower
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(keeper_sol, sol_bank, 0.0, Some(true), keeper.pubkey())
+        .await;
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(keeper_usdc, usdc_bank, 950.0, None, keeper.pubkey())
+        .await;
+    let end_ix = borrower
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![sol_bank.key],
+        )
+        .await;
+
+    let blockhash = test_f.get_latest_blockhash().await;
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        Some(&keeper.pubkey()),
+        &[&keeper],
+        blockhash,
+    );
+    let result = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await;
+
+    if expect_success {
+        result?;
+        assert_active_orders(&borrower, 0).await;
+        let cache = borrower.load().await.health_cache;
+        assert!(cache.is_healthy());
+    } else {
+        assert_custom_error!(result.unwrap_err(), MarginfiError::WorseHealthPostExecution);
+        assert_active_orders(&borrower, 1).await;
+    }
+
+    Ok(())
+}
+
 // See the comment over the first test
-#[test_case(BankMint::Fixed, 500.0, BankMint::Usdc, 985.0, BankMint::Sol, take_profit_trigger(fp!(15), slippage_bps(500)), 1.00075)]
-#[test_case(BankMint::Sol, 5.0, BankMint::Usdc, 10.0, BankMint::Fixed, take_profit_trigger(fp!(35), 0), 1.1975)] // Greedy user
-#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, take_profit_trigger(fp!(0.5), slippage_bps(250)), 1.0055)]
-#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 72.5, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(350)), 1.01895)]
-#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, both_trigger(fp!(1495), fp!(1500), slippage_bps(5)), 1.07425)]
-#[test_case(BankMint::Fixed, 1000.0, BankMint::Usdc, 985.0, BankMint::Sol, stop_loss_trigger(fp!(1100), slippage_bps(25)), 1.002575)]
-#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, stop_loss_trigger(fp!(1490), 0), 1.0)] // Greedy user
-#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, stop_loss_trigger(fp!(2), slippage_bps(35)), 1.00035)]
+#[test_case(BankMint::Fixed, 500.0, BankMint::Usdc, 985.0, BankMint::Sol, take_profit_trigger(fp!(15), slippage_bps(500)), 1.00075, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Sol, 5.0, BankMint::Usdc, 10.0, BankMint::Fixed, take_profit_trigger(fp!(35), 0), 1.1975, OrderTriggerType::TakeProfit)] // Greedy user
+#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, take_profit_trigger(fp!(0.5), slippage_bps(250)), 1.0055, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 72.5, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(350)), 1.01895, OrderTriggerType::TakeProfit)]
+#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, both_trigger(fp!(1495), fp!(1500), slippage_bps(5)), 1.07425, OrderTriggerType::StopLoss)]
+#[test_case(BankMint::Fixed, 1000.0, BankMint::Usdc, 985.0, BankMint::Sol, stop_loss_trigger(fp!(1100), slippage_bps(25)), 1.002575, OrderTriggerType::StopLoss)]
+#[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, stop_loss_trigger(fp!(1490), 0), 1.0, OrderTriggerType::StopLoss)] // Greedy user
+#[test_case(BankMint::Fixed, 5.0, BankMint::Usdc, 9.0, BankMint::Sol, stop_loss_trigger(fp!(2), slippage_bps(35)), 1.00035, OrderTriggerType::StopLoss)]
+// Exactly at the take-profit threshold, Both must select TakeProfit.
+#[test_case(BankMint::Fixed, 50.0, BankMint::Usdc, 75.0, BankMint::Sol, both_trigger(fp!(5), fp!(25), slippage_bps(100)), 1.0, OrderTriggerType::TakeProfit)]
 #[tokio::test]
 async fn execute_order_success(
     asset_mint: BankMint,
@@ -779,6 +1004,7 @@ async fn execute_order_success(
     uninvolved_mint: BankMint,
     trigger: OrderTrigger,
     withdraw_scale: f64,
+    expected_trigger: OrderTriggerType,
 ) -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Setup
@@ -818,6 +1044,27 @@ async fn execute_order_success(
 
     let order_before = borrower_mfi_account_f.load_order(order_pda).await;
     let mfi_before = borrower_mfi_account_f.load().await;
+    let asset_bank_before = asset_bank_f.load().await;
+    let liability_bank_before = liability_bank_f.load().await;
+
+    let closure_recipient = Keypair::new();
+    fund_keeper_for_fees(&test_f, &closure_recipient).await?;
+    let closure_balance_before = test_f
+        .try_load(&closure_recipient.pubkey())
+        .await?
+        .unwrap()
+        .lamports;
+    // Account closures return the actual balance, including any donations above rent.
+    let mut order_account = test_f.try_load(&order_pda).await?.unwrap();
+    order_account.lamports += 123;
+    let order_lamports = order_account.lamports;
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&order_pda, &order_account.into());
+    let record_lamports = test_f
+        .get_minimum_rent_for_size(8 + ExecuteOrderRecord::LEN)
+        .await;
 
     let (start_ix, execute_record) = borrower_mfi_account_f
         .make_start_execute_ix(order_pda, keeper.pubkey())
@@ -853,7 +1100,7 @@ async fn execute_order_success(
             order_pda,
             execute_record,
             keeper.pubkey(),
-            keeper.pubkey(),
+            closure_recipient.pubkey(),
             vec![liability_bank_f.key],
         )
         .await;
@@ -867,8 +1114,40 @@ async fn execute_order_success(
         blockhash,
     );
 
-    ctx.banks_client.process_transaction(tx).await?;
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await?;
+    result.result?;
+    let events = execution_events(&result.metadata.unwrap().log_messages);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.header.signer, Some(keeper.pubkey()));
+    assert_eq!(event.header.marginfi_account, borrower_mfi_account_f.key);
+    assert_eq!(
+        event.header.marginfi_account_authority,
+        mfi_before.authority
+    );
+    assert_eq!(event.header.marginfi_group, mfi_before.group);
+    assert_eq!(event.order, order_pda);
+    assert_eq!(event.created_at, order_before.created_at);
+    assert_eq!(event.max_slippage, order_before.max_slippage);
+    assert_eq!(event.asset_bank, asset_bank_f.key);
+    assert_eq!(event.triggered, expected_trigger);
+    assert_eq!(event.closure_recipient, closure_recipient.pubkey());
+    assert_eq!(event.order_lamports_returned, order_lamports);
     drop(ctx);
+
+    assert!(test_f.try_load(&execute_record).await?.is_none());
+    let closure_balance_after = test_f
+        .try_load(&closure_recipient.pubkey())
+        .await?
+        .unwrap()
+        .lamports;
+    assert_eq!(
+        closure_balance_after - closure_balance_before,
+        order_lamports + record_lamports
+    );
 
     // order closed
     let order_after = test_f.try_load(&order_pda).await?;
@@ -913,6 +1192,36 @@ async fn execute_order_success(
         .iter()
         .find(|b| b.bank_pk == pre_liab.bank_pk);
     assert!(post_liab.is_none(), "liability balance should be removed");
+    assert_eq!(event.asset_shares_after, post_asset.unwrap().asset_shares);
+
+    // These fixtures have zero oracle confidence and no elapsed interest/premium accrual.
+    // Check exact order equity, excluding the uninvolved balance and without f64 rounding.
+    let pre_assets = calc_value(
+        asset_bank_before.get_asset_amount(pre_asset.asset_shares.into())?,
+        I80F48::from_num(price),
+        asset_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    let pre_liabilities = calc_value(
+        liability_bank_before.get_liability_amount(pre_liab.liability_shares.into())?,
+        I80F48::from_num(default_price_for_mint(&liability_mint)),
+        liability_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    let post_assets = calc_value(
+        asset_bank_f
+            .load()
+            .await
+            .get_asset_amount(post_asset.unwrap().asset_shares.into())?,
+        I80F48::from_num(price),
+        asset_bank_f.mint.mint.decimals,
+        None,
+    )?;
+    assert_eq!(
+        I80F48::from(event.equity_before_usd),
+        pre_assets - pre_liabilities
+    );
+    assert_eq!(I80F48::from(event.equity_after_usd), post_assets);
 
     // uninvolved SOL balance unchanged
     let pre_sol = mfi_before
@@ -1322,6 +1631,92 @@ async fn close_order_success_authority(
     );
     assert_active_orders(&borrower_mfi_account_f, 0).await;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn order_close_rejects_transient_state() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let asset = test_f.get_bank(&BankMint::Usdc);
+    let liability = test_f.get_bank(&BankMint::Fixed);
+    let user = create_borrower_with_positions(&test_f, asset, 300.0, liability, 50.0).await?;
+    let order = user
+        .try_place_order(
+            vec![asset.key, liability.key],
+            stop_loss_trigger(fp!(100), 0),
+        )
+        .await?;
+    let repay_token = liability.mint.create_token_account_and_mint_to(100.0).await;
+    user.try_bank_repay(repay_token.key, liability, 0.0, Some(true))
+        .await?;
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let mut account = user.load().await;
+
+    for (flag, error) in [
+        (
+            ACCOUNT_IN_RECEIVERSHIP,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (
+            ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),
+        (
+            ACCOUNT_IN_ORDER_EXECUTION,
+            MarginfiError::UnexpectedOrderExecutionState,
+        ),
+        (ACCOUNT_IN_REBALANCE, MarginfiError::IllegalAction),
+    ] {
+        account.account_flags = flag;
+        user.set_account(&account).await?;
+        let result = user.try_close_order(order, test_f.payer()).await;
+        assert_custom_error!(result.unwrap_err(), error);
+        let result = user
+            .try_keeper_close_order(order, &keeper, keeper.pubkey())
+            .await;
+        assert_custom_error!(result.unwrap_err(), error);
+        assert!(test_f.try_load(&order).await?.is_some());
+        assert_active_orders(&user, 1).await;
+    }
+
+    account.account_flags = 0;
+    user.set_account(&account).await?;
+    user.try_keeper_close_order(order, &keeper, keeper.pubkey())
+        .await?;
+    assert_active_orders(&user, 0).await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn keeper_close_order_after_account_closed() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let asset = test_f.get_bank(&BankMint::Usdc);
+    let liability = test_f.get_bank(&BankMint::Fixed);
+    let user = create_borrower_with_positions(&test_f, asset, 300.0, liability, 50.0).await?;
+    let order = user
+        .try_place_order(
+            vec![asset.key, liability.key],
+            stop_loss_trigger(fp!(100), 0),
+        )
+        .await?;
+    let closed = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: solana_system_interface::program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&user.key, &closed.into());
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    user.try_keeper_close_order(order, &keeper, keeper.pubkey())
+        .await?;
+    assert!(test_f.try_load(&order).await?.is_none());
     Ok(())
 }
 

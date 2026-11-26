@@ -245,7 +245,7 @@ pub fn lending_account_withdraw<'info>(
         health_cache.program_version = PROGRAM_VERSION;
 
         health_cache.set_engine_ok(true);
-        marginfi_account.health_cache = health_cache;
+        marginfi_account.set_health_cache(health_cache);
 
         // Inline CB gate: a risk-carrying withdraw (account carries a liability) reverts if
         // any involved bank's live price has jumped past the breach threshold. A

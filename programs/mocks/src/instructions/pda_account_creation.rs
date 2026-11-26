@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
-use anchor_lang::InstructionData;
+use marginfi_type_crate::marginfi_cpi_stubs;
 
 #[derive(Accounts)]
 #[instruction(account_index: u16, third_party_id: Option<u16>)]
@@ -67,20 +67,6 @@ impl CreateMarginfiAccountPdaViaCpi<'_> {
         call_log.third_party_id = third_party_id;
         call_log.timestamp = clock.unix_timestamp;
 
-        let _accounts = marginfi::accounts::MarginfiAccountInitializePda {
-            marginfi_group: ctx.accounts.marginfi_group.key(),
-            marginfi_account: ctx.accounts.marginfi_account.key(),
-            authority: ctx.accounts.authority.key(),
-            fee_payer: ctx.accounts.fee_payer.key(),
-            instructions_sysvar: ctx.accounts.instructions_sysvar.key(),
-            system_program: ctx.accounts.system_program.key(),
-        };
-
-        let instruction_data = marginfi::instruction::MarginfiAccountInitializePda {
-            account_index,
-            third_party_id,
-        };
-
         let account_metas = vec![
             AccountMeta::new_readonly(ctx.accounts.marginfi_group.key(), false),
             AccountMeta::new(ctx.accounts.marginfi_account.key(), false),
@@ -92,7 +78,10 @@ impl CreateMarginfiAccountPdaViaCpi<'_> {
         let instruction = Instruction {
             program_id: ctx.accounts.marginfi_program.key(),
             accounts: account_metas,
-            data: instruction_data.data(),
+            data: marginfi_cpi_stubs::marginfi_account_initialize_pda_data(
+                account_index,
+                third_party_id,
+            ),
         };
 
         anchor_lang::solana_program::program::invoke(

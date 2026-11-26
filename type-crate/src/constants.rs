@@ -53,7 +53,7 @@ pub const ORDER_ACTIVE_TAGS: usize = 2;
 /// Compile-time guard to ensure ORDER_ACTIVE_TAGS stays 2 as assumed
 /// in several places in the code for simplicity.
 /// It can be removed when orders are extended to allow more balances.
-pub const _: () = assert!(ORDER_ACTIVE_TAGS == 2);
+const _: () = assert!(ORDER_ACTIVE_TAGS == 2);
 /// Padding length (in bytes) to preserve `Order` layout when more balances are added.
 pub const ORDER_TAG_PADDING: usize = 32;
 
@@ -141,6 +141,10 @@ pub const PREMIUM_ACTIVE: u64 = 1 << 13;
 /// `propagate_kamino_market_emergency`. Worth zero for Initial margin, exactly like a reserve in
 /// emergency mode.
 pub const KAMINO_MARKET_EMERGENCY: u64 = 1 << 14;
+
+/// JupLend's global liquidity, token reserve, or Earn supply position is halted. Refreshed by
+/// `propagate_juplend_emergency`; Initial collateral value is zero until the next refresh clears it.
+pub const JUPLEND_EMERGENCY: u64 = 1 << 15;
 
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
