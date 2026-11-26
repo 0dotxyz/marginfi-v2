@@ -275,6 +275,8 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
     let mut order = order_loader.load_mut()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
+    // Gate at start: the order can close a tagged balance before the end gate runs, so a bank
+    // whose breaching price sets the trigger must be caught here while it's still active.
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
@@ -296,10 +298,6 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         order_asset_count == 1 && order_liab_count == 1,
         MarginfiError::InvalidAssetOrLiabilitiesCount
     );
-
-    // Also gate at start: the order can close a tagged balance before the end gate runs, so a bank
-    // whose breaching price sets the trigger must be caught here while it's still active.
-    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let net = order_assets_in_equity
         .checked_sub(order_liabs_in_equity)
@@ -501,17 +499,15 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     // keeper e.g. take $25 each from A/B and repay $50 C instead)
     let closed_order_balances_count = 1;
 
-    // order_liab_in_equity = 0
-    let order_current_health = order_assets_in_equity;
-
-    // Check that the non-order balances remain unchanged, including inactive ones. Also check that
-    // the account is at least as healthy as it was at the start of execution, If it wasn't since
-    // the user specified the slippage, we at least make sure the account is still healthy after
-    // execution to avoid the position taking on more risk.
+    // Check that the non-order balances remain unchanged, including inactive ones, and that the
+    // whole account is maintenance-healthy (spot prices) after execution. The slippage checks above
+    // are measured on the tagged pair in Equity (EMA) terms; they bound what the executor may take
+    // from the user, but say nothing about whether the account is still solvent at spot. An order
+    // that would leave the account unhealthy fails, even if it improved health, and the account is
+    // left to liquidation.
     execute_record.check_health_and_verify_unchanged(
         &marginfi_account,
         closed_order_balances_count,
-        &order_current_health,
         is_healthy,
     )?;
 
@@ -519,11 +515,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         marginfi_account.liquidation_tagged_at = 0;
     }
 
-    // At this point we know that all non order balances were not touched and the order
-    // balances that were touched:
-    // 1) Is still above or equal to the trigger price (in equity terms).
-    // 2) Did not make the account less healthy and if at all we did, the account is
-    //    still healthy overall.
+    // At this point we know that all non order balances were not touched and the order balances
+    // that were touched:
+    // 1) Is still above or equal to the trigger price (in equity terms), less slippage.
+    // 2) Left the account maintenance-healthy overall.
 
     // Withdraw defers its snapshot refresh while ACCOUNT_IN_ORDER_EXECUTION is set, so this
     // handler owns it: claim at old rates and re-weight surviving liabilities against the

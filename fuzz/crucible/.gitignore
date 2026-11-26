@@ -11,3 +11,4 @@
 /.crucible-scout
 /.scout-provenance.lock
 /fc-workdir-*
+/idls

@@ -46,10 +46,14 @@ you can quickly grab all the Accounts that belong to your program using a fetch 
   are allowed with this instruction. Others have their own deposit instruction.
 - No Risk Engine check, always considered risk-free
 - `amount` is in native token, in native decimal, e.g. 1 SOL = 1 \* 10^9
-- Set `deposit_up_to_limit` to "true" to ignore your amount input if near the deposit cap and
-deposit only what is available. For example, if the deposit cap is 10 SOL, there is 6 SOL in
-the bank, and you attempt to deposit 10, `deposit_up_to_limit` = true will deposit 4,
-`deposit_up_to_limit` = false will fail and abort.
+- Set `deposit_up_to_limit` to `true` to deposit the smaller of your requested amount and the
+remaining conservative allowance, calculated after interest accrual. The allowance reserves one
+native unit of headroom and rounds down. For example, with a 10 SOL deposit limit and exactly 6 SOL
+already deposited, a request for 10 SOL deposits 3.999999999 SOL. Without the flag, that request fails.
+- A capped deposit can succeed without transferring tokens or creating a position when the allowance
+is zero; no deposit event is emitted in that case. Transaction success does not guarantee a deposit.
+- Note: `bank.config.deposit_limit = u64::MAX` means the deposit limit is disabled, 0 means no
+  deposits are allowed. Also check the bank's operational state to ensure deposits are allowed.
 </details>
 
 <details>

@@ -232,7 +232,7 @@ const SCOUT_TARGET_PROGRAM_ARTIFACT: &str = "programs/marginfi_program.so";
 
 // LendingAccountDeposit.signer_token_account = self.signer_token_account
 
-// LendingPoolConfigureBank.bank_config_opt = scout_valid_bank_config_opt()
+// LendingPoolConfigureBank.bank_config_opt = scout_valid_bank_config_fast()
 
 // old_marginfi_account = self.marginfi_account
 
@@ -522,17 +522,17 @@ fn scout_valid_bank_config(oracle_max_age: u16) -> marginfi::types::BankConfigCo
     }
 }
 
-fn scout_valid_bank_config_opt() -> marginfi::types::BankConfigOpt {
+// Post-#674 the program splits bank config into the fast (admin) BankConfigFast and the
+// timelocked-governance BankConfigGov; lending_pool_configure_bank takes the former and
+// lending_pool_configure_bank_gov the latter.
+fn scout_valid_bank_config_fast() -> marginfi::types::BankConfigFast {
     let zero = || marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ZERO);
-    let one = || marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::ONE);
-    marginfi::types::BankConfigOpt {
-        asset_weight_init: Some(zero()),
-        asset_weight_maint: Some(zero()),
-        liability_weight_init: Some(one()),
-        liability_weight_maint: Some(one()),
+    marginfi::types::BankConfigFast {
         deposit_limit: Some(1_000_000_000),
         borrow_limit: Some(500_000_000),
-        operational_state: Some(marginfi::types::BankOperationalState::Operational),
+        // The fast path only accepts risk-reducing operational-state transitions
+        // (InvalidFastBankOperationalState), and banks are created Operational.
+        operational_state: None,
         interest_rate_config: Some(marginfi::types::InterestRateConfigOpt {
             insurance_fee_fixed_apr: Some(zero()),
             insurance_ir_fee: Some(zero()),
@@ -549,14 +549,8 @@ fn scout_valid_bank_config_opt() -> marginfi::types::BankConfigOpt {
                 marginfi::types::RatePoint { util: 0, rate: 0 },
             ]),
         }),
-        risk_tier: Some(marginfi::types::RiskTier::Isolated),
-        asset_tag: Some(0),
         total_asset_value_init_limit: Some(10_000_000_000),
-        oracle_max_confidence: Some(500_000_000),
-        oracle_max_age: Some(15),
         permissionless_bad_debt_settlement: Some(false),
-        freeze_settings: Some(false),
-        tokenless_repayments_allowed: Some(false),
         liquidation_liquidator_fee: None,
         liquidation_insurance_fee: None,
         circuit_breaker_enabled: None,
@@ -567,6 +561,25 @@ fn scout_valid_bank_config_opt() -> marginfi::types::BankConfigOpt {
         cb_window_seconds: None,
         cb_window_max_up_bps: None,
         cb_window_max_down_bps: None,
+    }
+}
+
+// Base template for the governance half: every field None, call sites set only what they
+// need (e.g. tokenless_repayments_allowed). Gov re-set of weights/oracle fields is avoided
+// so the call is a no-op apart from the intended flag.
+fn scout_valid_bank_config_gov() -> marginfi::types::BankConfigGov {
+    marginfi::types::BankConfigGov {
+        asset_weight_init: None,
+        asset_weight_maint: None,
+        liability_weight_init: None,
+        liability_weight_maint: None,
+        operational_state: None,
+        risk_tier: None,
+        asset_tag: None,
+        oracle_max_confidence: None,
+        oracle_max_age: None,
+        tokenless_repayments_allowed: None,
+        freeze_settings: None,
     }
 }
 
@@ -742,7 +755,7 @@ fn scout_lending_pool_add_bank_accounts(
 ) -> accounts::LendingPoolAddBank {
     accounts::LendingPoolAddBank {
         marginfi_group,
-        admin,
+        governance_admin: admin,
         fee_payer,
         fee_state,
         global_fee_wallet,
@@ -3310,7 +3323,7 @@ impl MarginfiFixture {
                 .call(instruction::InitStakedSettings { settings: staked_settings_config })
                 .accounts(accounts::InitStakedSettings {
                     marginfi_group: staked_group_pubkey,
-                    admin: fixture.payer.pubkey(),
+                    governance_admin: fixture.payer.pubkey(),
                     fee_payer: fixture.payer.pubkey(),
                     staked_settings: staked_settings_pda,
                 })
@@ -3441,17 +3454,11 @@ impl MarginfiFixture {
                 .program(fixture.program_id)
                 .call(instruction::MarginfiGroupConfigure {
                     new_admin: Some(fixture.payer.pubkey()),
-                    new_emode_admin: Some(fixture.payer.pubkey()),
                     new_curve_admin: Some(fixture.payer.pubkey()),
                     new_limit_admin: Some(fixture.payer.pubkey()),
                     new_emissions_admin: Some(fixture.payer.pubkey()),
                     new_metadata_admin: Some(fixture.payer.pubkey()),
-                    new_risk_admin: Some(fixture.payer.pubkey()),
                     new_flow_admin: Some(fixture.payer.pubkey()),
-                    emode_max_init_leverage: None,
-                    emode_max_maint_leverage: None,
-                    same_asset_emode_init_leverage: None,
-                    same_asset_emode_maint_leverage: None,
                 })
                 .accounts(accounts::MarginfiGroupConfigure {
                     marginfi_group: fixture.marginfi_group,
@@ -3461,10 +3468,35 @@ impl MarginfiFixture {
                 .send()
                 .map(|o| o.is_success())
                 .unwrap_or(false),
-            "setup: marginfi_group_configure prerequisite for \
-             lending_pool_force_tokenless_repay_complete (and every other admin-role-gated \
-             instruction relying on a real, non-zero risk_admin/delegate_*_admin/emode_admin/ \
-             metadata_admin) failed"
+            "setup: marginfi_group_configure prerequisite for every admin-role-gated \
+             instruction relying on a real, non-zero delegate_*_admin/metadata_admin failed"
+        );
+        // Post-#674, emode_admin/risk_admin (and the emode leverage caps) moved to the
+        // governance-gated marginfi_group_configure_gov. governance_admin defaults to the
+        // group admin at init, so the payer can set them here.
+        assert!(
+            fixture.ctx
+                .program(fixture.program_id)
+                .call(instruction::MarginfiGroupConfigureGov {
+                    new_admin: None,
+                    new_emode_admin: Some(fixture.payer.pubkey()),
+                    new_risk_admin: Some(fixture.payer.pubkey()),
+                    emode_max_init_leverage: None,
+                    emode_max_maint_leverage: None,
+                    same_asset_emode_init_leverage: None,
+                    same_asset_emode_maint_leverage: None,
+                })
+                .accounts(accounts::MarginfiGroupConfigureGov {
+                    marginfi_group: fixture.marginfi_group,
+                    governance_admin: fixture.payer.pubkey(),
+                })
+                .signers(&[&*fixture.payer])
+                .send()
+                .map(|o| o.is_success())
+                .unwrap_or(false),
+            "setup: marginfi_group_configure_gov prerequisite for \
+             lending_pool_force_tokenless_repay_complete (and every other instruction relying \
+             on a real, non-zero risk_admin/emode_admin) failed"
         );
         let tokenless_bank_keypair = Keypair::new();
         let tokenless_bank_pubkey = tokenless_bank_keypair.pubkey();
@@ -3483,12 +3515,10 @@ impl MarginfiFixture {
         );
         fixture.tokenless_bank = tokenless_bank_pubkey;
 
-        let mut tokenless_bank_config_opt = scout_valid_bank_config_opt();
-        tokenless_bank_config_opt.tokenless_repayments_allowed = Some(true);
         assert!(
             fixture.ctx
                 .program(fixture.program_id)
-                .call(instruction::LendingPoolConfigureBank { bank_config_opt: tokenless_bank_config_opt })
+                .call(instruction::LendingPoolConfigureBank { bank_config_opt: scout_valid_bank_config_fast() })
                 .accounts(accounts::LendingPoolConfigureBank {
                     group: fixture.marginfi_group,
                     admin: fixture.payer.pubkey(),
@@ -3498,8 +3528,27 @@ impl MarginfiFixture {
                 .send()
                 .map(|o| o.is_success())
                 .unwrap_or(false),
-            "setup: lending_pool_configure_bank (flipping tokenless_repayments_allowed=true on \
-             tokenless_bank) prerequisite for lending_pool_force_tokenless_repay_complete failed"
+            "setup: lending_pool_configure_bank (fast config on tokenless_bank) prerequisite \
+             for lending_pool_force_tokenless_repay_complete failed"
+        );
+        // Post-#674, tokenless_repayments_allowed lives in the governance half of bank config.
+        let mut tokenless_bank_config_gov = scout_valid_bank_config_gov();
+        tokenless_bank_config_gov.tokenless_repayments_allowed = Some(true);
+        assert!(
+            fixture.ctx
+                .program(fixture.program_id)
+                .call(instruction::LendingPoolConfigureBankGov { bank_config_opt: tokenless_bank_config_gov })
+                .accounts(accounts::LendingPoolConfigureBankGov {
+                    group: fixture.marginfi_group,
+                    governance_admin: fixture.payer.pubkey(),
+                    bank: tokenless_bank_pubkey,
+                })
+                .signers(&[&*fixture.payer])
+                .send()
+                .map(|o| o.is_success())
+                .unwrap_or(false),
+            "setup: lending_pool_configure_bank_gov (flipping tokenless_repayments_allowed=true \
+             on tokenless_bank) prerequisite for lending_pool_force_tokenless_repay_complete failed"
         );
 
         let emissions_mint_pubkey = fixture.ctx
@@ -4023,7 +4072,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolAddBankKamino {
                     group: fixture.marginfi_group,
-                    admin: fixture.payer.pubkey(),
+                    governance_admin: fixture.payer.pubkey(),
                     fee_payer: fixture.payer.pubkey(),
                     bank_mint: fixture.bank_mint,
                     bank: kamino_withdraw_bank_pda,
@@ -4134,24 +4183,32 @@ impl MarginfiFixture {
 
     #[cfg(feature = "admin_actions")]
     pub fn action_marginfi_group_configure(&mut self) -> bool {
-        // TODO: arg emode_max_init_leverage: Option<marginfi::types::WrappedI80F48>; arg emode_max_maint_leverage: Option<marginfi::types::WrappedI80F48>
+        // Post-#674 split: emode_admin/risk_admin and the emode leverage caps moved to
+        // marginfi_group_configure_gov; this instruction keeps the fast admin set.
         let new_admin: Pubkey = self.payer.pubkey();
-        let new_emode_admin: Pubkey = self.payer.pubkey();
         let new_curve_admin: Pubkey = self.payer.pubkey();
         let new_limit_admin: Pubkey = self.payer.pubkey();
         let new_emissions_admin: Pubkey = self.payer.pubkey();
         let new_metadata_admin: Pubkey = self.payer.pubkey();
-        let new_risk_admin: Pubkey = self.payer.pubkey();
-        let emode_max_init_leverage: Option<marginfi::types::WrappedI80F48> = Default::default(); // TODO: construct arg emode_max_init_leverage: Option<marginfi::types::WrappedI80F48>
-        let emode_max_maint_leverage: Option<marginfi::types::WrappedI80F48> = Default::default(); // TODO: construct arg emode_max_maint_leverage: Option<marginfi::types::WrappedI80F48>
         let marginfi_group = self.marginfi_group;
         let admin = self.payer.pubkey();
         let __scout_success = self.ctx
             .program(self.program_id)
-            .call(instruction::MarginfiGroupConfigure { new_admin: Some(new_admin), new_emode_admin: Some(new_emode_admin), new_curve_admin: Some(new_curve_admin), new_limit_admin: Some(new_limit_admin), new_emissions_admin: Some(new_emissions_admin), new_metadata_admin: Some(new_metadata_admin), new_risk_admin: Some(new_risk_admin), new_flow_admin: None, emode_max_init_leverage, emode_max_maint_leverage, same_asset_emode_init_leverage: None, same_asset_emode_maint_leverage: None })
+            .call(instruction::MarginfiGroupConfigure { new_admin: Some(new_admin), new_curve_admin: Some(new_curve_admin), new_limit_admin: Some(new_limit_admin), new_emissions_admin: Some(new_emissions_admin), new_metadata_admin: Some(new_metadata_admin), new_flow_admin: None })
             .accounts(accounts::MarginfiGroupConfigure {
                 marginfi_group: marginfi_group,
                 admin: admin,
+            })
+            .signers(&[&*self.payer])
+            .send()
+            .map(|o| o.is_success())
+            .unwrap_or(false);
+        let __scout_success = __scout_success && self.ctx
+            .program(self.program_id)
+            .call(instruction::MarginfiGroupConfigureGov { new_admin: None, new_emode_admin: Some(self.payer.pubkey()), new_risk_admin: Some(self.payer.pubkey()), emode_max_init_leverage: None, emode_max_maint_leverage: None, same_asset_emode_init_leverage: None, same_asset_emode_maint_leverage: None })
+            .accounts(accounts::MarginfiGroupConfigureGov {
+                marginfi_group: marginfi_group,
+                governance_admin: self.payer.pubkey(),
             })
             .signers(&[&*self.payer])
             .send()
@@ -4215,7 +4272,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolAddBankWithSeed { bank_config, bank_seed })
             .accounts(accounts::LendingPoolAddBankWithSeed {
                 marginfi_group: marginfi_group,
-                admin: admin,
+                governance_admin: admin,
                 fee_payer: fee_payer,
                 fee_state: fee_state,
                 global_fee_wallet: global_fee_wallet,
@@ -4296,7 +4353,7 @@ impl MarginfiFixture {
 
     #[cfg(feature = "admin_actions")]
     pub fn action_lending_pool_configure_bank(&mut self) -> bool {
-        let bank_config_opt: marginfi::types::BankConfigOpt = scout_valid_bank_config_opt();
+        let bank_config_opt: marginfi::types::BankConfigFast = scout_valid_bank_config_fast();
         let group = self.marginfi_group;
         let admin = self.payer.pubkey();
         let bank = self.bank;
@@ -4406,7 +4463,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolSetOraclePrice { price, setup: SCOUT_ORACLE_SETUP_FIXED, })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: group,
-                admin: admin,
+                governance_admin: admin,
                 bank: bank,
             })
             .signers(&[&*self.payer])
@@ -4442,7 +4499,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolConfigureBankEmode { emode_tag, entries })
             .accounts(accounts::LendingPoolConfigureBankEmode {
                 group: group,
-                emode_admin: emode_admin,
+                governance_admin: emode_admin,
                 bank: bank,
             })
             .signers(&[&*self.payer])
@@ -4466,7 +4523,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolCloneEmode {  })
             .accounts(accounts::LendingPoolCloneEmode {
                 group: group,
-                signer: signer,
+                governance_admin: signer,
                 copy_from_bank: copy_from_bank,
                 copy_to_bank: copy_to_bank,
             })
@@ -5550,7 +5607,7 @@ impl MarginfiFixture {
             .call(instruction::InitStakedSettings { settings })
             .accounts(accounts::InitStakedSettings {
                 marginfi_group: marginfi_group,
-                admin: admin,
+                governance_admin: admin,
                 fee_payer: fee_payer,
                 staked_settings: staked_settings,
             })
@@ -5576,7 +5633,7 @@ impl MarginfiFixture {
             .call(instruction::EditStakedSettings { settings })
             .accounts(accounts::EditStakedSettings {
                 marginfi_group: marginfi_group,
-                admin: admin,
+                governance_admin: admin,
                 staked_settings: staked_settings,
             })
             .signers(&[&*self.payer])
@@ -5940,27 +5997,42 @@ impl MarginfiFixture {
 
     #[cfg(not(feature = "admin_actions"))]
     pub fn action_marginfi_group_configure(&mut self) -> bool {
+        // Post-#674 split: emode_admin/risk_admin and the emode leverage caps moved to
+        // marginfi_group_configure_gov; this instruction keeps the fast admin set.
         let marginfi_group = self.marginfi_group;
         let admin = self.payer.pubkey();
         let __scout_success = self.ctx
             .program(self.program_id)
             .call(instruction::MarginfiGroupConfigure {
                 new_admin: Some(self.payer.pubkey()),
-                new_emode_admin: Some(self.payer.pubkey()),
                 new_curve_admin: Some(self.payer.pubkey()),
                 new_limit_admin: Some(self.payer.pubkey()),
                 new_emissions_admin: Some(self.payer.pubkey()),
                 new_metadata_admin: Some(self.payer.pubkey()),
-                new_risk_admin: Some(self.payer.pubkey()),
                 new_flow_admin: Some(self.payer.pubkey()),
+            })
+            .accounts(accounts::MarginfiGroupConfigure {
+                marginfi_group,
+                admin,
+            })
+            .signers(&[&*self.payer])
+            .send()
+            .map(|o| o.is_success())
+            .unwrap_or(false);
+        let __scout_success = __scout_success && self.ctx
+            .program(self.program_id)
+            .call(instruction::MarginfiGroupConfigureGov {
+                new_admin: None,
+                new_emode_admin: Some(self.payer.pubkey()),
+                new_risk_admin: Some(self.payer.pubkey()),
                 emode_max_init_leverage: None,
                 emode_max_maint_leverage: None,
                 same_asset_emode_init_leverage: None,
                 same_asset_emode_maint_leverage: None,
             })
-            .accounts(accounts::MarginfiGroupConfigure {
+            .accounts(accounts::MarginfiGroupConfigureGov {
                 marginfi_group,
-                admin,
+                governance_admin: self.payer.pubkey(),
             })
             .signers(&[&*self.payer])
             .send()
@@ -5974,7 +6046,7 @@ impl MarginfiFixture {
 
     #[cfg(not(feature = "admin_actions"))]
     pub fn action_lending_pool_configure_bank(&mut self) -> bool {
-        let bank_config_opt = scout_valid_bank_config_opt();
+        let bank_config_opt = scout_valid_bank_config_fast();
         let __scout_success = self.ctx
             .program(self.program_id)
             .call(instruction::LendingPoolConfigureBank { bank_config_opt })
@@ -6040,7 +6112,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolConfigureBankEmode { emode_tag, entries })
             .accounts(accounts::LendingPoolConfigureBankEmode {
                 group: self.marginfi_group,
-                emode_admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank: self.bank,
             })
             .signers(&[&*self.payer])
@@ -6388,14 +6460,29 @@ impl MarginfiFixture {
             return None;
         }
         if tokenless_allowed {
-            let mut bank_config_opt = scout_valid_bank_config_opt();
-            bank_config_opt.tokenless_repayments_allowed = Some(true);
             if !(self.ctx
                     .program(self.program_id)
-                    .call(instruction::LendingPoolConfigureBank { bank_config_opt })
+                    .call(instruction::LendingPoolConfigureBank { bank_config_opt: scout_valid_bank_config_fast() })
                     .accounts(accounts::LendingPoolConfigureBank {
                         group: self.marginfi_group,
                         admin: self.payer.pubkey(),
+                        bank,
+                    })
+                    .signers(&[&*self.payer])
+                    .send()
+                    .map(|o| o.is_success())
+                    .unwrap_or(false)) {
+                return None;
+            }
+            // Post-#674, tokenless_repayments_allowed is governance-gated bank config.
+            let mut bank_config_gov = scout_valid_bank_config_gov();
+            bank_config_gov.tokenless_repayments_allowed = Some(true);
+            if !(self.ctx
+                    .program(self.program_id)
+                    .call(instruction::LendingPoolConfigureBankGov { bank_config_opt: bank_config_gov })
+                    .accounts(accounts::LendingPoolConfigureBankGov {
+                        group: self.marginfi_group,
+                        governance_admin: self.payer.pubkey(),
                         bank,
                     })
                     .signers(&[&*self.payer])
@@ -6886,7 +6973,7 @@ impl MarginfiFixture {
     }
 
     fn scout_liquidate_raise_liab_bank_limits(&mut self, bank: Pubkey) -> bool {
-        let mut bank_config_opt = scout_valid_bank_config_opt();
+        let mut bank_config_opt = scout_valid_bank_config_fast();
         bank_config_opt.deposit_limit = Some(u64::MAX);
         bank_config_opt.borrow_limit = Some(u64::MAX);
         bank_config_opt.total_asset_value_init_limit = Some(u64::MAX);
@@ -7418,7 +7505,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolConfigureBankOracle { setup: 3, oracle })
             .accounts(accounts::LendingPoolConfigureBankOracle {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .remaining_accounts(vec![oracle])
@@ -7669,7 +7756,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     bank,
                 })
                 .signers(&[&*self.payer])
@@ -8087,7 +8174,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolConfigureBankEmode { emode_tag: 1, entries })
             .accounts(accounts::LendingPoolConfigureBankEmode {
                 group: self.marginfi_group,
-                emode_admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .signers(&[&*self.payer])
@@ -8918,7 +9005,7 @@ impl MarginfiFixture {
         let price_ix = scout_anchor_instruction(
             self.program_id,
             instruction::LendingPoolSetOraclePrice { price: marginfi::types::WrappedI80F48::from_i80f48(fixed::types::I80F48::from_num(10)), setup: SCOUT_ORACLE_SETUP_FIXED, },
-            accounts::LendingPoolSetOraclePrice { group: self.marginfi_group, admin: payer.pubkey(), bank: asset_bank },
+            accounts::LendingPoolSetOraclePrice { group: self.marginfi_group, governance_admin: payer.pubkey(), bank: asset_bank },
         );
         let mut withdraw_ix = scout_anchor_instruction(
             self.program_id,
@@ -9786,12 +9873,10 @@ impl MarginfiFixture {
                 .unwrap_or(false),
             "scout helper: lending_pool_add_bank failed for purge_deleverage_balance unmatched-bank test"
         );
-        let mut bank_config_opt = scout_valid_bank_config_opt();
-        bank_config_opt.tokenless_repayments_allowed = Some(true);
         assert!(
             self.ctx
                 .program(self.program_id)
-                .call(instruction::LendingPoolConfigureBank { bank_config_opt })
+                .call(instruction::LendingPoolConfigureBank { bank_config_opt: scout_valid_bank_config_fast() })
                 .accounts(accounts::LendingPoolConfigureBank {
                     group: self.marginfi_group,
                     admin: self.payer.pubkey(),
@@ -9802,6 +9887,24 @@ impl MarginfiFixture {
                 .map(|o| o.is_success())
                 .unwrap_or(false),
             "scout helper: lending_pool_configure_bank failed for purge_deleverage_balance unmatched-bank test"
+        );
+        // Post-#674, tokenless_repayments_allowed is governance-gated bank config.
+        let mut bank_config_gov = scout_valid_bank_config_gov();
+        bank_config_gov.tokenless_repayments_allowed = Some(true);
+        assert!(
+            self.ctx
+                .program(self.program_id)
+                .call(instruction::LendingPoolConfigureBankGov { bank_config_opt: bank_config_gov })
+                .accounts(accounts::LendingPoolConfigureBankGov {
+                    group: self.marginfi_group,
+                    governance_admin: self.payer.pubkey(),
+                    bank,
+                })
+                .signers(&[&*self.payer])
+                .send()
+                .map(|o| o.is_success())
+                .unwrap_or(false),
+            "scout helper: lending_pool_configure_bank_gov failed for purge_deleverage_balance unmatched-bank test"
         );
         assert!(
             self.ctx
@@ -10071,7 +10174,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::EditStakedSettings {
                     marginfi_group: self.staked_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     staked_settings: self.staked_settings,
                 })
                 .signers(&[&*self.payer])
@@ -10416,7 +10519,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolAddBankKamino { bank_config, bank_seed })
             .accounts(accounts::LendingPoolAddBankKamino {
                 group,
-                admin,
+                governance_admin: admin,
                 fee_payer,
                 bank_mint,
                 bank,
@@ -10471,7 +10574,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolAddBankDrift { bank_config, bank_seed })
             .accounts(accounts::LendingPoolAddBankDrift {
                 group,
-                admin,
+                governance_admin: admin,
                 fee_payer,
                 bank_mint,
                 bank,
@@ -10577,7 +10680,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolAddBankSolend { bank_config, bank_seed })
             .accounts(accounts::LendingPoolAddBankSolend {
                 group,
-                admin,
+                governance_admin: admin,
                 fee_payer,
                 bank_mint,
                 bank,
@@ -10651,7 +10754,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolAddBankSolend { bank_config: scout_valid_solend_config(oracle), bank_seed })
             .accounts(accounts::LendingPoolAddBankSolend {
                 group,
-                admin: payer.pubkey(),
+                governance_admin: payer.pubkey(),
                 fee_payer: payer.pubkey(),
                 bank_mint: mint,
                 bank,
@@ -10865,7 +10968,7 @@ impl MarginfiFixture {
             .call(instruction::LendingPoolSetOraclePrice { price: one, setup: SCOUT_ORACLE_SETUP_FIXED, })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .signers(&[&*self.payer])
@@ -10954,7 +11057,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank: bank_collateral,
             })
             .signers(&[&*self.payer])
@@ -11000,7 +11103,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank: bank_liability,
             })
             .signers(&[&*self.payer])
@@ -11098,7 +11201,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank: bank_collateral,
             })
             .signers(&[&*self.payer])
@@ -11160,7 +11263,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     bank: healthy_bank,
                 })
                 .signers(&[&*self.payer])
@@ -11231,7 +11334,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     bank: bank_collateral,
                 })
                 .signers(&[&*self.payer])
@@ -11275,7 +11378,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     bank: bank_liability,
                 })
                 .signers(&[&*self.payer])
@@ -11369,7 +11472,7 @@ impl MarginfiFixture {
                 })
                 .accounts(accounts::LendingPoolSetOraclePrice {
                     group: self.marginfi_group,
-                    admin: self.payer.pubkey(),
+                    governance_admin: self.payer.pubkey(),
                     bank: bank_collateral,
                 })
                 .signers(&[&*self.payer])
@@ -13732,23 +13835,14 @@ impl MarginfiFixture {
     fn scout_rl_operational_state_opt(
         &self,
         state: marginfi::types::BankOperationalState,
-    ) -> marginfi::types::BankConfigOpt {
-        marginfi::types::BankConfigOpt {
-            asset_weight_init: None,
-            asset_weight_maint: None,
-            liability_weight_init: None,
-            liability_weight_maint: None,
+    ) -> marginfi::types::BankConfigFast {
+        marginfi::types::BankConfigFast {
             deposit_limit: None,
             borrow_limit: None,
             operational_state: Some(state),
             interest_rate_config: None,
-            risk_tier: None,
-            asset_tag: None,
             total_asset_value_init_limit: None,
-            oracle_max_confidence: None,
-            oracle_max_age: None,
             permissionless_bad_debt_settlement: None,
-            freeze_settings: None,
             liquidation_liquidator_fee: None,
             liquidation_insurance_fee: None,
             circuit_breaker_enabled: None,
@@ -13759,7 +13853,6 @@ impl MarginfiFixture {
             cb_window_seconds: None,
             cb_window_max_up_bps: None,
             cb_window_max_down_bps: None,
-            tokenless_repayments_allowed: None,
         }
     }
 
@@ -14546,7 +14639,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .signers(&[&*self.payer])
@@ -14576,7 +14669,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .signers(&[&*self.payer])
@@ -14883,7 +14976,7 @@ impl MarginfiFixture {
             })
             .accounts(accounts::LendingPoolSetOraclePrice {
                 group: self.marginfi_group,
-                admin: self.payer.pubkey(),
+                governance_admin: self.payer.pubkey(),
                 bank,
             })
             .signers(&[&*self.payer])

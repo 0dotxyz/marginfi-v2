@@ -9,7 +9,7 @@ use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{
         centi_to_u32, BankConfigOpt, EmodeEntry, LiquidationRecord, MarginfiAccount, OrderTrigger,
-        WrappedI80F48,
+        WrappedI80F48, DELEVERAGE_START, LIQUIDATION_START,
     },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -437,6 +437,11 @@ async fn premium_growth_follows_schedule() -> anyhow::Result<()> {
         native!(0.229, "SOL", f64)
     );
     assert_eq!(load_tag(&liquidatee).await, midpoint);
+    // The 0.1.13 post-liquidation timestamp and the 0.1.12a cache provenance
+    // must both survive the merge: the finished cache is fresh and no longer a start cache.
+    let post_cache = liquidatee.load().await.health_cache;
+    assert_eq!(post_cache.timestamp, midpoint);
+    assert_eq!(post_cache.flags & (LIQUIDATION_START | DELEVERAGE_START), 0);
 
     // Mature the restarted tag, then advance past maturity to check the ceiling holds.
     set_timestamp(
@@ -769,7 +774,7 @@ async fn run_order_execution(
     keeper: &Keypair,
     keeper_usdc: Pubkey,
     keeper_sol: Pubkey,
-) -> anyhow::Result<()> {
+) -> Result<(), BanksClientError> {
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     let (start_ix, execute_record) = borrower
@@ -800,8 +805,7 @@ async fn run_order_execution(
     );
     ctx.banks_client
         .process_transaction_with_preflight(tx)
-        .await?;
-    Ok(())
+        .await
 }
 
 /// Order execution clears the tag once the account is maintenance-healthy, while it still
@@ -826,12 +830,12 @@ async fn order_execution_clears_the_tag_when_healthy() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Order execution leaves the tag alone while the account stays maintenance-unhealthy.
+/// An order execution that leaves the account maintenance-unhealthy fails, so the tag stays.
 #[tokio::test]
 async fn order_execution_keeps_the_tag_while_unhealthy() -> anyhow::Result<()> {
     let (test_f, borrower, order_pda, keeper, keeper_usdc, keeper_sol) =
         setup_tagged_order_account(4.0).await?;
-    run_order_execution(
+    let res = run_order_execution(
         &test_f,
         &borrower,
         order_pda,
@@ -839,7 +843,8 @@ async fn order_execution_keeps_the_tag_while_unhealthy() -> anyhow::Result<()> {
         keeper_usdc,
         keeper_sol,
     )
-    .await?;
+    .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostExecution);
 
     assert_eq!(load_tag(&borrower).await, T0);
     Ok(())

@@ -22,7 +22,6 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import { patchBankrunConnection } from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -574,19 +573,11 @@ export const mochaHooks = {
     bankRunProvider = new BankrunProvider(bankrunContext);
     banksClient = bankrunContext.banksClient;
 
-    // Patch missing connection methods that tests need
-    patchBankrunConnection(bankRunProvider.connection, banksClient);
-
     // Set the global Anchor provider so getProvider() works
     // This is critical for tests that use anchor.getProvider() or program.provider
-    const anchorProvider = new AnchorProvider(
-      bankRunProvider.connection,
-      new Wallet(bankrunContext.payer),
-      {},
-    );
-    anchor.setProvider(anchorProvider);
+    anchor.setProvider(bankRunProvider);
 
-    // Factory to create AnchorProvider for any wallet, reusing the patched connection
+    // Factory to create AnchorProvider for any wallet, reusing the LiteSVM connection
     const makeProvider = (keypair: Keypair) =>
       new AnchorProvider(bankRunProvider.connection, new Wallet(keypair), {});
 
@@ -611,19 +602,19 @@ export const mochaHooks = {
 
     bankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      anchorProvider,
+      bankRunProvider,
     );
     mocksBankrunProgram = new Program<Mocks>(
       mocksIdlWithAddress as Mocks,
-      anchorProvider,
+      bankRunProvider,
     );
     klendBankrunProgram = new Program<KaminoLending>(
       klendIdlWithAddress as KaminoLending,
-      anchorProvider,
+      bankRunProvider,
     );
     driftBankrunProgram = new Program<Drift>(
       driftIdlWithAddress as Drift,
-      anchorProvider,
+      bankRunProvider,
     );
 
     const payer = bankrunContext.payer;

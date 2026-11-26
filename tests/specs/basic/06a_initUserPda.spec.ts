@@ -1,5 +1,5 @@
 import { Program } from "@coral-xyz/anchor";
-import { Transaction } from "@solana/web3.js";
+import { SystemProgram, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../../../target/types/marginfi";
 import { bankrunProgram, marginfiGroup, users } from "../../rootHooks";
 import {
@@ -169,6 +169,36 @@ describe("Initialize user account with PDA", () => {
     await expectFailedTxWithMessage(async () => {
       await users[0].mrgnProgram.provider.sendAndConfirm(tx, []);
     }, "already in use");
+  });
+
+  it("initializes a PDA that already has lamports", async () => {
+    const accountIndex = 556;
+    const [accountPda] = deriveMarginfiAccountPda(
+      program.programId,
+      marginfiGroup.publicKey,
+      users[0].wallet.publicKey,
+      accountIndex
+    );
+
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: users[0].wallet.publicKey,
+        toPubkey: accountPda,
+        lamports: 1,
+      }),
+      await accountInitPda(program, {
+        marginfiGroup: marginfiGroup.publicKey,
+        marginfiAccount: accountPda,
+        authority: users[0].wallet.publicKey,
+        feePayer: users[0].wallet.publicKey,
+        accountIndex,
+      })
+    );
+    await users[0].mrgnProgram.provider.sendAndConfirm(tx, []);
+
+    const account = await program.account.marginfiAccount.fetch(accountPda);
+    assertKeysEqual(account.authority, users[0].wallet.publicKey);
+    assert.equal(account.accountIndex, accountIndex);
   });
 
   it("Verify PDA accounts have unique addresses", async () => {

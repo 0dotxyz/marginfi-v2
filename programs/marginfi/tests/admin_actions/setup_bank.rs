@@ -21,8 +21,9 @@ use marginfi_type_crate::{
     },
     types::{
         centi_to_u32, make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt,
-        BankMetadata, BankVaultType, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
-        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
+        BankMetadata, BankOperationalState, BankVaultType, EmodeEntry, InterestRateConfigOpt,
+        MarginfiGroup, OracleSetup, RatePoint, SameAssetEmodeRegistry, EMODE_ON,
+        INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -806,6 +807,132 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
         .await;
     assert!(fixed_res.is_err());
     assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn same_asset_eligibility_rejects_weight_inversion_but_allows_disable() -> anyhow::Result<()>
+{
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+    let group = test_f.marginfi_group.load().await;
+
+    // Set the weights while the bank is ineligible and same-asset e-mode is disabled.
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            bank,
+            BankConfigOpt {
+                liability_weight_init: Some(I80F48!(1.2).into()),
+                liability_weight_maint: Some(I80F48!(1).into()),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    // With same-asset leverage disabled, the weights do not produce an e-mode inversion.
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, true)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, false)
+        .await?;
+
+    // A narrow leverage gap produces an initial weight of 0.6 and maintenance near 0.524.
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group.admin,
+            group.emode_admin,
+            group.delegate_curve_admin,
+            group.delegate_limit_admin,
+            group.delegate_emissions_admin,
+            group.metadata_admin,
+            group.risk_admin,
+            Some(I80F48!(2).into()),
+            Some(I80F48!(2.1).into()),
+        )
+        .await?;
+    // Avoid reusing the successful enable transaction's blockhash and signature.
+    test_f.context.borrow_mut().warp_to_slot(100).unwrap();
+    let result = test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, true)
+        .await;
+    assert!(result.is_err());
+    assert_custom_error!(result.unwrap_err(), MarginfiError::BadEmodeConfig);
+    assert_eq!(bank.load().await.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
+    let registry: SameAssetEmodeRegistry = test_f
+        .load_and_deserialize(&test_f.marginfi_group.same_asset_emode_registry)
+        .await;
+    assert!(registry.find_bank_index(bank.key).is_none());
+
+    // A wider leverage gap is valid and can be opted in.
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group.admin,
+            group.emode_admin,
+            group.delegate_curve_admin,
+            group.delegate_limit_admin,
+            group.delegate_emissions_admin,
+            group.metadata_admin,
+            group.risk_admin,
+            Some(I80F48!(1.5).into()),
+            Some(I80F48!(3).into()),
+        )
+        .await?;
+    // The enable instruction is byte-identical to the rejected transaction above.
+    test_f.context.borrow_mut().warp_to_slot(200).unwrap();
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, true)
+        .await?;
+    let registry: SameAssetEmodeRegistry = test_f
+        .load_and_deserialize(&test_f.marginfi_group.same_asset_emode_registry)
+        .await;
+    assert!(registry.find_bank_index(bank.key).is_some());
+
+    // A later group update can still create an inversion; disabling the bank must remain possible.
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group.admin,
+            group.emode_admin,
+            group.delegate_curve_admin,
+            group.delegate_limit_admin,
+            group.delegate_emissions_admin,
+            group.metadata_admin,
+            group.risk_admin,
+            Some(I80F48!(2).into()),
+            Some(I80F48!(2.1).into()),
+        )
+        .await?;
+    // Re-registering an already eligible bank must not be blocked by the new check.
+    test_f.context.borrow_mut().warp_to_slot(300).unwrap();
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, true)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank, false)
+        .await?;
+    assert_eq!(bank.load().await.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
+    let registry: SameAssetEmodeRegistry = test_f
+        .load_and_deserialize(&test_f.marginfi_group.same_asset_emode_registry)
+        .await;
+    assert!(registry.find_bank_index(bank.key).is_none());
 
     Ok(())
 }
@@ -2450,6 +2577,103 @@ async fn configure_bank_rejects_a_fee_that_cannot_clear_its_emode_entries() -> a
         res.unwrap_err().downcast::<BanksClientError>().unwrap(),
         MarginfiError::MaxMaintLeverageExceeded
     );
+
+    Ok(())
+}
+
+/// Entries left above a lowered group cap do not block unrelated edits such as a pause, while weight
+/// and fee edits still re-check them.
+#[tokio::test]
+async fn configure_bank_revalidates_emode_only_on_weight_or_fee_changes() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+    let loaded_bank = bank.load().await;
+    let group_before = test_f.marginfi_group.load().await;
+
+    test_f
+        .marginfi_group
+        .try_update_with_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(19).into()),
+            Some(I80F48::from_num(20).into()),
+        )
+        .await?;
+    // 0.8 and 0.9 against the 1.0 USDC liability weights are 5x and 10x
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(
+            &bank,
+            1,
+            &[EmodeEntry {
+                collateral_bank_emode_tag: 1,
+                flags: 0,
+                pad0: [0; 5],
+                asset_weight_init: I80F48!(0.8).into(),
+                asset_weight_maint: I80F48!(0.9).into(),
+            }],
+        )
+        .await?;
+    test_f
+        .marginfi_group
+        .try_update_with_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(2).into()),
+            Some(I80F48::from_num(5).into()),
+        )
+        .await?;
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::Paused),
+                ..BankConfigOpt::default()
+            },
+        )
+        .await?;
+    assert_eq!(
+        bank.load().await.config.operational_state,
+        BankOperationalState::Paused
+    );
+
+    let default_fee = centi_to_u32(I80F48::from_num(0.025));
+    for edit in [
+        BankConfigOpt {
+            liability_weight_init: Some(loaded_bank.config.liability_weight_init),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liability_weight_maint: Some(loaded_bank.config.liability_weight_maint),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liquidation_liquidator_fee: Some(default_fee),
+            ..BankConfigOpt::default()
+        },
+        BankConfigOpt {
+            liquidation_insurance_fee: Some(default_fee),
+            ..BankConfigOpt::default()
+        },
+    ] {
+        let res = test_f
+            .marginfi_group
+            .try_lending_pool_configure_bank(&bank, edit)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::MaxInitLeverageExceeded);
+    }
 
     Ok(())
 }
