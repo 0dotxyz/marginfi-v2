@@ -127,6 +127,7 @@ fn should_include_integration_observation_meta(bank: &Bank) -> bool {
 pub struct MarginfiAccountFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
+    pub account_keypair: Keypair,
 }
 
 impl MarginfiAccountFixture {
@@ -174,6 +175,7 @@ impl MarginfiAccountFixture {
         MarginfiAccountFixture {
             ctx: ctx_ref,
             key: account_key.pubkey(),
+            account_keypair: account_key,
         }
     }
 

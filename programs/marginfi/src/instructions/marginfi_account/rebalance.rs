@@ -1458,9 +1458,14 @@ pub fn settle_rebalance_tip<'info>(
     }
 
     let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
-    let (authority, group) = match load_marginfi_account_unless_closed(&marginfi_account_info)? {
-        None => (Pubkey::default(), Pubkey::default()),
+    // Loading the account is only for event metadata. A closed legacy-keypair account may have been
+    // recreated with unrelated data, so a load failure must not prevent settlement.
+    let (authority, group) = match load_marginfi_account_unless_closed(&marginfi_account_info)
+        .ok()
+        .flatten()
+    {
         Some(account) => (account.authority, account.group),
+        None => (Pubkey::default(), Pubkey::default()),
     };
     emit!(RebalanceTipSettledEvent {
         header: AccountEventHeader {
