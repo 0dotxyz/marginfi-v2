@@ -256,24 +256,16 @@ pub struct Bank {
     /// first. Orders measure realized rates from it.
     pub rate_readings: [RateReading; BANK_RATE_READINGS],
 
-    /// Native units of deposited emissions not yet spread into the bank's supply rate and yield
-    /// index, as of `emissions_spread_updated_at`. See `EMISSIONS_SPREAD_SECONDS`.
-    pub emissions_spread_pending: WrappedI80F48,
-    /// Native units of `emissions_spread_pending` spread per second.
-    pub emissions_spread_rate: WrappedI80F48,
-    /// Deposits, in native units, that the pending emissions are a share of: the yield index
-    /// divides `asset_share_value` by one plus that share.
-    pub emissions_spread_base: WrappedI80F48,
-    /// Unix seconds the emissions spread was last written.
-    pub emissions_spread_updated_at: i64,
+    /// How much emissions paid at once by `lending_pool_emissions_deposit` have grown
+    /// `asset_share_value` in total, as a fraction (0.25 is 25%). The yield index divides it out.
+    pub emissions_at_once_growth: WrappedI80F48,
     /// Native units deposited by `lending_pool_emissions_deposit_streamed`, held in the liquidity
     /// vault but not yet added to `asset_share_value`.
     pub emissions_stream_pending: WrappedI80F48,
     /// Seconds of accrual left to pay `emissions_stream_pending` over.
     pub emissions_stream_seconds: u64,
 
-    pub _reserved0: [[u64; 8]; 24],
-    pub _reserved1: [u64; 3],
+    pub _reserved0: [[u64; 8]; 25],
 }
 
 impl Bank {

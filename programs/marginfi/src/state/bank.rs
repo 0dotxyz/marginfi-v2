@@ -16,10 +16,7 @@ use crate::{
             InterestRateStateChanges,
         },
         price::OraclePriceWithMultiplier,
-        rate::{
-            debt_index_of, emissions_spread_rate_at, emissions_stream_rate, pending_emissions,
-            pending_emissions_growth, yield_index_of,
-        },
+        rate::{debt_index_of, emissions_stream_rate, yield_index_of},
     },
     utils::is_integration_asset_tag,
 };
@@ -35,9 +32,8 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
-        DEFAULT_LIQUIDATION_FEE, EMISSIONS_SPREAD_SECONDS, FREEZE_SETTINGS, GROUP_FLAGS,
-        MAX_LIQUIDATION_FEE_U32, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
-        TOKENLESS_REPAYMENTS_ALLOWED,
+        DEFAULT_LIQUIDATION_FEE, FREEZE_SETTINGS, GROUP_FLAGS, MAX_LIQUIDATION_FEE_U32,
+        PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
         u32_to_centi, Bank, BankConfig, BankConfigOpt, BankOperationalState, MarginfiGroup,
@@ -221,12 +217,7 @@ pub trait BankImpl {
     ) -> MarginfiResult<()>;
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
     fn take_rate_reading(&mut self, multiplier: I80F48, now: i64) -> MarginfiResult;
-    fn spread_emissions(
-        &mut self,
-        amount: u64,
-        share_value_before: I80F48,
-        now: i64,
-    ) -> MarginfiResult;
+    fn pay_emissions_at_once(&mut self, amount: u64) -> MarginfiResult;
     fn stream_emissions(&mut self, amount: u64, seconds: u64) -> MarginfiResult;
     fn pay_streamed_emissions(&mut self, seconds: u64) -> MarginfiResult;
     fn update_cache_price(
@@ -870,7 +861,7 @@ impl BankImpl for Bank {
             return Ok(());
         }
         if let Some(reading) = RateReading::new(
-            yield_index_of(self, multiplier, now)?,
+            yield_index_of(self, multiplier)?,
             debt_index_of(self, multiplier)?,
             now,
         ) {
@@ -879,41 +870,22 @@ impl BankImpl for Bank {
         Ok(())
     }
 
-    /// Spreads an emissions deposit of `amount`, which lifted `asset_share_value` from
-    /// `share_value_before`, over `EMISSIONS_SPREAD_SECONDS`, never slowing what is still pending.
-    fn spread_emissions(
-        &mut self,
-        amount: u64,
-        share_value_before: I80F48,
-        now: i64,
-    ) -> MarginfiResult {
-        let share_value = I80F48::from(self.asset_share_value);
-        if share_value_before <= I80F48::ZERO || share_value <= share_value_before {
+    /// Pays depositors `amount` of emissions at once through `asset_share_value` and adds the
+    /// growth to `emissions_at_once_growth`, which the yield index divides out.
+    fn pay_emissions_at_once(&mut self, amount: u64) -> MarginfiResult {
+        let share_value_before = I80F48::from(self.asset_share_value);
+        self.pay_depositors(I80F48::from_num(amount))?;
+        if share_value_before == I80F48::ZERO {
             return Ok(());
         }
-        // The pending growth rises with the share value: the deposit leaves the yield index put.
-        let growth_to_count = share_value
+        self.emissions_at_once_growth = I80F48::from(self.asset_share_value)
             .checked_div(share_value_before)
-            .and_then(|growth| growth.checked_mul(pending_emissions_growth(self, now)))
+            .and_then(|growth| {
+                growth.checked_mul(I80F48::ONE.checked_add(self.emissions_at_once_growth.into())?)
+            })
             .and_then(|growth| growth.checked_sub(I80F48::ONE))
-            .ok_or_else(math_error!())?;
-        if growth_to_count <= I80F48::ZERO {
-            return Ok(());
-        }
-        let tokens = pending_emissions(self, now)
-            .checked_add(I80F48::from_num(amount))
-            .ok_or_else(math_error!())?;
-        let rate = tokens
-            .checked_div(I80F48::from_num(EMISSIONS_SPREAD_SECONDS))
-            .ok_or_else(math_error!())?
-            .max(emissions_spread_rate_at(self, now));
-        self.emissions_spread_base = tokens
-            .checked_div(growth_to_count)
             .ok_or_else(math_error!())?
             .into();
-        self.emissions_spread_pending = tokens.into();
-        self.emissions_spread_rate = rate.into();
-        self.emissions_spread_updated_at = now;
         Ok(())
     }
 
@@ -2901,5 +2873,91 @@ mod emissions_stream {
             assert_eq!(pending(&bank), I80F48::from_num(u64::MAX) * 2);
             assert_eq!(bank.emissions_stream_seconds, merged);
         }
+    }
+}
+
+/// `pay_emissions_at_once` lifts `asset_share_value` and records the growth in
+/// `emissions_at_once_growth`. Every figure is exact in I80F48.
+#[cfg(test)]
+mod emissions_at_once {
+    use super::*;
+    use bytemuck::Zeroable;
+
+    const MIN: I80F48 = MIN_EMISSIONS_SHARE_SUPPLY;
+
+    /// A bank of `shares` at a share value of 1 that was never paid at once.
+    fn bank_of(shares: I80F48) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = shares.into();
+        bank
+    }
+
+    fn growth(bank: &Bank) -> I80F48 {
+        bank.emissions_at_once_growth.into()
+    }
+
+    /// A quarter of the supply lifts the share value to 1.25 and records a growth of 0.25.
+    #[test]
+    fn a_deposit_lifts_the_share_value_and_records_the_growth() {
+        let mut bank = bank_of(MIN * 4);
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(1.25));
+        assert_eq!(growth(&bank), I80F48::from_num(0.25));
+    }
+
+    /// From a share value of 1.5, a deposit that doubles it records a growth of 1. A second that
+    /// doubles it again leaves a growth of 3.
+    #[test]
+    fn deposits_compound_their_growth() {
+        let mut bank = bank_of(MIN);
+        bank.asset_share_value = I80F48::from_num(1.5).into();
+        bank.pay_emissions_at_once((MIN * I80F48::from_num(1.5)).to_num())
+            .unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(3));
+        assert_eq!(growth(&bank), I80F48::ONE);
+
+        bank.pay_emissions_at_once((MIN * 3).to_num()).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(6));
+        assert_eq!(growth(&bank), I80F48::from_num(3));
+    }
+
+    #[test]
+    fn a_deposit_that_does_not_move_the_share_value_records_no_growth() {
+        let mut bank = bank_of(I80F48::from_num(1u128 << 50));
+        bank.pay_emissions_at_once(1).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::ONE);
+        assert_eq!(growth(&bank), I80F48::ZERO);
+    }
+
+    /// A bank whose share value a socialized loss took to zero still takes the deposit. There is
+    /// no growth to measure from zero, so none is recorded.
+    #[test]
+    fn a_deposit_into_a_zero_share_value_records_no_growth() {
+        let mut bank = bank_of(MIN);
+        bank.asset_share_value = I80F48::ZERO.into();
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::ONE);
+        assert_eq!(growth(&bank), I80F48::ZERO);
+    }
+
+    /// One plus the growth must stay under I80F48's 2^79 ceiling: a deposit that doubles the share
+    /// value lands when that sum is 2^77 and reverts when it is 2^78.
+    #[test]
+    fn a_deposit_past_the_fixed_point_range_reverts() {
+        let doubled_from = |exponent: u32| {
+            let mut bank = bank_of(MIN);
+            bank.emissions_at_once_growth =
+                (I80F48::from_num(1u128 << exponent) - I80F48::ONE).into();
+            bank.pay_emissions_at_once(MIN.to_num()).map(|()| bank)
+        };
+
+        let bank = doubled_from(77).unwrap();
+        assert_eq!(growth(&bank), I80F48::from_num(1u128 << 78) - I80F48::ONE);
+        assert_eq!(
+            doubled_from(78).unwrap_err(),
+            MarginfiError::MathError.into()
+        );
     }
 }

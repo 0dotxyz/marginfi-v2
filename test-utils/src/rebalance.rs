@@ -1491,10 +1491,7 @@ impl MultiVenueFixture {
                 .collect(),
         );
         let multiplier = venue_multiplier(&state, ais, &clock).unwrap();
-        (
-            bank_f,
-            yield_index_of(&state, multiplier, clock.unix_timestamp).unwrap(),
-        )
+        (bank_f, yield_index_of(&state, multiplier).unwrap())
     }
 
     /// Reads the user's asset shares in `bank` (zero if no active balance).

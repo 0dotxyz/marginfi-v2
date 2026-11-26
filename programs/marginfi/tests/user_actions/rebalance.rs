@@ -4,7 +4,7 @@ use fixtures::{
     assert_custom_error,
     prelude::*,
     rebalance::{
-        drive_rate, drive_utilization, rebalance_move, setup, setup_live,
+        drive_rate, drive_utilization, fund_lender, rebalance_move, setup, setup_live,
         setup_multi_venue_fixture, spike_params, LiveParams, RebalanceFixture, DEPOSIT_USDC,
         DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, SPIKE_BORROW, SPIKE_COLLATERAL, TEST_WINDOW,
         VENUE_DEPOSIT_NATIVE,
@@ -14,9 +14,8 @@ use kamino_mocks::state::MinimalReserve;
 use marginfi::{assert_eq_with_tolerance, prelude::MarginfiError, state::rate::NativeRateModel};
 use marginfi_type_crate::{
     constants::{
-        BANK_RATE_READING_SPACING_SECONDS, EMISSIONS_STREAM_MAX_SECONDS,
-        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS, REBALANCE_ORDER_SEED,
-        REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        EMISSIONS_STREAM_MAX_SECONDS, INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
+        REBALANCE_ORDER_SEED, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
     },
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
     types::{BankConfig, BankConfigOpt, WrappedI80F48, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES},
@@ -269,176 +268,54 @@ async fn rebalance_needs_no_history_on_a_bank_no_move_touches() -> anyhow::Resul
     Ok(())
 }
 
-/// Emissions dropped into the idle native source count in its rate even when the keeper moves with
-/// no drop inside the window: the drop counts as 28% a year, the destination pays 7.5%.
+/// Emissions paid at once into the idle native source do not hold the deposit there: the drop
+/// lands inside the window and counts for nothing, so the deposit moves to the 7.5% destination.
 #[tokio::test]
-async fn rebalance_counts_a_native_sources_emissions_between_drops() -> anyhow::Result<()> {
+async fn rebalance_leaves_out_a_native_sources_emissions_paid_at_once() -> anyhow::Result<()> {
+    let position = DEPOSIT_USDC + EMISSIONS_DROP_USDC;
     let f = setup_live(LiveParams::default()).await?;
     f.drop_emissions(&f.src_bank_f, EMISSIONS_DROP_USDC).await?;
-    f.advance_clock(BANK_RATE_READING_SPACING_SECONDS).await;
-    f.pulse(&f.src_bank_f).await?;
-    f.pulse(&f.dst_bank_f).await?;
     f.advance_clock(TEST_WINDOW).await;
 
     let ixs = f
-        .build_sandwich_moving(
-            f.src_bank_f.key,
-            f.dst_bank_f.key,
-            &[],
-            DEPOSIT_USDC + EMISSIONS_DROP_USDC,
-        )
+        .build_sandwich_moving(f.src_bank_f.key, f.dst_bank_f.key, &[], position)
         .await;
-    let res = f.process(&ixs).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
+    f.process(&ixs).await?;
+
+    assert_position_moved_to_dst(&f, position).await;
     Ok(())
 }
 
-/// An idle native destination is worth moving into for its emissions alone: the drop counts as 14%
-/// a year once the move lands, clear of the 2% margin.
+/// An idle native destination is not worth moving into for emissions paid at once: they went to
+/// the depositors already there, so it still pays nothing.
 #[tokio::test]
-async fn rebalance_counts_a_native_destinations_emissions() -> anyhow::Result<()> {
+async fn rebalance_leaves_out_a_native_destinations_emissions_paid_at_once() -> anyhow::Result<()> {
     let f = setup_live(spike_params()).await?;
     f.drop_emissions(&f.dst_bank_f, EMISSIONS_DROP_USDC).await?;
     f.advance_clock(TEST_WINDOW).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
-    f.process(&ixs).await?;
-
-    assert_moved_to_dst(&f).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
     Ok(())
 }
 
-/// Weekly drops keep the source's emissions counted whenever the keeper tries, just before a drop
-/// or just after it. Once the last drop is fully counted, the deposit may move.
+/// A keeper that lifts the destination's rate just ahead of its move and donates the deposit's size
+/// into it at once clears the spot gates but not the window: the donation counts for nothing.
 #[tokio::test]
-async fn rebalance_counts_native_emissions_across_the_drop_cycle() -> anyhow::Result<()> {
-    /// Price both banks a window ahead of `at`: the window opens after the last drop.
-    async fn open_window_before(f: &RebalanceFixture, at: i64) -> anyhow::Result<()> {
-        f.pin_clock(at - TEST_WINDOW).await;
-        f.pulse(&f.src_bank_f).await?;
-        f.pulse(&f.dst_bank_f).await?;
-        f.pin_clock(at).await;
-        Ok(())
-    }
-    /// Move the whole position, grown by `drops` emissions drops. The compute budget keeps each
-    /// attempt's signature distinct.
-    async fn try_move(
-        f: &RebalanceFixture,
-        drops: u32,
-        attempt: u32,
-    ) -> Result<(), solana_program_test::BanksClientError> {
-        let position = DEPOSIT_USDC + f64::from(drops) * EMISSIONS_DROP_USDC;
-        let mut ixs = f
-            .build_sandwich_moving(f.src_bank_f.key, f.dst_bank_f.key, &[], position)
-            .await;
-        ixs.insert(
-            0,
-            ComputeBudgetInstruction::set_compute_unit_limit(400_000 + attempt),
-        );
-        f.process(&ixs).await
-    }
-
-    let f = setup_live(LiveParams::default()).await?;
-    let week = 7 * 86_400;
-    f.drop_emissions(&f.src_bank_f, EMISSIONS_DROP_USDC).await?;
-
-    open_window_before(&f, BASE_TS + week - 1).await?;
-    let res = try_move(&f, 1, 0).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
-
-    f.pin_clock(BASE_TS + week).await;
-    f.drop_emissions(&f.src_bank_f, EMISSIONS_DROP_USDC).await?;
-    f.advance_clock(1).await;
-    let res = try_move(&f, 2, 1).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
-
-    // The second drop spreads from the moment it lands and is fully spread ten days on.
-    open_window_before(&f, BASE_TS + week + 10 * 86_400 + TEST_WINDOW).await?;
-    try_move(&f, 2, 2).await?;
-    assert_position_moved_to_dst(&f, DEPOSIT_USDC + 2.0 * EMISSIONS_DROP_USDC).await;
-    Ok(())
-}
-
-/// The destination's emissions are priced over the supply the move leaves it with, against a
-/// source paying nothing: a margin one step under that rate moves, one on or over it does not.
-#[test_case(-1, true; "under the rate")]
-#[test_case(0, false; "on the rate")]
-#[test_case(1, false; "over the rate")]
-#[tokio::test]
-async fn rebalance_prices_a_native_destinations_emissions_at_the_margin(
-    steps: i32,
-    moves: bool,
-) -> anyhow::Result<()> {
-    let f = setup_live(spike_params()).await?;
-    f.drop_emissions(&f.dst_bank_f, EMISSIONS_DROP_USDC).await?;
-    f.advance_clock(TEST_WINDOW).await;
-
-    let now = f.test_f.get_clock().await.unix_timestamp;
-    let landed = NativeRateModel::new(&f.dst_bank_f.load().await, now)?
-        .rate_at((DEPOSIT_USDC * 1_000_000.0) as u64)?;
-    assert_moves_at_the_margin(&f, landed, steps, moves, DEPOSIT_USDC).await
-}
-
-/// The source's spread emissions are priced at its own supply and the destination over the supply
-/// the move leaves it with: a margin one step under the gap moves, one on or over it does not.
-#[test_case(-1, true; "under the gap")]
-#[test_case(0, false; "on the gap")]
-#[test_case(1, false; "over the gap")]
-#[tokio::test]
-async fn rebalance_prices_a_native_sources_emissions_at_the_margin(
-    steps: i32,
-    moves: bool,
-) -> anyhow::Result<()> {
-    // 1/512 of the deposit counts as 7.1% a year, under the 7.5% the destination pays once landed.
-    let drop = DEPOSIT_USDC / 512.0;
-    let position = DEPOSIT_USDC + drop;
-    let f = setup_live(LiveParams::default()).await?;
-    f.drop_emissions(&f.src_bank_f, drop).await?;
-    f.advance_clock(BANK_RATE_READING_SPACING_SECONDS).await;
-    f.pulse(&f.src_bank_f).await?;
-    f.pulse(&f.dst_bank_f).await?;
-    f.advance_clock(TEST_WINDOW).await;
-
-    // Accrued at this second, the move prices both banks exactly as loaded here.
-    for bank in [&f.src_bank_f, &f.dst_bank_f] {
-        f.test_f.marginfi_group.try_accrue_interest(bank).await?;
-    }
-    let now = f.test_f.get_clock().await.unix_timestamp;
-    let src_rate = NativeRateModel::new(&f.src_bank_f.load().await, now)?.rate_at(0)?;
-    let landed = NativeRateModel::new(&f.dst_bank_f.load().await, now)?
-        .rate_at((position * 1_000_000.0) as u64)?;
-    assert_moves_at_the_margin(&f, landed - src_rate, steps, moves, position).await
-}
-
-/// A keeper that donates into the idle destination just ahead of its move clears the spot gate but
-/// not the window: ten minutes of the donation's spread pays a sliver of the yield it asks for.
-#[tokio::test]
-async fn rebalance_counts_a_donation_before_the_move_only_for_what_it_spread() -> anyhow::Result<()>
+async fn rebalance_counts_a_donation_paid_at_once_before_the_move_for_nothing() -> anyhow::Result<()>
 {
     let f = setup_live(spike_params()).await?;
+
     f.advance_clock(TEST_WINDOW).await;
-    f.drop_emissions(&f.dst_bank_f, EMISSIONS_DROP_USDC).await?;
+    drive_rate(&f.test_f, &f.dst_bank_f, SPIKE_BORROW, SPIKE_COLLATERAL).await?;
+    f.drop_emissions(&f.dst_bank_f, DEPOSIT_USDC).await?;
     f.advance_clock(600).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotImproving);
     Ok(())
-}
-
-/// Settlement reads the same yield index: the idle destination's drop, still spreading,
-/// out-yields the idle source over the delay and the keeper is paid.
-#[tokio::test]
-async fn rebalance_settle_counts_a_native_destinations_emissions() -> anyhow::Result<()> {
-    let f = setup_live(spike_params()).await?;
-    f.set_keeper_tip(200_000).await?;
-    f.top_up_pool(5_000_000).await?;
-    f.drop_emissions(&f.dst_bank_f, EMISSIONS_DROP_USDC).await?;
-    f.advance_clock(TEST_WINDOW).await;
-
-    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
-    f.process(&ixs).await?;
-    assert_settle_pays_the_keeper(&f).await
 }
 
 /// The idle native source's emissions stream counts in its rate: 31.5% a year, against the 7.5% the
@@ -539,8 +416,7 @@ async fn rebalance_prices_a_native_destinations_stream_at_the_margin(
         .marginfi_group
         .try_accrue_interest(&f.dst_bank_f)
         .await?;
-    let now = f.test_f.get_clock().await.unix_timestamp;
-    let landed = NativeRateModel::new(&f.dst_bank_f.load().await, now)?
+    let landed = NativeRateModel::new(&f.dst_bank_f.load().await)?
         .rate_at((DEPOSIT_USDC * 1_000_000.0) as u64)?;
     assert_moves_at_the_margin(&f, landed, steps, moves, DEPOSIT_USDC).await
 }
@@ -572,9 +448,8 @@ async fn rebalance_prices_a_native_sources_stream_at_the_margin(
     for bank in [&f.src_bank_f, &f.dst_bank_f] {
         f.test_f.marginfi_group.try_accrue_interest(bank).await?;
     }
-    let now = f.test_f.get_clock().await.unix_timestamp;
-    let src_rate = NativeRateModel::new(&f.src_bank_f.load().await, now)?.rate_at(0)?;
-    let landed = NativeRateModel::new(&f.dst_bank_f.load().await, now)?
+    let src_rate = NativeRateModel::new(&f.src_bank_f.load().await)?.rate_at(0)?;
+    let landed = NativeRateModel::new(&f.dst_bank_f.load().await)?
         .rate_at((position * 1_000_000.0) as u64)?;
     assert_moves_at_the_margin(&f, landed - src_rate, steps, moves, position).await
 }
@@ -641,8 +516,10 @@ async fn rebalance_enforces_cooldown() -> anyhow::Result<()> {
 /// The keeper tip is escrowed at `end_rebalance` and paid at settlement only when the destination
 /// realized more yield than the source over the window. Here the idle source (rate 0) is out-yielded
 /// by the borrow-carrying destination, so the escrow is paid to the keeper (the pool is not refunded).
+#[test_case(false; "no donation")]
+#[test_case(true; "a donation paid at once into the source")]
 #[tokio::test]
-async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> {
+async fn rebalance_settle_pays_keeper_on_realized_yield(donation: bool) -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let tip = 200_000u64;
     f.set_keeper_tip(tip).await?;
@@ -660,6 +537,11 @@ async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> 
         pending_tip,
         "escrow out of the pool equals the record's pending tip"
     );
+    if donation {
+        // The move emptied the source, and emissions need depositors to pay.
+        fund_lender(&f.test_f, &f.src_bank_f).await?;
+        f.drop_emissions(&f.src_bank_f, DEPOSIT_USDC).await?;
+    }
 
     f.advance_clock(601).await; // settle delay = clamp(0, 600, 3600) = 600
     let record_lamports = f.lamports_of(f.record_pda).await;
@@ -691,8 +573,10 @@ async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> 
 /// When the move did not realize its promised improvement (here the source is driven to out-yield the
 /// destination over the window, standing in for a manipulated advantage that did not hold), settlement
 /// refunds the escrowed tip to the fee pool instead of paying the keeper.
+#[test_case(false; "no donation")]
+#[test_case(true; "a donation paid at once into the destination")]
 #[tokio::test]
-async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()> {
+async fn rebalance_settle_refunds_pool_when_not_realized(donation: bool) -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let tip = 200_000u64;
     f.set_keeper_tip(tip).await?;
@@ -716,6 +600,9 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
         .set_pyth_oracle_timestamp(PYTH_SOL_FEED, BASE_TS)
         .await;
     drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
+    if donation {
+        f.drop_emissions(&f.dst_bank_f, DEPOSIT_USDC).await?;
+    }
 
     f.advance_clock(601).await;
     let record_lamports = f.lamports_of(f.record_pda).await;

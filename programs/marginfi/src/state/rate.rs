@@ -7,8 +7,7 @@
 //! the rate-bearing account, and maps the pure `Option` result to a marginfi error:
 //!
 //! - Native marginfi banks: the bank's own interest curve at its post-deposit utilization (net;
-//!   fees fall on borrowers) plus its spread and streamed emissions over that supply. The caller
-//!   accrues first.
+//!   fees fall on borrowers) plus its streamed emissions. The caller accrues first.
 //! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)` plus reserve rewards; a per-slot
 //!   reserve is rescaled from klend's slot-year to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
@@ -78,7 +77,7 @@ pub fn current_supply_apr<'info>(
 ) -> MarginfiResult<I80F48> {
     let tag = bank.config.asset_tag;
     if matches!(tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED) {
-        return NativeRateModel::new(bank, clock.unix_timestamp)?.rate_at(extra_native);
+        return NativeRateModel::new(bank)?.rate_at(extra_native);
     }
     let venue = venue.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     match tag {
@@ -97,14 +96,12 @@ pub fn current_supply_apr<'info>(
     }
 }
 
-/// A native bank's interest curve, current totals and emissions, captured once after accrual so
-/// the bank can be priced at any deposit size without re-reading it.
+/// A native bank's interest curve, current totals and emissions stream, captured once after
+/// accrual so the bank can be priced at any deposit size without re-reading it.
 pub struct NativeRateModel {
     curve: LendingCurve,
     assets: I80F48,
     liabilities: I80F48,
-    /// Native units of emissions spread per year, shared by every deposit.
-    emissions_per_year: I80F48,
     /// Native units of streamed emissions paid per year, shared by every deposit once the supply
     /// reaches `stream_min_assets`.
     stream_per_year: I80F48,
@@ -112,20 +109,18 @@ pub struct NativeRateModel {
 }
 
 impl NativeRateModel {
-    pub fn new(bank: &Bank, now: i64) -> MarginfiResult<Self> {
+    pub fn new(bank: &Bank) -> MarginfiResult<Self> {
         Ok(Self {
             curve: LendingCurve::new(&bank.config.interest_rate_config)?,
             assets: bank.get_asset_amount(bank.total_asset_shares.into())?,
             liabilities: bank.get_liability_amount(bank.total_liability_shares.into())?,
-            emissions_per_year: emissions_spread_rate_at(bank, now)
-                .saturating_mul(SECONDS_PER_YEAR),
             stream_per_year: emissions_stream_rate(bank)?.saturating_mul(SECONDS_PER_YEAR),
             stream_min_assets: bank.get_asset_amount(MIN_EMISSIONS_SHARE_SUPPLY)?,
         })
     }
 
     /// Supply rate after `extra_native` more tokens are deposited: the lending rate (zero with no
-    /// borrows, as in `update_bank_cache`) plus spread and streamed emissions over that supply.
+    /// borrows, as in `update_bank_cache`) plus streamed emissions over that supply.
     pub fn rate_at(&self, extra_native: u64) -> MarginfiResult<I80F48> {
         let assets = self
             .assets
@@ -134,15 +129,10 @@ impl NativeRateModel {
         if assets == I80F48::ZERO {
             return Ok(I80F48::ZERO);
         }
-        let emissions_per_year = if assets >= self.stream_min_assets {
-            self.emissions_per_year.saturating_add(self.stream_per_year)
-        } else {
-            self.emissions_per_year
-        };
-        let emissions = if emissions_per_year == I80F48::ZERO {
+        let emissions = if self.stream_per_year == I80F48::ZERO || assets < self.stream_min_assets {
             I80F48::ZERO
         } else {
-            emissions_per_year
+            self.stream_per_year
                 .checked_div(assets)
                 .ok_or_else(math_error!())?
         };
@@ -158,27 +148,6 @@ impl NativeRateModel {
             .lending_rate(utilization)?
             .checked_add(emissions)
             .ok_or_else(math_error!())?)
-    }
-}
-
-/// Native units of `bank`'s emissions still pending at `now`: what its last emissions deposit left
-/// to spread, less what `emissions_spread_rate` has spread since.
-pub fn pending_emissions(bank: &Bank, now: i64) -> I80F48 {
-    let tokens = I80F48::from(bank.emissions_spread_pending);
-    if tokens <= I80F48::ZERO {
-        return I80F48::ZERO;
-    }
-    let elapsed = now.saturating_sub(bank.emissions_spread_updated_at).max(0);
-    let spread = I80F48::from(bank.emissions_spread_rate).saturating_mul(I80F48::from_num(elapsed));
-    tokens.saturating_sub(spread).max(I80F48::ZERO)
-}
-
-/// Native units of `bank`'s emissions spread per second at `now`, zero once none are pending.
-pub fn emissions_spread_rate_at(bank: &Bank, now: i64) -> I80F48 {
-    if pending_emissions(bank, now) > I80F48::ZERO {
-        bank.emissions_spread_rate.into()
-    } else {
-        I80F48::ZERO
     }
 }
 
@@ -273,30 +242,20 @@ pub fn venue_multiplier<'info>(
     Ok(priced.price_multiplier)
 }
 
-/// Monotonic per-share supply index for `bank` at `now`: `asset_share_value` times the venue
-/// multiplier, with emissions spread over `EMISSIONS_SPREAD_SECONDS`. Its growth is the yield.
-pub fn yield_index_of(bank: &Bank, multiplier: I80F48, now: i64) -> MarginfiResult<I80F48> {
+/// Monotonic per-share supply index for `bank`: `asset_share_value` times the venue multiplier,
+/// with `emissions_at_once_growth` divided out. Its growth over a window is the realized yield.
+pub fn yield_index_of(bank: &Bank, multiplier: I80F48) -> MarginfiResult<I80F48> {
     let index = I80F48::from(bank.asset_share_value)
         .checked_mul(multiplier)
         .ok_or_else(math_error!())?;
-    let pending_growth = pending_emissions_growth(bank, now);
-    if pending_growth == I80F48::ONE {
+    let at_once_growth = I80F48::from(bank.emissions_at_once_growth);
+    if at_once_growth == I80F48::ZERO {
         return Ok(index);
     }
-    Ok(index
-        .checked_div(pending_growth)
+    Ok(I80F48::ONE
+        .checked_add(at_once_growth)
+        .and_then(|divisor| index.checked_div(divisor))
         .ok_or_else(math_error!())?)
-}
-
-/// How far `bank`'s share value runs ahead of its yield index at `now`: one plus the share-value
-/// growth its pending emissions stand for.
-pub fn pending_emissions_growth(bank: &Bank, now: i64) -> I80F48 {
-    let pending = pending_emissions(bank, now);
-    let base = I80F48::from(bank.emissions_spread_base);
-    if pending == I80F48::ZERO || base <= I80F48::ZERO {
-        return I80F48::ONE;
-    }
-    I80F48::ONE.saturating_add(pending.saturating_div(base))
 }
 
 /// Debt-side counterpart to [`yield_index_of`]: `liability_share_value` times the venue multiplier,
@@ -649,7 +608,7 @@ mod unit_consistency {
         bank.liability_share_value = I80F48::ONE.into();
         bank.total_asset_shares = I80F48::from_num(1_000).into();
         bank.total_liability_shares = I80F48::from_num(1_000).into();
-        let native = NativeRateModel::new(&bank, 0).unwrap().rate_at(0).unwrap();
+        let native = NativeRateModel::new(&bank).unwrap().rate_at(0).unwrap();
 
         // Kamino: a flat borrow curve at `target_bps`, evaluated at 100% utilization with no cut,
         // priced at klend's own pacing.
@@ -763,7 +722,7 @@ mod native_dilution {
         bank.total_liability_shares = I80F48::from_num(500).into();
 
         // Half utilized now; a deposit equal to its current supply leaves it a quarter utilized.
-        let model = NativeRateModel::new(&bank, 0).unwrap();
+        let model = NativeRateModel::new(&bank).unwrap();
         assert_eq!(model.rate_at(0).unwrap(), one * I80F48::from_num(0.25));
         assert_eq!(
             model.rate_at(1_000).unwrap(),
@@ -772,10 +731,7 @@ mod native_dilution {
 
         bank.total_liability_shares = I80F48::ZERO.into();
         assert_eq!(
-            NativeRateModel::new(&bank, 0)
-                .unwrap()
-                .rate_at(1_000)
-                .unwrap(),
+            NativeRateModel::new(&bank).unwrap().rate_at(1_000).unwrap(),
             I80F48::ZERO
         );
     }
@@ -815,7 +771,7 @@ mod emissions_stream {
     }
 
     fn rate_at(bank: &Bank, extra_native: u64) -> I80F48 {
-        NativeRateModel::new(bank, 0)
+        NativeRateModel::new(bank)
             .unwrap()
             .rate_at(extra_native)
             .unwrap()
@@ -863,15 +819,6 @@ mod emissions_stream {
         assert_eq!(rate_at(&bank, 3), SECONDS_PER_YEAR / (min + I80F48::ONE));
     }
 
-    /// A bank still spreading a lump deposit while it streams counts both.
-    #[test]
-    fn the_stream_adds_to_the_spread_emissions() {
-        let mut bank = streaming_bank(quarter_supply(), 1_000, 1_000);
-        bank.emissions_spread_pending = I80F48::from_num(1_000).into();
-        bank.emissions_spread_rate = I80F48::ONE.into();
-        assert_eq!(rate_at(&bank, 0), I80F48::from_num(0.5));
-    }
-
     /// A year of `pay_streamed_emissions` at one native unit a second grows the share value by the
     /// rate the model counted for it.
     #[test]
@@ -890,14 +837,17 @@ mod emissions_stream {
         let rate_at_share_value = |share_value: I80F48| {
             let mut bank = streaming_bank(MIN_EMISSIONS_SHARE_SUPPLY, u64::MAX, 1);
             bank.asset_share_value = share_value.into();
-            NativeRateModel::new(&bank, 0).unwrap().rate_at(0)
+            NativeRateModel::new(&bank).unwrap().rate_at(0)
         };
         assert_eq!(
             rate_at_share_value(I80F48::ONE).unwrap(),
             I80F48::MAX / MIN_EMISSIONS_SHARE_SUPPLY
         );
         assert_eq!(rate_at_share_value(I80F48::ONE >> 20).unwrap(), I80F48::MAX);
-        assert!(rate_at_share_value(I80F48::ONE >> 21).is_err());
+        assert_eq!(
+            rate_at_share_value(I80F48::ONE >> 21).unwrap_err(),
+            MarginfiError::MathError.into()
+        );
     }
 
     #[test]
@@ -1048,302 +998,116 @@ mod realized_rates {
     }
 }
 
-/// An emissions deposit enters a native bank's yield index and supply rate evenly over
-/// `EMISSIONS_SPREAD_SECONDS`. Every figure here is exact in I80F48.
+/// The yield index leaves out what `pay_emissions_at_once` paid. Every figure is exact in I80F48.
 #[cfg(test)]
-mod emissions_spread {
+mod emissions_at_once {
     use super::*;
-    use crate::state::interest_rate::LendingCurve;
     use bytemuck::Zeroable;
-    use marginfi_type_crate::constants::EMISSIONS_SPREAD_SECONDS;
-    use marginfi_type_crate::types::{
-        make_points, milli_to_u32, InterestRateConfig, INTEREST_CURVE_SEVEN_POINT,
+    use marginfi_type_crate::constants::{
+        INTEREST_MAX_WINDOW_SECONDS, INTEREST_MIN_WINDOW_SECONDS,
     };
 
     const T0: i64 = 1_700_000_000;
-    /// Deposits before the drop: four spreads' worth of native units. A drop of one spread's worth
-    /// lifts the share value from 1 to 1.25 and spreads at exactly one unit a second.
-    const SUPPLY: i64 = 4 * EMISSIONS_SPREAD_SECONDS;
-    const DROP: u64 = EMISSIONS_SPREAD_SECONDS as u64;
+    const MIN: I80F48 = MIN_EMISSIONS_SHARE_SUPPLY;
 
-    /// A bank holding `SUPPLY` at a share value of 1 that has just taken a `DROP` at `T0`.
-    fn dropped_bank() -> Bank {
+    /// A bank of `shares` at a share value of 1 that was never paid at once.
+    fn bank_of(shares: I80F48) -> Bank {
         let mut bank = Bank::zeroed();
-        bank.total_asset_shares = I80F48::from_num(SUPPLY).into();
-        bank.asset_share_value = I80F48::from_num(1.25).into();
-        bank.spread_emissions(DROP, I80F48::ONE, T0).unwrap();
+        bank.asset_share_value = I80F48::ONE.into();
+        bank.total_asset_shares = shares.into();
         bank
     }
 
+    /// A deposit of a quarter of the supply lifts the share value to 1.25 and the index not at all,
+    /// under any venue multiplier.
     #[test]
-    fn a_deposit_leaves_the_yield_index_where_it_was() {
-        let bank = dropped_bank();
+    fn a_deposit_paid_at_once_leaves_the_yield_index_where_it_was() {
+        let mut bank = bank_of(MIN * 4);
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(1.25));
+        assert_eq!(yield_index_of(&bank, I80F48::ONE).unwrap(), I80F48::ONE);
         assert_eq!(
-            I80F48::from(bank.emissions_spread_pending),
-            I80F48::from_num(DROP)
+            yield_index_of(&bank, I80F48::from_num(2)).unwrap(),
+            I80F48::from_num(2)
         );
-        assert_eq!(I80F48::from(bank.emissions_spread_rate), I80F48::ONE);
-        assert_eq!(
-            I80F48::from(bank.emissions_spread_base),
-            I80F48::from_num(SUPPLY)
-        );
-        assert_eq!(bank.emissions_spread_updated_at, T0);
-        assert_eq!(yield_index_of(&bank, I80F48::ONE, T0).unwrap(), I80F48::ONE);
     }
 
+    /// Paid at once, streamed, then paid at once again: the share value goes 1, 2, 3, 6 and the
+    /// index takes in only the stream, going from 1 to 1.5.
     #[test]
-    fn the_yield_index_takes_the_deposit_in_evenly_and_then_holds() {
-        let bank = dropped_bank();
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        assert_eq!(pending_emissions(&bank, half), I80F48::from_num(DROP / 2));
+    fn the_yield_index_takes_in_only_what_is_paid_over_time() {
+        let mut bank = bank_of(MIN);
+        bank.pay_emissions_at_once(MIN.to_num()).unwrap();
+        assert_eq!(yield_index_of(&bank, I80F48::ONE).unwrap(), I80F48::ONE);
+
+        bank.emissions_stream_pending = MIN.into();
+        bank.emissions_stream_seconds = 1_000;
+        bank.pay_streamed_emissions(1_000).unwrap();
         assert_eq!(
-            yield_index_of(&bank, I80F48::ONE, half).unwrap(),
-            I80F48::from_num(1.25) / I80F48::from_num(1.125)
+            yield_index_of(&bank, I80F48::ONE).unwrap(),
+            I80F48::from_num(1.5)
         );
 
-        let end = T0 + EMISSIONS_SPREAD_SECONDS;
-        for now in [end, end + EMISSIONS_SPREAD_SECONDS] {
-            assert_eq!(pending_emissions(&bank, now), I80F48::ZERO);
-            assert_eq!(emissions_spread_rate_at(&bank, now), I80F48::ZERO);
+        bank.pay_emissions_at_once((MIN * 3).to_num()).unwrap();
+        assert_eq!(I80F48::from(bank.asset_share_value), I80F48::from_num(6));
+        assert_eq!(
+            yield_index_of(&bank, I80F48::ONE).unwrap(),
+            I80F48::from_num(1.5)
+        );
+    }
+
+    /// The largest deposit inside the shortest or longest rate window realizes no supply rate.
+    #[test]
+    fn a_deposit_paid_at_once_realizes_no_supply_rate() {
+        for window in [INTEREST_MIN_WINDOW_SECONDS, INTEREST_MAX_WINDOW_SECONDS] {
+            let mut bank = bank_of(MIN);
+            bank.take_rate_reading(I80F48::ONE, T0).unwrap();
+            bank.pay_emissions_at_once(u64::MAX).unwrap();
+
+            let now = T0 + i64::from(window);
+            let index_now = yield_index_of(&bank, I80F48::ONE).unwrap();
             assert_eq!(
-                yield_index_of(&bank, I80F48::ONE, now).unwrap(),
-                I80F48::from_num(1.25)
+                realized_supply_apr(&bank, window, index_now, now).unwrap(),
+                I80F48::ZERO
             );
         }
     }
 
-    /// The venue multiplier scales the index; the spread divides the result.
     #[test]
-    fn the_spread_applies_on_top_of_the_venue_multiplier() {
-        let bank = dropped_bank();
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        assert_eq!(
-            yield_index_of(&bank, I80F48::from_num(2), half).unwrap(),
-            I80F48::from_num(2.5) / I80F48::from_num(1.125)
-        );
-    }
-
-    /// A donation into a bank still spreading a drop adds its tokens at the same rate: the spread
-    /// runs past the original end by exactly the donation's own seconds.
-    #[test]
-    fn a_small_deposit_cannot_slow_the_spread() {
-        let mut bank = dropped_bank();
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        let before = I80F48::from(bank.asset_share_value);
-        bank.asset_share_value = (before + I80F48::from_num(4) / I80F48::from_num(SUPPLY)).into();
-        bank.spread_emissions(4, before, half).unwrap();
-
-        assert_eq!(I80F48::from(bank.emissions_spread_rate), I80F48::ONE);
-        let end = T0 + EMISSIONS_SPREAD_SECONDS;
-        assert_eq!(pending_emissions(&bank, end), I80F48::from_num(4));
-        assert_eq!(pending_emissions(&bank, end + 4), I80F48::ZERO);
-    }
-
-    /// A drop larger than what is pending re-spreads the whole remainder over a fresh spread.
-    #[test]
-    fn a_large_deposit_raises_the_rate() {
-        let mut bank = dropped_bank();
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        let before = I80F48::from(bank.asset_share_value);
-        let drop = 3 * DROP / 2;
-        bank.asset_share_value =
-            (before + I80F48::from_num(drop) / I80F48::from_num(SUPPLY)).into();
-        bank.spread_emissions(drop, before, half).unwrap();
-
-        assert_eq!(
-            I80F48::from(bank.emissions_spread_rate),
-            I80F48::from_num(2)
-        );
-        assert_eq!(
-            pending_emissions(&bank, half + EMISSIONS_SPREAD_SECONDS - 1),
-            I80F48::from_num(2)
-        );
-        assert_eq!(
-            pending_emissions(&bank, half + EMISSIONS_SPREAD_SECONDS),
-            I80F48::ZERO
-        );
-    }
-
-    /// The spread emissions are shared over the supply after the deposit, the same supply the bank
-    /// holds once that deposit lands, and stop once the drop is fully spread.
-    #[test]
-    fn the_supply_rate_counts_emissions_over_the_larger_supply() {
-        let mut bank = dropped_bank();
-        bank.config.interest_rate_config = InterestRateConfig {
-            hundred_util_rate: milli_to_u32(I80F48::ONE),
-            points: make_points(&[]),
-            curve_type: INTEREST_CURVE_SEVEN_POINT,
-            ..Default::default()
-        };
-        let assets = 5 * EMISSIONS_SPREAD_SECONDS;
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        let model = NativeRateModel::new(&bank, half).unwrap();
-        assert_eq!(
-            model.rate_at(0).unwrap(),
-            SECONDS_PER_YEAR / I80F48::from_num(assets)
-        );
-        assert_eq!(
-            model.rate_at(assets as u64).unwrap(),
-            SECONDS_PER_YEAR / I80F48::from_num(2 * assets)
-        );
-
-        bank.liability_share_value = I80F48::ONE.into();
-        bank.total_liability_shares = I80F48::from_num(assets / 2).into();
-        let lending = LendingCurve::new(&bank.config.interest_rate_config)
-            .unwrap()
-            .lending_rate(I80F48::from_num(0.5))
-            .unwrap();
-        assert_eq!(
-            NativeRateModel::new(&bank, half)
-                .unwrap()
-                .rate_at(0)
-                .unwrap(),
-            lending + SECONDS_PER_YEAR / I80F48::from_num(assets)
-        );
-        assert_eq!(
-            NativeRateModel::new(&bank, T0 + EMISSIONS_SPREAD_SECONDS)
-                .unwrap()
-                .rate_at(0)
-                .unwrap(),
-            lending
-        );
-    }
-
-    /// A rate reading taken at the drop and one taken a half spread later realize the spread
-    /// share-value growth, not the jump.
-    #[test]
-    fn the_realized_supply_rate_counts_emissions_between_readings() {
-        let mut bank = dropped_bank();
-        let half_spread = EMISSIONS_SPREAD_SECONDS / 2;
-        bank.take_rate_reading(I80F48::ONE, T0).unwrap();
-        let now = T0 + half_spread;
-        let index_now = yield_index_of(&bank, I80F48::ONE, now).unwrap();
-        assert_eq!(
-            realized_supply_apr(&bank, half_spread as u32, index_now, now).unwrap(),
-            (I80F48::from_num(1.25) / I80F48::from_num(1.125) - I80F48::ONE) * SECONDS_PER_YEAR
-                / I80F48::from_num(half_spread)
-        );
-    }
-
-    #[test]
-    fn a_bank_without_emissions_keeps_its_raw_index() {
+    fn a_bank_never_paid_at_once_keeps_its_raw_index() {
         let mut bank = Bank::zeroed();
         bank.asset_share_value = I80F48::from_num(1.5).into();
         assert_eq!(
-            yield_index_of(&bank, I80F48::from_num(2), T0).unwrap(),
+            yield_index_of(&bank, I80F48::from_num(2)).unwrap(),
             I80F48::from_num(3)
         );
-        assert_eq!(emissions_spread_rate_at(&bank, T0), I80F48::ZERO);
-
-        // A share value the deposit did not move leaves nothing to spread.
-        bank.spread_emissions(1, I80F48::from_num(1.5), T0).unwrap();
-        assert_eq!(I80F48::from(bank.emissions_spread_pending), I80F48::ZERO);
     }
 
-    /// Ten small donations across the spread keep its rate and push its end out by exactly their
-    /// own tokens' seconds.
+    /// Each one-unit deposit into the smallest supply rounds the growth down, lifting the index one
+    /// fixed-point step: a thousand read as 0.00000052% a year over the shortest window.
     #[test]
-    fn repeated_small_deposits_never_slow_the_spread() {
-        let mut bank = dropped_bank();
-        let step = EMISSIONS_SPREAD_SECONDS / 20;
-        for k in 1..=10 {
-            let before = I80F48::from(bank.asset_share_value);
-            bank.asset_share_value =
-                (before + I80F48::from_num(4) / I80F48::from_num(SUPPLY)).into();
-            bank.spread_emissions(4, before, T0 + k * step).unwrap();
-            assert_eq!(I80F48::from(bank.emissions_spread_rate), I80F48::ONE);
+    fn repeated_dust_deposits_move_the_yield_index_a_step_each() {
+        let deposits = 1_000;
+        let mut bank = bank_of(MIN);
+        bank.take_rate_reading(I80F48::ONE, T0).unwrap();
+        for _ in 0..deposits {
+            bank.pay_emissions_at_once(1).unwrap();
         }
-        let end = T0 + EMISSIONS_SPREAD_SECONDS + 40;
-        assert_eq!(pending_emissions(&bank, end - 1), I80F48::ONE);
-        assert_eq!(pending_emissions(&bank, end), I80F48::ZERO);
-    }
-
-    /// The largest drop a token amount allows, into the smallest supply that accepts emissions,
-    /// spreads without overflow: the index stays at 1 and the rate is the drop over the spread.
-    #[test]
-    fn the_largest_drop_spreads_without_overflow() {
-        let mut bank = Bank::zeroed();
-        bank.config.interest_rate_config = InterestRateConfig {
-            points: make_points(&[]),
-            curve_type: INTEREST_CURVE_SEVEN_POINT,
-            ..Default::default()
-        };
-        let shares = MIN_EMISSIONS_SHARE_SUPPLY;
-        bank.total_asset_shares = shares.into();
-        let assets = shares + I80F48::from_num(u64::MAX);
-        bank.asset_share_value = (assets / shares).into();
-        bank.spread_emissions(u64::MAX, I80F48::ONE, T0).unwrap();
-
-        assert_eq!(yield_index_of(&bank, I80F48::ONE, T0).unwrap(), I80F48::ONE);
-        let rate = I80F48::from_num(u64::MAX) / I80F48::from_num(EMISSIONS_SPREAD_SECONDS);
-        assert_eq!(I80F48::from(bank.emissions_spread_rate), rate);
         assert_eq!(
-            NativeRateModel::new(&bank, T0).unwrap().rate_at(0).unwrap(),
-            rate * SECONDS_PER_YEAR / assets
+            I80F48::from(bank.asset_share_value),
+            I80F48::ONE + I80F48::from_num(deposits) / MIN
         );
-    }
 
-    /// The share-value growth of a deposit times the growth still pending must stay under I80F48's
-    /// 2^79 ceiling: at 2^78 the deposit spreads, at 2^79 it reverts and the spread is untouched.
-    #[test]
-    fn a_deposit_past_the_fixed_point_range_reverts() {
-        let pending_growth_of = |exponent: u32| {
-            let mut bank = Bank::zeroed();
-            bank.emissions_spread_pending =
-                (I80F48::from_num(1u128 << exponent) - I80F48::ONE).into();
-            bank.emissions_spread_base = I80F48::ONE.into();
-            bank.emissions_spread_rate = I80F48::ONE.into();
-            bank.emissions_spread_updated_at = T0;
-            bank
-        };
-
-        let mut bank = pending_growth_of(39);
-        bank.asset_share_value = I80F48::from_num(1u128 << 39).into();
-        bank.spread_emissions(1, I80F48::ONE, T0).unwrap();
-
-        let mut bank = pending_growth_of(39);
-        bank.asset_share_value = I80F48::from_num(1u128 << 40).into();
-        let untouched = bank;
+        let index = yield_index_of(&bank, I80F48::ONE).unwrap();
         assert_eq!(
-            bank.spread_emissions(1, I80F48::ONE, T0).unwrap_err(),
-            MarginfiError::MathError.into()
+            index,
+            I80F48::ONE + I80F48::DELTA * I80F48::from_num(deposits)
         );
-        assert_eq!(bank, untouched);
-    }
-
-    /// A rate so large that its spread saturates I80F48 leaves nothing pending.
-    #[test]
-    fn a_saturated_spread_leaves_nothing_pending() {
-        let mut bank = Bank::zeroed();
-        bank.emissions_spread_pending = I80F48::from_num(1u64 << 62).into();
-        bank.emissions_spread_rate = I80F48::from_num(1u64 << 60).into();
-        bank.emissions_spread_updated_at = T0;
-        let now = T0 + (1 << 30);
-        assert_eq!(pending_emissions(&bank, now), I80F48::ZERO);
-        assert_eq!(emissions_spread_rate_at(&bank, now), I80F48::ZERO);
-    }
-
-    /// Every native asset tag, the banks emissions deposits accept, prices its spread emissions.
-    #[test]
-    fn every_native_tag_counts_its_emissions() {
-        let half = T0 + EMISSIONS_SPREAD_SECONDS / 2;
-        let clock = Clock {
-            unix_timestamp: half,
-            ..Clock::default()
-        };
-        for tag in [ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_STAKED] {
-            let mut bank = dropped_bank();
-            bank.config.asset_tag = tag;
-            bank.config.interest_rate_config = InterestRateConfig {
-                points: make_points(&[]),
-                curve_type: INTEREST_CURVE_SEVEN_POINT,
-                ..Default::default()
-            };
-            assert_eq!(
-                current_supply_apr(&bank, None, None, RewardsAccounts::default(), 0, &clock)
-                    .unwrap(),
-                SECONDS_PER_YEAR / I80F48::from_num(5 * EMISSIONS_SPREAD_SECONDS)
-            );
-        }
+        let now = T0 + i64::from(INTEREST_MIN_WINDOW_SECONDS);
+        assert_eq!(
+            realized_supply_apr(&bank, INTEREST_MIN_WINDOW_SECONDS, index, now).unwrap(),
+            I80F48::DELTA * I80F48::from_num(1_460 * deposits)
+        );
     }
 }

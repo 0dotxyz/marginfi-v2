@@ -576,16 +576,8 @@ impl BankFixture {
     /// right now.
     pub async fn seed_native_rate_history(&self) {
         let bank = self.load().await;
-        let now = {
-            let ctx = self.ctx.borrow_mut();
-            let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
-            clock.unix_timestamp
-        };
-        let apr = NativeRateModel::new(&bank, now)
-            .unwrap()
-            .rate_at(0)
-            .unwrap();
-        let index = yield_index_of(&bank, I80F48::ONE, now).unwrap();
+        let apr = NativeRateModel::new(&bank).unwrap().rate_at(0).unwrap();
+        let index = yield_index_of(&bank, I80F48::ONE).unwrap();
         let age = i64::from(INTEREST_MAX_WINDOW_SECONDS);
         self.seed_rate_history(index, apr, age).await;
     }

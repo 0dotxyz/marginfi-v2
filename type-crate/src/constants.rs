@@ -131,10 +131,6 @@ pub const _: () = assert!(
         >= INTEREST_MAX_WINDOW_SECONDS as i64
 );
 
-/// Seconds over which an emissions deposit is spread into a native bank's supply rate and yield
-/// index: a week plus three days.
-pub const EMISSIONS_SPREAD_SECONDS: i64 = 864_000; // 10 days
-
 /// Shortest period a streamed emissions deposit can be paid over.
 pub const EMISSIONS_STREAM_MIN_SECONDS: u64 = 86_400; // 1 day
 /// Longest period a streamed emissions deposit can be paid over.

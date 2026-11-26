@@ -396,14 +396,10 @@ mod tests {
         assert_eq!(offset_of!(Bank, _pad3), 1842);
         assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
         assert_eq!(offset_of!(Bank, rate_readings), Bank::V1_LEN);
-        assert_eq!(offset_of!(Bank, emissions_spread_pending), 2264);
-        assert_eq!(offset_of!(Bank, emissions_spread_rate), 2280);
-        assert_eq!(offset_of!(Bank, emissions_spread_base), 2296);
-        assert_eq!(offset_of!(Bank, emissions_spread_updated_at), 2312);
-        assert_eq!(offset_of!(Bank, emissions_stream_pending), 2320);
-        assert_eq!(offset_of!(Bank, emissions_stream_seconds), 2336);
-        assert_eq!(offset_of!(Bank, _reserved0), 2344);
-        assert_eq!(offset_of!(Bank, _reserved1), 3880);
+        assert_eq!(offset_of!(Bank, emissions_at_once_growth), 2264);
+        assert_eq!(offset_of!(Bank, emissions_stream_pending), 2280);
+        assert_eq!(offset_of!(Bank, emissions_stream_seconds), 2296);
+        assert_eq!(offset_of!(Bank, _reserved0), 2304);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

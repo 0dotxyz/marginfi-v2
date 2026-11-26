@@ -227,9 +227,7 @@ pub fn lending_pool_emissions_deposit(
 
     receive_emissions(ctx.accounts, &mut bank, &group, amount, &clock)?;
 
-    let share_value_before = I80F48::from(bank.asset_share_value);
-    bank.pay_depositors(I80F48::from_num(amount))?;
-    bank.spread_emissions(amount, share_value_before, clock.unix_timestamp)?;
+    bank.pay_emissions_at_once(amount)?;
 
     bank.update_bank_cache(&group)?;
 
