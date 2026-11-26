@@ -1883,3 +1883,34 @@ async fn test_position_transfer_full_debt_move_clears_order_tag() -> anyhow::Res
     assert_eq!(source_balance.tag, 0);
     Ok(())
 }
+
+/// Moving a whole deposit drops the order tag of the emptied source slot, which stays active.
+#[tokio::test]
+async fn test_position_transfer_full_asset_move_clears_order_tag() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let source_f = usdc_depositor(&test_f).await;
+    let dest_f = test_f.create_marginfi_account().await;
+    let mut source_account = source_f.load().await;
+    source_account
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|b| b.is_active() && b.bank_pk == usdc_bank_f.key)
+        .unwrap()
+        .tag = 1;
+    source_f.set_account(&source_account).await?;
+
+    source_f
+        .try_position_transfer(&dest_f, usdc_bank_f, 500.0)
+        .await?;
+
+    let source_account = source_f.load().await;
+    let source_balance = source_account
+        .lending_account
+        .get_balance(&usdc_bank_f.key)
+        .unwrap();
+    assert_eq!(I80F48::from(source_balance.asset_shares), I80F48::ZERO);
+    assert_eq!(source_balance.tag, 0);
+    Ok(())
+}

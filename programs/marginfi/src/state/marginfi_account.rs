@@ -2438,6 +2438,7 @@ impl<'a> BankAccountWrapper<'a> {
     /// Adds `shares` to this balance's `side`, or removes them if negative, for shares moving from
     /// or to another balance of the same bank. The bank's share totals stay unchanged.
     pub fn transfer_shares(&mut self, side: BalanceSide, shares: I80F48) -> MarginfiResult {
+        let side_before = self.balance.get_side();
         let had_assets = I80F48::from(self.balance.asset_shares)
             .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
         let had_liabs = I80F48::from(self.balance.liability_shares)
@@ -2457,6 +2458,7 @@ impl<'a> BankAccountWrapper<'a> {
         if had_liabs && self.balance.is_empty(BalanceSide::Liabilities) {
             self.balance.write_off_premium();
         }
+        clear_stale_order_tag(self.balance, side_before);
         Ok(())
     }
 
@@ -3936,6 +3938,34 @@ mod test {
             assert_eq!(I80F48::from(wrapper.balance.asset_shares), I80F48!(0.5));
             assert_eq!(wrapper.balance.get_side(), None);
             assert_eq!(wrapper.balance.tag, 0);
+        }
+
+        #[test]
+        fn share_transfer_clears_order_tag_on_empty_and_new_side() {
+            for side in [BalanceSide::Assets, BalanceSide::Liabilities] {
+                let (assets, liabs) = match side {
+                    BalanceSide::Assets => (I80F48!(10), I80F48::ZERO),
+                    BalanceSide::Liabilities => (I80F48::ZERO, I80F48!(10)),
+                };
+                let (mut bank, mut balance) =
+                    make_bank_and_balance(I80F48::ONE, I80F48::ONE, assets, liabs);
+                balance.tag = 31;
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                wrapper.transfer_shares(side, I80F48!(-4)).unwrap();
+                assert_eq!(wrapper.balance.tag, 31);
+                wrapper.transfer_shares(side, I80F48!(-6)).unwrap();
+                assert_eq!(wrapper.balance.get_side(), None);
+                assert_eq!(wrapper.balance.tag, 0);
+
+                // A tag left on an empty slot does not attach to shares moved in.
+                wrapper.balance.tag = 31;
+                wrapper.transfer_shares(side, I80F48!(10)).unwrap();
+                assert_eq!(wrapper.balance.get_side(), Some(side));
+                assert_eq!(wrapper.balance.tag, 0);
+            }
         }
 
         /// `withdraw` on a bank with fractional `asset_share_value`. Choose an

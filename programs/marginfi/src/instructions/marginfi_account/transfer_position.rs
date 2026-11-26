@@ -185,8 +185,6 @@ fn transfer_position<'info>(
                 check_no_liability_dust(source_position.balance)?;
                 if source_position.balance.is_empty(BalanceSide::Liabilities) {
                     carried_premium = receivable;
-                    // The emptied slot stays active, so it keeps no order tag.
-                    source_position.balance.tag = 0;
                 }
             } else {
                 source_position.transfer_shares(side, -share_amount)?;
