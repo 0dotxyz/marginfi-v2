@@ -12,7 +12,11 @@ use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     constants::REBALANCE_ORDER_SEED,
     pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
-    types::{BankConfig, BankConfigOpt, WrappedI80F48, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES},
+    types::{
+        BankConfig, BankConfigOpt, WrappedI80F48, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+        MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
+    },
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::tokio;
@@ -593,6 +597,79 @@ async fn rebalance_keeper_close_when_no_position() -> anyhow::Result<()> {
         .get_account(f.order_pda)
         .await?;
     assert!(order.map(|a| a.lamports).unwrap_or(0) == 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebalance_order_close_rejects_transient_state() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dest = f.test_f.usdc_mint.create_empty_token_account().await;
+    f.user
+        .try_bank_withdraw(dest.key, &f.src_bank_f, DEPOSIT_USDC, Some(true))
+        .await?;
+    let payer = f.test_f.payer();
+    let authority_ix = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    let keeper_ix = f
+        .user
+        .make_keeper_close_rebalance_order_ix(f.order_pda, f.keeper.pubkey())
+        .await;
+    let mut account = f.user.load().await;
+
+    for (flag, error) in [
+        (
+            ACCOUNT_IN_RECEIVERSHIP,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (
+            ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+            MarginfiError::UnexpectedLiquidationState,
+        ),
+        (ACCOUNT_IN_FLASHLOAN, MarginfiError::AccountInFlashloan),
+        (
+            ACCOUNT_IN_ORDER_EXECUTION,
+            MarginfiError::UnexpectedOrderExecutionState,
+        ),
+        (ACCOUNT_IN_REBALANCE, MarginfiError::IllegalAction),
+    ] {
+        account.account_flags = flag;
+        f.user.set_account(&account).await?;
+        let blockhash = f.test_f.get_latest_blockhash().await;
+        {
+            let ctx = f.test_f.context.borrow_mut();
+            let authority_tx = Transaction::new_signed_with_payer(
+                &[authority_ix.clone()],
+                Some(&payer),
+                &[&ctx.payer],
+                blockhash,
+            );
+            let result = ctx
+                .banks_client
+                .process_transaction_with_preflight(authority_tx)
+                .await;
+            assert_custom_error!(result.unwrap_err(), error);
+            let keeper_tx = Transaction::new_signed_with_payer(
+                &[keeper_ix.clone()],
+                Some(&f.keeper.pubkey()),
+                &[&f.keeper],
+                blockhash,
+            );
+            let result = ctx
+                .banks_client
+                .process_transaction_with_preflight(keeper_tx)
+                .await;
+            assert_custom_error!(result.unwrap_err(), error);
+        }
+        assert!(f.test_f.try_load(&f.order_pda).await?.is_some());
+        assert_eq!(f.user.load().await.active_orders, 1);
+    }
+
+    account.account_flags = 0;
+    f.user.set_account(&account).await?;
+    f.process(&[keeper_ix]).await?;
+    assert_eq!(f.user.load().await.active_orders, 0);
     Ok(())
 }
 

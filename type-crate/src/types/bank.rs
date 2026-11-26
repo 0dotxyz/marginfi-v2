@@ -123,6 +123,7 @@ pub struct Bank {
     ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
     /// - Bit 14 (16384): `KAMINO_MARKET_EMERGENCY` — the Kamino lending market behind this bank is
     ///   in emergency mode, so the bank backs no new borrowing.
+    /// - Bit 15 (32768): `JUPLEND_EMERGENCY` — propagated JupLend emergency state; no Initial value.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -481,6 +482,22 @@ impl OracleSetup {
         matches!(
             self,
             Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
+        )
+    }
+
+    /// Setups whose confidence is the admin-set `oracle_max_confidence` band rather than a value
+    /// the feed publishes. That band is a pricing haircut, not measured uncertainty.
+    pub fn has_static_confidence(self) -> bool {
+        matches!(
+            self,
+            Self::SwitchboardPull
+                | Self::KaminoSwitchboardPull
+                | Self::DriftSwitchboardPull
+                | Self::SolendSwitchboardPull
+                | Self::JuplendSwitchboardPull
+                | Self::Scope
+                | Self::ScopeKamino
+                | Self::ScopeJuplend
         )
     }
 
