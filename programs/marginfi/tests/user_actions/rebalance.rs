@@ -4504,7 +4504,10 @@ async fn rebalance_rejects_a_keeper_funded_deposit() -> anyhow::Result<()> {
         .create_token_account_and_mint_to_with_owner(&f.keeper.pubkey(), 0.000001)
         .await
         .key;
-    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key).await,
+        f.bank_meta(f.dst_bank_f.key).await,
+    ];
     let start_ix = f
         .user
         .make_rebalance_start_ix(

@@ -619,14 +619,14 @@ async fn kamino_deposit_refresh_flag_uses_refreshed_exchange_rate() -> anyhow::R
         "obligation must remain stale after reserve-only refresh"
     );
 
-    let mut stale_ix = user
-        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, DEPOSIT_AMOUNT)
+    let stale_ix = user
+        .make_kamino_deposit_ix_with_refresh(
+            user_token.key,
+            &setup.bank_f,
+            DEPOSIT_AMOUNT,
+            Some(false),
+        )
         .await;
-    stale_ix.data = marginfi::instruction::KaminoDeposit {
-        amount: DEPOSIT_AMOUNT,
-        refresh_reserve: Some(false),
-    }
-    .data();
 
     let (result, logs) = send_kamino_ixs(&setup, &[stale_ix]).await?;
     assert!(result.is_err(), "deposit with stale obligation must fail");
@@ -901,19 +901,14 @@ async fn kamino_withdraw_without_refresh_flag_fails_on_stale_state(
         .await?;
     }
 
-    let mut ix = user
-        .make_kamino_withdraw_ix(
+    let ix = user
+        .make_kamino_withdraw_ix_with_flags(
             user_token.key,
             &setup.bank_f,
             REQUESTED_COLLATERAL,
-            Some(false),
+            Some(0x00),
         )
         .await;
-    ix.data = marginfi::instruction::KaminoWithdraw {
-        amount: REQUESTED_COLLATERAL,
-        flags: Some(0x00),
-    }
-    .data();
 
     let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "stale withdraw without refresh must fail");
@@ -964,14 +959,9 @@ async fn kamino_deposit_refreshes_before_bank_validation() -> anyhow::Result<()>
         .set_account(&setup.bank_f.key, &AccountSharedData::from(bank));
     let before = kamino_account_data(&setup, user.key, user_token.key).await?;
 
-    let mut ix = user
-        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, 1_000_000)
+    let ix = user
+        .make_kamino_deposit_ix_with_refresh(user_token.key, &setup.bank_f, 1_000_000, Some(true))
         .await;
-    ix.data = marginfi::instruction::KaminoDeposit {
-        amount: 1_000_000,
-        refresh_reserve: Some(true),
-    }
-    .data();
     let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "deposit into a paused bank must fail");
     let reserve_refresh = logs
@@ -1004,14 +994,14 @@ async fn kamino_withdraw_refreshes_before_checking_balance(
     let before = kamino_account_data(&setup, user.key, user_token.key).await?;
 
     // The account has no position, so withdrawal must fail after both refreshes.
-    let mut ix = user
-        .make_kamino_withdraw_ix(user_token.key, &setup.bank_f, 1, Some(withdraw_all))
+    let ix = user
+        .make_kamino_withdraw_ix_with_flags(
+            user_token.key,
+            &setup.bank_f,
+            1,
+            Some(if withdraw_all { 0x03 } else { 0x02 }),
+        )
         .await;
-    ix.data = marginfi::instruction::KaminoWithdraw {
-        amount: 1,
-        flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
-    }
-    .data();
     let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(result.is_err(), "withdraw without a position must fail");
     let reserve_refresh = logs
@@ -1063,14 +1053,14 @@ async fn kamino_withdraw_rolls_back_when_obligation_refresh_fails(
         .set_account(&setup.obligation, &AccountSharedData::from(obligation));
     let before = kamino_account_data(&setup, user.key, user_token.key).await?;
 
-    let mut ix = user
-        .make_kamino_withdraw_ix(user_token.key, &setup.bank_f, 1_000_000, Some(withdraw_all))
+    let ix = user
+        .make_kamino_withdraw_ix_with_flags(
+            user_token.key,
+            &setup.bank_f,
+            1_000_000,
+            Some(if withdraw_all { 0x03 } else { 0x02 }),
+        )
         .await;
-    ix.data = marginfi::instruction::KaminoWithdraw {
-        amount: 1_000_000,
-        flags: Some(if withdraw_all { 0x03 } else { 0x02 }),
-    }
-    .data();
     let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(
         result.is_err(),
@@ -1095,14 +1085,9 @@ async fn kamino_deposit_rolls_back_refresh_when_transfer_fails() -> anyhow::Resu
     warp_clock_forward(&setup).await?;
     let before = kamino_account_data(&setup, user.key, user_token.key).await?;
 
-    let mut ix = user
-        .make_kamino_deposit_ix(user_token.key, &setup.bank_f, 100_000_000)
+    let ix = user
+        .make_kamino_deposit_ix_with_refresh(user_token.key, &setup.bank_f, 100_000_000, Some(true))
         .await;
-    ix.data = marginfi::instruction::KaminoDeposit {
-        amount: 100_000_000,
-        refresh_reserve: Some(true),
-    }
-    .data();
     let (result, logs) = send_kamino_ixs(&setup, &[ix]).await?;
     assert!(
         result.is_err(),

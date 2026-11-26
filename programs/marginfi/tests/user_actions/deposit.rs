@@ -375,23 +375,20 @@ async fn deposit_up_to_limit_native_unit_boundary(
     let wallet = bank_f.mint.create_token_account_and_mint_to(1).await;
 
     // Encode raw native amounts directly: UI f64 conversion could obscure a one-unit boundary.
-    let deposit_ix = |account, amount, deposit_up_to_limit| Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingAccountDeposit {
-            group: test_f.marginfi_group.key,
-            marginfi_account: account,
-            authority: test_f.payer(),
-            bank: bank_f.key,
-            signer_token_account: wallet.key,
-            liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank_f.mint.token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountDeposit {
+    let deposit_ix = |account, amount, deposit_up_to_limit| {
+        ix_builders::lending::lending_account_deposit(
+            &ix_builders::lending::LendingAccountDeposit {
+                group: test_f.marginfi_group.key,
+                marginfi_account: account,
+                authority: test_f.payer(),
+                bank: bank_f.key,
+                signer_token_account: wallet.key,
+                liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
+                token_program: bank_f.mint.token_program,
+            },
             amount,
             deposit_up_to_limit,
-        }
-        .data(),
+        )
     };
     let seed_tx = Transaction::new_signed_with_payer(
         &[deposit_ix(lender.key, INITIAL_DEPOSIT, None)],

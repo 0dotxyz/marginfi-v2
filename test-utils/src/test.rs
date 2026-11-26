@@ -2327,15 +2327,15 @@ impl TestFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let mut ixs = pre_instructions.to_vec();
         ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
-        let mut deposit_ix = user
-            .make_kamino_deposit_ix(signer_token_account, bank_f, amount)
-            .await;
-        deposit_ix.data = marginfi::instruction::KaminoDeposit {
-            amount,
-            refresh_reserve: Some(refresh.internal),
-        }
-        .data();
-        ixs.push(deposit_ix);
+        ixs.push(
+            user.make_kamino_deposit_ix_with_refresh(
+                signer_token_account,
+                bank_f,
+                amount,
+                Some(refresh.internal),
+            )
+            .await,
+        );
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
@@ -2374,9 +2374,6 @@ impl TestFixture {
 
         let mut ixs = pre_instructions.to_vec();
         ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
-        let mut withdraw_ix = user
-            .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
-            .await;
         let mut flags = 0;
         if withdraw_all.unwrap_or(false) {
             flags |= WITHDRAW_ALL_FLAG;
@@ -2384,12 +2381,15 @@ impl TestFixture {
         if refresh.internal {
             flags |= REFRESH_RESERVE_FLAG;
         }
-        withdraw_ix.data = marginfi::instruction::KaminoWithdraw {
-            amount,
-            flags: (flags != 0).then_some(flags),
-        }
-        .data();
-        ixs.push(withdraw_ix);
+        ixs.push(
+            user.make_kamino_withdraw_ix_with_flags(
+                destination_token_account,
+                bank_f,
+                amount,
+                (flags != 0).then_some(flags),
+            )
+            .await,
+        );
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 

@@ -1739,13 +1739,21 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
     ) -> Instruction {
-        self.make_kamino_deposit_ix_with_authority(
-            funding_account,
-            bank,
-            amount,
-            self.ctx.borrow().payer.pubkey(),
-        )
-        .await
+        self.make_kamino_deposit_ix_with_refresh(funding_account, bank, amount, Some(false))
+            .await
+    }
+
+    /// As `make_kamino_deposit_ix`, with the instruction's `refresh_reserve` argument.
+    pub async fn make_kamino_deposit_ix_with_refresh(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        refresh_reserve: Option<bool>,
+    ) -> Instruction {
+        let authority = self.ctx.borrow().payer.pubkey();
+        self.kamino_deposit_ix(funding_account, bank, amount, refresh_reserve, authority)
+            .await
     }
 
     pub async fn make_kamino_deposit_ix_with_authority(
@@ -1753,6 +1761,18 @@ impl MarginfiAccountFixture {
         funding_account: Pubkey,
         bank: &BankFixture,
         amount: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        self.kamino_deposit_ix(funding_account, bank, amount, Some(false), authority)
+            .await
+    }
+
+    async fn kamino_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        refresh_reserve: Option<bool>,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -1788,7 +1808,7 @@ impl MarginfiAccountFixture {
                 instruction_sysvar_account: sysvar::instructions::ID,
             },
             amount,
-            Some(false),
+            refresh_reserve,
         )
     }
 
@@ -1809,6 +1829,19 @@ impl MarginfiAccountFixture {
         .await
     }
 
+    /// As `make_kamino_withdraw_ix`, with the instruction's raw `flags` argument.
+    pub async fn make_kamino_withdraw_ix_with_flags(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        flags: Option<u8>,
+    ) -> Instruction {
+        let authority = self.ctx.borrow().payer.pubkey();
+        self.kamino_withdraw_ix(destination_account, bank, amount, flags, authority)
+            .await
+    }
+
     pub async fn make_kamino_withdraw_ix_with_authority(
         &self,
         destination_account: Pubkey,
@@ -1817,17 +1850,29 @@ impl MarginfiAccountFixture {
         withdraw_all: Option<bool>,
         authority: Pubkey,
     ) -> Instruction {
+        let flags = if withdraw_all.unwrap_or(false) {
+            Some(0b0000_0001u8)
+        } else {
+            None
+        };
+        self.kamino_withdraw_ix(destination_account, bank, amount, flags, authority)
+            .await
+    }
+
+    async fn kamino_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        flags: Option<u8>,
+        authority: Pubkey,
+    ) -> Instruction {
         let marginfi_account = self.load().await;
         let bank_state = bank.load().await;
         let reserve: MinimalReserve =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
         let (lending_market_authority, _) =
             derive_kamino_lending_market_authority(&reserve.lending_market);
-        let flags = if withdraw_all.unwrap_or(false) {
-            Some(0b0000_0001u8)
-        } else {
-            None
-        };
 
         let mut ix = ix_builders::kamino::kamino_withdraw(
             &ix_builders::kamino::KaminoWithdraw {
