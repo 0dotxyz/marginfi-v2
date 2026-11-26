@@ -2,10 +2,14 @@ use crate::state::bank::BankImpl;
 // Permissionless ix to propagate a group's staked collateral settings to any bank in that group.
 use crate::check;
 use crate::state::bank_config::BankConfigImpl;
+use crate::state::staked_settings::StakedSettingsImpl;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
-    constants::{ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE, STAKED_ORACLE_FLAGS},
+    constants::{
+        ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE, CIRCUIT_BREAKER_ENABLED,
+        STAKED_ORACLE_FLAGS,
+    },
     types::{Bank, MarginfiGroup, StakedSettings},
 };
 
@@ -30,6 +34,10 @@ pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Resul
     bank.config.risk_tier = settings.risk_tier;
     bank.flags &= !STAKED_ORACLE_FLAGS;
     bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
+    if settings.flags & CIRCUIT_BREAKER_ENABLED != 0 {
+        settings.apply_circuit_breaker_config(&mut bank.config)?;
+        bank.set_circuit_breaker_enabled(true)?;
+    }
 
     // Only validate the oracle info if it has changed
     if oracle_before != oracle_after {

@@ -46,12 +46,23 @@ pub struct StakedSettings {
     pub risk_tier: RiskTier,
     _pad0: [u8; 5],
 
-    /// Desired bitmask for staked-bank transition flags. These bits are copied to `Bank.flags`
+    /// Desired bitmask for staked-bank transition flags. Bits 9 and 10 are copied to `Bank.flags`
     /// when staked settings are propagated or when a new staked bank is created.
     /// * Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
     /// * Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
     ///   single-pool on-ramp account in NAV.
+    /// * Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED`: propagation and bank creation turn on the
+    ///   bank's circuit breaker with the `cb_*` values below; while clear, they leave it alone.
     pub flags: u64,
+
+    pub cb_deviation_bps_tiers: [u16; 3],
+    pub cb_tier_durations_seconds: [u16; 3],
+    pub cb_escalation_window_mult: u8,
+    _pad1: [u8; 1],
+    pub cb_ema_alpha_bps: u16,
+    pub cb_window_seconds: u32,
+    pub cb_window_max_up_bps: u16,
+    pub cb_window_max_down_bps: u16,
 
     /// The following values are irrelevant because staked collateral positions do not support
     /// borrowing.
@@ -59,7 +70,7 @@ pub struct StakedSettings {
     // * liability_weight_init
     // * liability_weight_maint
     // * borrow_limit
-    _reserved1: [u8; 32],
+    _reserved1: [u8; 8],
     _reserved2: [u8; 64],
 }
 
@@ -127,7 +138,15 @@ impl Default for StakedSettings {
             risk_tier: RiskTier::Collateral,
             _pad0: [0; 5],
             flags: 0,
-            _reserved1: [0; 32],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _pad1: [0; 1],
+            cb_ema_alpha_bps: 0,
+            cb_window_seconds: 0,
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _reserved1: [0; 8],
             _reserved2: [0; 64],
         }
     }

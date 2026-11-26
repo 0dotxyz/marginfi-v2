@@ -36,7 +36,7 @@ The governance admin is the safety-critical authority and should be a timelocked
   leverage limits
 - Perform all e-mode configuration, including same-asset registry initialization, eligibility,
   and cloning. The stored `emode_admin` does not independently authorize an instruction.
-- Initialize, edit, and transition staked-collateral settings
+- Initialize, edit, and transition staked-collateral settings, other than their circuit breaker
 - Operate a frozen user account for remediation or seizure, including withdrawals
 - Remove a user account from the frozen state
 
@@ -52,6 +52,7 @@ quickly, but it cannot make the risk-sensitive changes listed under `governance_
 **Can do:**
 - Configure fast-admin bank settings: deposit/borrow/init-value limits, interest curves,
   permissionless bad-debt settlement, liquidation fees, and circuit breakers
+- Edit the circuit-breaker settings that staked-collateral banks inherit
 - Configure bank/group rate limits and the deleverage withdrawal limit (also delegable to the
   limit admin)
 - Make only risk-reducing bank-state transitions: Operational → Paused, ReduceOnly, or
@@ -72,7 +73,8 @@ quickly, but it cannot make the risk-sensitive changes listed under `governance_
 - Change global fee state (that's the `global_fee_admin`)
 - Set `risk_admin` or `emode_admin`, change e-mode settings, create/configure bank oracle or
   fixed-price feeds, change governance-class bank risk parameters, enable tokenless repayments,
-  freeze bank settings, restore a bank to Operational, or edit staked settings
+  freeze bank settings, restore a bank to Operational, or edit staked settings other than their
+  circuit breaker
 
 ### Risk Admin
 
@@ -321,6 +323,7 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Unfreeze account | `governance_admin` |
 | Operate a frozen account | `governance_admin` |
 | Initialize/edit/transition staked settings | `governance_admin` |
+| Edit staked circuit-breaker settings | `admin` |
 | Handle bankruptcy | `risk_admin` or `admin` (or permissionless if flag set) |
 | Start forced deleverage | `risk_admin` |
 | Force tokenless repay complete | `risk_admin` |

@@ -16,7 +16,7 @@ use marginfi::{
         LIQUIDATION_FLAT_FEE_DEFAULT, ORDER_EXECUTION_MAX_FEE, ORDER_INIT_FLAT_FEE_DEFAULT,
     },
     instruction::*,
-    instructions::marginfi_group::StakedSettingsConfig,
+    instructions::marginfi_group::{StakedSettingsConfig, StakedSettingsEditConfigFast},
 };
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
@@ -2149,6 +2149,53 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: EnableStakedOracleOnramp {}.data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+        let mut signers = vec![&ctx.payer];
+        if signer.pubkey() != payer_pubkey {
+            signers.push(signer);
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &signers,
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        drop(ctx);
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_edit_staked_settings_fast(
+        &self,
+        settings: StakedSettingsEditConfigFast,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_edit_staked_settings_fast_with_signer(&payer, settings)
+            .await
+    }
+
+    pub async fn try_edit_staked_settings_fast_with_signer(
+        &self,
+        signer: &Keypair,
+        settings: StakedSettingsEditConfigFast,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditStakedSettingsFast {
+                marginfi_group: self.key,
+                admin: signer.pubkey(),
+                staked_settings: self.staked_settings,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: EditStakedSettingsFast { settings }.data(),
         };
 
         let ctx = self.ctx.borrow();
