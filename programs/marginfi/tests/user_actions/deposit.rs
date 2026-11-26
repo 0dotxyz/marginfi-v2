@@ -1,16 +1,16 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token;
 use fixed::types::I80F48;
 use fixtures::prelude::*;
 use fixtures::{assert_custom_error, native};
 use marginfi::state::bank::BankImpl;
 use marginfi::{assert_eq_with_tolerance, prelude::*};
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::{BankConfig, BankConfigOpt, BankVaultType};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::clock::Clock;
+use solana_sdk::signer::Signer;
 use solana_sdk::transaction::Transaction;
-use solana_sdk::{instruction::Instruction, signer::Signer};
 use test_case::test_case;
 
 #[test_case(0.0, BankMint::Usdc)]
@@ -204,26 +204,19 @@ async fn marginfi_account_deposit_failure_wrong_token_program() -> anyhow::Resul
 
     let marginfi_account = user_mfi_account_f.load().await;
 
-    let accounts = marginfi::accounts::LendingAccountDeposit {
-        group: marginfi_account.group,
-        marginfi_account: user_mfi_account_f.key,
-        authority: test_f.context.borrow().payer.pubkey(),
-        bank: bank_f.key,
-        signer_token_account: user_token_account.key,
-        liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-        token_program: spl_token::ID,
-    }
-    .to_account_metas(Some(true));
-
-    let deposit_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::LendingAccountDeposit {
-            amount: native!(deposit_amount, bank_f.mint.mint.decimals, f64),
-            deposit_up_to_limit: None,
-        }
-        .data(),
-    };
+    let deposit_ix = ix_builders::lending::lending_account_deposit(
+        &ix_builders::lending::LendingAccountDeposit {
+            group: marginfi_account.group,
+            marginfi_account: user_mfi_account_f.key,
+            authority: test_f.context.borrow().payer.pubkey(),
+            bank: bank_f.key,
+            signer_token_account: user_token_account.key,
+            liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
+            token_program: spl_token::ID,
+        },
+        native!(deposit_amount, bank_f.mint.mint.decimals, f64),
+        None,
+    );
 
     let tx = {
         let ctx = test_f.context.borrow();
@@ -382,23 +375,20 @@ async fn deposit_up_to_limit_native_unit_boundary(
     let wallet = bank_f.mint.create_token_account_and_mint_to(1).await;
 
     // Encode raw native amounts directly: UI f64 conversion could obscure a one-unit boundary.
-    let deposit_ix = |account, amount, deposit_up_to_limit| Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingAccountDeposit {
-            group: test_f.marginfi_group.key,
-            marginfi_account: account,
-            authority: test_f.payer(),
-            bank: bank_f.key,
-            signer_token_account: wallet.key,
-            liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank_f.mint.token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountDeposit {
+    let deposit_ix = |account, amount, deposit_up_to_limit| {
+        ix_builders::lending::lending_account_deposit(
+            &ix_builders::lending::LendingAccountDeposit {
+                group: test_f.marginfi_group.key,
+                marginfi_account: account,
+                authority: test_f.payer(),
+                bank: bank_f.key,
+                signer_token_account: wallet.key,
+                liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
+                token_program: bank_f.mint.token_program,
+            },
             amount,
             deposit_up_to_limit,
-        }
-        .data(),
+        )
     };
     let seed_tx = Transaction::new_signed_with_payer(
         &[deposit_ix(lender.key, INITIAL_DEPOSIT, None)],

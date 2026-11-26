@@ -1,12 +1,9 @@
 pub mod bank;
 pub mod bank_cache;
 pub mod bank_config;
-pub mod drift;
 pub mod emode;
 pub mod fee_state;
 pub mod interest_rate;
-pub mod juplend;
-pub mod kamino;
 pub mod liquidation_record;
 pub mod lst_stake_price;
 pub mod marginfi_account;
@@ -18,5 +15,4 @@ pub mod price;
 pub mod rate;
 pub mod rate_limiter;
 pub mod rebalance;
-pub mod solend;
 pub mod staked_settings;

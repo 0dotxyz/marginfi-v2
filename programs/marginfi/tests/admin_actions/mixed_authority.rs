@@ -1,12 +1,11 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     constants::FREEZE_SETTINGS,
+    ix_builders,
     types::{BankConfigFast, BankConfigGov, BankConfigOpt, BankOperationalState},
 };
-use solana_sdk::instruction::Instruction;
 use solana_sdk::{signature::Keypair, signer::Signer, transaction::Transaction};
 
 async fn try_configure_fast_state(
@@ -14,23 +13,18 @@ async fn try_configure_fast_state(
     bank: &fixtures::bank::BankFixture,
     operational_state: BankOperationalState,
 ) -> Result<(), solana_program_test::BanksClientError> {
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingPoolConfigureBank {
+    let ix = ix_builders::pool::lending_pool_configure_bank(
+        &ix_builders::pool::LendingPoolConfigureBank {
             group: test_f.marginfi_group.key,
             admin: test_f.payer_keypair().pubkey(),
             bank: bank.key,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolConfigureBank {
-            bank_config_opt: BankConfigFast {
-                operational_state: Some(operational_state),
-                ..BankConfigFast::default()
-            },
-        }
-        .data(),
-    };
+        },
+        BankConfigFast {
+            operational_state: Some(operational_state),
+            ..BankConfigFast::default()
+        },
+    );
     let ctx = test_f.context.borrow();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -85,14 +79,12 @@ async fn group_configuration_has_explicit_fast_and_governance_entry_points() -> 
         .marginfi_group
         .try_group_configure_with_signer(
             &test_f.payer_keypair(),
-            marginfi::instruction::MarginfiGroupConfigure {
-                new_admin: None,
-                new_curve_admin: None,
-                new_limit_admin: None,
-                new_flow_admin: None,
-                new_emissions_admin: None,
-                new_metadata_admin: Some(metadata_admin),
-            },
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(metadata_admin),
         )
         .await?;
 
@@ -102,15 +94,13 @@ async fn group_configuration_has_explicit_fast_and_governance_entry_points() -> 
         .marginfi_group
         .try_group_configure_gov_with_signer(
             &governance_admin,
-            marginfi::instruction::MarginfiGroupConfigureGov {
-                new_admin: Some(new_fast_admin),
-                new_emode_admin: None,
-                new_risk_admin: Some(risk_admin),
-                emode_max_init_leverage: None,
-                emode_max_maint_leverage: None,
-                same_asset_emode_init_leverage: None,
-                same_asset_emode_maint_leverage: None,
-            },
+            Some(new_fast_admin),
+            None,
+            Some(risk_admin),
+            None,
+            None,
+            None,
+            None,
         )
         .await?;
 
@@ -139,23 +129,18 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
         .try_set_governance_admin(&governance_admin)
         .await?;
 
-    let fast_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingPoolConfigureBank {
+    let fast_ix = ix_builders::pool::lending_pool_configure_bank(
+        &ix_builders::pool::LendingPoolConfigureBank {
             group: test_f.marginfi_group.key,
             admin: test_f.payer_keypair().pubkey(),
             bank: bank.key,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolConfigureBank {
-            bank_config_opt: BankConfigFast {
-                operational_state: Some(BankOperationalState::Operational),
-                ..BankConfigFast::default()
-            },
-        }
-        .data(),
-    };
+        },
+        BankConfigFast {
+            operational_state: Some(BankOperationalState::Operational),
+            ..BankConfigFast::default()
+        },
+    );
     let ctx = test_f.context.borrow();
     let tx = Transaction::new_signed_with_payer(
         &[fast_ix],
@@ -167,23 +152,18 @@ async fn bank_configuration_entry_points_reject_wrong_operational_state_class() 
     assert_custom_error!(err, MarginfiError::InvalidFastBankOperationalState);
     drop(ctx);
 
-    let gov_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingPoolConfigureBankGov {
+    let gov_ix = ix_builders::pool::lending_pool_configure_bank_gov(
+        &ix_builders::pool::LendingPoolConfigureBankGov {
             group: test_f.marginfi_group.key,
             governance_admin: governance_admin.pubkey(),
             bank: bank.key,
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolConfigureBankGov {
-            bank_config_opt: BankConfigGov {
-                operational_state: Some(BankOperationalState::Paused),
-                ..BankConfigGov::default()
-            },
-        }
-        .data(),
-    };
+        },
+        BankConfigGov {
+            operational_state: Some(BankOperationalState::Paused),
+            ..BankConfigGov::default()
+        },
+    );
     let ctx = test_f.context.borrow();
     let tx = Transaction::new_signed_with_payer(
         &[gov_ix],

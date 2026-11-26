@@ -3,12 +3,9 @@
 //! The caller supplies account metas and the target program ID. Keeping these
 //! encodings independent of the program crate lets mocks be built separately.
 
-use crate::constants::ix_discriminators::START_LIQUIDATION;
-
-/// Anchor discriminator for `lending_pool_handle_bankruptcy`.
-pub const LENDING_POOL_HANDLE_BANKRUPTCY: [u8; 8] = [162, 11, 56, 139, 90, 128, 70, 173];
-/// Anchor discriminator for `marginfi_account_initialize_pda`.
-pub const MARGINFI_ACCOUNT_INITIALIZE_PDA: [u8; 8] = [87, 177, 91, 80, 218, 119, 245, 31];
+use crate::constants::ix_discriminators::native::{
+    LENDING_POOL_HANDLE_BANKRUPTCY, MARGINFI_ACCOUNT_INITIALIZE_PDA, START_LIQUIDATION,
+};
 
 /// Instruction data for `start_liquidation`, which takes no arguments.
 pub fn start_liquidation_data() -> Vec<u8> {

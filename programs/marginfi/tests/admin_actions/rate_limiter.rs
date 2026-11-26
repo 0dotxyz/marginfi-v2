@@ -1,13 +1,11 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::assert_custom_error;
 use fixtures::prelude::*;
 use marginfi::prelude::*;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
 use solana_program_test::*;
 use solana_sdk::transaction::Transaction;
-use solana_sdk::{
-    clock::Clock, instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{clock::Clock, pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 async fn fund_signer(test_f: &TestFixture, signer: &Keypair) -> anyhow::Result<()> {
     let ctx = test_f.context.borrow_mut();
@@ -27,20 +25,15 @@ async fn configure_group_hourly_limit_as(
     admin: &Keypair,
     hourly_limit: u64,
 ) -> anyhow::Result<()> {
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::ConfigureGroupRateLimits {
+    let ix = ix_builders::admin::configure_group_rate_limits(
+        &ix_builders::admin::ConfigureGroupRateLimits {
             marginfi_group: test_f.marginfi_group.key,
             admin: admin.pubkey(),
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::ConfigureGroupRateLimits {
-            hourly_max_outflow_usd: Some(hourly_limit),
-            daily_max_outflow_usd: None,
-        }
-        .data(),
-    };
+        },
+        Some(hourly_limit),
+        None,
+    );
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -61,21 +54,16 @@ async fn configure_bank_hourly_limit_as(
     bank: Pubkey,
     hourly_limit: u64,
 ) -> anyhow::Result<()> {
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::ConfigureBankRateLimits {
+    let ix = ix_builders::admin::configure_bank_rate_limits(
+        &ix_builders::admin::ConfigureBankRateLimits {
             group: test_f.marginfi_group.key,
             admin: admin.pubkey(),
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
             bank,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::ConfigureBankRateLimits {
-            hourly_max_outflow: Some(hourly_limit),
-            daily_max_outflow: None,
-        }
-        .data(),
-    };
+        },
+        Some(hourly_limit),
+        None,
+    );
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -94,20 +82,15 @@ async fn configure_group_hourly_limit(
     test_f: &TestFixture,
     hourly_limit: u64,
 ) -> anyhow::Result<()> {
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::ConfigureGroupRateLimits {
+    let ix = ix_builders::admin::configure_group_rate_limits(
+        &ix_builders::admin::ConfigureGroupRateLimits {
             marginfi_group: test_f.marginfi_group.key,
             admin: test_f.payer(),
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::ConfigureGroupRateLimits {
-            hourly_max_outflow_usd: Some(hourly_limit),
-            daily_max_outflow_usd: None,
-        }
-        .data(),
-    };
+        },
+        Some(hourly_limit),
+        None,
+    );
 
     {
         let ctx = test_f.context.borrow_mut();
@@ -170,23 +153,18 @@ async fn limit_admin_can_configure_and_flow_admin_can_update_rate_limits() -> an
     };
 
     let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::UpdateGroupRateLimiter {
+    let ix = ix_builders::admin::update_group_rate_limiter(
+        &ix_builders::admin::UpdateGroupRateLimiter {
             marginfi_group: test_f.marginfi_group.key,
             delegate_flow_admin: flow_admin.pubkey(),
             instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::UpdateGroupRateLimiter {
-            outflow_usd: Some(42),
-            inflow_usd: None,
-            update_seq,
-            event_start_slot,
-            event_end_slot: slot,
-        }
-        .data(),
-    };
+        },
+        Some(42),
+        None,
+        update_seq,
+        event_start_slot,
+        slot,
+    );
 
     {
         let ctx = test_f.context.borrow_mut();
@@ -223,23 +201,18 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
 
     {
         let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(95),
-                inflow_usd: None,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            Some(95),
+            None,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -266,23 +239,18 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
         let g: MarginfiGroup = test_f
             .load_and_deserialize(&test_f.marginfi_group.key)
             .await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(15),
-                inflow_usd: Some(10),
-                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
-                event_start_slot: g.rate_limiter_last_admin_update_slot.saturating_add(1),
-                event_end_slot: slot2,
-            }
-            .data(),
-        };
+            },
+            Some(15),
+            Some(10),
+            g.rate_limiter_last_admin_update_seq.saturating_add(1),
+            g.rate_limiter_last_admin_update_slot.saturating_add(1),
+            slot2,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -316,23 +284,18 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             let clock: Clock = ctx.banks_client.get_sysvar().await?;
             clock.slot
         };
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: None,
-                inflow_usd: None,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            None,
+            None,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -350,23 +313,18 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
     // Invalid slot range.
     {
         let (next_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq,
-                event_start_slot: next_start_slot.saturating_add(1),
-                event_end_slot: next_start_slot,
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            update_seq,
+            next_start_slot.saturating_add(1),
+            next_start_slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -392,23 +350,18 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             let clock: Clock = ctx.banks_client.get_sysvar().await?;
             clock.slot
         };
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot.saturating_add(1),
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            update_seq,
+            event_start_slot,
+            slot.saturating_add(1),
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -434,23 +387,18 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             let clock: Clock = ctx.banks_client.get_sysvar().await?;
             clock.slot
         };
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq: next_seq.saturating_add(1),
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            next_seq.saturating_add(1),
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -492,23 +440,18 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
     // First valid update sets last slot + seq.
     {
         let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq,
-                event_start_slot,
-                event_end_slot: slot,
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            update_seq,
+            event_start_slot,
+            slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -526,23 +469,18 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
         let g: MarginfiGroup = test_f
             .load_and_deserialize(&test_f.marginfi_group.key)
             .await;
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: test_f.payer(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
-                event_start_slot: g.rate_limiter_last_admin_update_slot,
-                event_end_slot: g.rate_limiter_last_admin_update_slot,
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            g.rate_limiter_last_admin_update_seq.saturating_add(1),
+            g.rate_limiter_last_admin_update_slot,
+            g.rate_limiter_last_admin_update_slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -573,23 +511,18 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             .load_and_deserialize(&test_f.marginfi_group.key)
             .await;
         let unauthorized = Keypair::new();
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+        let ix = ix_builders::admin::update_group_rate_limiter(
+            &ix_builders::admin::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
                 delegate_flow_admin: unauthorized.pubkey(),
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateGroupRateLimiter {
-                outflow_usd: Some(1),
-                inflow_usd: None,
-                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
-                event_start_slot: g.rate_limiter_last_admin_update_slot.saturating_add(1),
-                event_end_slot: next_slot,
-            }
-            .data(),
-        };
+            },
+            Some(1),
+            None,
+            g.rate_limiter_last_admin_update_seq.saturating_add(1),
+            g.rate_limiter_last_admin_update_slot.saturating_add(1),
+            next_slot,
+        );
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],

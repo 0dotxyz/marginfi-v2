@@ -1,4 +1,3 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
@@ -15,6 +14,7 @@ use juplend_mocks::{
 use marginfi::{errors::MarginfiError, state::bank::BankImpl};
 use marginfi_type_crate::{
     constants::JUPLEND_EMERGENCY,
+    ix_builders,
     pdas::{
         derive_juplend_auth_list, derive_juplend_borrow_position, derive_juplend_liquidity,
         JUPLEND_LIQUIDITY_PROGRAM_ID,
@@ -37,18 +37,15 @@ async fn propagate(
     nonce: u32,
 ) -> Result<(), BanksClientError> {
     let ctx = setup.test_f.context.borrow_mut();
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::PropagateJuplendEmergency {
+    let ix = ix_builders::juplend::propagate_juplend_emergency(
+        &ix_builders::juplend::PropagateJuplendEmergency {
             lending: setup.lending,
             liquidity: derive_juplend_liquidity().0,
             token_reserve: reserve,
             supply_position: position,
             bank: setup.bank_f.key,
-        }
-        .to_account_metas(None),
-        data: marginfi::instruction::PropagateJuplendEmergency {}.data(),
-    };
+        },
+    );
     let tx = Transaction::new_signed_with_payer(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(500_000 + nonce),
@@ -97,15 +94,12 @@ async fn pulse(
     user: &MarginfiAccountFixture,
     nonce: u32,
 ) -> anyhow::Result<()> {
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::PulseHealth {
+    let mut ix = ix_builders::lending::lending_account_pulse_health(
+        &ix_builders::lending::LendingAccountPulseHealth {
             marginfi_account: user.key,
             group: user.load().await.group,
-        }
-        .to_account_metas(None),
-        data: marginfi::instruction::LendingAccountPulseHealth {}.data(),
-    };
+        },
+    );
     ix.accounts
         .extend(user.load_observation_account_metas(vec![], vec![]).await);
     let ctx = setup.test_f.context.borrow_mut();

@@ -1,11 +1,10 @@
 use anchor_lang::prelude::AccountMeta;
 use anchor_lang::solana_program::{instruction::Instruction, pubkey::Pubkey};
-use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_lang::InstructionData;
 use fixtures::{assert_custom_error, bank::BankFixture, prelude::*};
 use marginfi::prelude::*;
-use marginfi_type_crate::constants::{
-    INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_SEED,
-};
+use marginfi_type_crate::ix_builders;
+use marginfi_type_crate::types::BankVaultType;
 use pretty_assertions::assert_eq;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -302,19 +301,14 @@ async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
 
     let mut ixs = vec![borrow_ix, repay_ix];
 
-    let start_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::LendingAccountStartFlashloan {
+    let start_ix = ix_builders::lending::lending_account_start_flashloan(
+        &ix_builders::lending::LendingAccountStartFlashloan {
             marginfi_account: borrower_mfi_account_f.key,
             authority: test_f.context.borrow().payer.pubkey(),
             ixs_sysvar: Pubkey::default(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingAccountStartFlashloan {
-            end_index: ixs.len() as u64 + 1,
-        }
-        .data(),
-    };
+        },
+        ixs.len() as u64 + 1,
+    );
 
     let end_ix = borrower_mfi_account_f
         .make_lending_account_end_flashloan_ix(vec![], vec![])
@@ -539,9 +533,8 @@ async fn flashloan_fail_account_transfer_during_flashloan() -> anyhow::Result<()
 
     let account = borrower_mfi_account_f.load().await;
 
-    let transfer_account_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::TransferToNewAccount {
+    let transfer_account_ix = ix_builders::account::transfer_to_new_account(
+        &ix_builders::account::TransferToNewAccount {
             old_marginfi_account: borrower_mfi_account_f.key,
             new_marginfi_account: new_account.pubkey(),
             group: account.group,
@@ -551,10 +544,8 @@ async fn flashloan_fail_account_transfer_during_flashloan() -> anyhow::Result<()
             global_fee_wallet: test_f.marginfi_group.fee_wallet,
             fee_state: test_f.marginfi_group.fee_state,
             system_program: system_program::ID,
-        }
-        .to_account_metas(None),
-        data: marginfi::instruction::TransferToNewAccount {}.data(),
-    };
+        },
+    );
 
     let flash_loan_result = borrower_mfi_account_f
         .try_flashloan(
@@ -615,31 +606,17 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
         .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
-    let bank_pk = sol_bank.key;
-    let (liquidity_vault, _) = Pubkey::find_program_address(
-        &[LIQUIDITY_VAULT_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-    let (insurance_vault, _) = Pubkey::find_program_address(
-        &[INSURANCE_VAULT_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-    let (insurance_vault_authority, _) = Pubkey::find_program_address(
-        &[INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(), bank_pk.as_ref()],
-        &marginfi::ID,
-    );
-
     // A sneaky trick attackers might try to pull is to simply bankrupt what they borrowed instead
     // of returning it...
     let payer = test_f.payer();
     let cpi_accounts = mocks::accounts::HandleBankruptcyViaCpi {
         group: test_f.marginfi_group.key,
         signer: payer,
-        bank: bank_pk,
+        bank: sol_bank.key,
         marginfi_account: borrower_mfi_account_f.key,
-        liquidity_vault,
-        insurance_vault,
-        insurance_vault_authority,
+        liquidity_vault: sol_bank.get_vault(BankVaultType::Liquidity).0,
+        insurance_vault: sol_bank.get_vault(BankVaultType::Insurance).0,
+        insurance_vault_authority: sol_bank.get_vault_authority(BankVaultType::Insurance).0,
         token_program: anchor_spl::token::ID,
         marginfi_program: marginfi::ID,
     };

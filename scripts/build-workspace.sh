@@ -26,3 +26,9 @@ anchor build -p test_transfer_hook --arch v3 --no-idl --ignore-keys
 export CARGO_TARGET_DIR="$SBF_TARGET_DIR"
 echo "Building marginfi (sBPF v3, mainnet-beta)"
 anchor build -p marginfi --arch v3 --no-idl --ignore-keys -- --features mainnet-beta
+
+# Build the native CPI fixture separately to avoid workspace feature unification with Anchor.
+(
+  cd "$ROOT/programs/native-cpi-example"
+  CARGO_TARGET_DIR="$ROOT/programs/native-cpi-example/target" cargo build-sbf --arch v2
+)

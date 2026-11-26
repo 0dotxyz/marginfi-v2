@@ -1,11 +1,8 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::test::TestFixture;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::types::MarginfiAccount;
 use solana_program_test::tokio;
-use solana_sdk::{
-    clock::Clock, instruction::Instruction, signature::Keypair, signer::Signer,
-    transaction::Transaction,
-};
+use solana_sdk::{clock::Clock, signature::Keypair, signer::Signer, transaction::Transaction};
 use solana_system_interface::program as system_program;
 
 #[tokio::test]
@@ -13,18 +10,15 @@ async fn marginfi_account_create_success() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
 
     let marginfi_account_key = Keypair::new();
-    let accounts = marginfi::accounts::MarginfiAccountInitialize {
-        marginfi_group: test_f.marginfi_group.key,
-        marginfi_account: marginfi_account_key.pubkey(),
-        authority: test_f.payer(),
-        fee_payer: test_f.payer(),
-        system_program: system_program::id(),
-    };
-    let init_marginfi_account_ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountInitialize {}.data(),
-    };
+    let init_marginfi_account_ix = ix_builders::account::marginfi_account_initialize(
+        &ix_builders::account::MarginfiAccountInitialize {
+            marginfi_group: test_f.marginfi_group.key,
+            marginfi_account: marginfi_account_key.pubkey(),
+            authority: test_f.payer(),
+            fee_payer: test_f.payer(),
+            system_program: system_program::id(),
+        },
+    );
 
     let tx = Transaction::new_signed_with_payer(
         &[init_marginfi_account_ix],

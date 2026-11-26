@@ -1,4 +1,3 @@
-use anchor_lang::InstructionData;
 use anchor_spl::token_2022::spl_token_2022::extension::{
     transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
 };
@@ -381,14 +380,9 @@ async fn withdraw_dust_tolerance_is_in_native_units(
     btc_mint.mint_to(&user_token_f.key, 10.0).await;
 
     // Exact native amounts, bypassing the helpers' f64 UI conversion.
-    let mut deposit_ix = marginfi_account_f
-        .make_deposit_ix(user_token_f.key, &bank_f, 1.0, None)
+    let deposit_ix = marginfi_account_f
+        .make_deposit_ix_native(user_token_f.key, &bank_f, amount_native, None)
         .await;
-    deposit_ix.data = marginfi::instruction::LendingAccountDeposit {
-        amount: amount_native,
-        deposit_up_to_limit: None,
-    }
-    .data();
     send(&test_f, deposit_ix).await?;
 
     bank_f.set_asset_share_value(share_value).await;
@@ -406,14 +400,9 @@ async fn withdraw_dust_tolerance_is_in_native_units(
         .await;
     let vault_before = vault_f.balance().await;
 
-    let mut withdraw_ix = marginfi_account_f
-        .make_bank_withdraw_ix(user_token_f.key, &bank_f, 1.0, None)
+    let withdraw_ix = marginfi_account_f
+        .make_bank_withdraw_ix_native(user_token_f.key, &bank_f, amount_native, None)
         .await;
-    withdraw_ix.data = marginfi::instruction::LendingAccountWithdraw {
-        amount: amount_native,
-        withdraw_all: None,
-    }
-    .data();
     let res = send(&test_f, withdraw_ix).await;
 
     if !accepted {

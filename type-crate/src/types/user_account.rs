@@ -33,7 +33,7 @@ pub struct MarginfiAccount {
     ///
     /// Flags:MarginfiAccount
     /// - 1: `ACCOUNT_DISABLED` - Indicates that the account is disabled and no further actions can
-    /// be taken on it.
+    ///   be taken on it.
     /// - 2: `ACCOUNT_IN_FLASHLOAN` - Only set when an account is within a flash loan, e.g. when
     ///   start_flashloan is called, then unset when the flashloan ends.
     /// - 4: `ACCOUNT_FLAG_DEPRECATED` - Deprecated, available for future use

@@ -10,7 +10,7 @@ transfer-hook = ["transfer_hook"]
 
 [dependencies]
 solana-account-v3 = { package = "solana-account", version = "3.4.0" }
-marginfi-type-crate = { workspace = true, features = ["anchor"] }
+marginfi-type-crate = { workspace = true, features = ["anchor", "ix_builders"] }
 kamino-mocks = { path = "../programs/kamino-mocks" , features = ["no-entrypoint", "agave-v4-test"]}
 drift-mocks = { path = "../programs/drift-mocks" , features = ["no-entrypoint"]}
 juplend-mocks = { path = "../programs/juplend-mocks" , features = ["no-entrypoint"]}

@@ -18,10 +18,8 @@ use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalLendingMarket, MinimalObligation, MinimalReserve};
-use marginfi::state::{
-    bank::BankImpl, drift::DriftConfigCompact, juplend::JuplendConfigCompact,
-    kamino::KaminoConfigCompact,
-};
+use marginfi::state::bank::BankImpl;
+use marginfi_type_crate::ix_builders;
 use marginfi_type_crate::pdas::{
     derive_bank_vault, derive_bank_vault_authority, derive_drift_insurance_fund_vault,
     derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault,
@@ -37,7 +35,8 @@ use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
     types::{
         centi_to_u32, make_points, milli_to_u32, BankConfig, BankOperationalState, BankVaultType,
-        InterestRateConfig, OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
+        DriftConfigCompact, InterestRateConfig, JuplendConfigCompact, KaminoConfigCompact,
+        OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
@@ -59,6 +58,8 @@ use solana_sdk::{hash::Hash, sysvar};
 use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::system_program;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
+
+pub const NATIVE_CPI_EXAMPLE_ID: Pubkey = pubkey!("NatCP1EXampLe111111111111111111111111111111");
 
 #[derive(Default, Debug, Clone)]
 pub struct TestSettings {
@@ -360,16 +361,13 @@ impl KaminoBankSetup {
         let lending_market = self.load_reserve().await.lending_market;
         let ctx = self.test_f.context.borrow_mut();
 
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::PropagateKaminoMarketEmergency {
+        let ix = ix_builders::kamino::propagate_kamino_market_emergency(
+            &ix_builders::kamino::PropagateKaminoMarketEmergency {
                 reserve: reserve_key,
                 lending_market,
                 bank: self.bank_f.key,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::PropagateKaminoMarketEmergency {}.data(),
-        };
+            },
+        );
 
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -784,6 +782,12 @@ impl TestFixture {
         #[cfg(feature = "transfer-hook")]
         program.add_program("test_transfer_hook", TEST_HOOK_ID, None);
         program.add_program("mocks", mocks::ID, None);
+        if std::env::var_os("SBF_OUT_DIR")
+            .map(|dir| PathBuf::from(dir).join("native_cpi_example.so").exists())
+            .unwrap_or(false)
+        {
+            program.add_program("native_cpi_example", NATIVE_CPI_EXAMPLE_ID, None);
+        }
 
         program.prefer_bpf(false);
         let requires_real_kamino_program = add_integration_programs;
@@ -1477,45 +1481,48 @@ impl TestFixture {
             0,
         );
 
-        let add_bank_accounts = marginfi::accounts::LendingPoolAddBankKamino {
-            group: test_f.marginfi_group.key,
-            governance_admin: test_f.payer(),
-            fee_payer: test_f.payer(),
-            bank_mint: reserve_mint.key,
-            bank: bank_key,
-            integration_acc_1: reserve_key,
-            integration_acc_2: obligation,
-            liquidity_vault_authority,
-            liquidity_vault: derive_bank_vault(&bank_key, BankVaultType::Liquidity, &marginfi::ID)
+        let mut add_bank_ix = ix_builders::kamino::lending_pool_add_bank_kamino(
+            &ix_builders::kamino::LendingPoolAddBankKamino {
+                group: test_f.marginfi_group.key,
+                governance_admin: test_f.payer(),
+                fee_payer: test_f.payer(),
+                bank_mint: reserve_mint.key,
+                bank: bank_key,
+                integration_acc_1: reserve_key,
+                integration_acc_2: obligation,
+                liquidity_vault_authority,
+                liquidity_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
+                )
                 .0,
-            insurance_vault_authority: derive_bank_vault_authority(
-                &bank_key,
-                BankVaultType::Insurance,
-                &marginfi::ID,
-            )
-            .0,
-            insurance_vault: derive_bank_vault(&bank_key, BankVaultType::Insurance, &marginfi::ID)
+                insurance_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
                 .0,
-            fee_vault_authority: derive_bank_vault_authority(
-                &bank_key,
-                BankVaultType::Fee,
-                &marginfi::ID,
-            )
-            .0,
-            fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
-            token_program: reserve_mint.token_program,
-            system_program: system_program::ID,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        };
-        let mut add_bank_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: add_bank_accounts.to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolAddBankKamino {
-                bank_config,
-                bank_seed: KAMINO_TEST_BANK_SEED,
-            }
-            .data(),
-        };
+                insurance_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Fee,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
+                token_program: reserve_mint.token_program,
+                system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+            bank_config,
+            KAMINO_TEST_BANK_SEED,
+        );
         add_bank_ix
             .accounts
             .push(AccountMeta::new_readonly(PYTH_USDC_FEED, false));
@@ -1530,9 +1537,8 @@ impl TestFixture {
         let user_metadata = derive_kamino_user_metadata(&liquidity_vault_authority).0;
         create_system_account_if_missing(test_f.context.clone(), user_metadata).await;
 
-        let init_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::KaminoInitObligation {
+        let init_ix = ix_builders::kamino::kamino_init_obligation(
+            &ix_builders::kamino::KaminoInitObligation {
                 fee_payer: test_f.payer(),
                 bank: bank_key,
                 signer_token_account: init_source.key,
@@ -1561,13 +1567,9 @@ impl TestFixture {
                 instruction_sysvar_account: sysvar::instructions::ID,
                 rent: sysvar::rent::ID,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoInitObligation {
-                amount: KAMINO_INIT_OBLIGATION_NOMINAL_AMOUNT,
-            }
-            .data(),
-        };
+            },
+            KAMINO_INIT_OBLIGATION_NOMINAL_AMOUNT,
+        );
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
 
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
@@ -1713,46 +1715,49 @@ impl TestFixture {
             0,
         );
 
-        let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
-            group: self.marginfi_group.key,
-            governance_admin: self.payer(),
-            fee_payer: self.payer(),
-            bank_mint: mint.key,
-            bank: bank_key,
-            integration_acc_1: spot_market,
-            integration_acc_2: drift_user,
-            integration_acc_3: drift_user_stats,
-            liquidity_vault_authority,
-            liquidity_vault: derive_bank_vault(&bank_key, BankVaultType::Liquidity, &marginfi::ID)
+        let mut add_bank_ix = ix_builders::drift::lending_pool_add_bank_drift(
+            &ix_builders::drift::LendingPoolAddBankDrift {
+                group: self.marginfi_group.key,
+                governance_admin: self.payer(),
+                fee_payer: self.payer(),
+                bank_mint: mint.key,
+                bank: bank_key,
+                integration_acc_1: spot_market,
+                integration_acc_2: drift_user,
+                integration_acc_3: drift_user_stats,
+                liquidity_vault_authority,
+                liquidity_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Liquidity,
+                    &marginfi::ID,
+                )
                 .0,
-            insurance_vault_authority: derive_bank_vault_authority(
-                &bank_key,
-                BankVaultType::Insurance,
-                &marginfi::ID,
-            )
-            .0,
-            insurance_vault: derive_bank_vault(&bank_key, BankVaultType::Insurance, &marginfi::ID)
+                insurance_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
                 .0,
-            fee_vault_authority: derive_bank_vault_authority(
-                &bank_key,
-                BankVaultType::Fee,
-                &marginfi::ID,
-            )
-            .0,
-            fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
-            token_program: spl_token::ID,
-            system_program: system_program::ID,
-            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-        };
-        let mut add_bank_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: add_bank_accounts.to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolAddBankDrift {
-                bank_config,
-                bank_seed,
-            }
-            .data(),
-        };
+                insurance_vault: derive_bank_vault(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault_authority: derive_bank_vault_authority(
+                    &bank_key,
+                    BankVaultType::Fee,
+                    &marginfi::ID,
+                )
+                .0,
+                fee_vault: derive_bank_vault(&bank_key, BankVaultType::Fee, &marginfi::ID).0,
+                token_program: spl_token::ID,
+                system_program: system_program::ID,
+                instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+            },
+            bank_config,
+            bank_seed,
+        );
         add_bank_ix
             .accounts
             .push(AccountMeta::new_readonly(PYTH_USDC_FEED, false));
@@ -1764,9 +1769,8 @@ impl TestFixture {
             .unwrap();
 
         let init_source = mint.create_token_account_and_mint_to(1.0).await;
-        let init_user_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::DriftInitUser {
+        let init_user_ix = ix_builders::drift::drift_init_user(
+            &ix_builders::drift::DriftInitUser {
                 fee_payer: self.payer(),
                 signer_token_account: init_source.key,
                 bank: bank_key,
@@ -1788,13 +1792,9 @@ impl TestFixture {
                 token_program: mint.token_program,
                 rent: sysvar::rent::ID,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::DriftInitUser {
-                amount: DRIFT_INIT_USER_NOMINAL_AMOUNT,
-            }
-            .data(),
-        };
+            },
+            DRIFT_INIT_USER_NOMINAL_AMOUNT,
+        );
         Self::process_ixs(self.context.clone(), &[cu_ix, init_user_ix])
             .await
             .unwrap();
@@ -2174,9 +2174,8 @@ impl TestFixture {
             0,
         );
 
-        let mut add_bank_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolAddBankJuplend {
+        let mut add_bank_ix = ix_builders::juplend::lending_pool_add_bank_juplend(
+            &ix_builders::juplend::LendingPoolAddBankJuplend {
                 group: test_f.marginfi_group.key,
                 governance_admin: test_f.payer(),
                 fee_payer: test_f.payer(),
@@ -2214,14 +2213,10 @@ impl TestFixture {
                 token_program,
                 system_program: system_program::ID,
                 instruction_sysvar: solana_sdk::sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolAddBankJuplend {
-                bank_config,
-                bank_seed,
-            }
-            .data(),
-        };
+            },
+            bank_config,
+            bank_seed,
+        );
         add_bank_ix
             .accounts
             .push(AccountMeta::new_readonly(PYTH_USDC_FEED, false));
@@ -2265,9 +2260,8 @@ impl TestFixture {
         .unwrap();
 
         let init_source = mint_f.create_token_account_and_mint_to(10.0).await;
-        let init_position_ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::JuplendInitPosition {
+        let init_position_ix = ix_builders::juplend::juplend_init_position(
+            &ix_builders::juplend::JuplendInitPosition {
                 fee_payer: test_f.payer(),
                 signer_token_account: init_source.key,
                 bank: bank_key,
@@ -2294,13 +2288,9 @@ impl TestFixture {
                 token_program,
                 associated_token_program: anchor_spl::associated_token::ID,
                 system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::JuplendInitPosition {
-                amount: JUPLEND_INIT_POSITION_NOMINAL_AMOUNT,
-            }
-            .data(),
-        };
+            },
+            JUPLEND_INIT_POSITION_NOMINAL_AMOUNT,
+        );
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_position_ix])
             .await
             .unwrap();
@@ -2337,15 +2327,15 @@ impl TestFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let mut ixs = pre_instructions.to_vec();
         ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
-        let mut deposit_ix = user
-            .make_kamino_deposit_ix(signer_token_account, bank_f, amount)
-            .await;
-        deposit_ix.data = marginfi::instruction::KaminoDeposit {
-            amount,
-            refresh_reserve: Some(refresh.internal),
-        }
-        .data();
-        ixs.push(deposit_ix);
+        ixs.push(
+            user.make_kamino_deposit_ix_with_refresh(
+                signer_token_account,
+                bank_f,
+                amount,
+                Some(refresh.internal),
+            )
+            .await,
+        );
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
@@ -2384,9 +2374,6 @@ impl TestFixture {
 
         let mut ixs = pre_instructions.to_vec();
         ixs.extend(self.kamino_refresh_ixs(bank_f, user, refresh).await);
-        let mut withdraw_ix = user
-            .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
-            .await;
         let mut flags = 0;
         if withdraw_all.unwrap_or(false) {
             flags |= WITHDRAW_ALL_FLAG;
@@ -2394,12 +2381,15 @@ impl TestFixture {
         if refresh.internal {
             flags |= REFRESH_RESERVE_FLAG;
         }
-        withdraw_ix.data = marginfi::instruction::KaminoWithdraw {
-            amount,
-            flags: (flags != 0).then_some(flags),
-        }
-        .data();
-        ixs.push(withdraw_ix);
+        ixs.push(
+            user.make_kamino_withdraw_ix_with_flags(
+                destination_token_account,
+                bank_f,
+                amount,
+                (flags != 0).then_some(flags),
+            )
+            .await,
+        );
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
