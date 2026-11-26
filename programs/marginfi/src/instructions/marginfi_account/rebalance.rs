@@ -8,7 +8,8 @@
 //! move's destination, priced with every declared deposit into it counted, beats the move's source
 //! by `min_improvement` before the legs run and still does after they land; no other referenced
 //! bank with deposit capacity, measured as the tighter of the bank's own limit and its venue's,
-//! would pay the move's tokens more, counting that bank's own declared inflow; a bank is either a
+//! would pay the move's tokens more, counting that bank's own declared inflow; a move is refused
+//! while it touches, or could instead go to, a referenced bank that has no rate; a bank is either a
 //! source or a destination within one execution; an order-tagged balance moves whole, alone, into
 //! a bank the account holds nothing in, and its tag follows it; the total tokens moved are capped
 //! by the order's `amount` budget (uncapped when the order is unlimited); token principal is
@@ -58,7 +59,7 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
         price::OraclePriceFeedAdapter,
-        rate::{self, rate_at, rate_of, NativeRateModel, RewardsAccounts},
+        rate::{self, rate_at, rate_of, require_rate, NativeRateModel, RewardsAccounts},
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
     utils::is_integration_asset_tag,
@@ -783,7 +784,8 @@ pub fn start_rebalance<'info>(
     // underlying-token count), independent of any per-bank oracle price. Snapshot each bank's pre-move
     // underlying amount after it clears the allowlist + mint checks.
     let account = ctx.accounts.marginfi_account.load()?;
-    let mut rates: Vec<I80F48> = Vec::with_capacity(banks.len());
+    // `None` for a bank that has no rate right now.
+    let mut rates: Vec<Option<I80F48>> = Vec::with_capacity(banks.len());
     let mut capacity: Vec<I80F48> = Vec::with_capacity(banks.len());
     let mut ref_banks: Vec<RebalanceRefBank> = Vec::with_capacity(banks.len());
     // Native banks price from their own curve and totals, captured once here and reused below.
@@ -810,7 +812,7 @@ pub fn start_rebalance<'info>(
             Some(NativeRateModel::new(&bank)?)
         };
         let rate = match &model {
-            Some(model) => model.rate_at(0)?,
+            Some(model) => Some(model.rate_at(0)?),
             None => rate_of(
                 &bank,
                 parsed.oracles,
@@ -883,9 +885,9 @@ pub fn start_rebalance<'info>(
         .collect::<MarginfiResult<Vec<u64>>>()?;
 
     // The supply rate bank `i` would pay after `extra_native` more tokens are deposited into it.
-    let rate_after = |i: usize, extra_native: u64| -> MarginfiResult<I80F48> {
+    let rate_after = |i: usize, extra_native: u64| -> MarginfiResult<Option<I80F48>> {
         match &models[i] {
-            Some(model) => model.rate_at(extra_native),
+            Some(model) => model.rate_at(extra_native).map(Some),
             None => {
                 let parsed = &banks[i];
                 rate_at(
@@ -902,7 +904,7 @@ pub fn start_rebalance<'info>(
 
     // Each bank's supply rate with all of its declared inflow deposited. A native bank's rate only
     // falls as supply grows, so this is also its highest possible rate for any further deposit.
-    let mut landed: Vec<I80F48> = Vec::with_capacity(banks.len());
+    let mut landed: Vec<Option<I80F48>> = Vec::with_capacity(banks.len());
     for i in 0..banks.len() {
         landed.push(if inflow_native[i] == 0 {
             rates[i]
@@ -915,12 +917,11 @@ pub fn start_rebalance<'info>(
     // the rate those tokens would earn there instead of at the destination.
     for m in moves.iter() {
         let d = m.dst_index as usize;
+        let dst_rate = require_rate(landed[d])?;
+        let src_rate = require_rate(rates[m.src_index as usize])?;
         // The destination must beat the source, as the source stands today, by the margin.
         check!(
-            landed[d]
-                > rates[m.src_index as usize]
-                    .checked_add(min_imp)
-                    .ok_or_else(math_error!())?,
+            dst_rate > src_rate.checked_add(min_imp).ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
         );
         // A tagged balance is priced as its whole pile, the destination's entire inflow.
@@ -936,7 +937,7 @@ pub fn start_rebalance<'info>(
         for i in 0..banks.len() {
             if i == d
                 || inflow[i] >= capacity[i]
-                || (models[i].is_some() && landed[i] <= landed[d])
+                || (models[i].is_some() && landed[i].is_some_and(|rate| rate <= dst_rate))
                 || ref_banks[i].tag != 0
                 || tagged_dst[i]
             {
@@ -962,8 +963,9 @@ pub fn start_rebalance<'info>(
             if extra_native == inflow_native[i] {
                 continue;
             }
-            let candidate = rate_after(i, extra_native)?;
-            check!(candidate <= landed[d], MarginfiError::RebalanceNotBestVenue);
+            // A bank these tokens could enter is compared, so it needs a rate.
+            let candidate = require_rate(rate_after(i, extra_native)?)?;
+            check!(candidate <= dst_rate, MarginfiError::RebalanceNotBestVenue);
         }
     }
 
@@ -1117,13 +1119,13 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 Some(rate) => rate,
                 None => {
                     let parsed = &banks[d];
-                    let rate = rate_of(
+                    let rate = require_rate(rate_of(
                         &*parsed.loader.load()?,
                         parsed.oracles,
                         parsed.token_reserve,
                         parsed.rewards,
                         &clock,
-                    )?;
+                    )?)?;
                     post_rates[d] = Some(rate);
                     rate
                 }

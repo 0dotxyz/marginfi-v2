@@ -9,7 +9,8 @@
 //! - Native marginfi banks: the bank's own interest curve at its utilization after the deposit (net
 //!   by construction; fees fall on borrowers). The caller accrues the bank first.
 //! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`. A reserve that accrues per slot
-//!   is rescaled from klend's slot-year to a wall-clock year at measured chain pacing.
+//!   is rescaled from klend's slot-year to a wall-clock year at measured chain pacing, and has no
+//!   rate (`None`) while the epoch is too young to measure it.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
 //! - JupLend: the liquidity-layer supply rate, a deposit priced on the mint's `RateModel` at the
@@ -32,7 +33,7 @@ use fixed::types::I80F48;
 use juplend_mocks::state::{
     LendingRewardsRateModel, RateModel, TokenReserve, EXCHANGE_PRICES_PRECISION,
 };
-use kamino_mocks::state::{MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
+use kamino_mocks::state::{InterestRateBasis, MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
@@ -59,7 +60,8 @@ pub struct RewardsAccounts<'info> {
 /// `is_*_asset_tag` checks used across deposit/withdraw). `venue` is the rate-bearing account
 /// (`None` for native, which prices from its own totals); `token_reserve` is JupLend's
 /// `TokenReserve` (`None` otherwise). Unknown tags fail rather than default to native. The caller
-/// refreshes the venue this slot and locates it (see `rate_of`).
+/// refreshes the venue this slot and locates it (see `rate_of`). `Ok(None)` is a venue that has
+/// no rate right now.
 pub fn current_supply_apr<'info>(
     bank: &Bank,
     venue: Option<&'info AccountInfo<'info>>,
@@ -67,16 +69,16 @@ pub fn current_supply_apr<'info>(
     rewards: RewardsAccounts<'info>,
     extra_native: u64,
     clock: &Clock,
-) -> MarginfiResult<I80F48> {
+) -> MarginfiResult<Option<I80F48>> {
     let tag = bank.config.asset_tag;
     if matches!(tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED) {
-        return NativeRateModel::new(bank)?.rate_at(extra_native);
+        return NativeRateModel::new(bank)?.rate_at(extra_native).map(Some);
     }
     let venue = venue.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     match tag {
         ASSET_TAG_KAMINO => kamino_supply_apr(&bank.config, venue, rewards, extra_native, clock),
-        ASSET_TAG_DRIFT => drift_supply_apr(&bank.config, venue, extra_native, clock),
-        ASSET_TAG_SOLEND => solend_supply_apr(&bank.config, venue, extra_native),
+        ASSET_TAG_DRIFT => drift_supply_apr(&bank.config, venue, extra_native, clock).map(Some),
+        ASSET_TAG_SOLEND => solend_supply_apr(&bank.config, venue, extra_native).map(Some),
         ASSET_TAG_JUPLEND => juplend_supply_apr(
             &bank.config,
             venue,
@@ -84,7 +86,8 @@ pub fn current_supply_apr<'info>(
             rewards,
             extra_native,
             clock,
-        ),
+        )
+        .map(Some),
         _ => err!(MarginfiError::InvalidOracleSetup),
     }
 }
@@ -156,7 +159,7 @@ pub fn rate_at<'info>(
     rewards: RewardsAccounts<'info>,
     extra_native: u64,
     clock: &Clock,
-) -> MarginfiResult<I80F48> {
+) -> MarginfiResult<Option<I80F48>> {
     current_supply_apr(
         bank,
         venue_ai(bank, oracle_ais),
@@ -175,7 +178,7 @@ pub fn rate_of<'info>(
     token_reserve: Option<&AccountInfo>,
     rewards: RewardsAccounts<'info>,
     clock: &Clock,
-) -> MarginfiResult<I80F48> {
+) -> MarginfiResult<Option<I80F48>> {
     current_supply_apr(
         bank,
         venue_ai(bank, oracle_ais),
@@ -184,6 +187,11 @@ pub fn rate_of<'info>(
         0,
         clock,
     )
+}
+
+/// The rate of a venue a rebalance has to price, failing while the venue has none.
+pub fn require_rate(rate: Option<I80F48>) -> MarginfiResult<I80F48> {
+    Ok(rate.ok_or(MarginfiError::KaminoSlotPacingUnavailable)?)
 }
 
 /// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`
@@ -227,42 +235,27 @@ pub fn venue_remaining_capacity<'info>(
 
 /// Shortest elapsed slice of an epoch that yields a usable pacing sample.
 const SLOT_PACING_MIN_SAMPLE_SECONDS: i64 = 3_600;
-/// Bounds a real chain has ever paced within; outside them the sample is treated as unusable.
-const SLOT_PACING_MIN_PER_SECOND: u8 = 1;
-const SLOT_PACING_MAX_PER_SECOND: u8 = 4;
 
 /// Slots per second over a `seconds`-long sample, or `None` when the sample is too short to be
-/// meaningful or paces outside anything a live chain produces.
+/// meaningful.
 fn slots_per_second_from(slots: u64, seconds: i64) -> Option<I80F48> {
     if seconds < SLOT_PACING_MIN_SAMPLE_SECONDS {
         return None;
     }
-    let measured = I80F48::from_num(slots).checked_div(I80F48::from_num(seconds))?;
-    (I80F48::from_num(SLOT_PACING_MIN_PER_SECOND)..=I80F48::from_num(SLOT_PACING_MAX_PER_SECOND))
-        .contains(&measured)
-        .then_some(measured)
+    I80F48::from_num(slots).checked_div(I80F48::from_num(seconds))
 }
 
 /// Real slots per second over the elapsed part of the current epoch, for venues that denominate
-/// their rate in slots. Falls back to klend's own convention when the sample is unusable.
-fn measured_slots_per_second(clock: &Clock) -> I80F48 {
-    let nominal = I80F48::from_num(KLEND_SLOTS_PER_SECOND);
-    let Ok(schedule) = EpochSchedule::get() else {
-        return nominal;
-    };
-    let Some(slots) = clock
+/// their rate in slots. `None` while the epoch is too young to yield a usable sample.
+fn measured_slots_per_second(clock: &Clock) -> MarginfiResult<Option<I80F48>> {
+    let epoch_first_slot = EpochSchedule::get()?.get_first_slot_in_epoch(clock.epoch);
+    let seconds = clock
+        .unix_timestamp
+        .saturating_sub(clock.epoch_start_timestamp);
+    Ok(clock
         .slot
-        .checked_sub(schedule.get_first_slot_in_epoch(clock.epoch))
-    else {
-        return nominal;
-    };
-    slots_per_second_from(
-        slots,
-        clock
-            .unix_timestamp
-            .saturating_sub(clock.epoch_start_timestamp),
-    )
-    .unwrap_or(nominal)
+        .checked_sub(epoch_first_slot)
+        .and_then(|slots| slots_per_second_from(slots, seconds)))
 }
 
 // The venue account is supplied by a permissionless keeper, so it must be tied to the bank: these
@@ -274,12 +267,19 @@ fn kamino_supply_apr<'info>(
     rewards: RewardsAccounts<'info>,
     extra_native: u64,
     clock: &Clock,
-) -> MarginfiResult<I80F48> {
+) -> MarginfiResult<Option<I80F48>> {
     let loader = load_kamino_reserve(bank_config, reserve_ai)?;
     let r = loader.load()?;
     check!(!r.is_stale(clock.slot), MarginfiError::ReserveStale);
     let extra = I80F48::from_num(extra_native);
-    let slots_per_second = measured_slots_per_second(clock);
+    // Chain pacing is measured only for a reserve that accrues per slot; the others do not read it.
+    let slots_per_second = match r.interest_rate_basis().ok_or_else(math_error!())? {
+        InterestRateBasis::Legacy => match measured_slots_per_second(clock)? {
+            Some(slots_per_second) => slots_per_second,
+            None => return Ok(None),
+        },
+        InterestRateBasis::TrueApr => I80F48::from_num(KLEND_SLOTS_PER_SECOND),
+    };
     let base = r
         .supply_apr_at(extra, slots_per_second)
         .ok_or_else(math_error!())?;
@@ -300,7 +300,9 @@ fn kamino_supply_apr<'info>(
     let rewards_apr = r
         .rewards_apr_at(max_apr_bps, extra, slots_per_second)
         .ok_or_else(math_error!())?;
-    Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
+    Ok(Some(
+        base.checked_add(rewards_apr).ok_or_else(math_error!())?,
+    ))
 }
 
 fn drift_supply_apr<'info>(
@@ -589,23 +591,22 @@ mod slot_pacing {
     use super::*;
 
     #[test]
-    fn only_a_live_looking_sample_yields_a_pacing() {
+    fn only_a_long_enough_sample_yields_a_pacing() {
         // 400ms slots over the minimum one-hour window.
         assert_eq!(
             slots_per_second_from(9_000, 3_600).unwrap(),
             I80F48::from_num(2.5)
         );
         assert!(slots_per_second_from(9_000, 3_599).is_none());
-        // The bounds themselves are usable; a hair outside either is not.
+        // 200ms slots.
         assert_eq!(
-            slots_per_second_from(3_600, 3_600).unwrap(),
-            I80F48::from_num(SLOT_PACING_MIN_PER_SECOND)
+            slots_per_second_from(18_000, 3_600).unwrap(),
+            I80F48::from_num(5)
         );
+        // The most slots over the shortest sample is the largest pacing there is, and it fits.
         assert_eq!(
-            slots_per_second_from(14_400, 3_600).unwrap(),
-            I80F48::from_num(SLOT_PACING_MAX_PER_SECOND)
+            slots_per_second_from(u64::MAX, 3_600).unwrap(),
+            I80F48::from_bits(((u64::MAX as i128) << 48) / 3_600)
         );
-        assert!(slots_per_second_from(3_599, 3_600).is_none());
-        assert!(slots_per_second_from(14_401, 3_600).is_none());
     }
 }

@@ -5,7 +5,7 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::MarginfiGroup;
 
-const MAX_DELEVERAGE_WITHDRAW_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500; // ~10 minutes at ~400ms/slot
+const MAX_DELEVERAGE_WITHDRAW_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500;
 
 /// (delegate_flow_admin only) Update the deleverage daily withdraw outflow.
 ///

@@ -343,6 +343,12 @@ impl BorrowRateCurve {
 }
 
 impl MinimalReserve {
+    /// The basis this reserve accrues interest and rewards over, or `None` for a value klend does
+    /// not define.
+    pub fn interest_rate_basis(&self) -> Option<InterestRateBasis> {
+        InterestRateBasis::from_u8(self.config.interest_rate_basis)
+    }
+
     /// Net lender supply APR (I80F48, 1.0 == 100%): `borrow_rate(util) * util * (1 - protocol_take_rate)`
     /// with `util = borrowed / total_supply`. The caller must ensure the reserve was refreshed this
     /// slot (see [`MinimalReserve::is_stale`]). Returns `None` on zero supply, overflow, or an
@@ -360,7 +366,7 @@ impl MinimalReserve {
             self.borrowed_amount_sf(),
             &self.config.borrow_rate_curve.points,
             self.config.protocol_take_rate_pct,
-            InterestRateBasis::from_u8(self.config.interest_rate_basis)?,
+            self.interest_rate_basis()?,
             slots_per_second,
         )
     }
@@ -386,7 +392,7 @@ impl MinimalReserve {
             self.rewards_amount_available,
             self.mint_total_supply,
             max_apr_bps,
-            InterestRateBasis::from_u8(self.config.interest_rate_basis)?,
+            self.interest_rate_basis()?,
             slots_per_second,
         )
     }

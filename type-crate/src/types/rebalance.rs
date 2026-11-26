@@ -127,8 +127,8 @@ pub struct RebalanceRecord {
     pub moves: [RebalanceMove; MAX_REBALANCE_MOVES],
     /// Snapshot of every active balance NOT in the referenced set; end verifies these unchanged.
     pub balance_states: [ExecuteOrderBalanceRecord; MAX_REBALANCE_RECORD_BALANCES],
-    /// Per-referenced-bank supply rate captured at `start_rebalance`, before the move. `end_rebalance`
-    /// requires each move's post-deposit destination rate to still beat its source's rate from here.
+    /// Per-referenced-bank supply rate before the move, zero for a bank with no rate at start.
+    /// `end_rebalance` requires each move's destination to still beat its source's rate from here.
     pub pre_rate: [WrappedI80F48; MAX_REBALANCE_BANKS],
     /// Per-referenced-bank yield index (`asset_share_value` × venue multiplier) captured at
     /// `end_rebalance`. `settle_rebalance_tip` compares current indices against these to require the

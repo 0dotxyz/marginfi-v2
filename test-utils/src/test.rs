@@ -1284,6 +1284,19 @@ impl TestFixture {
         self.context.borrow_mut().set_sysvar(&clock);
     }
 
+    /// Rewrites the Clock and EpochSchedule sysvars so the current epoch began `slots` slots and
+    /// `seconds` seconds ago, the sample chain pacing is measured from. Slot and time stay put.
+    pub async fn set_slot_pacing_sample(&self, slots: u64, seconds: i64) {
+        let mut clock = self.get_clock().await;
+        // One earlier epoch of this length puts the current epoch's first slot `slots` back.
+        let epoch_slots = clock.slot - slots;
+        clock.epoch = 1;
+        clock.epoch_start_timestamp = clock.unix_timestamp - seconds;
+        let ctx = self.context.borrow_mut();
+        ctx.set_sysvar(&EpochSchedule::custom(epoch_slots, epoch_slots, false));
+        ctx.set_sysvar(&clock);
+    }
+
     pub async fn advance_time(&self, seconds: i64) {
         let mut clock: Clock = self
             .context
