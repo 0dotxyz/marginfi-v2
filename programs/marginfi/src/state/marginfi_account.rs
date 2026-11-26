@@ -10,7 +10,10 @@ use crate::{
     },
     utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
-use anchor_lang::prelude::*;
+use anchor_lang::{
+    prelude::*,
+    solana_program::instruction::{get_stack_height, TRANSACTION_LEVEL_STACK_HEIGHT},
+};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
@@ -100,7 +103,8 @@ pub trait MarginfiAccountImpl {
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
+/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true` only if the
+///    instruction is top-level (not a CPI)
 /// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
 /// 3. If `allow_order_execution` is true and the account is in order execution → `true`
 /// 4. If the account is frozen → `true` only if signer is the governance admin (the slow authority)
@@ -118,7 +122,9 @@ pub fn is_signer_authorized(
     // cannot authorize unrelated instructions; bounded by the rebalance start/end value-conservation
     // checks and the exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
     if allow_rebalance && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
-        return true;
+        // Defense-in-depth: the allowlist permits only top-level instructions. If an otherwise
+        // allowed instruction were somehow reached by CPI, we would reject it here.
+        return get_stack_height() == TRANSACTION_LEVEL_STACK_HEIGHT;
     }
 
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
