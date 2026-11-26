@@ -251,6 +251,16 @@ This is not the intent: generally speaking, Orders can fail for the same reason 
 would fail. If an Order is failing under circumstances where a normal Withdraw would also fail, that
 is out-of-scope.
 
+### Orders Fail if the Account is Unhealthy After Execution
+
+An Order execution must leave the whole account healthy at maintenance (spot prices). An execution
+that improves health but leaves the account unhealthy fails, and the account is left to
+liquidation. For example, the user has a hedged account with several liabilities that has become
+liquidatable, and closing one Order's pair is not enough to restore it. This is intended: Orders
+are not a tool to partially de-risk an account that is already liquidatable. The user can still
+repay manually at any time. Reports that an Order cannot execute on an account that would remain
+unhealthy are out-of-scope.
+
 ### There's an Incoming Bug in XXXX When it Goes Live to Mainnet
 
 If you see an incoming change on any program marginlend is integrated with that will lead to a bug
@@ -747,7 +757,7 @@ the doc on `should_skip_rate_limit`:
 /// is net-neutral to protocol outflow and must not consume a bank's rate-limit budget.
 ```
 
-### Staked Bank Propagation Wipes Inidividually Configured Settings
+### Staked Bank Propagation Wipes Individually Configured Settings
 
 Some settings, including e.g. the FREEZE_SETTINGS flag, are wiped when a Staked bank accepts
 propagation from the Staked Settings. This is by design: Staked banks first priority is to respond

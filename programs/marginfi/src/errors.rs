@@ -224,7 +224,7 @@ pub enum MarginfiError {
     OrderLiabilityNotClosed,
     #[msg("Invalid asset or liabilities count")] // 6110
     InvalidAssetOrLiabilitiesCount,
-    #[msg("Account health can only worsen if account is healthy")] // 6111
+    #[msg("Order execution must leave the account healthy")] // 6111
     WorseHealthPostExecution,
     #[msg("TP must be > 0, SL must be > 0 and TP > SL if both are set")] // 6112
     InvalidOrderTakeProfitOrStopLoss,
