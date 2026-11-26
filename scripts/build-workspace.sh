@@ -32,4 +32,3 @@ anchor build -p marginfi --arch v3 --no-idl --ignore-keys -- --features mainnet-
   cd "$ROOT/programs/native-cpi-example"
   CARGO_TARGET_DIR="$ROOT/programs/native-cpi-example/target" cargo build-sbf --arch v2
 )
-cp "$ROOT/programs/native-cpi-example/target/deploy/native_cpi_example.so" "$SBF_OUT_DIR/"
