@@ -131,6 +131,7 @@ pub const BUILDERS: &[&str] = &[
     "panic_unpause",
     "panic_unpause_permissionless",
     "propagate_fee_state",
+    "propagate_juplend_emergency",
     "propagate_kamino_market_emergency",
     "propagate_staked_settings",
     "purge_deleverage_balance",

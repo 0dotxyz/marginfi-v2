@@ -431,6 +431,7 @@ pub mod ix_discriminators {
         pub const LENDING_POOL_ADD_BANK_JUPLEND: [u8; 8] = [18, 208, 117, 90, 53, 111, 195, 41];
         pub const LENDING_POOL_ADD_BANK_KAMINO: [u8; 8] = [118, 53, 16, 243, 255, 245, 149, 241];
         pub const LENDING_POOL_ADD_BANK_SOLEND: [u8; 8] = [81, 233, 203, 199, 47, 226, 0, 68];
+        pub const PROPAGATE_JUPLEND_EMERGENCY: [u8; 8] = [145, 114, 134, 117, 87, 236, 98, 229];
         pub const PROPAGATE_KAMINO_MARKET_EMERGENCY: [u8; 8] =
             [252, 182, 246, 73, 108, 118, 102, 142];
         pub const SOLEND_DEPOSIT: [u8; 8] = [56, 127, 176, 148, 12, 25, 3, 24];

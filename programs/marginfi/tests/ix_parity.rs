@@ -4100,6 +4100,33 @@ fn all_builders_match_anchor() {
     {
         let expected = Instruction {
             program_id: marginfi::ID,
+            accounts: marginfi::accounts::PropagateJuplendEmergency {
+                lending: key(100),
+                liquidity: key(101),
+                token_reserve: key(102),
+                supply_position: key(103),
+                bank: key(104),
+            }
+            .to_account_metas(None),
+            data: marginfi::instruction::PropagateJuplendEmergency {}.data(),
+        };
+        let actual = marginfi_type_crate::ix_builders::juplend::propagate_juplend_emergency(
+            &marginfi_type_crate::ix_builders::juplend::PropagateJuplendEmergency {
+                lending: key(100),
+                liquidity: key(101),
+                token_reserve: key(102),
+                supply_position: key(103),
+                bank: key(104),
+            },
+        );
+        assert_eq!(
+            expected, actual,
+            "propagate_juplend_emergency optional_none=False"
+        );
+    }
+    {
+        let expected = Instruction {
+            program_id: marginfi::ID,
             accounts: marginfi::accounts::PropagateKaminoMarketEmergency {
                 reserve: key(100),
                 lending_market: key(101),
@@ -4829,6 +4856,7 @@ fn all_idl_instructions_have_builders() {
         "panic_unpause",
         "panic_unpause_permissionless",
         "propagate_fee_state",
+        "propagate_juplend_emergency",
         "propagate_kamino_market_emergency",
         "propagate_staked_settings",
         "purge_deleverage_balance",

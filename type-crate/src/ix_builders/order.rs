@@ -97,7 +97,8 @@ impl ToAccountMetas for MarginfiAccountEndExecuteOrder {
 }
 /// (permissionless keeper) End Order execution
 /// * Closes the Order (keeper keeps the rent)
-/// * Closes the borrow position involved in the Order, the lending position remains open
+/// * Closes the borrow position involved in the Order; the lending balance slot remains open.
+/// If its assets are emptied, its tag is cleared and other Orders sharing it are orphaned.
 /// * User health must be "unchanged" (within Order requirements i.e. minus slippage). Keeper
 /// may keep any slippage in excess of what was needed to complete the Order as profit.
 /// * `StartExecuteOrder` must appear earlier in the tx
@@ -133,7 +134,7 @@ pub fn marginfi_account_end_execute_order_with_program_id(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarginfiAccountKeeperCloseOrder {
     /// marginfi account was closed.
-    /// The ownership check is checked in the handler or/and type checks are made in the handler.
+    /// The handler validates ownership and layout unless the account is already closed.
     pub marginfi_account: Pubkey,
     pub fee_recipient: Pubkey,
     pub order: Pubkey,

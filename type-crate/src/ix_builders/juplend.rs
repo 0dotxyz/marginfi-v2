@@ -426,3 +426,55 @@ pub fn lending_pool_add_bank_juplend_with_program_id(
         data,
     }
 }
+
+/// Fixed accounts for [`propagate_juplend_emergency`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PropagateJuplendEmergency {
+    /// The JupLend Earn Lending state tied to the bank.
+    pub lending: Pubkey,
+    pub liquidity: Pubkey,
+    pub token_reserve: Pubkey,
+    pub supply_position: Pubkey,
+    pub bank: Pubkey,
+}
+impl PropagateJuplendEmergency {
+    pub const DISCRIMINATOR: [u8; 8] = ix_discriminators::integration::PROPAGATE_JUPLEND_EMERGENCY;
+
+    /// Account metas for `program_id`. A missing optional account is passed as `program_id`.
+    pub fn to_account_metas_with_program_id(&self, _program_id: Pubkey) -> Vec<AccountMeta> {
+        vec![
+            AccountMeta::new_readonly(self.lending, false),
+            AccountMeta::new_readonly(self.liquidity, false),
+            AccountMeta::new_readonly(self.token_reserve, false),
+            AccountMeta::new_readonly(self.supply_position, false),
+            AccountMeta::new(self.bank, false),
+        ]
+    }
+}
+impl ToAccountMetas for PropagateJuplendEmergency {
+    fn to_account_metas(&self) -> Vec<AccountMeta> {
+        self.to_account_metas_with_program_id(crate::ID)
+    }
+}
+/// (permissionless) Refresh a JupLend bank's global, token and Earn-position emergency state.
+/// Changes at Fluid take effect in health checks only after this instruction is called.
+///
+/// The returned instruction does not include remaining accounts.
+#[allow(clippy::too_many_arguments)]
+pub fn propagate_juplend_emergency(accounts: &PropagateJuplendEmergency) -> Instruction {
+    propagate_juplend_emergency_with_program_id(crate::ID, accounts)
+}
+
+/// Builds the instruction for a program ID chosen at runtime.
+#[allow(clippy::too_many_arguments)]
+pub fn propagate_juplend_emergency_with_program_id(
+    program_id: Pubkey,
+    accounts: &PropagateJuplendEmergency,
+) -> Instruction {
+    let data = PropagateJuplendEmergency::DISCRIMINATOR.to_vec();
+    Instruction {
+        program_id,
+        accounts: accounts.to_account_metas_with_program_id(program_id),
+        data,
+    }
+}
