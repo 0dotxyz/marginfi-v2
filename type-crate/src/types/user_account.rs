@@ -287,6 +287,10 @@ pub const ORDER_BLOCKING_FLAGS: u64 = ACCOUNT_DISABLED
 
 pub const MAX_LENDING_ACCOUNT_BALANCES: usize = 16;
 
+/// The balance had positive effective maintenance weight at the start of the current receivership.
+/// This is a transaction-scoped snapshot, not a persistent statement about the bank's weight.
+const BALANCE_RECEIVERSHIP_COLLATERAL: u8 = 1;
+
 assert_struct_size!(LendingAccount, 1728);
 assert_struct_align!(LendingAccount, 8);
 #[repr(C)]
@@ -356,11 +360,26 @@ pub struct Balance {
     /// Unix timestamp (u64) of the last premium accrual (claim) for this position. Set at
     /// balance creation and bumped on every `claim_premium`.
     pub last_update: u64,
-    /// Reserved for future use
-    pub _padding: [u64; 1],
+    /// Balance flags; bit 0 is transient receivership collateral eligibility.
+    pub flags: u8,
+    /// Reserved for future use.
+    pub _padding: [u8; 7],
 }
 
 impl Balance {
+    /// Only meaningful while the owning account is in the current receivership.
+    pub fn is_receivership_collateral(&self) -> bool {
+        self.flags & BALANCE_RECEIVERSHIP_COLLATERAL != 0
+    }
+
+    pub fn set_receivership_collateral(&mut self, eligible: bool) {
+        if eligible {
+            self.flags |= BALANCE_RECEIVERSHIP_COLLATERAL;
+        } else {
+            self.flags &= !BALANCE_RECEIVERSHIP_COLLATERAL;
+        }
+    }
+
     pub fn is_active(&self) -> bool {
         self.active != 0
     }
@@ -410,7 +429,8 @@ impl Balance {
             liability_shares: WrappedI80F48::from(I80F48::ZERO),
             premium_outstanding: WrappedI80F48::from(I80F48::ZERO),
             last_update: 0,
-            _padding: [0; 1],
+            flags: 0,
+            _padding: [0; 7],
         }
     }
 }

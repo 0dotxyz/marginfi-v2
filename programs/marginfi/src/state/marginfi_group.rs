@@ -407,5 +407,7 @@ mod tests {
         assert_eq!(offset_of!(Balance, premium_rate_snapshot), 36);
         assert_eq!(offset_of!(Balance, premium_outstanding), 72);
         assert_eq!(offset_of!(Balance, last_update), 88);
+        assert_eq!(offset_of!(Balance, flags), 96);
+        assert_eq!(offset_of!(Balance, _padding), 97);
     }
 }
