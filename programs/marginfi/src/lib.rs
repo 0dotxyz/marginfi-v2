@@ -810,6 +810,16 @@ pub mod marginfi {
         marginfi_account::admin_close_account(ctx)
     }
 
+    /// (risk admin only) Close an account left disabled by `lending_pool_handle_bankruptcy`,
+    /// purging its residual balances. Fails on isolated-tier collateral or unsettled debt. Rent and
+    /// the rebalance fee pool go to the global fee wallet.
+    /// Remaining accounts: one writable bank per active balance, in balance order.
+    pub fn admin_close_bankrupt_account<'info>(
+        ctx: Context<'info, AdminCloseBankruptAccount<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::admin_close_bankrupt_account(ctx)
+    }
+
     /// (Permissionless) Refresh the internal risk engine health cache. Useful for liquidators and
     /// other consumers that want to see the internal risk state of a user account. This cache is
     /// read-only and serves no purpose except being populated by this ix.

@@ -1561,8 +1561,11 @@ pub fn check_account_bankrupt<'info>(
 
     let has_liabilities = equity_liabs > I80F48::ZERO;
     let below_bankruptcy_threshold = equity_assets < BANKRUPT_THRESHOLD;
-    let liabilities_exceed_assets = equity_liabs > equity_assets;
-    let is_bankrupt = has_liabilities && below_bankruptcy_threshold && liabilities_exceed_assets;
+    // Disabled accounts stay bankruptable: after one leg is settled, the remaining debt can drop
+    // below the leftover (sub-$0.10) collateral, and a disabled account can't repay it.
+    let is_bankrupt = has_liabilities
+        && below_bankruptcy_threshold
+        && (equity_liabs > equity_assets || marginfi_account.get_flag(ACCOUNT_DISABLED));
 
     if !is_bankrupt {
         return err!(MarginfiError::AccountNotBankrupt);
@@ -2578,7 +2581,7 @@ impl<'a> BankAccountWrapper<'a> {
     /// * A liability might still have dust asset shares. Pass what is leftover in
     ///   `insurance_fee_amount` so the shares are not orphaned but rather added to insurance.
     /// * Assets that still have a dust-liability will transform those dust shares into bad debt.
-    fn close_balance_internal(
+    pub(crate) fn close_balance_internal(
         &mut self,
         in_receivership: bool,
         insurance_fee_amount: I80F48,

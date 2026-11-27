@@ -293,6 +293,11 @@ pub enum MarginfiError {
     InvalidFastBankOperationalState, // 6143
     #[msg("Governance bank configuration may only transition a bank to Operational")]
     InvalidGovernanceBankOperationalState, // 6144
+    // 6145 reserved: ZeroWeightCollateralNotSeizable
+    #[msg("Bankrupt account holds isolated-tier collateral, which may be worth real tokens")]
+    BankruptAccountHasIsolatedCollateral = 146, // 6146
+    #[msg("Bankrupt account has unsettled debt: run handle bankruptcy on that bank first")]
+    BankruptAccountHasUnsettledDebt, // 6147
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -714,6 +719,8 @@ impl From<u32> for MarginfiError {
             6142 => MarginfiError::MixedGroupConfigAuthority,
             6143 => MarginfiError::InvalidFastBankOperationalState,
             6144 => MarginfiError::InvalidGovernanceBankOperationalState,
+            6146 => MarginfiError::BankruptAccountHasIsolatedCollateral,
+            6147 => MarginfiError::BankruptAccountHasUnsettledDebt,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

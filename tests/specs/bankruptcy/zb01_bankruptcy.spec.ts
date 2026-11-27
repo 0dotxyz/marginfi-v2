@@ -18,13 +18,16 @@ import {
   globalProgramAdmin,
   riskAdmin,
   emodeAdmin,
+  globalFeeWallet,
 } from "../../rootHooks";
 import {
   accrueInterest,
+  adminCloseBankruptAccount,
   configureBank,
   groupConfigure,
   handleBankruptcy,
 } from "../../utils/group-instructions";
+import { toI80Scaled } from "../../utils/bn-utils";
 import { assert } from "chai";
 import { blankBankConfigOptRaw, ORACLE_CONF_INTERVAL } from "../../utils/types";
 import {
@@ -748,5 +751,55 @@ describe("Bank bankruptcy tests", () => {
     assert.deepEqual(bankAcc.config.operationalState, {
       killedByBankruptcy: {},
     });
+  });
+
+  it("(risk admin) Closes bankrupt user 0, purging its residual balances - happy path", async () => {
+    const userAccount = users[0].accounts.get(USER_ACCOUNT_THROWAWAY);
+    const accBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const balances = accBefore.lendingAccount.balances.filter(
+      (balance) => balance.active != 0,
+    );
+
+    const banksBefore = await Promise.all(
+      balances.map((balance) => bankrunProgram.account.bank.fetch(balance.bankPk)),
+    );
+    const accountLamports = (await banksClient.getAccount(userAccount)).lamports;
+    const feeWalletBefore = (await banksClient.getAccount(globalFeeWallet))
+      .lamports;
+
+    const tx = new Transaction().add(
+      await adminCloseBankruptAccount(riskAdmin.mrgnBankrunProgram, {
+        riskAdmin: riskAdmin.wallet.publicKey,
+        marginfiAccount: userAccount,
+        globalFeeWallet,
+        banks: balances.map((balance) => balance.bankPk),
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(riskAdmin.wallet);
+    await banksClient.processTransaction(tx);
+
+    assert.isNull(await banksClient.getAccount(userAccount));
+    const feeWalletAfter = (await banksClient.getAccount(globalFeeWallet))
+      .lamports;
+    // No rebalance fee pool was funded, so the fee wallet gains only the rent
+    assert.equal(feeWalletAfter - feeWalletBefore, accountLamports);
+
+    for (let i = 0; i < balances.length; i++) {
+      const balance = balances[i];
+      const before = banksBefore[i];
+      const after = await bankrunProgram.account.bank.fetch(balance.bankPk);
+      // Exactly the account's shares leave the bank's totals
+      assert.equal(
+        toI80Scaled(after.totalAssetShares),
+        toI80Scaled(before.totalAssetShares) - toI80Scaled(balance.assetShares),
+      );
+      assert.equal(
+        toI80Scaled(after.totalLiabilityShares),
+        toI80Scaled(before.totalLiabilityShares) -
+          toI80Scaled(balance.liabilityShares),
+      );
+    }
   });
 });

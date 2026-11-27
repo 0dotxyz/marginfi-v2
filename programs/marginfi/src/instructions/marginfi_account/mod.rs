@@ -1,4 +1,5 @@
 mod admin_close;
+mod admin_close_bankrupt;
 mod borrow;
 mod close;
 mod close_balance;
@@ -77,6 +78,7 @@ fn load_marginfi_account_unless_closed<'a>(
 }
 
 pub use admin_close::*;
+pub use admin_close_bankrupt::*;
 pub use borrow::*;
 pub use close::*;
 pub use close_balance::*;
