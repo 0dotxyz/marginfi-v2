@@ -279,7 +279,7 @@ pub fn lending_account_borrow<'info>(
 
     if !in_borrow_order {
         health_cache.set_engine_ok(true);
-        marginfi_account.health_cache = health_cache;
+        marginfi_account.set_health_cache(health_cache);
     }
 
     Ok(())

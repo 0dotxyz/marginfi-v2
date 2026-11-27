@@ -4,7 +4,11 @@ import {
   TOKEN_PROGRAM_ID,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "../../utils/types";
+import {
+  CONF_INTERVAL_MULTIPLE,
+  ORACLE_CONF_INTERVAL,
+  blankBankConfigOptRaw,
+} from "../../utils/types";
 import {
   createMintToInstruction,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -42,6 +46,7 @@ import {
   ecosystem,
   oracles,
   globalFeeWallet,
+  groupAdmin,
   INIT_POOL_ORIGINATION_FEE,
   LIQUIDATION_FLAT_FEE,
   ORDER_INIT_FLAT_FEE_DEFAULT,
@@ -55,7 +60,10 @@ import {
   expectFailedTxWithError,
   expectFailedTxWithMessage,
 } from "../../utils/genericTests";
-import { editGlobalFeeState } from "../../utils/group-instructions";
+import {
+  configureBank,
+  editGlobalFeeState,
+} from "../../utils/group-instructions";
 import { BankrunProvider } from "../../utils/litesvm";
 import { dummyIx } from "../../utils/bankrunConnection";
 
@@ -433,6 +441,138 @@ describe("orders", () => {
       await userProgram.provider.sendAndConfirm(
         new Transaction().add(borrowIx),
       );
+    });
+
+    it("lets a keeper close an order after a fixed-amount withdrawal empties and refills its asset", async () => {
+      const solBank = await program.account.bank.fetch(bankSol);
+      const solConfig = blankBankConfigOptRaw();
+      solConfig.assetWeightInit = bigNumberToWrappedI80F48(0.8);
+      solConfig.assetWeightMaint = bigNumberToWrappedI80F48(0.9);
+      solConfig.riskTier = { collateral: {} };
+      const restoreConfig = blankBankConfigOptRaw();
+      restoreConfig.assetWeightInit = solBank.config.assetWeightInit;
+      restoreConfig.assetWeightMaint = solBank.config.assetWeightMaint;
+      restoreConfig.riskTier = solBank.config.riskTier;
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankSol,
+            bankConfigOpt: solConfig,
+          })
+        )
+      );
+      try {
+        // Keep the account healthy while the ordered asset is temporarily absent.
+        const extraSol = new BN(3 * 10 ** ecosystem.wsolDecimals);
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await depositIx(userProgram, {
+              marginfiAccount: userMarginfiAccount,
+              bank: bankSol,
+              tokenAccount: user.wsolAccount,
+              amount: extraSol,
+              depositUpToLimit: false,
+            })
+          )
+        );
+        const orderPk = await placeTestOrder();
+        const before = await program.account.marginfiAccount.fetch(
+          userMarginfiAccount
+        );
+        const assetBefore = before.lendingAccount.balances.find(
+          (balance) => balance.active && balance.bankPk.equals(bankA)
+        );
+        assert.isDefined(assetBefore);
+        assert.isAbove(Number(assetBefore!.tag), 0);
+        const bank = await program.account.bank.fetch(bankA);
+        const withdrawAmount = new BN(
+          wrappedI80F48toBigNumber(assetBefore!.assetShares)
+            .times(wrappedI80F48toBigNumber(bank.assetShareValue))
+            .integerValue(1)
+            .toFixed(0)
+        );
+
+        const remaining = composeRemainingAccounts([
+          [bankUsdc, oracles.usdcOracle.publicKey],
+          [bankA, oracles.tokenAOracle.publicKey],
+          [bankSol, oracles.wsolOracle.publicKey],
+        ]);
+        const withdraw = await withdrawIx(userProgram, {
+          marginfiAccount: userMarginfiAccount,
+          bank: bankA,
+          tokenAccount: user.tokenAAccount,
+          amount: withdrawAmount,
+          withdrawAll: false,
+          remaining,
+        });
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(withdraw)
+        );
+
+        const emptied = await program.account.marginfiAccount.fetch(
+          userMarginfiAccount
+        );
+        const assetAfter = emptied.lendingAccount.balances.find(
+          (balance) => balance.active && balance.bankPk.equals(bankA)
+        );
+        assert.isDefined(
+          assetAfter,
+          "fixed-amount withdrawal keeps the slot active"
+        );
+        assert.isTrue(wrappedI80F48toBigNumber(assetAfter!.assetShares).lt(1));
+        assert.equal(Number(assetAfter!.tag), 0);
+
+        const deposit = await depositIx(userProgram, {
+          marginfiAccount: userMarginfiAccount,
+          bank: bankA,
+          tokenAccount: user.tokenAAccount,
+          amount: withdrawAmount,
+          depositUpToLimit: false,
+        });
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(deposit)
+        );
+        const refilled = await program.account.marginfiAccount.fetch(
+          userMarginfiAccount
+        );
+        const assetRefilled = refilled.lendingAccount.balances.find(
+          (balance) => balance.active && balance.bankPk.equals(bankA)
+        );
+        assert.isTrue(wrappedI80F48toBigNumber(assetRefilled!.assetShares).gt(1));
+        assert.equal(Number(assetRefilled!.tag), 0);
+
+        const close = await keeperCloseOrderIx(program, {
+          marginfiAccount: userMarginfiAccount,
+          order: orderPk,
+          feeRecipient: keeperUser.wallet.publicKey,
+        });
+        await keeperProgram.provider.sendAndConfirm(
+          new Transaction().add(close)
+        );
+        expect(await program.provider.connection.getAccountInfo(orderPk)).to.be
+          .null;
+        assert.equal(await getActiveOrders(userMarginfiAccount), 0);
+        const restoreSol = await withdrawIx(userProgram, {
+          marginfiAccount: userMarginfiAccount,
+          bank: bankSol,
+          tokenAccount: user.wsolAccount,
+          amount: extraSol,
+          withdrawAll: false,
+          remaining,
+        });
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(restoreSol)
+        );
+      } finally {
+        await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await configureBank(groupAdmin.mrgnProgram, {
+              bank: bankSol,
+              bankConfigOpt: restoreConfig,
+            })
+          )
+        );
+      }
     });
 
     it("keeper close fails when the condition is not satisfied - should fail", async () => {

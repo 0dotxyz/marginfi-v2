@@ -283,3 +283,27 @@ async fn juplend_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resu
     assert_eq!(seeded_ref, raw_price * multiplier);
     Ok(())
 }
+
+#[tokio::test]
+async fn juplend_deposit_rejects_receivership() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_juplend_bank(None).await;
+    let (user, token) = setup.create_user_with_liquidity(10.0).await;
+    let mut account = user.load().await;
+    account.account_flags |= marginfi_type_crate::types::ACCOUNT_IN_RECEIVERSHIP;
+    user.set_account(&account).await?;
+
+    let result = setup
+        .test_f
+        .run_juplend_deposit(&setup.bank_f, &user, token.key, 1_000_000)
+        .await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::AccountDisabled);
+    assert!(setup.load_user_accounted_shares(&user).await.is_none());
+
+    account.account_flags = 0;
+    user.set_account(&account).await?;
+    setup
+        .test_f
+        .run_juplend_deposit(&setup.bank_f, &user, token.key, 1_000_000)
+        .await?;
+    Ok(())
+}

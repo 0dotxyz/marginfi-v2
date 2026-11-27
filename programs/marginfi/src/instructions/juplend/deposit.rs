@@ -27,7 +27,10 @@ use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
 use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, BankVaultType, MarginfiAccount, MarginfiGroup};
-use marginfi_type_crate::{constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_DISABLED};
+use marginfi_type_crate::{
+    constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
+    types::{ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
+};
 
 /// Deposit into a JupLend lending pool through a marginfi account.
 ///
@@ -147,7 +150,7 @@ pub struct JuplendDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
-            !acc.get_flag(ACCOUNT_DISABLED)
+            !acc.get_flag(ACCOUNT_DISABLED | ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;

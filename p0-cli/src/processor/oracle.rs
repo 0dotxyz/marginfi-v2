@@ -2,7 +2,9 @@ use crate::config::Config;
 use anchor_client::anchor_lang::AnchorDeserialize;
 use chrono::{DateTime, Local, TimeZone};
 use fixed::types::I80F48;
-use marginfi::state::price::{PriceAdapter, PythPushOraclePriceFeed};
+use marginfi::state::price::{
+    parse_swb_pull_feed, PriceAdapter, PythPushOraclePriceFeed, SWITCHBOARD_PULL_PRECISION,
+};
 use marginfi_type_crate::constants::EXP_10_I80F48;
 use marginfi_type_crate::types::OraclePriceType;
 use pyth_solana_receiver_sdk::price_update::{FeedId, PriceUpdateV2};
@@ -13,7 +15,6 @@ use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{account::Account, account_info::IntoAccountInfo};
 use std::time::{SystemTime, UNIX_EPOCH};
-use switchboard_on_demand::PullFeedAccountData;
 
 pub fn find_pyth_push_oracles_for_feed_id(
     rpc_client: &RpcClient,
@@ -85,10 +86,10 @@ pub fn inspect_swb_pull_feed(config: &Config, address: Pubkey) -> anyhow::Result
     let mut account = config.mfi_program.rpc().get_account(&address)?;
 
     let ai = (&address, &mut account).into_account_info();
-    let feed = PullFeedAccountData::parse(ai.data.borrow())?;
+    let feed = parse_swb_pull_feed(&ai.data.borrow())?;
 
     let price: I80F48 = I80F48::from_num(feed.result.value)
-        .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
+        .checked_div(EXP_10_I80F48[SWITCHBOARD_PULL_PRECISION])
         .ok_or_else(|| anyhow::anyhow!("failed to compute SWB price: division overflow"))?;
 
     let last_updated = feed.last_update_timestamp;
@@ -102,9 +103,7 @@ pub fn inspect_swb_pull_feed(config: &Config, address: Pubkey) -> anyhow::Result
     println!("price: {}", price);
     println!(
         "last updated: {} (ts: {}; slot {})",
-        datetime,
-        last_updated,
-        feed.result.result_slot().unwrap_or(0)
+        datetime, last_updated, feed.result.slot
     );
     println!("age: {}s", age);
 

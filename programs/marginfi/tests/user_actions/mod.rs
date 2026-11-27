@@ -16,6 +16,7 @@ mod indexer_flags;
 mod interest_order;
 mod interest_order_common;
 mod juplend;
+mod juplend_emergency;
 mod kamino;
 mod limit_orders;
 mod limit_orders_common;

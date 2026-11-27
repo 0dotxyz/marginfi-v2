@@ -7,6 +7,9 @@
 pub mod macros;
 pub mod state;
 
+// ProgramTest 4 installs its CPI stubs in the Solana 4 sysvar crate.
+#[cfg(not(all(not(target_os = "solana"), feature = "agave-v4-test")))]
+use anchor_lang::solana_program::program::invoke;
 use anchor_lang::{
     prelude::*,
     solana_program::{
@@ -15,7 +18,8 @@ use anchor_lang::{
         program_error::ProgramError,
     },
 };
-use solana_program::program::invoke;
+#[cfg(all(not(target_os = "solana"), feature = "agave-v4-test"))]
+use solana_program_v4::program::invoke;
 use solana_sha256_hasher::hash;
 
 declare_id!(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID);

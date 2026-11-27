@@ -1,6 +1,7 @@
 use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
 use crate::utils::find_order_pda;
+use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use drift_mocks::drift::client as drift;
@@ -21,9 +22,10 @@ use marginfi_type_crate::types::{
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_program::{instruction::Instruction, sysvar};
 use solana_program_test::{BanksClient, BanksClientError, ProgramTestContext};
-use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction};
+use solana_sdk::{
+    hash::Hash, signature::Keypair, signer::Signer, sysvar, transaction::Transaction,
+};
 use std::{cell::RefCell, mem, rc::Rc};
 
 #[cfg(feature = "transfer-hook")]
@@ -1835,6 +1837,24 @@ impl MarginfiAccountFixture {
             program_id: kamino_mocks::kamino_lending::ID,
             accounts,
             data: kamino::args::RefreshReserve {}.data(),
+        }
+    }
+
+    /// Refresh reserve accounting without updating its oracle price.
+    pub async fn make_kamino_refresh_reserves_batch_ix(&self, bank: &BankFixture) -> Instruction {
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        Instruction {
+            program_id: kamino_mocks::kamino_lending::ID,
+            accounts: vec![
+                AccountMeta::new(bank_state.integration_acc_1, false),
+                AccountMeta::new_readonly(reserve.lending_market, false),
+            ],
+            data: kamino::args::RefreshReservesBatch {
+                skip_price_updates: true,
+            }
+            .data(),
         }
     }
 

@@ -1258,10 +1258,6 @@ export type Liquidity = {
           "writable": true
         },
         {
-          "name": "associatedTokenProgram",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
           "name": "tokenProgram"
         }
       ],

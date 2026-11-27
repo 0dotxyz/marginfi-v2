@@ -201,7 +201,6 @@ pub trait ExecuteOrderRecordImpl {
         marginfi_account: &MarginfiAccount,
         order_tags: &[u16],
         closed_order_balances_count: usize,
-        order_current_health: &I80F48,
         is_healthy: bool,
     ) -> MarginfiResult;
 }
@@ -247,15 +246,11 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
         marginfi_account: &MarginfiAccount,
         order_tags: &[u16],
         closed_order_balances_count: usize,
-        order_current_health: &I80F48,
         is_healthy: bool,
     ) -> MarginfiResult {
-        let order_start_health: I80F48 = self.order_start_health.into();
-
-        check!(
-            order_start_health <= *order_current_health || is_healthy,
-            MarginfiError::WorseHealthPostExecution
-        );
+        // The account must end maintenance-healthy, which in practice blocks some unhealthy or
+        // near-unhealthy accounts from executing orders.
+        check!(is_healthy, MarginfiError::WorseHealthPostExecution);
 
         let inactive_balance_count = marginfi_account
             .lending_account
@@ -430,7 +425,7 @@ mod tests {
             .unwrap();
         assert_eq!(record.active_balance_count, 0);
         assert!(record
-            .check_health_and_verify_unchanged(&account, &order_tags, 0, &I80F48::ZERO, true)
+            .check_health_and_verify_unchanged(&account, &order_tags, 0, true)
             .is_ok());
     }
 
@@ -455,12 +450,12 @@ mod tests {
             )
             .unwrap();
         assert!(record
-            .check_health_and_verify_unchanged(&account, &order_tags, 0, &I80F48::ZERO, true)
+            .check_health_and_verify_unchanged(&account, &order_tags, 0, true)
             .is_ok());
 
         account.lending_account.balances[1].tag = 0;
         let err = record
-            .check_health_and_verify_unchanged(&account, &order_tags, 0, &I80F48::ZERO, true)
+            .check_health_and_verify_unchanged(&account, &order_tags, 0, true)
             .unwrap_err();
         assert_eq!(err, MarginfiError::IllegalBalanceState.into());
     }

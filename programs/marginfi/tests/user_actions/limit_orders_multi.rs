@@ -90,12 +90,10 @@ async fn execute_order_with_withdraw(
 // SOL/PyUSD (A/D). We note several things here:
 // * (1) that the SOL/USDC order cannot execute if it attempts to close the entire $50 SOL balance
 // using withdraw-all, because orders can only close one position (the liability side).
-// * (2) the SOL/PyUSD order can't execute at all once the SOL balance is consumed to execute
-//   SOL/USDC, because there is not enough SOL to do so.
-// * (3) The SOL/PyUSD order STAYS ON THE BOOKS. It does not automatically close, if the user
-//   deposits SOL again later, it could become eligible to execute again! However, if the user
-//   closes the SOL Balance and deposits SOL later, then this Order CANNOT EXECUTE, it is orphaned
-//   from that Balance because it doesn't share a tag with it.
+// * (2) This test leaves a nonempty SOL balance when executing SOL/USDC. The SOL/PyUSD order
+//   stays on the books with both tags, even if the remaining SOL is insufficient to execute it.
+// * (3) Closing or emptying the SOL balance clears its tag and orphans SOL/PyUSD. The order stays
+//   on the books until closed, but a later deposit does not restore its tag or make it executable.
 //
 // This is pretty consistent with e.g. Drift, which leaves open orders on the books when a perp is
 //   closed, so a stop loss might stay open when a take-profit is executed, etc. Here there is much
@@ -259,8 +257,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
     Ok(())
 }
 
-// Here we have essentially the same setup as above, noting that withdrawing $50 from A is perfectly
-// fine as long as we don't withdraw-all.
+// A fixed-amount withdrawal can empty A while leaving its balance slot active during execution,
+// provided the order's slippage and health checks pass. Emptying A clears its order tag.
 #[tokio::test]
 async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -347,10 +345,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
     Ok(())
 }
 
-// Here we demonstrate that fully closing the SOL balance and re-opening it later doesn't work, the
-// SOL/PyUSD Order was created with a different Balance tag and cannot use the new SOL Balance. If
-// the user had deposited SOL without first doing withdraw_all to close the SOL balance, then the
-// SOL/PyUSD order would still be able to execute.
+// Closing the SOL balance and re-opening it leaves the SOL/PyUSD order orphaned. Emptying SOL via
+// a fixed-amount withdrawal would also clear the tag, even if the balance slot remained active.
 #[tokio::test]
 async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -428,7 +424,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
         .try_bank_withdraw(sol_destination.key, sol_bank, 0.0, Some(true))
         .await?;
 
-    // Reopen SOL with a new deposit (new tag, old order tag is now orphaned).
+    // Reopen SOL with a new deposit; the old order tag remains absent.
     let sol_deposit = sol_bank.mint.create_token_account_and_mint_to(1.0).await;
     borrower
         .try_bank_deposit(sol_deposit.key, sol_bank, 1.0, None)
