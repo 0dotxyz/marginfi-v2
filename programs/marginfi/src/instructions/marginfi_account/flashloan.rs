@@ -88,7 +88,10 @@ pub fn check_flashloan_can_start(
     // Will error if ix doesn't exist
     let unchecked_end_fl_ix = load_instruction_at_checked(end_fl_idx, sysvar_ixs)?;
 
-    let discrim = &unchecked_end_fl_ix.data[..8];
+    let discrim = unchecked_end_fl_ix
+        .data
+        .get(..END_FLASHLOAN.len())
+        .ok_or(MarginfiError::IllegalFlashloan)?;
     if discrim != END_FLASHLOAN {
         msg!("discrim: {:?}, expected: {:?}", discrim, END_FLASHLOAN);
         return err!(MarginfiError::IllegalFlashloan);
