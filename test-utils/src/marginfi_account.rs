@@ -2709,6 +2709,61 @@ impl MarginfiAccountFixture {
             .await
     }
 
+    /// Banks of the account's active balances, in balance order: the remaining accounts
+    /// `admin_close_bankrupt_account` expects.
+    pub async fn active_balance_banks(&self) -> Vec<Pubkey> {
+        self.load()
+            .await
+            .lending_account
+            .balances
+            .iter()
+            .filter(|balance| balance.is_active())
+            .map(|balance| balance.bank_pk)
+            .collect()
+    }
+
+    /// Calls `admin_close_bankrupt_account` with `banks` as the remaining accounts. Signs as the
+    /// test payer (the default risk admin) unless `risk_admin` is given.
+    pub async fn try_admin_close_bankrupt_account(
+        &self,
+        global_fee_wallet: Pubkey,
+        banks: &[Pubkey],
+        risk_admin: Option<&Keypair>,
+    ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let risk_admin_key = risk_admin.map_or(payer.pubkey(), |signer| signer.pubkey());
+
+        let mut accounts = marginfi::accounts::AdminCloseBankruptAccount {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            risk_admin: risk_admin_key,
+            global_fee_wallet,
+            rebalance_fee_pool: self.rebalance_fee_pool_pda(),
+            system_program: system_program::ID,
+            instruction_sysvar: solana_sdk::sysvar::instructions::ID,
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(banks.iter().map(|bank| AccountMeta::new(*bank, false)));
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::AdminCloseBankruptAccount {}.data(),
+        };
+
+        let mut signers = vec![&payer];
+        if let Some(signer) = risk_admin {
+            signers.push(signer);
+        }
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
     pub async fn try_sync_indexer_flags(&self) -> std::result::Result<(), BanksClientError> {
         let mut ix = Instruction {
             program_id: marginfi::ID,

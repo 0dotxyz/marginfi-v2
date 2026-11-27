@@ -4,6 +4,7 @@ mod bank_resize;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod circuit_breaker;
+mod close_bankrupt_account;
 mod configure_bank_authority;
 mod create_marginfi_group;
 mod deleverage;

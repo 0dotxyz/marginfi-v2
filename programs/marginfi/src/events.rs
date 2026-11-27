@@ -422,6 +422,25 @@ pub struct AdminCloseAccountEvent {
     pub global_fee_wallet: Pubkey,
 }
 
+/// One balance purged by `admin_close_bankrupt_account`: its shares before the purge and the
+/// premium written off.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct PurgedBalance {
+    pub bank: Pubkey,
+    pub asset_shares: f64,
+    pub liability_shares: f64,
+    pub premium_written_off: f64,
+}
+
+#[event]
+pub struct AdminCloseBankruptAccountEvent {
+    pub header: AccountEventHeader,
+    pub global_fee_wallet: Pubkey,
+    /// Lamports swept from the account's rebalance fee pool to the global fee wallet
+    pub fee_pool_swept: u64,
+    pub balances: Vec<PurgedBalance>,
+}
+
 #[event]
 pub struct HealthPulseEvent {
     pub account: Pubkey,

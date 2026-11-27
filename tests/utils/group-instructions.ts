@@ -1203,6 +1203,41 @@ export const handleBankruptcy = (
   return ix;
 };
 
+export type AdminCloseBankruptAccountArgs = {
+  riskAdmin: PublicKey;
+  marginfiAccount: PublicKey;
+  globalFeeWallet: PublicKey;
+  /** The bank of every active balance, in balance order. No oracles. */
+  banks: PublicKey[];
+};
+
+/**
+ * (risk admin) Close an account left disabled by bankruptcy, purging its residual balances. Rent
+ * and the rebalance fee pool go to the global fee wallet.
+ */
+export const adminCloseBankruptAccount = (
+  program: Program<Marginfi>,
+  args: AdminCloseBankruptAccountArgs,
+) => {
+  const bankMeta: AccountMeta[] = args.banks.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: true,
+  }));
+
+  return program.methods
+    .adminCloseBankruptAccount()
+    .accounts({
+      // group: // implied from marginfiAccount
+      marginfiAccount: args.marginfiAccount,
+      riskAdmin: args.riskAdmin,
+      globalFeeWallet: args.globalFeeWallet,
+      // rebalanceFeePool: // implied from seed
+    })
+    .remainingAccounts(bankMeta)
+    .instruction();
+};
+
 export type CloseBankArgs = {
   marginfiGroup: PublicKey;
   bank: PublicKey;
