@@ -661,7 +661,7 @@ fn end_sandwich<'info>(
         if account.lending_account.has_liabilities() {
             run_cb_price_gate(&account, ctx.remaining_accounts)?;
         }
-        account.health_cache = health_cache;
+        account.set_health_cache(health_cache);
         account.unset_flag(
             ACCOUNT_IN_BORROW_ORDER | ACCOUNT_IN_BORROW_ORDER_INTERNAL,
             false,
