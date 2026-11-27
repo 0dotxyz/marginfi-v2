@@ -701,6 +701,8 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         asset_bank,
         asset_shares_after,
         triggered,
+        price_validated: price_ok,
+        interest_validated: interest_ok,
         equity_before_usd: execute_record.order_start_health,
         equity_after_usd: net.into(),
         closure_recipient: ctx.accounts.fee_recipient.key(),

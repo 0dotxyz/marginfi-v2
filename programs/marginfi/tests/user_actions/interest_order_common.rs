@@ -1,6 +1,7 @@
 //! A USDC lend against a SOL borrow with a standing interest-trigger order on the pair, and the
 //! drivers that move the SOL rate: the fixture the interest-order tests run against.
 
+use super::order::execution_events;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::marginfi_account::MarginfiAccountFixture;
@@ -10,6 +11,7 @@ use fixtures::test::{
     BASE_TS, PYTH_PUSH_SOL_FULLV_FEED, PYTH_PUSH_SOL_PARTV_FEED, PYTH_PYUSD_FEED,
     PYTH_SOL_EQUIVALENT_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED,
 };
+use marginfi::events::MarginfiAccountExecuteOrderEvent;
 use marginfi_type_crate::constants::{
     INTEREST_DEFAULT_EXIT_BUDGET_SECONDS, INTEREST_MAX_EXIT_BUDGET_SECONDS,
     INTEREST_MAX_WINDOW_SECONDS,
@@ -354,12 +356,50 @@ impl InterestFixture {
         self.unwind_inner(scale, metas, compute_units).await
     }
 
+    /// As `unwind`, returning the execution event the sandwich emitted.
+    pub async fn unwind_event(
+        &self,
+        scale: f64,
+    ) -> anyhow::Result<MarginfiAccountExecuteOrderEvent> {
+        let metas = self
+            .account_f
+            .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+            .await;
+        let ixs = self.unwind_ixs(scale, metas, 0).await;
+        let blockhash = self.test_f.get_latest_blockhash().await;
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&self.keeper.pubkey()),
+            &[&self.keeper],
+            blockhash,
+        );
+        let result = self
+            .test_f
+            .banks_client()
+            .process_transaction_with_metadata(tx)
+            .await?;
+        result.result?;
+        let mut events = execution_events(&result.metadata.unwrap().log_messages);
+        assert_eq!(events.len(), 1);
+        Ok(events.remove(0))
+    }
+
     async fn unwind_inner(
         &self,
         scale: f64,
         metas: Vec<AccountMeta>,
         compute_units: u32,
     ) -> std::result::Result<(), BanksClientError> {
+        let ixs = self.unwind_ixs(scale, metas, compute_units).await;
+        self.process(&ixs).await
+    }
+
+    async fn unwind_ixs(
+        &self,
+        scale: f64,
+        metas: Vec<AccountMeta>,
+        compute_units: u32,
+    ) -> Vec<Instruction> {
         let usdc = self.test_f.get_bank(&BankMint::Usdc);
         let sol = self.test_f.get_bank(&BankMint::Sol);
 
@@ -405,7 +445,7 @@ impl InterestFixture {
             ));
         }
         ixs.extend([start_ix, repay_ix, withdraw_ix, end_ix]);
-        self.process(&ixs).await
+        ixs
     }
 
     /// The same sandwich with the observation banks read-only, which the carry condition cannot

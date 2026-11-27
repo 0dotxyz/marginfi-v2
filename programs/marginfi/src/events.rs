@@ -380,8 +380,12 @@ pub struct MarginfiAccountExecuteOrderEvent {
     pub asset_bank: Pubkey,
     /// Position shares, not token amounts or swap proceeds.
     pub asset_shares_after: WrappedI80F48,
-    /// The validated execution branch: StopLoss or TakeProfit, never Both.
+    /// The price branch of the execution: StopLoss or TakeProfit, never Both.
     pub triggered: OrderTriggerType,
+    /// The price trigger was met and the execution stayed within its cost bound.
+    pub price_validated: bool,
+    /// The interest trigger was met and the execution stayed within its cost bound.
+    pub interest_validated: bool,
     /// Protocol-valued equity of the tagged order balances immediately before execution.
     pub equity_before_usd: WrappedI80F48,
     /// Protocol-valued equity after execution. The difference is not realized trading P/L.

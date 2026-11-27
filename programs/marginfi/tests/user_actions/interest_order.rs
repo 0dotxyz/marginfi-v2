@@ -14,7 +14,11 @@ async fn interest_order_fires_once_the_pair_has_bled_for_a_window() -> anyhow::R
     let mut fx = setup(Params::default()).await?;
 
     fx.advance(TEST_WINDOW).await;
-    fx.unwind(1.0).await?;
+    let event = fx.unwind_event(1.0).await?;
+    assert_eq!(
+        (event.price_validated, event.interest_validated),
+        (false, true)
+    );
 
     assert!(
         fx.test_f.try_load(&fx.order).await?.is_none(),
@@ -96,7 +100,11 @@ async fn a_price_trigger_still_fires_before_the_carry_window_elapses() -> anyhow
     .await?;
 
     fx.advance(3_600).await;
-    fx.unwind(1.0).await?;
+    let event = fx.unwind_event(1.0).await?;
+    assert_eq!(
+        (event.price_validated, event.interest_validated),
+        (true, false)
+    );
 
     assert!(
         fx.test_f.try_load(&fx.order).await?.is_none(),
@@ -154,7 +162,11 @@ async fn both_conditions_met_lets_either_cost_bound_carry_the_execution() -> any
     .await?;
 
     fx.advance(TEST_WINDOW).await;
-    fx.unwind(1.04).await?;
+    let event = fx.unwind_event(1.04).await?;
+    assert_eq!(
+        (event.price_validated, event.interest_validated),
+        (true, false)
+    );
 
     assert!(
         fx.test_f.try_load(&fx.order).await?.is_none(),
