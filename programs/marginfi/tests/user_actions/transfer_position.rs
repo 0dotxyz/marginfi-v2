@@ -14,7 +14,10 @@ use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
-async fn liability_shares(account: &MarginfiAccountFixture, bank: &BankFixture) -> I80F48 {
+pub(super) async fn liability_shares(
+    account: &MarginfiAccountFixture,
+    bank: &BankFixture,
+) -> I80F48 {
     account
         .load()
         .await
@@ -1082,6 +1085,23 @@ pub(super) async fn user_with_usdc_deposit(
     (user, user_f)
 }
 
+/// Sets the order tag on `account`'s balance in `bank`.
+async fn set_order_tag(
+    account: &MarginfiAccountFixture,
+    bank: &BankFixture,
+    tag: u16,
+) -> anyhow::Result<()> {
+    let mut state = account.load().await;
+    state
+        .lending_account
+        .balances
+        .iter_mut()
+        .find(|b| b.is_active() && b.bank_pk == bank.key)
+        .unwrap()
+        .tag = tag;
+    account.set_account(&state).await
+}
+
 pub(super) async fn asset_shares(account: &MarginfiAccountFixture, bank: &BankFixture) -> I80F48 {
     account
         .load()
@@ -1192,15 +1212,7 @@ async fn test_position_transfer_tagged_deposit_requires_receiver_consent() -> an
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source_f = usdc_depositor(&test_f).await;
     let (_receiver, dest_f) = user_with_usdc_deposit(&test_f).await;
-    let mut dest_account = dest_f.load().await;
-    dest_account
-        .lending_account
-        .balances
-        .iter_mut()
-        .find(|b| b.is_active() && b.bank_pk == usdc_bank_f.key)
-        .unwrap()
-        .tag = 1;
-    dest_f.set_account(&dest_account).await?;
+    set_order_tag(&dest_f, usdc_bank_f, 1).await?;
 
     let res = source_f
         .try_position_transfer(&dest_f, usdc_bank_f, 100.0)
@@ -1860,15 +1872,7 @@ async fn test_position_transfer_full_debt_move_clears_order_tag() -> anyhow::Res
     dest_f
         .try_bank_deposit(dest_usdc.key, usdc_bank_f, 500.0, None)
         .await?;
-    let mut source_account = source_f.load().await;
-    source_account
-        .lending_account
-        .balances
-        .iter_mut()
-        .find(|b| b.is_active() && b.bank_pk == sol_bank_f.key)
-        .unwrap()
-        .tag = 1;
-    source_f.set_account(&source_account).await?;
+    set_order_tag(&source_f, sol_bank_f, 1).await?;
 
     source_f
         .try_position_transfer(&dest_f, sol_bank_f, 100.0)
@@ -1891,15 +1895,7 @@ async fn test_position_transfer_full_asset_move_clears_order_tag() -> anyhow::Re
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let source_f = usdc_depositor(&test_f).await;
     let dest_f = test_f.create_marginfi_account().await;
-    let mut source_account = source_f.load().await;
-    source_account
-        .lending_account
-        .balances
-        .iter_mut()
-        .find(|b| b.is_active() && b.bank_pk == usdc_bank_f.key)
-        .unwrap()
-        .tag = 1;
-    source_f.set_account(&source_account).await?;
+    set_order_tag(&source_f, usdc_bank_f, 1).await?;
 
     source_f
         .try_position_transfer(&dest_f, usdc_bank_f, 500.0)

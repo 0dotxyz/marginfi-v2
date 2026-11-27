@@ -95,18 +95,7 @@ fn transfer_position<'info>(
         (BalanceSide::Assets, _) => return err!(MarginfiError::NoAssetFound),
         (BalanceSide::Liabilities, _) => return err!(MarginfiError::NoLiabilityFound),
     };
-    let opposite_side = if is_liability {
-        BalanceSide::Assets
-    } else {
-        BalanceSide::Liabilities
-    };
-    check!(
-        destination_account
-            .lending_account
-            .get_balance(&bank_key)
-            .is_none_or(|b| b.is_empty(opposite_side)),
-        MarginfiError::PositionTransferDestinationHoldsOppositeSide
-    );
+    check_no_opposite_side(&destination_account, &bank_key, side)?;
     if is_liability || !takes_unsolicited_deposit(&destination_account, &bank_key) {
         let receiver_consents = destination_account.authority == ctx.accounts.authority.key()
             || ctx
@@ -322,6 +311,26 @@ pub(super) fn check_can_receive(account: &MarginfiAccount, admin_acts: bool) -> 
     Ok(())
 }
 
+/// Errors if `account` holds the other side of `side` in `bank_key`.
+pub(super) fn check_no_opposite_side(
+    account: &MarginfiAccount,
+    bank_key: &Pubkey,
+    side: BalanceSide,
+) -> MarginfiResult {
+    let opposite_side = match side {
+        BalanceSide::Assets => BalanceSide::Liabilities,
+        BalanceSide::Liabilities => BalanceSide::Assets,
+    };
+    check!(
+        account
+            .lending_account
+            .get_balance(bank_key)
+            .is_none_or(|b| b.is_empty(opposite_side)),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
+    Ok(())
+}
+
 /// True if `account` holds a deposit in `bank_key` that no order tags. Only such a deposit takes
 /// positions without its authority's signature.
 pub(super) fn takes_unsolicited_deposit(account: &MarginfiAccount, bank_key: &Pubkey) -> bool {
@@ -487,4 +496,39 @@ pub struct LendingAccountTransferPosition<'info> {
     pub fee_state: AccountLoader<'info, FeeState>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opposite_side_check_turns_at_the_empty_balance_threshold() {
+        let bank = Pubkey::new_unique();
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0].active = 1;
+        account.lending_account.balances[0].bank_pk = bank;
+        for (held, allowed) in [
+            (EMPTY_BALANCE_THRESHOLD - I80F48::DELTA, true),
+            (EMPTY_BALANCE_THRESHOLD, false),
+            (EMPTY_BALANCE_THRESHOLD + I80F48::DELTA, false),
+        ] {
+            let balance = &mut account.lending_account.balances[0];
+            balance.liability_shares = held.into();
+            balance.asset_shares = I80F48::ZERO.into();
+            assert_eq!(
+                check_no_opposite_side(&account, &bank, BalanceSide::Assets).is_ok(),
+                allowed
+            );
+            let balance = &mut account.lending_account.balances[0];
+            balance.asset_shares = held.into();
+            balance.liability_shares = I80F48::ZERO.into();
+            assert_eq!(
+                check_no_opposite_side(&account, &bank, BalanceSide::Liabilities).is_ok(),
+                allowed
+            );
+        }
+        let other_bank = Pubkey::new_unique();
+        assert!(check_no_opposite_side(&account, &other_bank, BalanceSide::Assets).is_ok());
+    }
 }

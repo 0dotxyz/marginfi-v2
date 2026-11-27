@@ -1,6 +1,6 @@
 use super::premium::{advance_clock, premium_test_fixture};
 use super::transfer_position::{
-    asset_shares, indebted_source, usdc_depositor, user_with_usdc_deposit,
+    asset_shares, indebted_source, liability_shares, usdc_depositor, user_with_usdc_deposit,
 };
 use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
@@ -72,6 +72,14 @@ async fn total_asset_shares(bank: &BankFixture) -> I80F48 {
 
 async fn total_escrowed_asset_shares(bank: &BankFixture) -> I80F48 {
     bank.load().await.total_escrowed_asset_shares.into()
+}
+
+async fn escrowed_shares(test_f: &TestFixture, escrow: Pubkey) -> I80F48 {
+    test_f
+        .load_and_deserialize::<PositionEscrow>(&escrow)
+        .await
+        .asset_shares
+        .into()
 }
 
 async fn is_closed(test_f: &TestFixture, key: Pubkey) -> bool {
@@ -553,5 +561,92 @@ async fn position_escrow_rejects_debt() -> anyhow::Result<()> {
         .try_escrow_position(&receiver, sol_bank_f, 10.0, &payer)
         .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::NoAssetFound);
+    Ok(())
+}
+
+/// A claim cannot land on a balance that owes the escrowed bank's token. It goes through once the
+/// debt is repaid.
+#[tokio::test]
+async fn position_escrow_claim_rejects_an_account_in_debt_to_the_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let source = usdc_depositor(&test_f).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    let receiver_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&receiver_key.pubkey(), 100)
+        .await;
+    receiver
+        .try_bank_deposit_with_authority(receiver_sol.key, sol_bank_f, 100.0, None, &receiver_key)
+        .await?;
+    let receiver_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to_with_owner(&receiver_key.pubkey(), 10)
+        .await;
+    receiver
+        .try_bank_borrow_with_authority(receiver_usdc.key, usdc_bank_f, 100.0, 100, &receiver_key)
+        .await?;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 100.0).await?;
+    let escrowed = escrowed_shares(&test_f, escrow).await;
+
+    let res = receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
+
+    receiver
+        .try_bank_repay_with_authority(receiver_usdc.key, usdc_bank_f, 0, Some(true), &receiver_key)
+        .await?;
+    receiver
+        .try_claim_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await?;
+    assert_eq!(asset_shares(&receiver, usdc_bank_f).await, escrowed);
+    assert_eq!(liability_shares(&receiver, usdc_bank_f).await, I80F48::ZERO);
+    assert!(is_closed(&test_f, escrow).await);
+    Ok(())
+}
+
+/// A return cannot land on a source balance that borrowed the escrowed bank's token after the
+/// send. It goes through once the debt is repaid.
+#[tokio::test]
+async fn position_escrow_return_rejects_a_source_in_debt_to_the_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let _lender = usdc_depositor(&test_f).await;
+    let source = usdc_depositor(&test_f).await;
+    let (receiver_key, receiver) = empty_receiver(&test_f).await;
+    let escrow = escrow_usdc(&test_f, &source, &receiver, 500.0).await?;
+    let escrowed = escrowed_shares(&test_f, escrow).await;
+    let source_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    source
+        .try_bank_deposit(source_sol.key, sol_bank_f, 100.0, None)
+        .await?;
+    let source_usdc = test_f.usdc_mint.create_token_account_and_mint_to(10).await;
+    source
+        .try_bank_borrow(source_usdc.key, usdc_bank_f, 100.0)
+        .await?;
+
+    let res = source
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::PositionTransferDestinationHoldsOppositeSide
+    );
+
+    source
+        .try_bank_repay(source_usdc.key, usdc_bank_f, 0, Some(true))
+        .await?;
+    source
+        .try_return_position_escrow(escrow, usdc_bank_f, Some(&receiver_key))
+        .await?;
+    assert_eq!(asset_shares(&source, usdc_bank_f).await, escrowed);
+    assert_eq!(liability_shares(&source, usdc_bank_f).await, I80F48::ZERO);
+    assert!(is_closed(&test_f, escrow).await);
     Ok(())
 }

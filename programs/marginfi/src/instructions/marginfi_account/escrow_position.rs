@@ -1,5 +1,6 @@
 use super::transfer_position::{
-    charge_position_transfer, check_can_receive, check_position_flags, takes_unsolicited_deposit,
+    charge_position_transfer, check_can_receive, check_no_opposite_side, check_position_flags,
+    takes_unsolicited_deposit,
 };
 use crate::{
     check,
@@ -229,6 +230,7 @@ fn release_position_escrow(ctx: Context<ReleasePositionEscrow>, returned: bool) 
     let group = ctx.accounts.group.load()?;
 
     check_position_flags(&destination)?;
+    check_no_opposite_side(&destination, &bank_key, BalanceSide::Assets)?;
     validate_asset_tags(&bank, &destination)?;
     bank.accrue_interest(
         clock.unix_timestamp,

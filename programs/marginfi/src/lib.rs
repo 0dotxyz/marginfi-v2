@@ -646,8 +646,9 @@ pub mod marginfi {
     }
 
     /// (receiver authority, or permissionless sweep; group admin if the destination is frozen)
-    /// Move the escrowed shares into an account of the receiver's authority: any of them when it
-    /// signs, or else one holding a deposit in the bank that no order tags. Closes the escrow.
+    /// Move the escrowed shares into an account of the receiver's authority that holds no debt in
+    /// the bank: any of them when it signs, or else one holding a deposit there that no order tags.
+    /// Closes the escrow.
     pub fn lending_account_claim_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {
@@ -655,7 +656,8 @@ pub mod marginfi {
     }
 
     /// (receiver authority, or permissionless after expiry; group admin if the source is frozen)
-    /// Move the escrowed shares back to the source account. Closes the escrow.
+    /// Move the escrowed shares back to the source account, which must hold no debt in the bank.
+    /// Closes the escrow.
     pub fn lending_account_return_position_escrow(
         ctx: Context<ReleasePositionEscrow>,
     ) -> MarginfiResult {
