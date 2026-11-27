@@ -89,6 +89,12 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
         "Close all active orders before transfer"
     );
 
+    check!(
+        old_account.active_position_escrows == 0,
+        MarginfiError::IllegalAction,
+        "Close all position escrows before transfer"
+    );
+
     // Prevent multiple migrations from the same account
     check_eq!(
         old_account.migrated_to,
@@ -240,6 +246,12 @@ pub fn transfer_to_new_account_pda(
         old_account.active_orders == 0,
         MarginfiError::IllegalAction,
         "Close all active orders before transfer"
+    );
+
+    check!(
+        old_account.active_position_escrows == 0,
+        MarginfiError::IllegalAction,
+        "Close all position escrows before transfer"
     );
 
     // Prevent multiple migrations from the same account

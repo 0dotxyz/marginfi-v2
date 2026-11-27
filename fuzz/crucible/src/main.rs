@@ -1534,6 +1534,7 @@ fn scout_drift_state_data() -> Vec<u8> {
 }
 const SCOUT_BALANCE_ASSET_SHARES_OFFSET: usize = SCOUT_MARGINFI_ACCOUNT_LENDING_OFFSET + 40;
 const SCOUT_BANK_TOTAL_ASSET_SHARES_OFFSET: usize = 8 + 264;
+const SCOUT_BANK_TOTAL_ESCROWED_ASSET_SHARES_OFFSET: usize = 8 + 1856;
 // Balance = 104B, LendingAccount.balances[16] (type-crate/src/types/user_account.rs:117,144).
 const SCOUT_BALANCE_STRIDE: usize = 104;
 const SCOUT_BALANCES_PER_ACCOUNT: usize = 16;
@@ -5533,7 +5534,7 @@ impl MarginfiFixture {
         let fee_state = Pubkey::find_program_address(&[FEE_STATE_SEED], &self.program_id).0;
         let __scout_success = self.ctx
             .program(self.program_id)
-            .call(instruction::EditGlobalFeeState { admin: Some(admin), fee_wallet: Some(fee_wallet), bank_init_flat_sol_fee: Some(bank_init_flat_sol_fee), liquidation_flat_sol_fee: Some(liquidation_flat_sol_fee), order_init_flat_sol_fee: None, program_fee_fixed: Some(program_fee_fixed), program_fee_rate: Some(program_fee_rate), liquidation_max_fee: Some(liquidation_max_fee), order_execution_max_fee: None, pause_delegate_admin: None, account_transfer_fee: None })
+            .call(instruction::EditGlobalFeeState { admin: Some(admin), fee_wallet: Some(fee_wallet), bank_init_flat_sol_fee: Some(bank_init_flat_sol_fee), liquidation_flat_sol_fee: Some(liquidation_flat_sol_fee), order_init_flat_sol_fee: None, program_fee_fixed: Some(program_fee_fixed), program_fee_rate: Some(program_fee_rate), liquidation_max_fee: Some(liquidation_max_fee), order_execution_max_fee: None, pause_delegate_admin: None, account_transfer_fee: None, position_transfer_fee: None, position_transfer_min_value_usd_cents: None })
             .accounts(accounts::EditGlobalFeeState {
                 global_fee_admin: global_fee_admin,
                 fee_state: fee_state,
@@ -16864,7 +16865,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
     scout_check_session!();
     // SCOUT:INVARIANTS:BEGIN
     // SCOUT:INVARIANT:P-0002:BEGIN
-    // P-0002 -- share conservation: bank.total_asset_shares equals the sum of asset_shares across live balances referencing it.
+    // P-0002 -- share conservation: bank.total_asset_shares minus total_escrowed_asset_shares equals the sum of asset_shares across live balances referencing it.
     fn invariant_p_0002(f: &mut MarginfiFixture) {
         let bank_pk = f.bank;
         if bank_pk == Pubkey::default() {
@@ -16880,7 +16881,13 @@ fn invariant_test(_f: &mut MarginfiFixture) {
         let buf: [u8; 16] =
             bank_data[SCOUT_BANK_TOTAL_ASSET_SHARES_OFFSET
                 ..SCOUT_BANK_TOTAL_ASSET_SHARES_OFFSET + 16].try_into().unwrap_or_default();
-        let bank_total = fixed::types::I80F48::from_le_bytes(buf);
+        let escrowed: [u8; 16] = bank_data
+            .get(SCOUT_BANK_TOTAL_ESCROWED_ASSET_SHARES_OFFSET
+                ..SCOUT_BANK_TOTAL_ESCROWED_ASSET_SHARES_OFFSET + 16)
+            .and_then(|b| b.try_into().ok())
+            .unwrap_or_default();
+        let bank_total = fixed::types::I80F48::from_le_bytes(buf)
+            - fixed::types::I80F48::from_le_bytes(escrowed);
 
         let mut summed = fixed::types::I80F48::ZERO;
         if f.scout_known_next > SCOUT_KNOWN_CAP {
@@ -16914,7 +16921,7 @@ fn invariant_test(_f: &mut MarginfiFixture) {
             "P-0002",
             "bank-total-asset-shares-equals-sum-of-balances",
             diff <= SCOUT_SHARE_SUM_TOLERANCE,
-            "P-0002: bank {} total_asset_shares={} but balances over {} known account(s) sum to {} (diff={})",
+            "P-0002: bank {} unescrowed total_asset_shares={} but balances over {} known account(s) sum to {} (diff={})",
             bank_pk,
             bank_total,
             f.scout_known_accounts.len(),

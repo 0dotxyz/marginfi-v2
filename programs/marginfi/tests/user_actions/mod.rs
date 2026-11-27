@@ -9,6 +9,7 @@ mod create_account_pda_cpi;
 mod deposit;
 mod drift;
 mod emissions;
+mod escrow_position;
 mod flash_loan;
 mod indexer_flags;
 mod juplend;
@@ -28,6 +29,7 @@ mod repay;
 mod same_asset_emode;
 mod tag_liquid_record;
 mod transfer_account_pda;
+mod transfer_position;
 mod withdraw;
 
 use anchor_lang::prelude::Clock;

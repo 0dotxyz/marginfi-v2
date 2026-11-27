@@ -21,6 +21,8 @@ pub fn edit_fee_state(
     order_execution_max_fee: Option<WrappedI80F48>,
     pause_delegate_admin: Option<Pubkey>,
     account_transfer_fee: Option<u32>,
+    position_transfer_fee: Option<u32>,
+    position_transfer_min_value_usd_cents: Option<u32>,
 ) -> Result<()> {
     ix_utils::check_no_durable_nonce(&ctx.accounts.instruction_sysvar)?;
 
@@ -112,6 +114,22 @@ pub fn edit_fee_state(
             account_transfer_fee
         );
         fee_state.account_transfer_fee = account_transfer_fee;
+    }
+    if let Some(position_transfer_fee) = position_transfer_fee {
+        msg!(
+            "Updating position_transfer_fee: {:?} -> {:?}",
+            fee_state.position_transfer_fee,
+            position_transfer_fee
+        );
+        fee_state.position_transfer_fee = position_transfer_fee;
+    }
+    if let Some(position_transfer_min_value_usd_cents) = position_transfer_min_value_usd_cents {
+        msg!(
+            "Updating position_transfer_min_value_usd_cents: {:?} -> {:?}",
+            fee_state.position_transfer_min_value_usd_cents,
+            position_transfer_min_value_usd_cents
+        );
+        fee_state.position_transfer_min_value_usd_cents = position_transfer_min_value_usd_cents;
     }
 
     Ok(())

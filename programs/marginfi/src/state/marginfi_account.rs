@@ -91,6 +91,8 @@ pub trait MarginfiAccountImpl {
     fn prices_through_pt_emergency(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
+    fn increment_active_position_escrows(&mut self) -> MarginfiResult;
+    fn decrement_active_position_escrows(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
     fn sync_indexer_flags(&mut self);
 }
@@ -335,6 +337,21 @@ impl MarginfiAccountImpl for MarginfiAccount {
 
     fn decrement_active_orders(&mut self) -> MarginfiResult {
         self.active_orders = self.active_orders.saturating_sub(1);
+        Ok(())
+    }
+
+    fn increment_active_position_escrows(&mut self) -> MarginfiResult {
+        check!(
+            self.active_position_escrows < u16::MAX,
+            MarginfiError::IllegalAction,
+            "Too many open position escrows"
+        );
+        self.active_position_escrows += 1;
+        Ok(())
+    }
+
+    fn decrement_active_position_escrows(&mut self) -> MarginfiResult {
+        self.active_position_escrows = self.active_position_escrows.saturating_sub(1);
         Ok(())
     }
 
@@ -2211,6 +2228,27 @@ impl BalanceImpl for Balance {
     }
 }
 
+/// Updates the bank's lending and borrowing position counts from what `balance` held before a
+/// share change and what it holds now.
+fn update_position_counts(bank: &mut Bank, balance: &Balance, had_assets: bool, had_liabs: bool) {
+    let has_assets =
+        I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+    let has_liabs =
+        I80F48::from(balance.liability_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+    if !had_assets && has_assets {
+        bank.increment_lending_position_count();
+    }
+    if had_assets && !has_assets {
+        bank.decrement_lending_position_count();
+    }
+    if !had_liabs && has_liabs {
+        bank.increment_borrowing_position_count();
+    }
+    if had_liabs && !has_liabs {
+        bank.decrement_borrowing_position_count();
+    }
+}
+
 fn clear_stale_order_tag(balance: &mut Balance, side_before: Option<BalanceSide>) {
     let side_after = balance.get_side();
     if side_after.is_none() || side_after != side_before {
@@ -2395,6 +2433,33 @@ impl<'a> BankAccountWrapper<'a> {
     /// Returns the liability share delta minted.
     pub fn borrow(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BorrowOnly)
+    }
+
+    /// Adds `shares` to this balance's `side`, or removes them if negative, for shares moving from
+    /// or to another balance of the same bank. The bank's share totals stay unchanged.
+    pub fn transfer_shares(&mut self, side: BalanceSide, shares: I80F48) -> MarginfiResult {
+        let side_before = self.balance.get_side();
+        let had_assets = I80F48::from(self.balance.asset_shares)
+            .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+        let had_liabs = I80F48::from(self.balance.liability_shares)
+            .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+        self.claim_premium()?;
+        match side {
+            BalanceSide::Assets => self.balance.change_asset_shares(shares)?,
+            BalanceSide::Liabilities => self.balance.change_liability_shares(shares)?,
+        }
+        check!(
+            I80F48::from(self.balance.asset_shares) >= I80F48::ZERO
+                && I80F48::from(self.balance.liability_shares) >= I80F48::ZERO,
+            MarginfiError::IllegalBalanceState,
+            "Transfer would leave negative shares"
+        );
+        update_position_counts(self.bank, self.balance, had_assets, had_liabs);
+        if had_liabs && self.balance.is_empty(BalanceSide::Liabilities) {
+            self.balance.write_off_premium();
+        }
+        clear_stale_order_tag(self.balance, side_before);
+        Ok(())
     }
 
     /// Deposit an asset, ignoring deposit caps, will error if this repays a liability instead of increasing a asset.
@@ -2719,24 +2784,7 @@ impl<'a> BankAccountWrapper<'a> {
             I80F48::ZERO
         };
 
-        // Record if the balance was an asset/liability after
-        let has_assets =
-            I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
-        let has_liabs = I80F48::from(balance.liability_shares)
-            .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
-        // Increment position counts depending on the before/after state of the balance
-        if !had_assets && has_assets {
-            bank.increment_lending_position_count();
-        }
-        if had_assets && !has_assets {
-            bank.decrement_lending_position_count();
-        }
-        if !had_liabs && has_liabs {
-            bank.increment_borrowing_position_count();
-        }
-        if had_liabs && !has_liabs {
-            bank.decrement_borrowing_position_count();
-        }
+        update_position_counts(bank, balance, had_assets, had_liabs);
         // Below EMPTY_BALANCE_THRESHOLD health treats the liability as empty, so clear the
         // premium too — otherwise a book-transfer that leaves dust (liquidation) strands a
         // receivable that health never projects.
@@ -2869,23 +2917,7 @@ impl<'a> BankAccountWrapper<'a> {
             bank.check_utilization_ratio()?;
         }
 
-        let has_assets =
-            I80F48::from(balance.asset_shares).is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
-        let has_liabs = I80F48::from(balance.liability_shares)
-            .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
-
-        if !had_assets && has_assets {
-            bank.increment_lending_position_count();
-        }
-        if had_assets && !has_assets {
-            bank.decrement_lending_position_count();
-        }
-        if !had_liabs && has_liabs {
-            bank.increment_borrowing_position_count();
-        }
-        if had_liabs && !has_liabs {
-            bank.decrement_borrowing_position_count();
-        }
+        update_position_counts(bank, balance, had_assets, had_liabs);
 
         clear_stale_order_tag(balance, side_before);
 
@@ -3906,6 +3938,34 @@ mod test {
             assert_eq!(I80F48::from(wrapper.balance.asset_shares), I80F48!(0.5));
             assert_eq!(wrapper.balance.get_side(), None);
             assert_eq!(wrapper.balance.tag, 0);
+        }
+
+        #[test]
+        fn share_transfer_clears_order_tag_on_empty_and_new_side() {
+            for side in [BalanceSide::Assets, BalanceSide::Liabilities] {
+                let (assets, liabs) = match side {
+                    BalanceSide::Assets => (I80F48!(10), I80F48::ZERO),
+                    BalanceSide::Liabilities => (I80F48::ZERO, I80F48!(10)),
+                };
+                let (mut bank, mut balance) =
+                    make_bank_and_balance(I80F48::ONE, I80F48::ONE, assets, liabs);
+                balance.tag = 31;
+                let mut wrapper = BankAccountWrapper {
+                    balance: &mut balance,
+                    bank: &mut bank,
+                };
+                wrapper.transfer_shares(side, I80F48!(-4)).unwrap();
+                assert_eq!(wrapper.balance.tag, 31);
+                wrapper.transfer_shares(side, I80F48!(-6)).unwrap();
+                assert_eq!(wrapper.balance.get_side(), None);
+                assert_eq!(wrapper.balance.tag, 0);
+
+                // A tag left on an empty slot does not attach to shares moved in.
+                wrapper.balance.tag = 31;
+                wrapper.transfer_shares(side, I80F48!(10)).unwrap();
+                assert_eq!(wrapper.balance.get_side(), Some(side));
+                assert_eq!(wrapper.balance.tag, 0);
+            }
         }
 
         /// `withdraw` on a bank with fractional `asset_share_value`. Choose an
