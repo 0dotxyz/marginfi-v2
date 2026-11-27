@@ -2263,7 +2263,7 @@ impl BalanceImpl for Balance {
 fn clear_stale_order_tag(balance: &mut Balance, side_before: Option<BalanceSide>) {
     let side_after = balance.get_side();
     if side_after.is_none() || side_after != side_before {
-        balance.tag = 0;
+        balance.clear_tag();
     }
 }
 
@@ -3961,6 +3961,22 @@ mod test {
             assert_eq!(I80F48::from(wrapper.balance.asset_shares), I80F48!(0.5));
             assert_eq!(wrapper.balance.get_side(), None);
             assert_eq!(wrapper.balance.tag, 0);
+        }
+
+        #[test]
+        fn emptying_a_balance_clears_its_order_tag_type() {
+            let (mut bank, mut balance) =
+                make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48!(10), I80F48::ZERO);
+            balance.tag = 9;
+            balance.tag_type = OrderTagType::Interest as u8;
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.withdraw(I80F48!(10)).unwrap();
+            assert_eq!(wrapper.balance.get_side(), None);
+            assert_eq!(wrapper.balance.tag, 0);
+            assert_eq!(wrapper.balance.tag_type, OrderTagType::default() as u8);
         }
 
         /// `withdraw` on a bank with fractional `asset_share_value`. Choose an

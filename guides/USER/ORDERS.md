@@ -93,7 +93,8 @@ measured span can be longer than you asked for, never shorter.
 
 An auto-rebalance does not move a balance an interest trigger was placed on. The bank your lending
 position is measured in stays the one you chose. The balance is held this way until its Order tag is
-cleared with `SetKeeperCloseFlags`, including after the Order has executed or been closed.
+cleared, with `SetKeeperCloseFlags` or by emptying the balance, including after the Order has
+executed or been closed.
 
 ### Interest and Price Triggers Together
 
@@ -206,8 +207,8 @@ shrink the count. Update or cancel the order if you no longer want a Keeper clos
 
 An auto-rebalance does not move a balance a borrow order uses. A close therefore finds the deposit
 in the destination bank you chose. An order tags the balances it finds when it is placed, and again
-at every fill that opens. They stay held until their Order tag is cleared with
-`SetKeeperCloseFlags`, including after the order is cancelled.
+at every fill that opens. They stay held until their Order tag is cleared, with
+`SetKeeperCloseFlags` or by emptying the balance, including after the order is cancelled.
 
 ### What a Keeper Can and Cannot Do
 
