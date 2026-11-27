@@ -51,6 +51,7 @@ pub struct RebalanceOrder {
     /// Minimum required APR improvement (dst - src) to move, I80F48 (1.0 = 100%).
     pub min_improvement: WrappedI80F48,
     /// Minimum wall-clock seconds between executions (anti-ping-pong cooldown).
+    /// Also the span a move's realized rates are measured over, held between 6 and 48 hours.
     pub cooldown_seconds: u64,
     /// Per-execution token budget: each execution may relocate at most this many underlying tokens
     /// (raw native units of the shared mint) summed across all referenced banks. `0` means no cap.

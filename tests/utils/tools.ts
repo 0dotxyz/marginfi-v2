@@ -28,14 +28,19 @@ import {
   ASSET_TAG_KAMINO,
   ASSET_TAG_SOLEND,
   ASSET_TAG_STAKED,
+  BankConfig,
+  defaultBankConfig,
   HEALTH_CACHE_HEALTHY,
+  ORACLE_SETUP_PYTH_PUSH,
 } from "./types";
 import { composeRemainingAccounts } from "./user-instructions";
+import { addBankWithSeed, configureBankOracle } from "./group-instructions";
 import {
   globalProgramAdmin,
   bankrunContext,
   bankrunProgram,
   banksClient,
+  groupAdmin,
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
@@ -755,6 +760,40 @@ export const buildHealthRemainingAccounts = async (
   }
 
   return composeRemainingAccounts(groups);
+};
+
+/**
+ * Add a seeded bank to `group` on the default config plus `overrides`, priced by the Pyth push
+ * feed `oracle`.
+ */
+export const addBankWithSeedAndOracle = async (
+  group: PublicKey,
+  mint: PublicKey,
+  seed: BN,
+  bank: PublicKey,
+  oracle: PublicKey,
+  overrides: Partial<BankConfig> = {},
+) => {
+  await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+    new Transaction().add(
+      await addBankWithSeed(groupAdmin.mrgnProgram, {
+        marginfiGroup: group,
+        feePayer: groupAdmin.wallet.publicKey,
+        bankMint: mint,
+        config: { ...defaultBankConfig(), ...overrides },
+        seed,
+      }),
+    ),
+  );
+  await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+    new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnProgram, {
+        bank,
+        type: ORACLE_SETUP_PYTH_PUSH,
+        oracle,
+      }),
+    ),
+  );
 };
 
 /**

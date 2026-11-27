@@ -5,7 +5,8 @@ use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
 
-/// (permissionless) Refresh the cached oracle price for a bank and accrue interest.
+/// (permissionless) Refresh the cached oracle price for a bank, accrue interest and record a rate
+/// reading. While the protocol is paused, a native bank is not accrued and takes no reading.
 pub fn lending_pool_pulse_bank_price_cache<'info>(
     ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
 ) -> MarginfiResult {

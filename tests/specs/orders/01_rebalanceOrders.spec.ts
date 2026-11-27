@@ -51,6 +51,7 @@ import {
   deriveBankWithSeed,
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
+  deriveRebalanceFeePool,
   deriveSpotMarketPDA,
 } from "../../utils/pdas";
 import { USER_ACCOUNT } from "../../utils/mocks";
@@ -61,6 +62,7 @@ import {
 import {
   bigIntToBnSafe,
   bnToBigIntSafe,
+  divI80,
   I80F48_FRACTIONAL_BITS,
   nativeToI80Scaled,
   toI80Scaled,
@@ -117,6 +119,11 @@ import {
   setPythPullOraclePrice,
 } from "../../utils/bankrun-oracles";
 import { advanceOneHour } from "../../utils/bankrunConnection";
+import {
+  INTEREST_MIN_WINDOW_SECONDS,
+  restartRateHistory,
+  seedRateHistory,
+} from "../../utils/rate-readings";
 import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   ORACLE_CONF_INTERVAL,
@@ -209,16 +216,6 @@ const lastSeqOf = async (
   marginfiAccount: PublicKey,
 ): Promise<bigint> => (await nextSeqOf(program, marginfiAccount)) - 1n;
 
-const REBALANCE_FEE_POOL_SEED = "rebalance_fee_pool";
-const deriveRebalanceFeePool = (
-  programId: PublicKey,
-  marginfiAccount: PublicKey,
-) =>
-  PublicKey.findProgramAddressSync(
-    [Buffer.from(REBALANCE_FEE_POOL_SEED), marginfiAccount.toBuffer()],
-    programId,
-  );
-
 /** A declared N->N move from referenced-bank `srcIndex` to `dstIndex`, of `value` USD (== UI USDC at
  * the $1 test oracle). */
 const buildMove = (srcIndex: number, dstIndex: number, value: number) => ({
@@ -237,6 +234,9 @@ const bankBlock = (bank: PublicKey, oracle: PublicKey): AccountMeta[] => [
   { pubkey: bank, isSigner: false, isWritable: true },
   { pubkey: oracle, isSigner: false, isWritable: false },
 ];
+
+/** Realized APR seeded on a destination: far over any margin a test sets, so the spot gates decide. */
+const DST_HISTORY_APR_BPS = 10_000n;
 
 /** Solana's per-transaction account lock limit (`MAX_TX_ACCOUNT_LOCKS`). */
 const TX_ACCOUNT_LOCK_LIMIT = 64;
@@ -583,8 +583,8 @@ describe("Auto-rebalance orders (native -> native)", () => {
     await sendOwner(new Transaction().add(ix));
   };
 
-  /** Empty every USDC bank the owner may hold from a prior move, then restore exactly REBALANCE_AMOUNT
-   * in src, so each test starts from a clean single-source position. */
+  /** Empty every USDC bank the owner may hold from a prior move, restore exactly REBALANCE_AMOUNT in
+   * src, and seed every bank's rate history, so each test starts from a position a move can leave. */
   const resetOwnerToSrc = async () => {
     const drainBank = async (bank: PublicKey) => {
       const acc = await program.account.marginfiAccount.fetch(ownerAcc);
@@ -637,6 +637,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
         }),
       ),
     );
+    // A window of rate history: idle sources, and destinations that have out-yielded them.
+    for (const bank of [srcBank, src2Bank]) {
+      await seedRateHistory(bank, [usdcOracle], 0n);
+    }
+    for (const bank of [dstBank, dst2Bank]) {
+      await seedRateHistory(bank, [usdcOracle], DST_HISTORY_APR_BPS);
+    }
   };
 
   before(async () => {
@@ -1135,6 +1142,77 @@ describe("Auto-rebalance orders (native -> native)", () => {
       minImprovement: 1.0, // require +100% APR improvement
       cooldownSeconds: 0,
     });
+
+    await expectFailedTxWithError(
+      async () => {
+        await sendKeeper(await buildSandwich({ order }));
+      },
+      "RebalanceNotImproving",
+      6703,
+    );
+
+    await closeOrder(order);
+  });
+
+  it("moves only once the banks hold a window of rate history - RateHistoryTooShort", async () => {
+    await resetOwnerToSrc();
+    const order = await placeOrder({
+      allowedBanks: [srcBank, dstBank, dst2Bank],
+      minImprovement: 0.0001,
+      cooldownSeconds: 0,
+    });
+    for (const bank of [srcBank, dstBank, dst2Bank]) {
+      await restartRateHistory(bank, [usdcOracle]);
+    }
+
+    await expectFailedTxWithError(
+      async () => {
+        await sendKeeper(await buildSandwich({ order }));
+      },
+      "RateHistoryTooShort",
+      6145,
+    );
+
+    // A zero cooldown takes the shortest rate window. The destinations carry borrows and the source
+    // is idle, so a window on they have out-yielded it.
+    for (let hour = 0; hour < INTEREST_MIN_WINDOW_SECONDS / 3_600; hour++) {
+      await advanceOneHour(banksClient, bankrunContext);
+    }
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    // The compute-budget instruction keeps this attempt's signature distinct from the rejected one's.
+    await sendKeeper(
+      new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        ...(await buildSandwich({ order })).instructions,
+      ),
+    );
+    assert.equal(await assetShares(srcBank), 0n, "src drained after the move");
+    const half = nativeToI80Scaled(REBALANCE_AMOUNT.div(new BN(2)));
+    for (const bank of [dstBank, dst2Bank]) {
+      const shareValue = (await program.account.bank.fetch(bank)).assetShareValue;
+      assert.equal(
+        await assetShares(bank),
+        divI80(half, toI80Scaled(shareValue)),
+        "half lands at the bank's share value",
+      );
+    }
+
+    await closeOrder(order);
+  });
+
+  it("rejects a destination that has not out-yielded the source over the window - RebalanceNotImproving", async () => {
+    await resetOwnerToSrc();
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
+    const order = await placeOrder({
+      allowedBanks,
+      minImprovement: 0.0001,
+      cooldownSeconds: 0,
+    });
+
+    // The destinations pay what the happy path moves on, but their indices sat flat for the window.
+    for (const bank of [dstBank, dst2Bank]) {
+      await seedRateHistory(bank, [usdcOracle], 0n);
+    }
 
     await expectFailedTxWithError(
       async () => {
@@ -2123,6 +2201,13 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     dst: { bank: PublicKey; leg: VenueLeg; deposit: TransactionInstruction };
   }) => {
     const { order, src, dst } = opts;
+    await seedRateHistory(src.bank, src.leg.tail, 0n, src.leg.cranks);
+    await seedRateHistory(
+      dst.bank,
+      dst.leg.tail,
+      DST_HISTORY_APR_BPS,
+      dst.leg.cranks,
+    );
     const seq = await nextSeq();
     const [record] = deriveRebalanceRecord(program.programId, ownerAcc, seq);
     const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
@@ -2603,6 +2688,13 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     );
 
     const order = await placeOrder([kaminoBank, driftBank]);
+    await seedRateHistory(kaminoBank, kaminoTail(), 0n, await kaminoCranks());
+    await seedRateHistory(
+      driftBank,
+      driftTail(),
+      DST_HISTORY_APR_BPS,
+      await driftCranks(),
+    );
 
     const venues = [
       ...drifts,
@@ -2929,6 +3021,8 @@ describe("Auto-rebalance orders (worst-case balance sets)", () => {
       ...bankBlock(srcBank, usdcOracle),
       ...bankBlock(dstBank, usdcOracle),
     ];
+    await seedRateHistory(srcBank, [usdcOracle], 0n);
+    await seedRateHistory(dstBank, [usdcOracle], DST_HISTORY_APR_BPS);
     // The withdraw leg observes the balances as they stand; only `end_rebalance` sees the post set.
     const preSet = healthSet(await activeBanks(acc));
     const seq = await nextSeqOf(program, acc);

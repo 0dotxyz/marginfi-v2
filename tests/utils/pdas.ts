@@ -541,3 +541,38 @@ export const deriveSVSPpool = (voteAccount: PublicKey) => {
     SINGLE_POOL_PROGRAM_ID,
   );
 };
+
+export const deriveBorrowOrderPda = (
+  programId: PublicKey,
+  marginfiAccount: PublicKey,
+  bank: PublicKey,
+) => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("borrow_order", "utf-8"),
+      marginfiAccount.toBuffer(),
+      bank.toBuffer(),
+    ],
+    programId,
+  );
+};
+
+export const deriveBorrowOrderRecordPda = (
+  programId: PublicKey,
+  order: PublicKey,
+) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("borrow_order_record", "utf-8"), order.toBuffer()],
+    programId,
+  );
+};
+
+export const deriveRebalanceFeePool = (
+  programId: PublicKey,
+  marginfiAccount: PublicKey,
+) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("rebalance_fee_pool", "utf-8"), marginfiAccount.toBuffer()],
+    programId,
+  );
+};

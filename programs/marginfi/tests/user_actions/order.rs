@@ -26,7 +26,7 @@ use solana_sdk::{
 use solana_system_interface::error::SystemError;
 use test_case::test_case;
 
-fn execution_events(logs: &[String]) -> Vec<MarginfiAccountExecuteOrderEvent> {
+pub(super) fn execution_events(logs: &[String]) -> Vec<MarginfiAccountExecuteOrderEvent> {
     logs.iter()
         .filter_map(|line| line.strip_prefix("Program data: "))
         .map(|encoded| {
@@ -1134,6 +1134,10 @@ async fn execute_order_success(
     assert_eq!(event.max_slippage, order_before.max_slippage);
     assert_eq!(event.asset_bank, asset_bank_f.key);
     assert_eq!(event.triggered, expected_trigger);
+    assert_eq!(
+        (event.price_validated, event.interest_validated),
+        (true, false)
+    );
     assert_eq!(event.closure_recipient, closure_recipient.pubkey());
     assert_eq!(event.order_lamports_returned, order_lamports);
     drop(ctx);
