@@ -4,8 +4,8 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
     HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
-    ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
+    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+    ACCOUNT_IN_RECEIVERSHIP, ACCOUNT_IN_RISK_ADMIN_LIQUIDATION,
 };
 
 use crate::{
@@ -37,6 +37,12 @@ pub fn lending_account_pulse_health<'info>(
 ) -> MarginfiResult {
     let clock = Clock::get()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+    // Initial health is deliberately skipped in a flashloan, so a pulse cannot produce a
+    // meaningful snapshot until the flashloan has ended.
+    require!(
+        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+        MarginfiError::AccountInFlashloan
+    );
 
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;

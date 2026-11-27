@@ -1,14 +1,13 @@
 use crate::{
     bank_signer, check,
-    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health_and_clear_tag,
-            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            finalize_health_cache, is_signer_authorized, run_cb_price_gate, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{MarginfiAccountPremiumImpl, PremiumScratch},
@@ -39,7 +38,8 @@ use marginfi_type_crate::{
     pdas::DRIFT_PROGRAM_ID,
     types::{
         Bank, BankVaultType, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -275,7 +275,6 @@ pub fn drift_withdraw<'info>(
         });
 
         let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
         marginfi_account.sync_indexer_flags();
@@ -292,8 +291,6 @@ pub fn drift_withdraw<'info>(
                 &mut Some(&mut health_cache),
                 &mut Some(&mut premium_scratch),
             )?;
-
-            health_cache.program_version = PROGRAM_VERSION;
 
             // Claim premium at the old rates and refresh every liability's premium rate
             // snapshot with the post-withdraw collateral mix.
@@ -318,8 +315,11 @@ pub fn drift_withdraw<'info>(
                 bank.update_cache_price(price_for_cache)?;
             }
 
-            health_cache.set_engine_ok(true);
-            marginfi_account.set_health_cache(health_cache);
+            // Flashloan health is checked at the end, so this pass produced no cache.
+            if !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+                finalize_health_cache(&mut health_cache, clock.unix_timestamp);
+                marginfi_account.set_health_cache(health_cache);
+            }
 
             // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
             // price has jumped past the breach threshold; a liability-free withdraw skips it.
