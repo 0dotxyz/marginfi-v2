@@ -205,7 +205,7 @@ pub trait ExecuteOrderRecordImpl {
     ) -> MarginfiResult;
 }
 
-fn is_order_balance(balance: &Balance, order_tags: &[u16]) -> bool {
+pub fn is_order_balance(balance: &Balance, order_tags: &[u16]) -> bool {
     balance.tag != 0 && order_tags.contains(&balance.tag)
 }
 

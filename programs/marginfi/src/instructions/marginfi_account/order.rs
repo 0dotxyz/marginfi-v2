@@ -25,7 +25,7 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
-        order::{ExecuteOrderRecordImpl, OrderImpl},
+        order::{is_order_balance, ExecuteOrderRecordImpl, OrderImpl},
     },
 };
 use anchor_lang::prelude::*;
@@ -684,7 +684,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let (asset_bank, asset_shares_after) = marginfi_account
         .lending_account
         .get_active_balances_iter()
-        .find(|balance| balance.tag != 0 && order.tags.contains(&balance.tag))
+        .find(|balance| is_order_balance(balance, &order.tags))
         .map(|balance| (balance.bank_pk, balance.asset_shares))
         .unwrap_or_default();
 
