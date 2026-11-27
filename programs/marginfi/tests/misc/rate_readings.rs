@@ -5,7 +5,6 @@ use fixed::types::I80F48;
 use fixtures::bank::BankFixture;
 use fixtures::prelude::*;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
-use marginfi::constants::MIN_EMISSIONS_SHARE_SUPPLY;
 use marginfi_type_crate::constants::BANK_RATE_READING_SPACING_SECONDS;
 use marginfi_type_crate::types::RateReading;
 use solana_program_test::tokio;
@@ -120,8 +119,8 @@ async fn a_pulse_while_paused_takes_no_reading() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A share value driven past what a reading encodes leaves the ring as it was, and the instruction
-/// pricing the bank still lands.
+/// A share value past what a reading encodes leaves the ring as it was, and the instruction pricing
+/// the bank still lands.
 #[tokio::test]
 async fn an_index_past_the_reading_range_is_skipped_without_blocking_pricing() -> anyhow::Result<()>
 {
@@ -129,37 +128,19 @@ async fn an_index_past_the_reading_range_is_skipped_without_blocking_pricing() -
     let usdc = test_f.get_bank(&BankMint::Usdc);
     let group = &test_f.marginfi_group;
     pin_clock(&test_f, BASE_TS).await;
-
-    // The smallest share supply that accepts emissions, where a donation moves the share value most.
-    let supply: u64 = MIN_EMISSIONS_SHARE_SUPPLY.to_num();
-    let depositor = test_f.create_marginfi_account().await;
-    let depositor_usdc = test_f
-        .usdc_mint
-        .create_token_account_and_mint_to(supply as f64 / 1_000_000.0)
-        .await;
-    depositor
-        .try_bank_deposit(depositor_usdc.key, usdc, supply as f64 / 1_000_000.0, None)
-        .await?;
     group.try_pulse_bank_price_cache(usdc).await?;
     assert_eq!(usdc.load().await.recorded_rate_readings().count(), 1);
 
-    // 2^32 more per share, which lifts the share value to one past the largest encodable index.
-    let donation = supply << 32;
-    let funding = test_f
-        .usdc_mint
-        .create_token_account_and_mint_to(5_000_000_000.0)
-        .await;
-    usdc.try_emissions_deposit(donation, funding.key).await?;
+    // One past the largest encodable index. Emissions are capped far below it.
+    let past_range = I80F48::from_num(u32::MAX) + I80F48::from_num(2);
+    usdc.set_asset_share_value(past_range).await;
 
     let now = BASE_TS + BANK_RATE_READING_SPACING_SECONDS;
     pin_clock(&test_f, now).await;
     group.try_pulse_bank_price_cache(usdc).await?;
 
     let bank = usdc.load().await;
-    assert_eq!(
-        I80F48::from(bank.asset_share_value),
-        I80F48::from_num(u32::MAX) + I80F48::from_num(2)
-    );
+    assert_eq!(I80F48::from(bank.asset_share_value), past_range);
     assert_eq!(bank.recorded_rate_readings().count(), 1);
     assert_eq!(bank.newest_rate_reading().unwrap().timestamp, BASE_TS);
     assert_eq!(bank.cache.last_oracle_price_timestamp, now);

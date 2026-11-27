@@ -126,7 +126,7 @@ pub const BANK_RATE_READING_SPACING_SECONDS: i64 = 10_800; // 3 hours
 /// Rate readings a bank keeps: the spacings in `INTEREST_MAX_WINDOW_SECONDS` plus one, the count at
 /// which a bank priced every spacing still holds a reading a full max window old.
 pub const BANK_RATE_READINGS: usize = 17;
-pub const _: () = assert!(
+const _: () = assert!(
     (BANK_RATE_READINGS as i64 - 1) * BANK_RATE_READING_SPACING_SECONDS
         >= INTEREST_MAX_WINDOW_SECONDS as i64
 );
