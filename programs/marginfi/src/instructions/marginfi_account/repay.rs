@@ -11,7 +11,7 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{self, record_deposit_inflow, validate_bank_state, InstructionKind},
+    utils::{self, record_deposit_inflow, validate_repay_bank_state},
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
@@ -26,6 +26,7 @@ use marginfi_type_crate::{
     types::{
         is_marginfi_asset_tag, Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
         ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_REPAID_PAUSED_BANK,
     },
 };
 
@@ -69,7 +70,11 @@ pub fn lending_account_repay<'info>(
     };
 
     let mut bank = bank_loader.load_mut()?;
-    validate_bank_state(&bank, InstructionKind::FailsInPausedState, true)?;
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+    let in_liquidation = in_receivership && !marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE);
+    if validate_repay_bank_state(&bank, in_liquidation)? {
+        marginfi_account.set_flag(ACCOUNT_REPAID_PAUSED_BANK, false);
+    }
 
     let group = marginfi_group_loader.load()?;
     bank.accrue_interest(
@@ -78,8 +83,6 @@ pub fn lending_account_repay<'info>(
         #[cfg(not(feature = "client"))]
         bank_loader.key(),
     )?;
-
-    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
 
     // Tokenless repayments skip the transfer entirely: the premium receivable is written off
     // instead of settled, since no tokens back it.

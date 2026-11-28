@@ -586,7 +586,8 @@ pub mod marginfi {
     }
 
     /// (account authority, or any signer during receivership) Repay borrowed assets. Accrues
-    /// interest, records repayment, and transfers tokens to the bank's liquidity vault.
+    /// interest, records repayment, and transfers tokens to the bank's liquidity vault. A
+    /// liquidation that must close the account out may also repay debt in a paused bank.
     pub fn lending_account_repay<'info>(
         ctx: Context<'info, LendingAccountRepay<'info>>,
         amount: u64,
@@ -951,7 +952,9 @@ pub mod marginfi {
     }
 
     /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
-    /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
+    /// health improved and seized assets are within fee limits, and that all repayable debt is
+    /// repaid when the account's equity is no more than the fee on all debt. Only such a closeout
+    /// may repay debt in a paused bank. Charges a flat SOL fee.
     pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
         marginfi_account::end_liquidation(ctx)
     }

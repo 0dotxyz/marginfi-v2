@@ -8,7 +8,7 @@ use crate::{
         BalancePremiumImpl, PremiumScratch, PremiumScratchEntry, SCRATCH_ASSET, SCRATCH_LIABILITY,
         SCRATCH_PREMIUM_ACTIVE, SCRATCH_UNPRICEABLE,
     },
-    utils::{is_integration_asset_tag, NumTraitsWithTolerance},
+    utils::{is_integration_asset_tag, validate_repay_bank_state, NumTraitsWithTolerance},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -1676,6 +1676,35 @@ pub fn clear_liquidation_price_cache_locks<'info>(
         bank.cache.clear_liquidation_price_cache_locked();
     }
     Ok(())
+}
+
+/// True if the account owes a liability that a liquidator could repay and that is worth more than
+/// zero at the cached liquidation price. A liability in a bankrupt bank is not repayable.
+pub fn has_repayable_liabilities<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<bool> {
+    let bank_accounts_with_cache =
+        BankAccountWithCache::load(&marginfi_account.lending_account, remaining_ais)?;
+
+    for account in bank_accounts_with_cache.iter() {
+        if account.balance.is_empty(BalanceSide::Liabilities) {
+            continue;
+        }
+        let bank = account.bank.load()?;
+        if validate_repay_bank_state(&bank, true).is_err() {
+            continue;
+        }
+        let (value, _) = calc_weighted_liab_value_cached_standalone(
+            account.balance,
+            &bank,
+            RequirementType::Equity,
+        )?;
+        if value > I80F48::ZERO {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Health check using the heap-reuse health calculator, against `requirement_type`.

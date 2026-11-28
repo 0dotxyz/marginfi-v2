@@ -668,8 +668,10 @@ describe("jlr08: JupLend same-asset emode", () => {
     const sameAssetRemaining = getSameAssetRemainingGroups();
     const startRemaining =
       composeRemainingAccountsWriteableMeta(sameAssetRemaining);
-    const endRemaining =
-      composeRemainingAccountsMetaBanksOnly(sameAssetRemaining);
+    // The liquidation repays all of the debt, leaving only the JupLend collateral to price
+    const endRemaining = composeRemainingAccountsMetaBanksOnly([
+      getSameAssetRemainingGroups()[0],
+    ]);
 
     await mintToTokenAccount(
       ecosystem.tokenAMint.publicKey,
@@ -724,11 +726,14 @@ describe("jlr08: JupLend same-asset emode", () => {
         withdrawAll: false,
         remainingAccounts: composeRemainingAccounts(sameAssetRemaining),
       }),
+      // At 98x the equity is under the configured max fee on the debt, so
+      // the liquidator must repay all of it
       await repayIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         bank: regularTokenABank,
         tokenAccount: liquidator.tokenAAccount,
-        amount: RECEIVERSHIP_JUP_WITHDRAW,
+        amount: new BN(0),
+        repayAll: true,
         remaining: composeRemainingAccounts(sameAssetRemaining),
       }),
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {

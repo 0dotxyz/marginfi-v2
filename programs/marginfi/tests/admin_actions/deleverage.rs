@@ -7,7 +7,7 @@ use marginfi::prelude::*;
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
+    types::{BankConfigOpt, BankOperationalState, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
 use solana_sdk::clock::Clock;
@@ -534,6 +534,83 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostLiquidation);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleverage_cannot_repay_paused_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
+    let risk_admin = test_f.payer().clone();
+
+    let lp = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let lp_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    lp.try_bank_deposit(lp_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
+    deleveragee
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 2.0, None, &authority)
+        .await?;
+    deleveragee
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
+        .await?;
+    usdc_bank
+        .update_config(
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::Paused),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let risk_admin_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), deleveragee.key.as_ref()],
+        &marginfi::ID,
+    );
+    let init_ix = deleveragee
+        .make_init_liquidation_record_ix(record_pk, risk_admin)
+        .await;
+    let start_ix = deleveragee
+        .make_start_deleverage_ix(record_pk, risk_admin)
+        .await;
+    let repay_ix = deleveragee
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .await;
+    let end_ix = deleveragee
+        .make_end_deleverage_ix(record_pk, risk_admin, vec![])
+        .await;
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix, start_ix, repay_ix, end_ix],
+        Some(&risk_admin),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BankPaused);
 
     Ok(())
 }
